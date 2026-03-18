@@ -13,6 +13,10 @@ Electron desktop todo app built with React 19, TypeScript (strict), Tailwind CSS
 7. Git commit with conventional commit message
 8. If `progress.txt` exists, append learnings or decisions made
 
+## Dev Server
+- Use port **5200** for the renderer dev server (ports 5173-5185 are occupied)
+- In `electron.vite.config.ts`, set `server: { port: 5200 }` in the renderer config
+
 ## Key Commands
 - `npm run dev` — Start development server
 - `npm run build` — Production build
