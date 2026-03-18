@@ -13,7 +13,8 @@ ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with E
 7. Update `prd.json` to set `passes: true` for the completed story
 8. Git commit with a conventional commit message describing what was built
 9. Append any decisions, blockers, or learnings to `progress.txt`
-10. Exit when done with this story — you will be called again for the next one
+10. If there are more stories with `passes: false`, exit normally — you will be called again for the next one
+11. If ALL stories have `passes: true`, output exactly `<promise>COMPLETE</promise>` and exit
 
 ## Important Context
 - `.env` has Supabase credentials (`SUPABASE_URL` and `SUPABASE_ANON_KEY`)
