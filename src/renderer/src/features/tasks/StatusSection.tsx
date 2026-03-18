@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { useTaskStore } from '../../shared/stores'
 import type { Task, Status } from '../../../../shared/types'
 import { TaskRow } from './TaskRow'
 
@@ -25,12 +26,16 @@ export function StatusSection({
   onDeleteTask
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
+  const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
+  const toggleExpanded = useTaskStore((s) => s.toggleExpanded)
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => !prev)
   }, [])
 
-  const sorted = [...tasks].sort((a, b) => a.order_index - b.order_index)
+  // Only render top-level tasks (no parent_id) in status sections
+  const topLevel = tasks.filter((t) => t.parent_id === null)
+  const sorted = [...topLevel].sort((a, b) => a.order_index - b.order_index)
 
   return (
     <section>
@@ -64,10 +69,13 @@ export function StatusSection({
               task={task}
               statuses={allStatuses}
               isSelected={selectedTaskId === task.id}
+              depth={0}
+              isExpanded={expandedTaskIds.has(task.id)}
               onSelect={onSelectTask}
               onStatusChange={onStatusChange}
               onTitleChange={onTitleChange}
               onDelete={onDeleteTask}
+              onToggleExpanded={toggleExpanded}
             />
           ))}
           {sorted.length === 0 && (

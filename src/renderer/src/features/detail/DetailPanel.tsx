@@ -12,6 +12,7 @@ import { DetailRecurrence } from './DetailRecurrence'
 import { DetailSnooze } from './DetailSnooze'
 import { DetailDescription } from './DetailDescription'
 import { DetailActivityLog } from './DetailActivityLog'
+import { DetailSubtasks } from './DetailSubtasks'
 import { PriorityIndicator } from '../../shared/components/PriorityIndicator'
 import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
@@ -325,6 +326,9 @@ function DetailPanelContent({
         <Section label="Snooze">
           <DetailSnooze onSnooze={onSnooze} />
         </Section>
+
+        {/* Subtasks */}
+        <DetailSubtasks taskId={task.id} projectId={task.project_id} />
 
         {/* Description */}
         <DetailDescription

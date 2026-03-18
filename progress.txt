@@ -229,3 +229,18 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Activity log entries are created from the detail panel when fields change
 - Markdown preview is a simple inline renderer (no external library) — sufficient for bold, italic, code, headings, images
 - Image paste converts to base64 data URL embedded in markdown (no external storage needed)
+
+## Story 11: Subtasks and hierarchy
+- Added `expandedTaskIds` Set + `toggleExpanded`/`setExpanded` actions to taskStore
+- Added `createSubtask` action that auto-expands parent after creation
+- Updated `deleteTask` to cascade-remove children from store (mirrors DB CASCADE)
+- Added selectors: `selectTopLevelTasks`, `selectExpandedTaskIds`, `selectIsExpanded`, `selectChildCount`, `selectHasChildren`
+- TaskRow now renders expand/collapse chevron, subtask count badge with progress bar, and nested depth indentation (24px per level)
+- TaskRow recursively renders SubtaskList when expanded, supporting arbitrary nesting depth
+- StatusSection filters to top-level tasks (parent_id === null); subtasks render inline under their parents
+- TaskListView flatTasks respects expand/collapse state for keyboard navigation
+- Arrow Right: expand children; Arrow Left: collapse or navigate to parent
+- Created DetailSubtasks component with inline add-subtask input, status cycling, delete, and click-to-navigate
+- Added subtask section to DetailPanel between Snooze and Description
+- Typecheck passes with zero errors
+- Decisions: Used store-side Set<string> for expanded state rather than per-component useState so expand state persists across view switches. Subtask count badge uses `completed_date !== null` as done proxy to avoid extra status lookups.

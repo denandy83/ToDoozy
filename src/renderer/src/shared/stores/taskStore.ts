@@ -9,6 +9,7 @@ import type {
 interface TaskState {
   tasks: Record<string, Task>
   taskLabels: Record<string, Label[]>
+  expandedTaskIds: Set<string>
   currentTaskId: string | null
   loading: boolean
   error: string | null
@@ -25,10 +26,13 @@ interface TaskActions {
   deleteTask(id: string): Promise<boolean>
   duplicateTask(id: string, newId: string): Promise<Task | null>
   reorderTasks(taskIds: string[]): Promise<void>
+  createSubtask(parentId: string, input: CreateTaskInput): Promise<Task>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   hydrateTaskLabels(taskId: string): Promise<void>
   setCurrentTask(id: string | null): void
+  toggleExpanded(taskId: string): void
+  setExpanded(taskId: string, expanded: boolean): void
   clearError(): void
 }
 
@@ -37,6 +41,7 @@ export type TaskStore = TaskState & TaskActions
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: {},
   taskLabels: {},
+  expandedTaskIds: new Set<string>(),
   currentTaskId: null,
   loading: false,
   error: null,
@@ -157,12 +162,34 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const result = await window.api.tasks.delete(id)
       if (result) {
         set((state) => {
-          const { [id]: _, ...remaining } = state.tasks
-          const { [id]: __, ...remainingLabels } = state.taskLabels
+          // Collect all descendant IDs (cascade delete in DB, mirror in store)
+          const idsToRemove = new Set<string>([id])
+          const collectChildren = (parentId: string): void => {
+            for (const task of Object.values(state.tasks)) {
+              if (task.parent_id === parentId && !idsToRemove.has(task.id)) {
+                idsToRemove.add(task.id)
+                collectChildren(task.id)
+              }
+            }
+          }
+          collectChildren(id)
+
+          const remaining: Record<string, Task> = {}
+          const remainingLabels: Record<string, Label[]> = {}
+          for (const [tid, task] of Object.entries(state.tasks)) {
+            if (!idsToRemove.has(tid)) remaining[tid] = task
+          }
+          for (const [tid, labels] of Object.entries(state.taskLabels)) {
+            if (!idsToRemove.has(tid)) remainingLabels[tid] = labels
+          }
+          const newExpanded = new Set(state.expandedTaskIds)
+          for (const rid of idsToRemove) newExpanded.delete(rid)
+
           return {
             tasks: remaining,
             taskLabels: remainingLabels,
-            currentTaskId: state.currentTaskId === id ? null : state.currentTaskId
+            expandedTaskIds: newExpanded,
+            currentTaskId: idsToRemove.has(state.currentTaskId ?? '') ? null : state.currentTaskId
           }
         })
       }
@@ -210,6 +237,25 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
+  async createSubtask(parentId: string, input: CreateTaskInput): Promise<Task> {
+    try {
+      const task = await window.api.tasks.create({ ...input, parent_id: parentId })
+      set((state) => {
+        const newExpanded = new Set(state.expandedTaskIds)
+        newExpanded.add(parentId)
+        return {
+          tasks: { ...state.tasks, [task.id]: task },
+          expandedTaskIds: newExpanded
+        }
+      })
+      return task
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create subtask'
+      set({ error: message })
+      throw err
+    }
+  },
+
   async addLabel(taskId: string, labelId: string): Promise<void> {
     try {
       await window.api.tasks.addLabel(taskId, labelId)
@@ -249,6 +295,30 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set({ currentTaskId: id })
   },
 
+  toggleExpanded(taskId: string): void {
+    set((state) => {
+      const next = new Set(state.expandedTaskIds)
+      if (next.has(taskId)) {
+        next.delete(taskId)
+      } else {
+        next.add(taskId)
+      }
+      return { expandedTaskIds: next }
+    })
+  },
+
+  setExpanded(taskId: string, expanded: boolean): void {
+    set((state) => {
+      const next = new Set(state.expandedTaskIds)
+      if (expanded) {
+        next.add(taskId)
+      } else {
+        next.delete(taskId)
+      }
+      return { expandedTaskIds: next }
+    })
+  },
+
   clearError(): void {
     set({ error: null })
   }
@@ -275,6 +345,28 @@ export const selectSubtasks = (parentId: string) => (state: TaskState): Task[] =
   Object.values(state.tasks)
     .filter((t) => t.parent_id === parentId)
     .sort((a, b) => a.order_index - b.order_index)
+
+export const selectTopLevelTasks = (projectId: string) => (state: TaskState): Task[] =>
+  Object.values(state.tasks).filter(
+    (t) => t.project_id === projectId && t.parent_id === null
+  )
+
+export const selectExpandedTaskIds = (state: TaskState): Set<string> => state.expandedTaskIds
+
+export const selectIsExpanded = (taskId: string) => (state: TaskState): boolean =>
+  state.expandedTaskIds.has(taskId)
+
+export const selectChildCount = (parentId: string) => (state: TaskState): { total: number; done: number } => {
+  const children = Object.values(state.tasks).filter((t) => t.parent_id === parentId)
+  const done = children.filter((t) => {
+    // We check the task's completed_date as a proxy for "done"
+    return t.completed_date !== null
+  }).length
+  return { total: children.length, done }
+}
+
+export const selectHasChildren = (taskId: string) => (state: TaskState): boolean =>
+  Object.values(state.tasks).some((t) => t.parent_id === taskId)
 
 export const selectCurrentTask = (state: TaskState): Task | null =>
   state.currentTaskId ? state.tasks[state.currentTaskId] ?? null : null

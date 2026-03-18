@@ -77,7 +77,7 @@
       "title": "Subtasks and hierarchy",
       "description": "Parent/child via parent_id. Expand/collapse chevron. Progress bar (done/total). Subtask count badge. Sortable within parent. Cascade delete. Drag-and-drop: above (reorder), inside (make subtask), below (reorder).",
       "spec_section": "§6.3 Subtasks & Hierarchy",
-      "passes": false
+      "passes": true
     },
     {
       "id": "12",

@@ -16,25 +16,48 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
   const tasks = useTaskStore(selectTasksByProject(projectId))
   const statuses = useStatusStore(selectStatusesByProject(projectId))
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask } = useTaskStore()
+  const { createTask, updateTask, deleteTask, setCurrentTask, toggleExpanded, setExpanded } =
+    useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
+  const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Flat ordered list of visible (non-archived, non-template) tasks for keyboard nav
+  // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
     const result: Task[] = []
     const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
     for (const status of sorted) {
       const statusTasks = tasks
-        .filter((t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0)
+        .filter(
+          (t) =>
+            t.status_id === status.id &&
+            t.is_archived === 0 &&
+            t.is_template === 0 &&
+            t.parent_id === null
+        )
         .sort((a, b) => a.order_index - b.order_index)
-      result.push(...statusTasks)
+
+      const addWithChildren = (task: Task): void => {
+        result.push(task)
+        if (expandedTaskIds.has(task.id)) {
+          const children = tasks
+            .filter((t) => t.parent_id === task.id)
+            .sort((a, b) => a.order_index - b.order_index)
+          for (const child of children) {
+            addWithChildren(child)
+          }
+        }
+      }
+
+      for (const task of statusTasks) {
+        addWithChildren(task)
+      }
     }
     return result
-  }, [tasks, statuses])
+  }, [tasks, statuses, expandedTaskIds])
 
   const handleAddTask = useCallback(
     async (title: string) => {
@@ -144,12 +167,36 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
           }
           break
         }
+        case 'ArrowRight': {
+          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+            e.preventDefault()
+            // If task has children and is collapsed, expand it
+            const hasChildren = tasks.some((t) => t.parent_id === currentTaskId)
+            if (hasChildren) {
+              setExpanded(currentTaskId, true)
+            }
+          }
+          break
+        }
+        case 'ArrowLeft': {
+          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+            e.preventDefault()
+            const task = allTasks[currentTaskId]
+            // If expanded, collapse it
+            if (expandedTaskIds.has(currentTaskId)) {
+              setExpanded(currentTaskId, false)
+            } else if (task?.parent_id) {
+              // Navigate to parent
+              setCurrentTask(task.parent_id)
+            }
+          }
+          break
+        }
         case 'Enter': {
           if (!currentTaskId) {
             e.preventDefault()
             addInputRef.current?.focus()
           }
-          // Detail panel will be handled in Story 10
           break
         }
         case ' ': {
@@ -169,7 +216,8 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
         case 'Backspace': {
           if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
             e.preventDefault()
-            const nextIndex = currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
+            const nextIndex =
+              currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
             const nextTask = flatTasks[nextIndex]
             handleDeleteTask(currentTaskId)
             setCurrentTask(nextTask?.id ?? null)
@@ -194,7 +242,19 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
 
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
-  }, [currentTaskId, flatTasks, setCurrentTask, allTasks, statuses, handleStatusChange, handleDeleteTask])
+  }, [
+    currentTaskId,
+    flatTasks,
+    setCurrentTask,
+    allTasks,
+    tasks,
+    statuses,
+    expandedTaskIds,
+    toggleExpanded,
+    setExpanded,
+    handleStatusChange,
+    handleDeleteTask
+  ])
 
   const sortedStatuses = useMemo(
     () => [...statuses].sort((a, b) => a.order_index - b.order_index),

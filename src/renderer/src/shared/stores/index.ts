@@ -6,6 +6,11 @@ export {
   selectMyDayTasks,
   selectArchivedTasks,
   selectSubtasks,
+  selectTopLevelTasks,
+  selectExpandedTaskIds,
+  selectIsExpanded,
+  selectChildCount,
+  selectHasChildren,
   selectCurrentTask,
   selectTaskLabels
 } from './taskStore'

@@ -1,31 +1,41 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Trash2, ChevronRight } from 'lucide-react'
 import { StatusButton } from '../../shared/components/StatusButton'
+import { useTaskStore, selectSubtasks, selectChildCount } from '../../shared/stores'
 import type { Task, Status } from '../../../../shared/types'
 
 interface TaskRowProps {
   task: Task
   statuses: Status[]
   isSelected: boolean
+  depth: number
+  isExpanded: boolean
   onSelect: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
   onDelete: (taskId: string) => void
+  onToggleExpanded: (taskId: string) => void
 }
 
 export function TaskRow({
   task,
   statuses,
   isSelected,
+  depth,
+  isExpanded,
   onSelect,
   onStatusChange,
   onTitleChange,
-  onDelete
+  onDelete,
+  onToggleExpanded
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const childCount = useTaskStore(selectChildCount(task.id))
+  const hasChildren = childCount.total > 0
 
   useEffect(() => {
     if (!isEditing) setEditValue(task.title)
@@ -35,7 +45,6 @@ export function TaskRow({
     if (isEditing) inputRef.current?.focus()
   }, [isEditing])
 
-  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -75,7 +84,6 @@ export function TaskRow({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value
       setEditValue(val)
-      // Autosave with 1s debounce
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
         const trimmed = val.trim()
@@ -106,56 +114,177 @@ export function TaskRow({
     [onDelete, task.id]
   )
 
+  const handleChevronClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onToggleExpanded(task.id)
+    },
+    [onToggleExpanded, task.id]
+  )
+
   const doneStatus = statuses.find((s) => s.id === task.status_id)
   const isDone = doneStatus?.is_done === 1
+  const indentPx = depth * 24
 
   return (
-    <div
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-      className={`group flex items-center gap-3 px-4 py-2 transition-colors cursor-pointer ${
-        isSelected
-          ? 'bg-accent/12 border-l-2 border-accent/15'
-          : 'border-l-2 border-transparent hover:bg-foreground/6'
-      }`}
-      role="row"
-      aria-selected={isSelected}
-      tabIndex={0}
-    >
-      <StatusButton
-        currentStatusId={task.status_id}
-        statuses={statuses}
-        onStatusChange={handleStatusChange}
-      />
-
-      {isEditing ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={editValue}
-          onChange={handleEditChange}
-          onKeyDown={handleEditKeyDown}
-          onBlur={saveTitle}
-          className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground focus:outline-none"
-        />
-      ) : (
-        <span
-          className={`flex-1 truncate text-[15px] font-light tracking-tight ${
-            isDone ? 'text-muted line-through' : 'text-foreground'
-          }`}
-        >
-          {task.title}
-        </span>
-      )}
-
-      <button
-        onClick={handleDelete}
-        className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
-        title="Delete task"
-        aria-label="Delete task"
+    <>
+      <div
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        className={`group flex items-center gap-2 py-2 pr-4 transition-colors cursor-pointer ${
+          isSelected
+            ? 'bg-accent/12 border-l-2 border-accent/15'
+            : 'border-l-2 border-transparent hover:bg-foreground/6'
+        }`}
+        style={{ paddingLeft: `${16 + indentPx}px` }}
+        role="row"
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        tabIndex={0}
       >
-        <Trash2 size={14} />
-      </button>
+        {/* Expand/collapse chevron */}
+        <button
+          onClick={handleChevronClick}
+          className={`flex-shrink-0 rounded p-0.5 transition-colors ${
+            hasChildren
+              ? 'text-muted hover:bg-foreground/6 hover:text-foreground'
+              : 'invisible'
+          }`}
+          aria-label={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
+          tabIndex={-1}
+        >
+          <ChevronRight
+            size={12}
+            className={`transition-transform motion-safe:duration-150 ${
+              isExpanded ? 'rotate-90' : ''
+            }`}
+          />
+        </button>
+
+        <StatusButton
+          currentStatusId={task.status_id}
+          statuses={statuses}
+          onStatusChange={handleStatusChange}
+        />
+
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={handleEditChange}
+            onKeyDown={handleEditKeyDown}
+            onBlur={saveTitle}
+            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground focus:outline-none"
+          />
+        ) : (
+          <span
+            className={`flex-1 truncate text-[15px] font-light tracking-tight ${
+              isDone ? 'text-muted line-through' : 'text-foreground'
+            }`}
+          >
+            {task.title}
+          </span>
+        )}
+
+        {/* Subtask count badge + progress */}
+        {hasChildren && (
+          <SubtaskBadge done={childCount.done} total={childCount.total} />
+        )}
+
+        <button
+          onClick={handleDelete}
+          className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
+          title="Delete task"
+          aria-label="Delete task"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {/* Render subtasks if expanded */}
+      {hasChildren && isExpanded && (
+        <SubtaskList
+          parentId={task.id}
+          statuses={statuses}
+          depth={depth + 1}
+          selectedTaskId={null}
+          onSelect={onSelect}
+          onStatusChange={onStatusChange}
+          onTitleChange={onTitleChange}
+          onDelete={onDelete}
+          onToggleExpanded={onToggleExpanded}
+        />
+      )}
+    </>
+  )
+}
+
+interface SubtaskBadgeProps {
+  done: number
+  total: number
+}
+
+function SubtaskBadge({ done, total }: SubtaskBadgeProps): React.JSX.Element {
+  const pct = total > 0 ? (done / total) * 100 : 0
+  return (
+    <div className="flex flex-shrink-0 items-center gap-1.5">
+      <div className="h-1 w-8 overflow-hidden rounded-full bg-foreground/10">
+        <div
+          className="h-full rounded-full bg-accent transition-all motion-safe:duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
+        {done}/{total}
+      </span>
     </div>
+  )
+}
+
+interface SubtaskListProps {
+  parentId: string
+  statuses: Status[]
+  depth: number
+  selectedTaskId: string | null
+  onSelect: (taskId: string) => void
+  onStatusChange: (taskId: string, newStatusId: string) => void
+  onTitleChange: (taskId: string, newTitle: string) => void
+  onDelete: (taskId: string) => void
+  onToggleExpanded: (taskId: string) => void
+}
+
+function SubtaskList({
+  parentId,
+  statuses,
+  depth,
+  onSelect,
+  onStatusChange,
+  onTitleChange,
+  onDelete,
+  onToggleExpanded
+}: SubtaskListProps): React.JSX.Element {
+  const subtasks = useTaskStore(selectSubtasks(parentId))
+  const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
+  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+
+  return (
+    <>
+      {subtasks.map((child) => (
+        <TaskRow
+          key={child.id}
+          task={child}
+          statuses={statuses}
+          isSelected={currentTaskId === child.id}
+          depth={depth}
+          isExpanded={expandedTaskIds.has(child.id)}
+          onSelect={onSelect}
+          onStatusChange={onStatusChange}
+          onTitleChange={onTitleChange}
+          onDelete={onDelete}
+          onToggleExpanded={onToggleExpanded}
+        />
+      ))}
+    </>
   )
 }
