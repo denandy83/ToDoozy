@@ -23,3 +23,20 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Ran @electron/rebuild to fix better-sqlite3 native module for Electron's Node version
 - Database initializes on app.whenReady(), closes on app.will-quit
 - Typecheck passes, dev server compiles and migration runs successfully
+
+## Story 3: Repository pattern
+- Created src/shared/types.ts with all domain types (User, Project, Status, Task, Label, Theme, Setting, ActivityLogEntry) plus create/update input types
+- TASK_UPDATABLE_COLUMNS whitelist for SQL injection prevention on task updates
+- Created 8 repository classes in src/main/repositories/:
+  - UserRepository: CRUD, findByEmail
+  - ProjectRepository: CRUD, findByOwnerId, findDefault, member management (add/remove/get), getProjectsForUser
+  - StatusRepository: CRUD, findByProjectId, findDefault, findDone, reassignAndDelete (transactional)
+  - TaskRepository: CRUD, findByProjectId/StatusId/MyDay/Archived/Templates, findSubtasks, getSubtaskCount, reorder (batch transaction), label assignments, duplicate
+  - LabelRepository: CRUD, findByProjectId, findByTaskId
+  - ThemeRepository: CRUD, listByMode, getConfig (parsed JSON)
+  - SettingsRepository: get/set/getAll/getMultiple/setMultiple (transactional), delete
+  - ActivityLogRepository: create, findByTaskId/UserId, deleteByTaskId, getRecent
+- createRepositories() factory function returns all repos from a single db instance
+- Updated tsconfig.node.json and tsconfig.web.json to include src/shared/**/*.ts
+- 54 Vitest unit tests covering all repository methods — all pass
+- Typecheck passes, dev server compiles successfully

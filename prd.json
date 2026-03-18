@@ -21,7 +21,7 @@
       "title": "Repository pattern",
       "description": "Create typed repository classes: TaskRepository, LabelRepository, StatusRepository, SettingsRepository, ThemeRepository, ActivityLogRepository, ProjectRepository, UserRepository. Each has a local SQLite implementation. No raw SQL outside repositories.",
       "spec_section": "§36 Architecture - Database Layer",
-      "passes": false
+      "passes": true
     },
     {
       "id": "4",

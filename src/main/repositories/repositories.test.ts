@@ -1,0 +1,611 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import Database from 'better-sqlite3'
+import { randomUUID } from 'crypto'
+import { migrations } from '../database/migrations'
+import { UserRepository } from './UserRepository'
+import { ProjectRepository } from './ProjectRepository'
+import { StatusRepository } from './StatusRepository'
+import { TaskRepository } from './TaskRepository'
+import { LabelRepository } from './LabelRepository'
+import { ThemeRepository } from './ThemeRepository'
+import { SettingsRepository } from './SettingsRepository'
+import { ActivityLogRepository } from './ActivityLogRepository'
+import { createRepositories } from './index'
+
+function createTestDb(): Database.Database {
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
+  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)')
+  for (const migration of migrations) {
+    migration(db)
+  }
+  return db
+}
+
+// Helper: seed a user + project + status for FK dependencies
+function seedBase(db: Database.Database): { userId: string; projectId: string; statusId: string } {
+  const userId = randomUUID()
+  const projectId = randomUUID()
+  const statusId = randomUUID()
+  const now = new Date().toISOString()
+
+  db.prepare(
+    'INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(userId, `test-${userId}@example.com`, 'Test User', now, now)
+
+  db.prepare(
+    'INSERT INTO projects (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(projectId, 'Test Project', userId, now, now)
+
+  db.prepare(
+    'INSERT INTO statuses (id, project_id, name, order_index, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(statusId, projectId, 'Not Started', 0, 1, now, now)
+
+  return { userId, projectId, statusId }
+}
+
+describe('createRepositories', () => {
+  it('returns all repository instances', () => {
+    const db = createTestDb()
+    const repos = createRepositories(db)
+    expect(repos.users).toBeInstanceOf(UserRepository)
+    expect(repos.projects).toBeInstanceOf(ProjectRepository)
+    expect(repos.statuses).toBeInstanceOf(StatusRepository)
+    expect(repos.tasks).toBeInstanceOf(TaskRepository)
+    expect(repos.labels).toBeInstanceOf(LabelRepository)
+    expect(repos.themes).toBeInstanceOf(ThemeRepository)
+    expect(repos.settings).toBeInstanceOf(SettingsRepository)
+    expect(repos.activityLog).toBeInstanceOf(ActivityLogRepository)
+    db.close()
+  })
+})
+
+describe('UserRepository', () => {
+  let db: Database.Database
+  let repo: UserRepository
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new UserRepository(db)
+  })
+
+  it('creates and finds a user by id', () => {
+    const id = randomUUID()
+    const user = repo.create({ id, email: 'alice@test.com', display_name: 'Alice' })
+    expect(user.id).toBe(id)
+    expect(user.email).toBe('alice@test.com')
+    expect(user.display_name).toBe('Alice')
+
+    const found = repo.findById(id)
+    expect(found).toBeDefined()
+    expect(found!.email).toBe('alice@test.com')
+  })
+
+  it('finds a user by email', () => {
+    const id = randomUUID()
+    repo.create({ id, email: 'bob@test.com' })
+    const found = repo.findByEmail('bob@test.com')
+    expect(found).toBeDefined()
+    expect(found!.id).toBe(id)
+  })
+
+  it('updates a user', () => {
+    const id = randomUUID()
+    repo.create({ id, email: 'carol@test.com' })
+    const updated = repo.update(id, { display_name: 'Carol' })
+    expect(updated!.display_name).toBe('Carol')
+  })
+
+  it('deletes a user', () => {
+    const id = randomUUID()
+    repo.create({ id, email: 'dave@test.com' })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('lists all users', () => {
+    repo.create({ id: randomUUID(), email: 'a@test.com' })
+    repo.create({ id: randomUUID(), email: 'b@test.com' })
+    expect(repo.list()).toHaveLength(2)
+  })
+
+  it('returns undefined for nonexistent user', () => {
+    expect(repo.findById(randomUUID())).toBeUndefined()
+  })
+})
+
+describe('ProjectRepository', () => {
+  let db: Database.Database
+  let repo: ProjectRepository
+  let userId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new ProjectRepository(db)
+    userId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?)'
+    ).run(userId, 'owner@test.com', now, now)
+  })
+
+  it('creates and finds a project', () => {
+    const id = randomUUID()
+    const project = repo.create({ id, name: 'My Project', owner_id: userId })
+    expect(project.name).toBe('My Project')
+    expect(project.color).toBe('#888888')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds projects by owner', () => {
+    repo.create({ id: randomUUID(), name: 'P1', owner_id: userId })
+    repo.create({ id: randomUUID(), name: 'P2', owner_id: userId })
+    expect(repo.findByOwnerId(userId)).toHaveLength(2)
+  })
+
+  it('finds default project', () => {
+    repo.create({ id: randomUUID(), name: 'Personal', owner_id: userId, is_default: 1 })
+    const def = repo.findDefault(userId)
+    expect(def).toBeDefined()
+    expect(def!.is_default).toBe(1)
+  })
+
+  it('updates a project', () => {
+    const id = randomUUID()
+    repo.create({ id, name: 'Old', owner_id: userId })
+    const updated = repo.update(id, { name: 'New', color: '#ff0000' })
+    expect(updated!.name).toBe('New')
+    expect(updated!.color).toBe('#ff0000')
+  })
+
+  it('deletes a project', () => {
+    const id = randomUUID()
+    repo.create({ id, name: 'Temp', owner_id: userId })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('manages project members', () => {
+    const projectId = randomUUID()
+    repo.create({ id: projectId, name: 'Team', owner_id: userId })
+
+    const memberId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare('INSERT INTO users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+      memberId, 'member@test.com', now, now
+    )
+
+    repo.addMember(projectId, memberId, 'member', userId)
+    const members = repo.getMembers(projectId)
+    expect(members).toHaveLength(1)
+    expect(members[0].role).toBe('member')
+
+    expect(repo.removeMember(projectId, memberId)).toBe(true)
+    expect(repo.getMembers(projectId)).toHaveLength(0)
+  })
+
+  it('gets projects for a user via membership', () => {
+    const projectId = randomUUID()
+    repo.create({ id: projectId, name: 'Shared', owner_id: userId })
+    repo.addMember(projectId, userId, 'owner')
+    const projects = repo.getProjectsForUser(userId)
+    expect(projects).toHaveLength(1)
+  })
+})
+
+describe('StatusRepository', () => {
+  let db: Database.Database
+  let repo: StatusRepository
+  let projectId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new StatusRepository(db)
+    const base = seedBase(db)
+    projectId = base.projectId
+    // Remove the seeded status so we start clean
+    db.prepare('DELETE FROM statuses').run()
+  })
+
+  it('creates and finds a status', () => {
+    const id = randomUUID()
+    const status = repo.create({ id, project_id: projectId, name: 'Todo' })
+    expect(status.name).toBe('Todo')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds statuses by project', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'A', order_index: 1 })
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'B', order_index: 0 })
+    const statuses = repo.findByProjectId(projectId)
+    expect(statuses).toHaveLength(2)
+    expect(statuses[0].name).toBe('B') // ordered by order_index
+  })
+
+  it('finds default and done statuses', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Default', is_default: 1 })
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Done', is_done: 1 })
+    expect(repo.findDefault(projectId)!.name).toBe('Default')
+    expect(repo.findDone(projectId)!.name).toBe('Done')
+  })
+
+  it('updates a status', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, name: 'Old' })
+    const updated = repo.update(id, { name: 'New', color: '#00ff00' })
+    expect(updated!.name).toBe('New')
+    expect(updated!.color).toBe('#00ff00')
+  })
+
+  it('reassigns tasks and deletes a status', () => {
+    const oldId = randomUUID()
+    const newId = randomUUID()
+    repo.create({ id: oldId, project_id: projectId, name: 'Old Status' })
+    repo.create({ id: newId, project_id: projectId, name: 'New Status' })
+
+    // Create a task with the old status
+    const base = seedBase(db)
+    const taskId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, owner_id, title, status_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(taskId, base.projectId, base.userId, 'Test Task', oldId, now, now)
+
+    expect(repo.reassignAndDelete(oldId, newId)).toBe(true)
+    expect(repo.findById(oldId)).toBeUndefined()
+
+    const task = db.prepare('SELECT status_id FROM tasks WHERE id = ?').get(taskId) as { status_id: string }
+    expect(task.status_id).toBe(newId)
+  })
+})
+
+describe('TaskRepository', () => {
+  let db: Database.Database
+  let repo: TaskRepository
+  let userId: string
+  let projectId: string
+  let statusId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new TaskRepository(db)
+    const base = seedBase(db)
+    userId = base.userId
+    projectId = base.projectId
+    statusId = base.statusId
+  })
+
+  it('creates and finds a task', () => {
+    const id = randomUUID()
+    const task = repo.create({
+      id,
+      project_id: projectId,
+      owner_id: userId,
+      title: 'Buy milk',
+      status_id: statusId
+    })
+    expect(task.title).toBe('Buy milk')
+    expect(task.priority).toBe(0)
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds tasks by project (excludes archived/templates)', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Normal', status_id: statusId })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Archived', status_id: statusId, is_archived: 1 })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Template', status_id: statusId, is_template: 1 })
+    expect(repo.findByProjectId(projectId)).toHaveLength(1)
+  })
+
+  it('finds archived and template tasks', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Archived', status_id: statusId, is_archived: 1 })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Template', status_id: statusId, is_template: 1 })
+    expect(repo.findArchived(projectId)).toHaveLength(1)
+    expect(repo.findTemplates(projectId)).toHaveLength(1)
+  })
+
+  it('finds subtasks', () => {
+    const parentId = randomUUID()
+    repo.create({ id: parentId, project_id: projectId, owner_id: userId, title: 'Parent', status_id: statusId })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Child 1', status_id: statusId, parent_id: parentId })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Child 2', status_id: statusId, parent_id: parentId })
+    expect(repo.findSubtasks(parentId)).toHaveLength(2)
+  })
+
+  it('updates a task using column whitelist', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, owner_id: userId, title: 'Old', status_id: statusId })
+    const updated = repo.update(id, { title: 'New', priority: 3 })
+    expect(updated!.title).toBe('New')
+    expect(updated!.priority).toBe(3)
+  })
+
+  it('deletes a task', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, owner_id: userId, title: 'Temp', status_id: statusId })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('reorders tasks in a batch transaction', () => {
+    const ids = [randomUUID(), randomUUID(), randomUUID()]
+    for (const [i, id] of ids.entries()) {
+      repo.create({ id, project_id: projectId, owner_id: userId, title: `Task ${i}`, status_id: statusId, order_index: i })
+    }
+    repo.reorder([ids[2], ids[0], ids[1]])
+    expect(repo.findById(ids[2])!.order_index).toBe(0)
+    expect(repo.findById(ids[0])!.order_index).toBe(1)
+    expect(repo.findById(ids[1])!.order_index).toBe(2)
+  })
+
+  it('manages label assignments', () => {
+    const taskId = randomUUID()
+    repo.create({ id: taskId, project_id: projectId, owner_id: userId, title: 'Task', status_id: statusId })
+
+    const labelId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare('INSERT INTO labels (id, project_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      labelId, projectId, 'Bug', '#ff0000', now, now
+    )
+
+    repo.addLabel(taskId, labelId)
+    expect(repo.getLabels(taskId)).toHaveLength(1)
+
+    // Adding same label again should not error (INSERT OR IGNORE)
+    repo.addLabel(taskId, labelId)
+    expect(repo.getLabels(taskId)).toHaveLength(1)
+
+    expect(repo.removeLabel(taskId, labelId)).toBe(true)
+    expect(repo.getLabels(taskId)).toHaveLength(0)
+  })
+
+  it('duplicates a task', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, owner_id: userId, title: 'Original', status_id: statusId, priority: 2 })
+    const newId = randomUUID()
+    const copy = repo.duplicate(id, newId)
+    expect(copy).toBeDefined()
+    expect(copy!.title).toBe('Original (copy)')
+    expect(copy!.priority).toBe(2)
+    expect(copy!.id).toBe(newId)
+  })
+
+  it('gets subtask count', () => {
+    const parentId = randomUUID()
+    repo.create({ id: parentId, project_id: projectId, owner_id: userId, title: 'Parent', status_id: statusId })
+
+    // Create a "done" status
+    const doneStatusId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO statuses (id, project_id, name, is_done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(doneStatusId, projectId, 'Done', 1, now, now)
+
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'C1', status_id: statusId, parent_id: parentId })
+    repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'C2', status_id: doneStatusId, parent_id: parentId })
+
+    const count = repo.getSubtaskCount(parentId)
+    expect(count.total).toBe(2)
+    expect(count.done).toBe(1)
+  })
+})
+
+describe('LabelRepository', () => {
+  let db: Database.Database
+  let repo: LabelRepository
+  let projectId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new LabelRepository(db)
+    const base = seedBase(db)
+    projectId = base.projectId
+  })
+
+  it('creates and finds a label', () => {
+    const id = randomUUID()
+    const label = repo.create({ id, project_id: projectId, name: 'Bug', color: '#ff0000' })
+    expect(label.name).toBe('Bug')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds labels by project sorted by name', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Zzz' })
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Aaa' })
+    const labels = repo.findByProjectId(projectId)
+    expect(labels).toHaveLength(2)
+    expect(labels[0].name).toBe('Aaa')
+  })
+
+  it('updates a label', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, name: 'Old' })
+    const updated = repo.update(id, { name: 'New', color: '#00ff00' })
+    expect(updated!.name).toBe('New')
+  })
+
+  it('deletes a label', () => {
+    const id = randomUUID()
+    repo.create({ id, project_id: projectId, name: 'Temp' })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('finds labels by task id', () => {
+    const labelId = randomUUID()
+    repo.create({ id: labelId, project_id: projectId, name: 'Feature' })
+
+    const base = seedBase(db)
+    const taskId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, owner_id, title, status_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(taskId, base.projectId, base.userId, 'Task', base.statusId, now, now)
+
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run(taskId, labelId)
+
+    const labels = repo.findByTaskId(taskId)
+    expect(labels).toHaveLength(1)
+    expect(labels[0].name).toBe('Feature')
+  })
+})
+
+describe('ThemeRepository', () => {
+  let db: Database.Database
+  let repo: ThemeRepository
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new ThemeRepository(db)
+  })
+
+  it('lists seeded themes', () => {
+    const themes = repo.list()
+    expect(themes.length).toBe(12)
+  })
+
+  it('lists themes by mode', () => {
+    const dark = repo.listByMode('dark')
+    const light = repo.listByMode('light')
+    expect(dark.length).toBe(6)
+    expect(light.length).toBe(6)
+  })
+
+  it('creates a custom theme', () => {
+    const id = randomUUID()
+    const config = JSON.stringify({ bg: '#000', fg: '#fff', fgSecondary: '#aaa', fgMuted: '#666', muted: '#888', accent: '#f00', accentFg: '#fff', border: '#333' })
+    const theme = repo.create({ id, name: 'Custom', mode: 'dark', config })
+    expect(theme.name).toBe('Custom')
+    expect(repo.list().length).toBe(13)
+  })
+
+  it('updates a theme', () => {
+    const themes = repo.list()
+    const updated = repo.update(themes[0].id, { name: 'Renamed' })
+    expect(updated!.name).toBe('Renamed')
+  })
+
+  it('gets parsed config', () => {
+    const themes = repo.list()
+    const config = repo.getConfig(themes[0].id)
+    expect(config).toBeDefined()
+    expect(config!.bg).toBeDefined()
+    expect(config!.accent).toBeDefined()
+  })
+
+  it('deletes a theme', () => {
+    const id = randomUUID()
+    const config = JSON.stringify({ bg: '#000', fg: '#fff', fgSecondary: '#aaa', fgMuted: '#666', muted: '#888', accent: '#f00', accentFg: '#fff', border: '#333' })
+    repo.create({ id, name: 'ToDelete', mode: 'dark', config })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+})
+
+describe('SettingsRepository', () => {
+  let db: Database.Database
+  let repo: SettingsRepository
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new SettingsRepository(db)
+  })
+
+  it('gets seeded settings', () => {
+    const themeMode = repo.get('theme_mode')
+    expect(themeMode).toBe('dark')
+  })
+
+  it('gets all settings', () => {
+    const all = repo.getAll()
+    expect(all.length).toBeGreaterThanOrEqual(12)
+  })
+
+  it('sets and gets a value', () => {
+    repo.set('custom_key', 'custom_value')
+    expect(repo.get('custom_key')).toBe('custom_value')
+  })
+
+  it('upserts on set', () => {
+    repo.set('theme_mode', 'light')
+    expect(repo.get('theme_mode')).toBe('light')
+  })
+
+  it('gets multiple keys', () => {
+    const settings = repo.getMultiple(['theme_mode', 'sidebar_pinned'])
+    expect(settings).toHaveLength(2)
+  })
+
+  it('sets multiple at once in a transaction', () => {
+    repo.setMultiple([
+      { key: 'a', value: '1' },
+      { key: 'b', value: '2' }
+    ])
+    expect(repo.get('a')).toBe('1')
+    expect(repo.get('b')).toBe('2')
+  })
+
+  it('deletes a setting', () => {
+    repo.set('temp', 'val')
+    expect(repo.delete('temp')).toBe(true)
+    expect(repo.get('temp')).toBeNull()
+  })
+
+  it('returns null for nonexistent key', () => {
+    expect(repo.get('nonexistent')).toBeNull()
+  })
+
+  it('returns empty array for empty keys list', () => {
+    expect(repo.getMultiple([])).toEqual([])
+  })
+})
+
+describe('ActivityLogRepository', () => {
+  let db: Database.Database
+  let repo: ActivityLogRepository
+  let userId: string
+  let taskId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new ActivityLogRepository(db)
+    const base = seedBase(db)
+    userId = base.userId
+    taskId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, owner_id, title, status_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(taskId, base.projectId, base.userId, 'Log Test', base.statusId, now, now)
+  })
+
+  it('creates and finds a log entry', () => {
+    const id = randomUUID()
+    const entry = repo.create({ id, task_id: taskId, user_id: userId, action: 'created' })
+    expect(entry.action).toBe('created')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds entries by task', () => {
+    repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: 'created' })
+    repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: 'updated', old_value: 'old', new_value: 'new' })
+    expect(repo.findByTaskId(taskId)).toHaveLength(2)
+  })
+
+  it('finds entries by user', () => {
+    repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: 'created' })
+    expect(repo.findByUserId(userId)).toHaveLength(1)
+  })
+
+  it('deletes entries by task', () => {
+    repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: 'created' })
+    repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: 'updated' })
+    expect(repo.deleteByTaskId(taskId)).toBe(2)
+    expect(repo.findByTaskId(taskId)).toHaveLength(0)
+  })
+
+  it('gets recent entries with limit', () => {
+    for (let i = 0; i < 5; i++) {
+      repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: `action_${i}` })
+    }
+    expect(repo.getRecent(3)).toHaveLength(3)
+  })
+})
