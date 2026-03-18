@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
 import { useStatusStore } from './shared/stores/statusStore'
+import { useTaskStore } from './shared/stores/taskStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 
@@ -9,6 +10,7 @@ function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
+  const { hydrateTasks } = useTaskStore()
 
   useEffect(() => {
     initAuth()
@@ -21,12 +23,13 @@ function App(): React.JSX.Element {
     }
   }, [isAuthenticated, currentUser, hydrateProjects])
 
-  // Hydrate statuses when project changes
+  // Hydrate statuses and tasks when project changes
   useEffect(() => {
     if (currentProjectId) {
       hydrateStatuses(currentProjectId)
+      hydrateTasks(currentProjectId)
     }
-  }, [currentProjectId, hydrateStatuses])
+  }, [currentProjectId, hydrateStatuses, hydrateTasks])
 
   if (loading) {
     return <SplashScreen />

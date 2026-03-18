@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Settings, LogOut } from 'lucide-react'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
+import { TaskListView } from './features/tasks'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore, selectCurrentProject } from './shared/stores'
 import { ToastContainer } from './shared/components/Toast'
@@ -60,13 +61,19 @@ export function AppLayout(): React.JSX.Element {
       </aside>
 
       {/* Main content area */}
-      <main className="flex flex-1 flex-col items-center justify-center">
-        <h1 className="text-3xl font-light tracking-[0.15em] uppercase text-foreground">
-          {currentProject?.name ?? 'ToDoozy'}
-        </h1>
-        <p className="mt-2 text-sm font-light text-muted">
-          Select a view from the sidebar to get started.
-        </p>
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center border-b border-border px-6 py-4">
+          <h1 className="text-3xl font-light tracking-[0.15em] uppercase text-foreground">
+            {currentProject?.name ?? 'ToDoozy'}
+          </h1>
+        </header>
+        {currentProject ? (
+          <TaskListView projectId={currentProject.id} projectName={currentProject.name} />
+        ) : (
+          <div className="flex flex-1 items-center justify-center">
+            <p className="text-sm font-light text-muted">No project selected.</p>
+          </div>
+        )}
       </main>
 
       {/* Modals */}

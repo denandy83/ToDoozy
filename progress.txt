@@ -108,3 +108,32 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Built AppLayout with sidebar: project switcher header, nav placeholder, settings/logout footer
 - App.tsx hydrates projectStore and statusStore on auth, re-hydrates statuses on project switch
 - Typecheck passes with zero errors, production build succeeds
+
+## Story 8: Task CRUD with basic list view
+- Created StatusButton shared component (src/renderer/src/shared/components/StatusButton.tsx)
+  - Cycles through project statuses in order_index order, wraps around
+  - Displays Circle/CircleDot/CheckCircle2 icons based on status state
+  - Color-coded from status.color
+- Created AddTaskInput (src/renderer/src/features/tasks/AddTaskInput.tsx)
+  - Always visible at top of list, placeholder "Add to [view name]..."
+  - Enter submits, Escape clears and blurs
+  - Exposes focus() via forwardRef for keyboard navigation
+- Created TaskRow (src/renderer/src/features/tasks/TaskRow.tsx)
+  - StatusButton for cycling, inline title display, delete button (red, on hover)
+  - Double-click to edit inline, Enter saves, Escape cancels
+  - Autosave with 1s debounce on text changes
+  - Selection highlight: accent bg 12% + accent border 15%
+  - Done tasks show strikethrough + muted text
+- Created StatusSection (src/renderer/src/features/tasks/StatusSection.tsx)
+  - Collapsible sections with chevron toggle
+  - Status name + task count, color-coded
+  - Empty state message when no tasks
+- Created TaskListView (src/renderer/src/features/tasks/TaskListView.tsx)
+  - Orchestrates all task operations: create, update, delete with undo toast
+  - Tasks grouped by status sections, sorted by order_index
+  - Status change auto-sets completed_date for done statuses, clears for non-done
+  - Full keyboard navigation: ↑/↓ move selection, Enter focuses add-input, Space toggles status, Delete/Backspace deletes with auto-select next, Tab/Shift+Tab navigation
+  - Delete undo: toast with "Undo" button recreates task
+- Updated AppLayout: replaced placeholder with TaskListView, added project header
+- Updated App.tsx: hydrates taskStore on project change alongside statusStore
+- Typecheck passes with zero errors, production build succeeds

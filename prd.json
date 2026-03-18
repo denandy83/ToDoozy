@@ -56,7 +56,7 @@
       "title": "Task CRUD with basic list view",
       "description": "Create, list, update, delete tasks (project-scoped, status-scoped). Add-task input at top of list. Tasks grouped by status sections. Status cycling on click. Completed_date auto-set on done status. is_archived flag separate from status.",
       "spec_section": "§6 Task Interactions",
-      "passes": false
+      "passes": true
     },
     {
       "id": "9",
