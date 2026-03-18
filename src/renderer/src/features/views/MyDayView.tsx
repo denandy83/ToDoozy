@@ -344,7 +344,6 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
             const statusTasks = filteredMyDayTasks
               .filter((t) => t.status_id === status.id)
               .sort(prioritySortFn)
-            if (statusTasks.length === 0) return null
             return (
               <StatusSection
                 key={status.id}
@@ -367,15 +366,13 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           })}
 
           {filteredMyDayTasks.length === 0 && (
-            <div className="flex flex-1 items-center justify-center py-20">
-              <div className="text-center">
-                <p className="text-sm font-light text-muted/60">
-                  No tasks for today.
-                </p>
-                <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                  Add tasks or pin them to My Day
-                </p>
-              </div>
+            <div className="px-6 py-4">
+              <p className="text-sm font-light text-muted/60">
+                No tasks for today.
+              </p>
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
+                Add tasks or add them to My Day
+              </p>
             </div>
           )}
         </div>

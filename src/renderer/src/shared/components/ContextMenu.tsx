@@ -156,7 +156,7 @@ export function ContextMenu(): React.JSX.Element | null {
       {/* Pin/Unpin My Day */}
       <MenuItem
         icon={isInMyDay ? <SunMedium size={14} /> : <Sun size={14} />}
-        label={isInMyDay ? 'Unpin from My Day' : 'Pin to My Day'}
+        label={isInMyDay ? 'Remove from My Day' : 'Add to My Day'}
         onClick={() => handleAction(() => updateTask(task.id, { is_in_my_day: isInMyDay ? 0 : 1 }))}
       />
       {/* Add Subtask */}

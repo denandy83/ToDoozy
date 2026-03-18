@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef, useEffect, useState } from 'react'
 import { X, PanelBottom, PanelRight } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
@@ -248,7 +248,7 @@ function DetailPanelContent({
   onCreateLabel
 }: DetailPanelContentProps): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
@@ -275,70 +275,98 @@ function DetailPanelContent({
       </div>
 
       {/* Body */}
-      <div className="flex flex-col gap-5 p-4">
-        {/* Title */}
-        <DetailTitle title={task.title} onTitleChange={onTitleChange} />
+      <DetailPanelBody
+        position={position}
+        task={task}
+        statuses={statuses}
+        taskLabels={taskLabels}
+        allLabels={allLabels}
+        onTitleChange={onTitleChange}
+        onStatusChange={onStatusChange}
+        onToggleArchive={onToggleArchive}
+        onPriorityChange={onPriorityChange}
+        onDueDateChange={onDueDateChange}
+        onRecurrenceChange={onRecurrenceChange}
+        onSnooze={onSnooze}
+        onDescriptionChange={onDescriptionChange}
+        onAddLabel={onAddLabel}
+        onRemoveLabel={onRemoveLabel}
+        onCreateLabel={onCreateLabel}
+      />
+    </div>
+  )
+}
 
-        {/* Status */}
-        <Section label="Status">
-          <DetailStatusRow
-            currentStatusId={task.status_id}
-            statuses={statuses}
-            isArchived={task.is_archived === 1}
-            onStatusChange={onStatusChange}
-            onToggleArchive={onToggleArchive}
-          />
-        </Section>
+const MIN_COL_WIDTH = 280
+const COL_GAP = 24
 
-        {/* Priority */}
-        <Section label="Priority">
-          <PriorityIndicator
-            currentPriority={task.priority}
-            onPriorityChange={onPriorityChange}
-          />
-        </Section>
+function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTogglePosition'>): React.JSX.Element {
+  const { position, task, statuses, taskLabels, allLabels } = props
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [colCount, setColCount] = useState(1)
 
-        {/* Labels */}
-        <Section label="Labels">
-          <DetailLabels
-            assignedLabels={taskLabels}
-            allLabels={allLabels}
-            onAddLabel={onAddLabel}
-            onRemoveLabel={onRemoveLabel}
-            onCreateLabel={onCreateLabel}
-          />
-        </Section>
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || position !== 'bottom') return
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0
+      const cols = Math.max(1, Math.floor((width + COL_GAP) / (MIN_COL_WIDTH + COL_GAP)))
+      setColCount(cols)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [position])
 
-        {/* Due Date */}
-        <Section label="Due Date">
-          <DatePicker value={task.due_date} onChange={onDueDateChange} />
-        </Section>
+  const sections: React.ReactNode[] = [
+    <DetailTitle key="title" title={task.title} onTitleChange={props.onTitleChange} />,
+    <Section key="status" label="Status">
+      <DetailStatusRow currentStatusId={task.status_id} statuses={statuses} isArchived={task.is_archived === 1} onStatusChange={props.onStatusChange} onToggleArchive={props.onToggleArchive} />
+    </Section>,
+    <Section key="priority" label="Priority">
+      <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
+    </Section>,
+    <Section key="labels" label="Labels">
+      <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} />
+    </Section>,
+    <Section key="due" label="Due Date">
+      <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
+    </Section>,
+    <Section key="recurrence" label="Recurrence">
+      <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
+    </Section>,
+    <Section key="snooze" label="Snooze">
+      <DetailSnooze onSnooze={props.onSnooze} />
+    </Section>,
+    <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
+    <DetailDescription key="desc" description={task.description} onDescriptionChange={props.onDescriptionChange} />,
+    <DetailActivityLog key="activity" taskId={task.id} />
+  ]
 
-        {/* Recurrence */}
-        <Section label="Recurrence">
-          <DetailRecurrence
-            recurrenceRule={task.recurrence_rule}
-            onRecurrenceChange={onRecurrenceChange}
-          />
-        </Section>
-
-        {/* Snooze */}
-        <Section label="Snooze">
-          <DetailSnooze onSnooze={onSnooze} />
-        </Section>
-
-        {/* Subtasks */}
-        <DetailSubtasks taskId={task.id} projectId={task.project_id} />
-
-        {/* Description */}
-        <DetailDescription
-          description={task.description}
-          onDescriptionChange={onDescriptionChange}
-        />
-
-        {/* Activity Log */}
-        <DetailActivityLog taskId={task.id} />
+  if (position !== 'bottom' || colCount <= 1) {
+    return (
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-4">
+        <div className="flex flex-col gap-5">
+          {sections}
+        </div>
       </div>
+    )
+  }
+
+  // Distribute items evenly across columns, top-to-bottom then left-to-right
+  const columns: React.ReactNode[][] = Array.from({ length: colCount }, () => [])
+  const perCol = Math.ceil(sections.length / colCount)
+  for (let i = 0; i < sections.length; i++) {
+    const col = Math.floor(i / perCol)
+    columns[Math.min(col, colCount - 1)].push(sections[i])
+  }
+
+  return (
+    <div ref={containerRef} className="flex flex-1 gap-6 overflow-hidden p-4">
+      {columns.map((colItems, i) => (
+        <div key={i} className="flex flex-1 flex-col gap-5 overflow-y-auto">
+          {colItems}
+        </div>
+      ))}
     </div>
   )
 }

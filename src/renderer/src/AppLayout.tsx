@@ -151,10 +151,10 @@ export function AppLayout(): React.JSX.Element {
     async (taskId: string, viewId: string) => {
       if (viewId === 'my-day') {
         await updateTask(taskId, { is_in_my_day: 1 })
-        addToast({ message: 'Pinned to My Day' })
+        addToast({ message: 'Added to My Day' })
       } else if (viewId === 'backlog') {
         await updateTask(taskId, { is_in_my_day: 0 })
-        addToast({ message: 'Unpinned from My Day' })
+        addToast({ message: 'Removed from My Day' })
       } else if (viewId === 'archive') {
         await updateTask(taskId, { is_archived: 1 })
         addToast({ message: 'Archived' })

@@ -32,7 +32,7 @@ export function NavItem({
       ref={droppableId ? setNodeRef : undefined}
       onClick={onClick}
       title={collapsed ? `${label}${shortcutHint ? ` (${shortcutHint})` : ''}` : undefined}
-      className={`group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+      className={`group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
         active
           ? 'bg-accent/12 text-foreground border border-accent/15'
           : 'border border-transparent text-muted hover:bg-foreground/6 hover:border-border/50'
@@ -58,7 +58,11 @@ export function NavItem({
         </>
       )}
       {collapsed && count > 0 && (
-        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold text-white">
+        <span
+          className={`absolute bottom-0.5 right-0.5 text-[8px] font-bold tabular-nums leading-none ${
+            active ? 'text-accent' : 'text-muted/60'
+          }`}
+        >
           {count > 99 ? '99+' : count}
         </span>
       )}
