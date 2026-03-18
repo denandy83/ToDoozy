@@ -182,3 +182,50 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Sidebar defaults to pinned+expanded; defaults to backlog view on launch
 - Archive view is read-only (status button renders but clicking is a no-op)
 - Templates view "Use Template" creates task with default status in the current project
+
+## Story 10: Detail Panel - Task editor (2026-03-18)
+
+### What was built
+- Created DetailPanel feature (src/renderer/src/features/detail/)
+  - Resizable panel, toggleable between side (right) and bottom positions
+  - Drag-to-resize via mouse on left edge (side mode) or top edge (bottom mode)
+  - Size clamped 200-800px, position persisted in viewStore
+  - Escape closes panel (sets currentTaskId to null)
+  - Toggle position button (PanelBottom/PanelRight icons)
+- DetailTitle: Large text input with 1s autosave debounce, blur saves
+- DetailStatusRow: Button row dynamically generated from project statuses + Archive toggle
+  - Active status highlighted with status color background
+  - Archive button with pressed state
+- PriorityIndicator shared component (src/renderer/src/shared/components/PriorityIndicator.tsx)
+  - 5 levels: None, Low, Normal, High, Urgent with color-coded buttons
+  - Radio group pattern with aria-checked
+- DetailLabels: Assigned labels as LabelChip components with X removal
+  - "+Add" dropdown listing unassigned labels
+  - "New label..." inline creation with name input + color picker
+  - Click-outside to close, Escape to close
+- LabelChip shared component (src/renderer/src/shared/components/LabelChip.tsx)
+  - Colored chips with translucent background, X remove button
+  - Keyboard accessible (Enter/Space to click, Delete to remove)
+- DatePicker shared component (src/renderer/src/shared/components/DatePicker.tsx)
+  - Native date input with optional time toggle
+  - Clear button, Calendar/Clock icons
+- DetailRecurrence: Button row for None/Daily/Weekly/Monthly/Custom
+  - Custom mode shows inline text input for interval
+- DetailSnooze: Quick buttons for Later Today, Tomorrow, In 3 Days, Next Week, Pick Date
+  - Sets due_date to the snoozed date
+- DetailDescription: Markdown textarea with edit/preview toggle
+  - 1s autosave debounce, Cmd+V image paste (10MB limit, base64 embedded)
+  - Simple markdown preview (headings, bold, italic, code, images)
+- DetailActivityLog: Collapsible timeline of task changes
+  - Loads from activityLog IPC on task selection
+  - Shows action type, old/new values, timestamps
+- Activity logging: status, priority, title, due date, archive changes logged via activityLog.create()
+- Updated viewStore with detailPanelPosition ('side' | 'bottom') and detailPanelSize
+- Updated AppLayout: flex layout adapts to panel position (flex-row for side, flex-col for bottom)
+
+### Decisions
+- Panel opens automatically when any task is selected (currentTaskId !== null)
+- Side position is the default (400px width)
+- Activity log entries are created from the detail panel when fields change
+- Markdown preview is a simple inline renderer (no external library) — sufficient for bold, italic, code, headings, images
+- Image paste converts to base64 data URL embedded in markdown (no external storage needed)

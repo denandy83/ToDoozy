@@ -11,12 +11,14 @@ export {
 } from './taskStore'
 
 export { useViewStore } from './viewStore'
-export type { ViewStore, ViewId } from './viewStore'
+export type { ViewStore, ViewId, DetailPanelPosition } from './viewStore'
 export {
   selectCurrentView,
   selectSidebarPinned,
   selectSidebarExpanded,
-  selectSidebarWidth
+  selectSidebarWidth,
+  selectDetailPanelPosition,
+  selectDetailPanelSize
 } from './viewStore'
 
 export { useLabelStore } from './labelStore'

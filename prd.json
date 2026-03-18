@@ -70,7 +70,7 @@
       "title": "Detail Panel - Task editor",
       "description": "Resizable panel (bottom/side toggleable). Fields: title (autosave 1s), status buttons (dynamic from project statuses), priority buttons, labels section, due date picker with optional time, recurrence (None/Daily/Weekly/Monthly/Custom), snooze presets, markdown description with image paste, activity log timeline. Escape closes.",
       "spec_section": "§7 Detail Panel",
-      "passes": false
+      "passes": true
     },
     {
       "id": "11",

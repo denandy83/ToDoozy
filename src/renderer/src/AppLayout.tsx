@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
 import { TaskListView } from './features/tasks'
 import { Sidebar } from './features/sidebar'
+import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
@@ -111,6 +112,10 @@ export function AppLayout(): React.JSX.Element {
   }, [currentView, setView])
 
   const viewTitle = VIEW_TITLES[currentView]
+  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
+  const hasDetailPanel = currentTaskId !== null
+  const isSidePanel = detailPanelPosition === 'side'
 
   return (
     <div className="flex h-screen w-screen bg-background text-foreground">
@@ -146,17 +151,26 @@ export function AppLayout(): React.JSX.Element {
           )}
         </header>
 
-        {currentView === 'my-day' && <MyDayView />}
-        {currentView === 'backlog' && currentProject && (
-          <TaskListView projectId={currentProject.id} projectName={currentProject.name} />
-        )}
-        {currentView === 'backlog' && !currentProject && (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm font-light text-muted">No project selected.</p>
+        {/* Content + Detail Panel layout */}
+        <div className={`flex flex-1 overflow-hidden ${isSidePanel ? 'flex-row' : 'flex-col'}`}>
+          {/* View content */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {currentView === 'my-day' && <MyDayView />}
+            {currentView === 'backlog' && currentProject && (
+              <TaskListView projectId={currentProject.id} projectName={currentProject.name} />
+            )}
+            {currentView === 'backlog' && !currentProject && (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm font-light text-muted">No project selected.</p>
+              </div>
+            )}
+            {currentView === 'archive' && <ArchiveView />}
+            {currentView === 'templates' && <TemplatesView />}
           </div>
-        )}
-        {currentView === 'archive' && <ArchiveView />}
-        {currentView === 'templates' && <TemplatesView />}
+
+          {/* Detail Panel */}
+          {hasDetailPanel && <DetailPanel />}
+        </div>
       </main>
 
       {/* Modals */}

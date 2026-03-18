@@ -1,12 +1,15 @@
 import { create } from 'zustand'
 
 export type ViewId = 'my-day' | 'backlog' | 'archive' | 'templates'
+export type DetailPanelPosition = 'side' | 'bottom'
 
 interface ViewState {
   currentView: ViewId
   sidebarPinned: boolean
   sidebarExpanded: boolean
   sidebarWidth: number
+  detailPanelPosition: DetailPanelPosition
+  detailPanelSize: number
 }
 
 interface ViewActions {
@@ -17,6 +20,9 @@ interface ViewActions {
   toggleSidebarPinned(): void
   setSidebarExpanded(expanded: boolean): void
   setSidebarWidth(width: number): void
+  setDetailPanelPosition(position: DetailPanelPosition): void
+  toggleDetailPanelPosition(): void
+  setDetailPanelSize(size: number): void
 }
 
 export type ViewStore = ViewState & ViewActions
@@ -28,6 +34,8 @@ export const useViewStore = create<ViewStore>((set, get) => ({
   sidebarPinned: true,
   sidebarExpanded: true,
   sidebarWidth: 224, // 56 * 4 = w-56
+  detailPanelPosition: 'side' as DetailPanelPosition,
+  detailPanelSize: 400,
 
   setView(view: ViewId): void {
     set({ currentView: view })
@@ -62,6 +70,22 @@ export const useViewStore = create<ViewStore>((set, get) => ({
 
   setSidebarWidth(width: number): void {
     set({ sidebarWidth: Math.max(120, Math.min(600, width)) })
+  },
+
+  setDetailPanelPosition(position: DetailPanelPosition): void {
+    set({ detailPanelPosition: position })
+  },
+
+  toggleDetailPanelPosition(): void {
+    const { detailPanelPosition } = get()
+    set({
+      detailPanelPosition: detailPanelPosition === 'side' ? 'bottom' : 'side',
+      detailPanelSize: 400
+    })
+  },
+
+  setDetailPanelSize(size: number): void {
+    set({ detailPanelSize: Math.max(200, Math.min(800, size)) })
   }
 }))
 
@@ -70,3 +94,6 @@ export const selectCurrentView = (state: ViewState): ViewId => state.currentView
 export const selectSidebarPinned = (state: ViewState): boolean => state.sidebarPinned
 export const selectSidebarExpanded = (state: ViewState): boolean => state.sidebarExpanded
 export const selectSidebarWidth = (state: ViewState): number => state.sidebarWidth
+export const selectDetailPanelPosition = (state: ViewState): DetailPanelPosition =>
+  state.detailPanelPosition
+export const selectDetailPanelSize = (state: ViewState): number => state.detailPanelSize
