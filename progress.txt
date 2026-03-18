@@ -12,3 +12,14 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - electron-vite v5 requires vite@^7 (not v8) — pinned accordingly
 - Preload uses globalThis cast instead of window to avoid DOM type issues in Node tsconfig
 - Typecheck passes, dev server compiles and launches successfully
+
+## Story 2: Database layer with versioned migrations
+- Created src/main/database/ module with index.ts, migrations.ts, seed.ts
+- All 10 tables from §4 Data Model: users, projects, project_members, statuses, tasks, labels, task_labels, themes, settings, activity_log
+- schema_version table tracks migration versions; migrations run in transactions
+- PRAGMA foreign_keys = ON, WAL mode enabled
+- Seeded 12 built-in themes (6 dark, 6 light) and default settings
+- Default statuses (Not Started, In Progress, Done) are seeded per-project at project creation time (Story 7), not globally
+- Ran @electron/rebuild to fix better-sqlite3 native module for Electron's Node version
+- Database initializes on app.whenReady(), closes on app.will-quit
+- Typecheck passes, dev server compiles and migration runs successfully

@@ -14,7 +14,7 @@
       "title": "Database layer with versioned migrations",
       "description": "Create SQLite database with schema_version table and numbered migration functions. Implement all tables from §4 Data Model: users, projects, project_members, statuses, tasks, labels, task_labels, themes, settings, activity_log. Enable PRAGMA foreign_keys. Seed default data (3 statuses, default themes, default settings).",
       "spec_section": "§4 Data Model",
-      "passes": false
+      "passes": true
     },
     {
       "id": "3",
