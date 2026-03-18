@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye, Pencil } from 'lucide-react'
 
 interface DetailDescriptionProps {
@@ -34,22 +34,50 @@ export function DetailDescription({
     }
   }, [isEditing])
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const val = e.target.value
-      setValue(val)
+  const IMAGE_PATTERN = /!\[[^\]]*\]\(data:[^)]+\)/g
+  const IMAGE_PLACEHOLDER = '![📷 pasted image]'
 
-      // Auto-resize
+  // Show placeholders instead of base64 in textarea
+  const displayValue = useMemo(
+    () => value.replace(IMAGE_PATTERN, IMAGE_PLACEHOLDER),
+    [value]
+  )
+
+  const imageCount = useMemo(
+    () => (value.match(IMAGE_PATTERN) ?? []).length,
+    [value]
+  )
+
+  // Extract base64 images from real value to re-insert when display is edited
+  const imageDataRefs = useRef<string[]>([])
+  useEffect(() => {
+    imageDataRefs.current = value.match(IMAGE_PATTERN) ?? []
+  }, [value])
+
+  const handleDisplayChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const displayVal = e.target.value
+      // Reconstruct real value by replacing placeholders back with base64 data
+      let realVal = displayVal
+      let idx = 0
+      realVal = realVal.replace(/!\[📷 pasted image\]/g, () => {
+        const img = imageDataRefs.current[idx]
+        idx++
+        return img ?? IMAGE_PLACEHOLDER
+      })
+      setValue(realVal)
+
       e.target.style.height = 'auto'
       e.target.style.height = e.target.scrollHeight + 'px'
 
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
-        onDescriptionChange(val || null)
+        onDescriptionChange(realVal || null)
       }, 1000)
     },
     [onDescriptionChange]
   )
+
 
   const handleBlur = useCallback(() => {
     if (debounceRef.current) {
@@ -109,16 +137,23 @@ export function DetailDescription({
       </div>
 
       {isEditing ? (
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder="Add a description... (Markdown supported, Cmd+V to paste images)"
-          className="min-h-[80px] w-full resize-none rounded border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:outline-none focus:border-accent"
-        />
+        <div className="flex flex-col gap-2">
+          <textarea
+            ref={textareaRef}
+            value={displayValue}
+            onChange={handleDisplayChange}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder="Add a description... (Markdown supported, Cmd+V to paste images)"
+            className="min-h-[80px] w-full resize-none rounded border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:outline-none focus:border-accent"
+          />
+          {imageCount > 0 && (
+            <p className="text-[9px] font-bold uppercase tracking-wider text-muted">
+              {imageCount} pasted {imageCount === 1 ? 'image' : 'images'} (visible in preview)
+            </p>
+          )}
+        </div>
       ) : (
         <div
           onClick={() => setIsEditing(true)}

@@ -335,7 +335,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
     </Section>,
     <Section key="snooze" label="Snooze">
-      <DetailSnooze onSnooze={props.onSnooze} />
+      <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
     </Section>,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
     <DetailDescription key="desc" description={task.description} onDescriptionChange={props.onDescriptionChange} />,

@@ -211,7 +211,7 @@ export function ContextMenu(): React.JSX.Element | null {
         />
       </FlyoutItem>
       <FlyoutItem id="snooze" icon={<Clock size={14} />} label="Snooze" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
-        <SnoozeSubmenu openLeft={openLeft} onSnooze={(date) => handleAction(() => updateTask(task.id, { due_date: date }))} />
+        <SnoozeSubmenu openLeft={openLeft} currentDueDate={task.due_date} onSnooze={(date) => handleAction(() => updateTask(task.id, { due_date: date }))} />
       </FlyoutItem>
       <FlyoutItem id="focus" icon={<Focus size={14} />} label="Focus" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <FocusSubmenu openLeft={openLeft} onFocus={(mins) => handleAction(() => { addToast({ message: `Focus: ${mins} min` }) })} />

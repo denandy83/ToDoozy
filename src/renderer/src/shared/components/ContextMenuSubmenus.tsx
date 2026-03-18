@@ -115,32 +115,17 @@ export function LabelsSubmenu({
 
 // --- Snooze Flyout ---
 
-function addDays(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
-}
-
-function getLaterToday(): string {
-  const d = new Date()
-  d.setHours(d.getHours() + 3)
-  return d.toISOString()
-}
-
-const SNOOZE_PRESETS = [
-  { label: 'Later Today', getDate: getLaterToday },
-  { label: 'Tomorrow', getDate: () => addDays(1) },
-  { label: 'In 3 Days', getDate: () => addDays(3) },
-  { label: 'Next Week', getDate: () => addDays(7) }
-] as const
+import { getSnoozePresets } from '../utils/snooze'
 
 interface SnoozeSubmenuProps {
   openLeft: boolean
+  currentDueDate?: string | null
   onSnooze: (date: string) => void
 }
 
-export function SnoozeSubmenu({ openLeft, onSnooze }: SnoozeSubmenuProps): React.JSX.Element {
+export function SnoozeSubmenu({ openLeft, currentDueDate, onSnooze }: SnoozeSubmenuProps): React.JSX.Element {
   const [showPicker, setShowPicker] = useState(false)
+  const presets = getSnoozePresets(currentDueDate)
 
   const handlePickDate = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,7 +138,7 @@ export function SnoozeSubmenu({ openLeft, onSnooze }: SnoozeSubmenuProps): React
 
   return (
     <SubmenuContainer openLeft={openLeft}>
-      {SNOOZE_PRESETS.map((preset) => (
+      {presets.map((preset) => (
         <button
           key={preset.label}
           onClick={() => onSnooze(preset.getDate())}

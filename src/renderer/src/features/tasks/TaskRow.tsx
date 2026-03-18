@@ -209,13 +209,28 @@ export function TaskRow({
       const btn = addLabelBtnRef.current
       if (btn) {
         const rect = btn.getBoundingClientRect()
+        const pickerWidth = 220
         const pickerHeight = 280
 
-        let top = rect.top
-        // Position below the + button, right-aligned to window edge with margin
-        let left = window.innerWidth - 230
+        // Find the right edge of the scrollable task list area (not the full window)
+        const scrollParent = btn.closest('[role="grid"]') ?? btn.closest('main')
+        const containerRight = scrollParent
+          ? scrollParent.getBoundingClientRect().right
+          : window.innerWidth
 
-        // If picker would go off the bottom, shift up
+        let top = rect.top
+        let left = containerRight - pickerWidth - 8
+
+        // Fallback: if that puts it behind the button, open below instead
+        if (left < rect.right + 8) {
+          left = rect.left
+          top = rect.bottom + 4
+          if (left + pickerWidth > containerRight - 8) {
+            left = containerRight - pickerWidth - 8
+          }
+        }
+
+        // Clamp vertically
         if (top + pickerHeight > window.innerHeight - 8) {
           top = window.innerHeight - pickerHeight - 8
         }
