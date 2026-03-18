@@ -40,3 +40,14 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Updated tsconfig.node.json and tsconfig.web.json to include src/shared/**/*.ts
 - 54 Vitest unit tests covering all repository methods — all pass
 - Typecheck passes, dev server compiles successfully
+
+## Story 4: IPC layer and preload bridge
+- Created src/main/ipc-handlers.ts with registerIpcHandlers() mapping every repository method to an ipcMain.handle() channel
+- Channel naming convention: `namespace:method` (e.g., `tasks:findById`, `labels:create`)
+- Lazy initialization of repositories via getRepos() — repos created on first IPC call after DB is ready
+- Updated src/preload/index.ts: fully typed api object exposed via contextBridge with all 8 namespaces (tasks, labels, projects, statuses, users, activityLog, settings, themes)
+- Updated src/preload/index.d.ts: complete type declarations for TodoozyAPI with separate interfaces per namespace
+- Return values: undefined from repos converted to null for IPC serialization (undefined not serializable)
+- All methods return Promises in the preload API (ipcRenderer.invoke is async)
+- Registered IPC handlers in main/index.ts after initDatabase()
+- Typecheck passes with zero errors, dev server compiles successfully

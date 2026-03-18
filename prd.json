@@ -28,7 +28,7 @@
       "title": "IPC layer and preload bridge",
       "description": "Set up typed preload bridge via electron contextBridge. Every repository method maps to an IPC handler. Type declarations in index.d.ts must match the actual preload API. Use TASK_UPDATABLE_COLUMNS whitelist for update queries.",
       "spec_section": "§36 Architecture - IPC Layer",
-      "passes": false
+      "passes": true
     },
     {
       "id": "5",
