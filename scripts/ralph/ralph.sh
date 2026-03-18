@@ -1,10 +1,11 @@
 #!/bin/bash
-# Ralph Wiggum - Long-running AI agent loop (modified for file access)
+# Ralph Wiggum - Long-running AI agent loop
 # Usage: ./ralph.sh [--tool amp|claude] [max_iterations]
 
 set -e
 
-TOOL="claude"
+# Parse arguments
+TOOL="amp"  # Default to amp for backwards compatibility
 MAX_ITERATIONS=10
 
 while [[ $# -gt 0 ]]; do
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
+      # Assume it's max_iterations if it's a number
       if [[ "$1" =~ ^[0-9]+$ ]]; then
         MAX_ITERATIONS="$1"
       fi
@@ -26,17 +28,52 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate tool choice
 if [[ "$TOOL" != "amp" && "$TOOL" != "claude" ]]; then
   echo "Error: Invalid tool '$TOOL'. Must be 'amp' or 'claude'."
   exit 1
 fi
 
-# Find project root (where prd.json lives)
+# Use project root for all files (2 levels up from scripts/ralph/)
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRD_FILE="$PROJECT_ROOT/prd.json"
 PROGRESS_FILE="$PROJECT_ROOT/progress.txt"
-CLAUDE_MD="$PROJECT_ROOT/CLAUDE.md"
+ARCHIVE_DIR="$SCRIPT_DIR/archive"
+LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
+
+# Archive previous run if branch changed
+if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
+  CURRENT_BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE" 2>/dev/null || echo "")
+  LAST_BRANCH=$(cat "$LAST_BRANCH_FILE" 2>/dev/null || echo "")
+
+  if [ -n "$CURRENT_BRANCH" ] && [ -n "$LAST_BRANCH" ] && [ "$CURRENT_BRANCH" != "$LAST_BRANCH" ]; then
+    # Archive the previous run
+    DATE=$(date +%Y-%m-%d)
+    # Strip "ralph/" prefix from branch name for folder
+    FOLDER_NAME=$(echo "$LAST_BRANCH" | sed 's|^ralph/||')
+    ARCHIVE_FOLDER="$ARCHIVE_DIR/$DATE-$FOLDER_NAME"
+
+    echo "Archiving previous run: $LAST_BRANCH"
+    mkdir -p "$ARCHIVE_FOLDER"
+    [ -f "$PRD_FILE" ] && cp "$PRD_FILE" "$ARCHIVE_FOLDER/"
+    [ -f "$PROGRESS_FILE" ] && cp "$PROGRESS_FILE" "$ARCHIVE_FOLDER/"
+    echo "   Archived to: $ARCHIVE_FOLDER"
+
+    # Reset progress file for new run
+    echo "# Ralph Progress Log" > "$PROGRESS_FILE"
+    echo "Started: $(date)" >> "$PROGRESS_FILE"
+    echo "---" >> "$PROGRESS_FILE"
+  fi
+fi
+
+# Track current branch
+if [ -f "$PRD_FILE" ]; then
+  CURRENT_BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE" 2>/dev/null || echo "")
+  if [ -n "$CURRENT_BRANCH" ]; then
+    echo "$CURRENT_BRANCH" > "$LAST_BRANCH_FILE"
+  fi
+fi
 
 # Initialize progress file if it doesn't exist
 if [ ! -f "$PROGRESS_FILE" ]; then
@@ -48,6 +85,7 @@ fi
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 echo "Project root: $PROJECT_ROOT"
 
+# Run from project root so Claude has full file access
 cd "$PROJECT_ROOT"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
@@ -61,22 +99,18 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   if [ "$REMAINING" -eq 0 ]; then
     echo ""
     echo "All stories complete!"
-    echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
 
   NEXT_STORY=$(jq -r '[.stories[] | select(.passes == false)][0].title' "$PRD_FILE" 2>/dev/null || echo "unknown")
   echo "Next story: $NEXT_STORY ($REMAINING remaining)"
 
-  # Read CLAUDE.md content as the prompt
-  PROMPT=$(cat "$CLAUDE_MD")
-
+  # Run the selected tool
   if [[ "$TOOL" == "amp" ]]; then
-    OUTPUT=$(echo "$PROMPT" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
   else
-    # Run Claude in the project directory with full file access
-    # -p flag sends a prompt, --dangerously-skip-permissions for autonomous operation
-    OUTPUT=$(claude -p "$PROMPT" --dangerously-skip-permissions 2>&1 | tee /dev/stderr) || true
+    # Claude Code: pipe CLAUDE.md as prompt, --dangerously-skip-permissions for autonomous operation
+    OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROJECT_ROOT/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
   fi
 
   # Check for completion signal
