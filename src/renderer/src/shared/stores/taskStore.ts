@@ -18,6 +18,8 @@ interface TaskActions {
   hydrateTasks(projectId: string): Promise<void>
   hydrateMyDay(userId: string): Promise<void>
   hydrateArchived(projectId: string): Promise<void>
+  hydrateTemplates(projectId: string): Promise<void>
+  hydrateAllForProject(projectId: string, userId: string): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
   deleteTask(id: string): Promise<boolean>
@@ -80,6 +82,42 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set({ tasks: taskMap, loading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load archived tasks'
+      set({ error: message, loading: false })
+    }
+  },
+
+  async hydrateTemplates(projectId: string): Promise<void> {
+    set({ loading: true, error: null })
+    try {
+      const tasks = await window.api.tasks.findTemplates(projectId)
+      const taskMap: Record<string, Task> = {}
+      for (const task of tasks) {
+        taskMap[task.id] = task
+      }
+      set({ tasks: taskMap, loading: false })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load templates'
+      set({ error: message, loading: false })
+    }
+  },
+
+  async hydrateAllForProject(projectId: string, userId: string): Promise<void> {
+    set({ loading: true, error: null })
+    try {
+      const [regular, myDay, archived, templates] = await Promise.all([
+        window.api.tasks.findByProjectId(projectId),
+        window.api.tasks.findMyDay(userId),
+        window.api.tasks.findArchived(projectId),
+        window.api.tasks.findTemplates(projectId)
+      ])
+      const taskMap: Record<string, Task> = {}
+      for (const task of regular) taskMap[task.id] = task
+      for (const task of myDay) taskMap[task.id] = task
+      for (const task of archived) taskMap[task.id] = task
+      for (const task of templates) taskMap[task.id] = task
+      set({ tasks: taskMap, loading: false })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load tasks'
       set({ error: message, loading: false })
     }
   },

@@ -10,7 +10,7 @@ function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
-  const { hydrateTasks } = useTaskStore()
+  const { hydrateAllForProject } = useTaskStore()
 
   useEffect(() => {
     initAuth()
@@ -23,13 +23,13 @@ function App(): React.JSX.Element {
     }
   }, [isAuthenticated, currentUser, hydrateProjects])
 
-  // Hydrate statuses and tasks when project changes
+  // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
-    if (currentProjectId) {
+    if (currentProjectId && currentUser) {
       hydrateStatuses(currentProjectId)
-      hydrateTasks(currentProjectId)
+      hydrateAllForProject(currentProjectId, currentUser.id)
     }
-  }, [currentProjectId, hydrateStatuses, hydrateTasks])
+  }, [currentProjectId, currentUser, hydrateStatuses, hydrateAllForProject])
 
   if (loading) {
     return <SplashScreen />

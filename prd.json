@@ -63,7 +63,7 @@
       "title": "Views and sidebar navigation",
       "description": "Implement sidebar (collapsible 56px-600px, pinnable, hover-expand). Views: My Day (cross-project, is_in_my_day OR due today), Backlog (project-scoped), Archive (is_archived), Templates (is_template). Nav items with count badges. Keyboard: Cmd+1-4.",
       "spec_section": "§5 Views & Navigation",
-      "passes": false
+      "passes": true
     },
     {
       "id": "10",

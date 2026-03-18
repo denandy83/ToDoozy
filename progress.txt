@@ -137,3 +137,48 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Updated AppLayout: replaced placeholder with TaskListView, added project header
 - Updated App.tsx: hydrates taskStore on project change alongside statusStore
 - Typecheck passes with zero errors, production build succeeds
+
+## Story 9: Views and sidebar navigation (2026-03-18)
+
+### What was built
+- Created viewStore (src/renderer/src/shared/stores/viewStore.ts)
+  - Tracks current view (my-day, backlog, archive, templates)
+  - Sidebar state: pinned, expanded, width (clamped 120-600px)
+  - nextView/prevView for Cmd+[ / Cmd+] navigation
+- Created Sidebar component (src/renderer/src/features/sidebar/Sidebar.tsx)
+  - Collapsible: 56px icon-only ↔ 224px expanded, 200ms ease-out transition
+  - Pinnable: when unpinned, expands on hover and collapses on mouse leave
+  - Header with app logo + pin/unpin toggle button
+  - Footer with Settings + Logout buttons (adapts to collapsed state)
+- Created NavItem component (src/renderer/src/features/sidebar/NavItem.tsx)
+  - Active state: accent bg at 12% opacity + accent border at 15%
+  - Hover state: bg-foreground/6 with faint border
+  - Count badges (right-aligned in expanded, dot overlay in collapsed)
+  - Shortcut hints in collapsed tooltip
+  - role="tab" + aria-selected for accessibility
+- Created MyDayView (src/renderer/src/features/views/MyDayView.tsx)
+  - Cross-project: shows tasks where is_in_my_day=1 OR due_date is today
+  - Grouped by status sections, same keyboard nav as TaskListView
+  - New tasks created with is_in_my_day=1
+- Created ArchiveView (src/renderer/src/features/views/ArchiveView.tsx)
+  - Read-only browsing of is_archived tasks, sorted by completed_date desc
+  - Restore button (unarchive) with undo toast
+  - Keyboard nav: ↑/↓ arrow keys
+- Created TemplatesView (src/renderer/src/features/views/TemplatesView.tsx)
+  - Shows is_template tasks with "Use Template" button
+  - Creates a copy in backlog with default status
+  - Enter key on selected template triggers use
+- Updated AppLayout
+  - Replaced old sidebar with new Sidebar component
+  - View routing: renders correct view component based on currentView
+  - View title in header, project switcher shown only in Backlog view
+  - Global keyboard shortcuts: Cmd+1-4 (jump to views), Cmd+[/] (prev/next)
+- Updated App.tsx: uses hydrateAllForProject to load all task types (regular + my day + archived + templates) into a single store for cross-view filtering
+- Added hydrateTemplates and hydrateAllForProject to taskStore
+- Updated store barrel exports with viewStore
+
+### Decisions
+- Loaded all task types into a single task store map rather than separate stores, enabling cross-view counts and in-memory filtering
+- Sidebar defaults to pinned+expanded; defaults to backlog view on launch
+- Archive view is read-only (status button renders but clicking is a no-op)
+- Templates view "Use Template" creates task with default status in the current project

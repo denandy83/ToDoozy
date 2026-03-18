@@ -10,6 +10,15 @@ export {
   selectTaskLabels
 } from './taskStore'
 
+export { useViewStore } from './viewStore'
+export type { ViewStore, ViewId } from './viewStore'
+export {
+  selectCurrentView,
+  selectSidebarPinned,
+  selectSidebarExpanded,
+  selectSidebarWidth
+} from './viewStore'
+
 export { useLabelStore } from './labelStore'
 export type { LabelStore } from './labelStore'
 export {
