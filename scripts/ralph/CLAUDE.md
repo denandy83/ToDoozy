@@ -1,1 +1,0 @@
-/Users/andy.cassiers/Documents/Claude/todoozy/CLAUDE.md
