@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Modal } from '../../shared/components/Modal'
-import { useProjectStore, selectAllProjects } from '../../shared/stores'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
+import { useProjectStore, selectAllProjects, useStatusStore } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { StatusList } from './StatusList'
 import { ProjectGeneralSettings } from './ProjectGeneralSettings'
@@ -22,7 +22,7 @@ export function ProjectSettingsModal({
   const [activeTab, setActiveTab] = useState<Tab>('general')
   const projects = useProjectStore(selectAllProjects)
   const project = projects.find((p) => p.id === projectId) ?? null
-  const statuses = useStatusStore(selectStatusesByProject(projectId ?? ''))
+  const statuses = useStatusesByProject(projectId ?? '')
   const hydrateStatuses = useStatusStore((s) => s.hydrateStatuses)
   const { addToast } = useToast()
 

@@ -1,7 +1,7 @@
 import { useCallback, useState, useRef, useEffect } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { useTaskStore, selectSubtasks, selectChildCount } from '../../shared/stores'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
+import { useTaskStore, useSubtasks, useChildCount } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { StatusButton } from '../../shared/components/StatusButton'
 import type { Task } from '../../../../shared/types'
@@ -12,9 +12,9 @@ interface DetailSubtasksProps {
 }
 
 export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): React.JSX.Element {
-  const subtasks = useTaskStore(selectSubtasks(taskId))
-  const childCount = useTaskStore(selectChildCount(taskId))
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
+  const subtasks = useSubtasks(taskId)
+  const childCount = useChildCount(taskId)
+  const statuses = useStatusesByProject(projectId)
   const { createSubtask, updateTask, deleteTask, setCurrentTask } = useTaskStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 

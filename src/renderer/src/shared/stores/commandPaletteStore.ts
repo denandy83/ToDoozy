@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 
 interface CommandPaletteState {
   isOpen: boolean
@@ -15,7 +16,7 @@ interface CommandPaletteActions {
 
 export type CommandPaletteStore = CommandPaletteState & CommandPaletteActions
 
-export const useCommandPaletteStore = create<CommandPaletteStore>((set) => ({
+export const useCommandPaletteStore = createWithEqualityFn<CommandPaletteStore>((set) => ({
   isOpen: false,
   query: '',
   selectedIndex: 0,
@@ -35,4 +36,4 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set) => ({
   setSelectedIndex(index: number): void {
     set({ selectedIndex: index })
   }
-}))
+}), shallow)

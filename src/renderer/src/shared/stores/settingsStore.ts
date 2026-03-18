@@ -1,4 +1,6 @@
-import { create } from 'zustand'
+import { useMemo, useRef } from 'react'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type {
   Setting,
   Theme,
@@ -32,7 +34,7 @@ interface SettingsActions {
 
 export type SettingsStore = SettingsState & SettingsActions
 
-export const useSettingsStore = create<SettingsStore>((set, get) => ({
+export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) => ({
   settings: {},
   themes: {},
   currentThemeId: null,
@@ -185,7 +187,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   clearError(): void {
     set({ error: null })
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectThemesByMode = (mode: string) => (state: SettingsState): Theme[] =>
@@ -196,3 +198,21 @@ export const selectCurrentTheme = (state: SettingsState): Theme | null =>
 
 export const selectSetting = (key: string) => (state: SettingsState): string | null =>
   state.settings[key] ?? null
+
+// Hooks — stable selectors for parameterized queries
+export function useThemesByMode(mode: string): Theme[] {
+  const themes = useSettingsStore((s) => s.themes)
+  const prevRef = useRef<Theme[]>([])
+  return useMemo(() => {
+    const next = Object.values(themes).filter((t) => t.mode === mode)
+    if (next.length === prevRef.current.length && next.every((t, i) => t === prevRef.current[i])) {
+      return prevRef.current
+    }
+    prevRef.current = next
+    return next
+  }, [themes, mode])
+}
+
+export function useSetting(key: string): string | null {
+  return useSettingsStore((s) => s.settings[key] ?? null)
+}

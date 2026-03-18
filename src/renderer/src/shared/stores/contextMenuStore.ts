@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 
 interface ContextMenuState {
   isOpen: boolean
@@ -13,7 +14,7 @@ interface ContextMenuActions {
 
 export type ContextMenuStore = ContextMenuState & ContextMenuActions
 
-export const useContextMenuStore = create<ContextMenuStore>((set) => ({
+export const useContextMenuStore = createWithEqualityFn<ContextMenuStore>((set) => ({
   isOpen: false,
   position: { x: 0, y: 0 },
   taskId: null,
@@ -25,4 +26,4 @@ export const useContextMenuStore = create<ContextMenuStore>((set) => ({
   close(): void {
     set({ isOpen: false, taskId: null })
   }
-}))
+}), shallow)

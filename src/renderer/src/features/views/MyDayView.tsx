@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useRef, useEffect } from 'react'
 import { useTaskStore } from '../../shared/stores'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import {
   useLabelStore,
-  selectLabelsByProject,
+  useLabelsByProject,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
   selectFilterMode
@@ -27,7 +27,7 @@ interface MyDayViewProps {
 export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
+  const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
   const { createTask, updateTask, deleteTask, setCurrentTask, addLabel, removeLabel, hydrateAllTaskLabels } =
     useTaskStore()
@@ -40,7 +40,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Label state
-  const allLabels = useLabelStore(selectLabelsByProject(projectId))
+  const allLabels = useLabelsByProject(projectId)
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)

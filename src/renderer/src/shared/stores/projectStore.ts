@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type {
   Project,
   ProjectMember,
@@ -28,7 +29,7 @@ interface ProjectActions {
 
 export type ProjectStore = ProjectState & ProjectActions
 
-export const useProjectStore = create<ProjectStore>((set, get) => ({
+export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => ({
   projects: {},
   members: {},
   currentProjectId: null,
@@ -164,7 +165,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   clearError(): void {
     set({ error: null })
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectAllProjects = (state: ProjectState): Project[] =>

@@ -12,7 +12,11 @@ export {
   selectChildCount,
   selectHasChildren,
   selectCurrentTask,
-  selectTaskLabels
+  selectTaskLabels,
+  useTasksByProject,
+  useSubtasks,
+  useChildCount,
+  useTaskLabelsHook
 } from './taskStore'
 
 export { useViewStore } from './viewStore'
@@ -33,12 +37,17 @@ export {
   selectLabelById,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
-  selectFilterMode
+  selectFilterMode,
+  useLabelsByProject
 } from './labelStore'
 
 export { useStatusStore } from './statusStore'
 export type { StatusStore } from './statusStore'
 export {
+  useStatusesByProject,
+  useDefaultStatus,
+  useDoneStatus,
+  useStatusById,
   selectStatusesByProject,
   selectDefaultStatus,
   selectDoneStatus,
@@ -56,7 +65,7 @@ export {
 
 export { useSettingsStore } from './settingsStore'
 export type { SettingsStore } from './settingsStore'
-export { selectThemesByMode, selectCurrentTheme, selectSetting } from './settingsStore'
+export { selectThemesByMode, selectCurrentTheme, selectSetting, useThemesByMode, useSetting } from './settingsStore'
 
 export { useAuthStore } from './authStore'
 export type { AuthStore } from './authStore'

@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 
 export type ViewId = 'my-day' | 'backlog' | 'archive' | 'templates'
 export type DetailPanelPosition = 'side' | 'bottom'
@@ -32,7 +33,7 @@ export type ViewStore = ViewState & ViewActions
 
 const VIEW_ORDER: ViewId[] = ['my-day', 'backlog', 'archive', 'templates']
 
-export const useViewStore = create<ViewStore>((set, get) => ({
+export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
   currentView: 'backlog',
   layoutMode: 'list' as LayoutMode,
   sidebarPinned: true,
@@ -96,7 +97,7 @@ export const useViewStore = create<ViewStore>((set, get) => ({
   setDetailPanelSize(size: number): void {
     set({ detailPanelSize: Math.max(200, Math.min(800, size)) })
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectCurrentView = (state: ViewState): ViewId => state.currentView

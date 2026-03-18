@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Modal } from '../../shared/components/Modal'
-import { useSettingsStore, selectCurrentTheme, selectThemesByMode } from '../../shared/stores'
+import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { ColorPicker } from './ColorPicker'
@@ -53,7 +53,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
   const [customName, setCustomName] = useState('')
   const [hasChanges, setHasChanges] = useState(false)
 
-  const themesForMode = useSettingsStore(selectThemesByMode(mode))
+  const themesForMode = useThemesByMode(mode)
   const sortedThemes = useMemo(
     () => [...themesForMode].sort((a, b) => a.name.localeCompare(b.name)),
     [themesForMode]

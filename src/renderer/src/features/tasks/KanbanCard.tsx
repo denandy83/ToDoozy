@@ -6,7 +6,7 @@ import { PriorityBadge } from '../../shared/components/PriorityBadge'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useTaskStore, selectTaskLabels } from '../../shared/stores'
+import { useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status } from '../../../../shared/types'
@@ -32,7 +32,7 @@ export function KanbanCard({
   onStatusChange,
   onDeleteTask
 }: KanbanCardProps): React.JSX.Element {
-  const taskLabels = useTaskStore(selectTaskLabels(task.id))
+  const taskLabels = useTaskLabelsHook(task.id)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()

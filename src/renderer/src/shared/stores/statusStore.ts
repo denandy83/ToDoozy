@@ -1,4 +1,6 @@
-import { create } from 'zustand'
+import { useMemo, useRef } from 'react'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type { Status, CreateStatusInput, UpdateStatusInput } from '../../../../shared/types'
 
 interface StatusState {
@@ -18,7 +20,7 @@ interface StatusActions {
 
 export type StatusStore = StatusState & StatusActions
 
-export const useStatusStore = create<StatusStore>((set) => ({
+export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   statuses: {},
   loading: false,
   error: null,
@@ -105,9 +107,53 @@ export const useStatusStore = create<StatusStore>((set) => ({
   clearError(): void {
     set({ error: null })
   }
-}))
+}), shallow)
 
-// Selectors
+// Hooks — memoize selectors so Zustand gets a stable reference across renders
+
+function arraysEqual(a: Status[], b: Status[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+export function useStatusesByProject(projectId: string): Status[] {
+  const statuses = useStatusStore((state) => state.statuses)
+  const prevRef = useRef<Status[]>([])
+  const result = useMemo(() => {
+    const next = Object.values(statuses)
+      .filter((s) => s.project_id === projectId)
+      .sort((a, b) => a.order_index - b.order_index)
+    if (arraysEqual(prevRef.current, next)) return prevRef.current
+    prevRef.current = next
+    return next
+  }, [statuses, projectId])
+  return result
+}
+
+export function useDefaultStatus(projectId: string): Status | undefined {
+  const statuses = useStatusStore((state) => state.statuses)
+  return useMemo(
+    () => Object.values(statuses).find((s) => s.project_id === projectId && s.is_default === 1),
+    [statuses, projectId]
+  )
+}
+
+export function useDoneStatus(projectId: string): Status | undefined {
+  const statuses = useStatusStore((state) => state.statuses)
+  return useMemo(
+    () => Object.values(statuses).find((s) => s.project_id === projectId && s.is_done === 1),
+    [statuses, projectId]
+  )
+}
+
+export function useStatusById(id: string): Status | undefined {
+  return useStatusStore((state) => state.statuses[id])
+}
+
+// Keep old selector factories as aliases for backward compat with re-exports
 export const selectStatusesByProject = (projectId: string) => (state: StatusState): Status[] =>
   Object.values(state.statuses)
     .filter((s) => s.project_id === projectId)

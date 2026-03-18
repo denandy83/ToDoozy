@@ -1,7 +1,7 @@
 import { useMemo, useRef, useEffect, useCallback } from 'react'
 import { Copy } from 'lucide-react'
 import { useTaskStore } from '../../shared/stores'
-import { useStatusStore, selectDefaultStatus } from '../../shared/stores'
+import { useDefaultStatus } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
@@ -10,7 +10,7 @@ import type { Task } from '../../../../shared/types'
 export function TemplatesView(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
-  const defaultStatus = useStatusStore(selectDefaultStatus(projectId))
+  const defaultStatus = useDefaultStatus(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
   const allTasks = useTaskStore((s) => s.tasks)
   const { createTask, setCurrentTask } = useTaskStore()

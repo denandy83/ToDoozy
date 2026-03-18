@@ -5,9 +5,9 @@ import {
   Signal, Repeat, Tag, Clock, Focus
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
-import { useTaskStore, selectTaskLabels } from '../stores/taskStore'
-import { useStatusStore, selectStatusesByProject } from '../stores/statusStore'
-import { useLabelStore, selectLabelsByProject } from '../stores/labelStore'
+import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
+import { useStatusesByProject } from '../stores/statusStore'
+import { useLabelStore, useLabelsByProject } from '../stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import { useAuthStore } from '../stores/authStore'
 import { useToast } from './Toast'
@@ -34,9 +34,9 @@ export function ContextMenu(): React.JSX.Element | null {
   const task = useTaskStore((s) => (taskId ? s.tasks[taskId] : null))
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
-  const allLabels = useLabelStore(selectLabelsByProject(projectId))
-  const taskLabels = useTaskStore(selectTaskLabels(taskId ?? ''))
+  const statuses = useStatusesByProject(projectId)
+  const allLabels = useLabelsByProject(projectId)
+  const taskLabels = useTaskLabelsHook(taskId ?? '')
   const currentUser = useAuthStore((s) => s.currentUser)
   const { updateTask, deleteTask, duplicateTask, createTask } = useTaskStore()
   const { addToast } = useToast()

@@ -9,7 +9,7 @@ import { LabelPicker } from '../../shared/components/LabelPicker'
 import { PriorityBadge } from '../../shared/components/PriorityBadge'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useTaskStore, selectSubtasks, selectChildCount, selectTaskLabels } from '../../shared/stores'
+import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
@@ -62,9 +62,9 @@ export function TaskRow({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addLabelBtnRef = useRef<HTMLButtonElement>(null)
 
-  const childCount = useTaskStore(selectChildCount(task.id))
+  const childCount = useChildCount(task.id)
   const hasChildren = childCount.total > 0
-  const taskLabels = useTaskStore(selectTaskLabels(task.id))
+  const taskLabels = useTaskLabelsHook(task.id)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()
@@ -484,7 +484,7 @@ function SubtaskList({
   onRemoveLabel,
   onCreateLabel
 }: SubtaskListProps): React.JSX.Element {
-  const subtasks = useTaskStore(selectSubtasks(parentId))
+  const subtasks = useSubtasks(parentId)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
 

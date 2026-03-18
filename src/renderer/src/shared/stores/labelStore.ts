@@ -1,4 +1,6 @@
-import { create } from 'zustand'
+import { useMemo, useRef } from 'react'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type { Label, CreateLabelInput, UpdateLabelInput } from '../../../../shared/types'
 
 export type LabelFilterMode = 'hide' | 'blur'
@@ -24,7 +26,7 @@ interface LabelActions {
 
 export type LabelStore = LabelState & LabelActions
 
-export const useLabelStore = create<LabelStore>((set) => ({
+export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   labels: {},
   activeLabelFilters: new Set(),
   filterMode: 'hide' as LabelFilterMode,
@@ -118,7 +120,7 @@ export const useLabelStore = create<LabelStore>((set) => ({
   clearError(): void {
     set({ error: null })
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectLabelsByProject = (projectId: string) => (state: LabelState): Label[] =>
@@ -134,3 +136,17 @@ export const selectHasActiveLabelFilters = (state: LabelState): boolean =>
   state.activeLabelFilters.size > 0
 
 export const selectFilterMode = (state: LabelState): LabelFilterMode => state.filterMode
+
+// Hooks — stable selectors for parameterized queries
+export function useLabelsByProject(projectId: string): Label[] {
+  const labels = useLabelStore((s) => s.labels)
+  const prevRef = useRef<Label[]>([])
+  return useMemo(() => {
+    const next = Object.values(labels).filter((l) => l.project_id === projectId)
+    if (next.length === prevRef.current.length && next.every((l, i) => l === prevRef.current[i])) {
+      return prevRef.current
+    }
+    prevRef.current = next
+    return next
+  }, [labels, projectId])
+}

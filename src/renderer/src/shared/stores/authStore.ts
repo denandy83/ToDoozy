@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type { User, CreateUserInput, UpdateUserInput } from '../../../../shared/types'
 import { getSupabase, parseAuthTokensFromUrl } from '../../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
@@ -63,7 +64,7 @@ async function ensureLocalUser(
   })
 }
 
-export const useAuthStore = create<AuthStore>((set, get) => ({
+export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   currentUser: null,
   isAuthenticated: false,
   loading: false,
@@ -378,7 +379,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       })
     }
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectCurrentUser = (state: AuthState): User | null => state.currentUser

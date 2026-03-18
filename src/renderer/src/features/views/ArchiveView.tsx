@@ -3,14 +3,14 @@ import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { Task } from '../../../../shared/types'
 import { StatusButton } from '../../shared/components/StatusButton'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
 
 export function ArchiveView(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
   const allTasks = useTaskStore((s) => s.tasks)
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
+  const statuses = useStatusesByProject(projectId)
   const { updateTask, setCurrentTask } = useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const { addToast } = useToast()

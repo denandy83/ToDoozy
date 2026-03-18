@@ -21,7 +21,7 @@ import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore, selectCurrentProject } from './shared/stores'
-import { useStatusStore, selectStatusesByProject } from './shared/stores'
+import { useStatusesByProject } from './shared/stores'
 import { useTaskStore } from './shared/stores'
 import { useViewStore, selectLayoutMode } from './shared/stores/viewStore'
 import { useLabelStore } from './shared/stores/labelStore'
@@ -78,7 +78,7 @@ export function AppLayout(): React.JSX.Element {
   const { addToast } = useToast()
 
   const projectId = currentProject?.id ?? ''
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
+  const statuses = useStatusesByProject(projectId)
 
   const collapsed = !sidebarExpanded
 

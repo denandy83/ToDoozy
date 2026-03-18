@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useTaskStore, selectTasksByProject } from '../../shared/stores'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
+import { useTaskStore, useTasksByProject } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import {
   useLabelStore,
-  selectLabelsByProject,
+  useLabelsByProject,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
   selectFilterMode
@@ -26,8 +26,8 @@ interface TaskListViewProps {
 }
 
 export function TaskListView({ projectId, projectName, dropIndicator }: TaskListViewProps): React.JSX.Element {
-  const tasks = useTaskStore(selectTasksByProject(projectId))
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
+  const tasks = useTasksByProject(projectId)
+  const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
   const { createTask, updateTask, deleteTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels } =
     useTaskStore()
@@ -41,7 +41,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Label state
-  const allLabels = useLabelStore(selectLabelsByProject(projectId))
+  const allLabels = useLabelsByProject(projectId)
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)

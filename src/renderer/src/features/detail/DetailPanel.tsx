@@ -1,8 +1,8 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { X, PanelBottom, PanelRight } from 'lucide-react'
-import { useTaskStore, selectCurrentTask, selectTaskLabels } from '../../shared/stores'
-import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
-import { useLabelStore, selectLabelsByProject } from '../../shared/stores'
+import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
+import { useStatusesByProject } from '../../shared/stores'
+import { useLabelStore, useLabelsByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { DetailTitle } from './DetailTitle'
@@ -29,9 +29,9 @@ export function DetailPanel(): React.JSX.Element | null {
   const resizeRef = useRef<{ startPos: number; startSize: number } | null>(null)
 
   const projectId = task?.project_id ?? ''
-  const statuses = useStatusStore(selectStatusesByProject(projectId))
-  const allLabels = useLabelStore(selectLabelsByProject(projectId))
-  const taskLabels = useTaskStore(selectTaskLabels(task?.id ?? ''))
+  const statuses = useStatusesByProject(projectId)
+  const allLabels = useLabelsByProject(projectId)
+  const taskLabels = useTaskLabelsHook(task?.id ?? '')
 
   // Hydrate labels when task changes
   useEffect(() => {

@@ -1,4 +1,6 @@
-import { create } from 'zustand'
+import { useMemo, useRef } from 'react'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shallow } from 'zustand/shallow'
 import type {
   Task,
   CreateTaskInput,
@@ -40,7 +42,7 @@ interface TaskActions {
 
 export type TaskStore = TaskState & TaskActions
 
-export const useTaskStore = create<TaskStore>((set, get) => ({
+export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   tasks: {},
   taskLabels: {},
   expandedTaskIds: new Set<string>(),
@@ -343,7 +345,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   clearError(): void {
     set({ error: null })
   }
-}))
+}), shallow)
 
 // Selectors
 export const selectTasksByProject = (projectId: string) => (state: TaskState): Task[] =>
@@ -394,3 +396,69 @@ export const selectCurrentTask = (state: TaskState): Task | null =>
 
 export const selectTaskLabels = (taskId: string) => (state: TaskState): Label[] =>
   state.taskLabels[taskId] ?? []
+
+// Hooks — stable selectors for parameterized queries
+
+function tasksArrayEqual(a: Task[], b: Task[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function labelsArrayEqual(a: Label[], b: Label[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+export function useTasksByProject(projectId: string): Task[] {
+  const tasks = useTaskStore((s) => s.tasks)
+  const prevRef = useRef<Task[]>([])
+  return useMemo(() => {
+    const next = Object.values(tasks).filter((t) => t.project_id === projectId)
+    if (tasksArrayEqual(prevRef.current, next)) return prevRef.current
+    prevRef.current = next
+    return next
+  }, [tasks, projectId])
+}
+
+export function useSubtasks(parentId: string): Task[] {
+  const tasks = useTaskStore((s) => s.tasks)
+  const prevRef = useRef<Task[]>([])
+  return useMemo(() => {
+    const next = Object.values(tasks)
+      .filter((t) => t.parent_id === parentId)
+      .sort((a, b) => a.order_index - b.order_index)
+    if (tasksArrayEqual(prevRef.current, next)) return prevRef.current
+    prevRef.current = next
+    return next
+  }, [tasks, parentId])
+}
+
+export function useChildCount(parentId: string): { total: number; done: number } {
+  const tasks = useTaskStore((s) => s.tasks)
+  const prevRef = useRef<{ total: number; done: number }>({ total: 0, done: 0 })
+  return useMemo(() => {
+    const children = Object.values(tasks).filter((t) => t.parent_id === parentId)
+    const done = children.filter((t) => t.completed_date !== null).length
+    const next = { total: children.length, done }
+    if (prevRef.current.total === next.total && prevRef.current.done === next.done) return prevRef.current
+    prevRef.current = next
+    return next
+  }, [tasks, parentId])
+}
+
+export function useTaskLabelsHook(taskId: string): Label[] {
+  const taskLabels = useTaskStore((s) => s.taskLabels)
+  const prevRef = useRef<Label[]>([])
+  return useMemo(() => {
+    const next = taskLabels[taskId] ?? []
+    if (labelsArrayEqual(prevRef.current, next)) return prevRef.current
+    prevRef.current = next
+    return next
+  }, [taskLabels, taskId])
+}
