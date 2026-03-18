@@ -323,3 +323,29 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Click outside or Escape closes the menu
 - Delete action includes undo toast (same pattern as existing delete handlers)
 - Decisions: Used Zustand store for context menu state instead of prop threading — cleaner since TaskRow/KanbanCard are deeply nested. ContextMenu reads task/statuses/labels from existing stores directly. Labels submenu reuses the shared LabelPicker component. Focus flyout shows toast with timer duration (no persistent timer system yet — placeholder for future focus mode feature).
+
+## Story 18: Command palette with search operators
+- Created `commandPaletteStore` (Zustand) tracking open state, query string, and selected result index
+- Created `useCommandPaletteSearch` hook with full operator parsing:
+  - `p:high` / `priority:urgent` — filter by priority name or numeric value
+  - `l:work` / `label:design` — substring match on assigned label names
+  - `s:done` / `status:review` — substring match on project status names
+  - `due:today`, `due:week`, `due:overdue` — date-based filtering
+  - `has:subtasks`, `has:image`, `has:recurrence` — property-based filtering
+  - Operators are combinable: `p:high l:work due:week`
+  - Plain text does substring match on task title; all text terms must match
+- Created `CommandPalette` component rendered via portal, positioned top-center (15vh from top)
+  - Search input with placeholder showing operator syntax
+  - Esc key badge, backdrop blur, click-outside to close
+  - Arrow up/down keyboard navigation with scroll-into-view
+  - Enter to select + open detail panel
+  - Operator hint footer when query is empty
+- Created `CommandPaletteResult` component showing:
+  - Priority color dot, priority badge (for priority > 0), task title (truncated)
+  - Up to 2 label chips with overflow count, status badge, due date with relative formatting
+  - Selection highlight: accent bg 12% + accent border 15% (matching spec)
+  - Overdue dates shown in red
+- Added Cmd+K keyboard shortcut in AppLayout global keydown handler
+- Max 12 results, sorted by priority (highest first) then updated_at (most recent first)
+- Excludes archived and template tasks from search
+- Decisions: All filtering is done client-side against the in-memory task store (tasks are already fully hydrated). No IPC needed. Used useMemo for search results to avoid recomputation on unrelated renders.

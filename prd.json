@@ -126,7 +126,7 @@
       "title": "Command palette with search operators",
       "description": "Cmd+K modal. Substring match by default. Operators: p:high, l:work, s:done, due:today, has:subtasks. Combinable. Results show priority dot, badge, title, labels, status, due date. Click to select. Max 12 results. Escape closes.",
       "spec_section": "§17 Command Palette",
-      "passes": false
+      "passes": true
     }
   ]
 }

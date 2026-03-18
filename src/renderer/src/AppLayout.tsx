@@ -29,6 +29,8 @@ import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
+import { CommandPalette } from './features/command-palette'
+import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
 import type { Task } from '../../shared/types'
 
 const VIEW_TITLES: Record<ViewId, string> = {
@@ -225,6 +227,13 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
+      // Cmd+K = open command palette
+      if (e.key === 'k') {
+        e.preventDefault()
+        useCommandPaletteStore.getState().open()
+        return
+      }
+
       // Cmd+L = toggle kanban/list (only on my-day and backlog)
       if (e.key === 'l') {
         const view = useViewStore.getState().currentView
@@ -374,6 +383,9 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Context menu */}
         <ContextMenu />
+
+        {/* Command palette */}
+        <CommandPalette />
       </div>
 
       {/* Drag overlay - ghost card */}
