@@ -35,7 +35,7 @@
       "title": "Zustand stores",
       "description": "Create Zustand stores: taskStore, labelStore, statusStore, settingsStore, projectStore, authStore. Zero prop-drilling. Components subscribe to store slices.",
       "spec_section": "§36 Architecture - State Management",
-      "passes": false
+      "passes": true
     },
     {
       "id": "6",

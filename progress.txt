@@ -51,3 +51,15 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - All methods return Promises in the preload API (ipcRenderer.invoke is async)
 - Registered IPC handlers in main/index.ts after initDatabase()
 - Typecheck passes with zero errors, dev server compiles successfully
+
+## Story 5: Zustand Stores
+- Created 6 Zustand stores: taskStore, labelStore, statusStore, projectStore, settingsStore, authStore
+- Each store follows hydration pattern: load from IPC, store in Record<id, Entity> maps
+- All actions wrap IPC calls with try/catch, storing error messages in state
+- Exported typed selectors for common queries (by project, by status, current selection, etc.)
+- LabelStore includes activeLabelFilters (Set<string>) for filter UI
+- ProjectStore auto-selects default project on hydration if none selected
+- SettingsStore combines settings + themes management, restores currentThemeId from settings
+- AuthStore manages user session state with login/logout/checkAuth
+- Barrel export from shared/stores/index.ts
+- Zero any types, all interfaces defined, typecheck passes clean
