@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: Wed Mar 18 10:59:51 CET 2026
+---
+
+## Story 1: Scaffold Electron + React + TypeScript project
+- Scaffolded manually (electron-vite create is interactive, so set up structure by hand)
+- Installed all deps: better-sqlite3, @dnd-kit/core, @dnd-kit/sortable, lucide-react, tailwindcss@4, @tailwindcss/vite@4, zustand, @modelcontextprotocol/sdk, @supabase/supabase-js
+- Configured TypeScript strict mode (tsconfig.node.json + tsconfig.web.json)
+- Set up Tailwind CSS 4 via @tailwindcss/vite plugin with theme colors
+- Dev server configured on port 5200
+- Copied ToDoozy.png to resources/icon.png
+- electron-vite v5 requires vite@^7 (not v8) — pinned accordingly
+- Preload uses globalThis cast instead of window to avoid DOM type issues in Node tsconfig
+- Typecheck passes, dev server compiles and launches successfully

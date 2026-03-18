@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "outDir": "./out",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@renderer/*": ["./src/renderer/src/*"]
+    }
+  },
+  "include": [
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.tsx",
+    "src/renderer/src/**/*.d.ts",
+    "src/preload/**/*.d.ts"
+  ]
+}

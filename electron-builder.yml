@@ -1,0 +1,31 @@
+appId: com.todoozy
+productName: ToDoozy
+directories:
+  buildResources: resources
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+  - node_modules/better-sqlite3/**
+mac:
+  icon: resources/icon.png
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSDocumentsFolderUsageDescription: Application data storage.
+    - NSDownloadsFolderUsageDescription: Export functionality.
+win:
+  icon: resources/icon.png
+  executableName: ToDoozy
+linux:
+  icon: resources/icon.png
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: todoozy
+  category: Utility
+npmRebuild: false

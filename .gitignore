@@ -3,3 +3,6 @@ node_modules/
 dist/
 out/
 *.tsbuildinfo
+*.db
+*.db-journal
+.DS_Store

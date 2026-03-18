@@ -7,7 +7,7 @@
       "title": "Scaffold Electron + React + TypeScript project",
       "description": "Use electron-vite to scaffold the project. Install all dependencies: better-sqlite3, @dnd-kit/core, @dnd-kit/sortable, lucide-react, tailwindcss, @tailwindcss/vite, zustand, @modelcontextprotocol/sdk, @supabase/supabase-js. Set up TypeScript strict mode, Tailwind CSS 4, and ESLint. Copy ToDoozy.png to resources/icon.png.",
       "spec_section": "§3 Tech Stack, §2 Branding",
-      "passes": false
+      "passes": true
     },
     {
       "id": "2",
