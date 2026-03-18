@@ -1,14 +1,17 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
 import type { Task, Status } from '../../../../shared/types'
 import { TaskRow } from './TaskRow'
+import type { DropIndicator } from './useDragAndDrop'
 
 interface StatusSectionProps {
   status: Status
   tasks: Task[]
   allStatuses: Status[]
   selectedTaskId: string | null
+  dropIndicator?: DropIndicator | null
   onSelectTask: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
@@ -20,6 +23,7 @@ export function StatusSection({
   tasks,
   allStatuses,
   selectedTaskId,
+  dropIndicator,
   onSelectTask,
   onStatusChange,
   onTitleChange,
@@ -35,7 +39,11 @@ export function StatusSection({
 
   // Only render top-level tasks (no parent_id) in status sections
   const topLevel = tasks.filter((t) => t.parent_id === null)
-  const sorted = [...topLevel].sort((a, b) => a.order_index - b.order_index)
+  const sorted = useMemo(
+    () => [...topLevel].sort((a, b) => a.order_index - b.order_index),
+    [topLevel]
+  )
+  const sortedIds = useMemo(() => sorted.map((t) => t.id), [sorted])
 
   return (
     <section>
@@ -62,26 +70,29 @@ export function StatusSection({
       </button>
 
       {!collapsed && (
-        <div role="rowgroup">
-          {sorted.map((task) => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              statuses={allStatuses}
-              isSelected={selectedTaskId === task.id}
-              depth={0}
-              isExpanded={expandedTaskIds.has(task.id)}
-              onSelect={onSelectTask}
-              onStatusChange={onStatusChange}
-              onTitleChange={onTitleChange}
-              onDelete={onDeleteTask}
-              onToggleExpanded={toggleExpanded}
-            />
-          ))}
-          {sorted.length === 0 && (
-            <p className="px-4 py-3 text-sm font-light text-muted/40">No tasks</p>
-          )}
-        </div>
+        <SortableContext items={sortedIds} strategy={verticalListSortingStrategy}>
+          <div role="rowgroup">
+            {sorted.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                statuses={allStatuses}
+                isSelected={selectedTaskId === task.id}
+                depth={0}
+                isExpanded={expandedTaskIds.has(task.id)}
+                dropIndicator={dropIndicator}
+                onSelect={onSelectTask}
+                onStatusChange={onStatusChange}
+                onTitleChange={onTitleChange}
+                onDelete={onDeleteTask}
+                onToggleExpanded={toggleExpanded}
+              />
+            ))}
+            {sorted.length === 0 && (
+              <p className="px-4 py-3 text-sm font-light text-muted/40">No tasks</p>
+            )}
+          </div>
+        </SortableContext>
       )}
     </section>
   )

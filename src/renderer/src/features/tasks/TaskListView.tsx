@@ -6,13 +6,15 @@ import { useToast } from '../../shared/components/Toast'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import type { Task } from '../../../../shared/types'
+import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskListViewProps {
   projectId: string
   projectName: string
+  dropIndicator?: DropIndicator | null
 }
 
-export function TaskListView({ projectId, projectName }: TaskListViewProps): React.JSX.Element {
+export function TaskListView({ projectId, projectName, dropIndicator }: TaskListViewProps): React.JSX.Element {
   const tasks = useTaskStore(selectTasksByProject(projectId))
   const statuses = useStatusStore(selectStatusesByProject(projectId))
   const currentUser = useAuthStore((s) => s.currentUser)
@@ -170,7 +172,6 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
         case 'ArrowRight': {
           if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
             e.preventDefault()
-            // If task has children and is collapsed, expand it
             const hasChildren = tasks.some((t) => t.parent_id === currentTaskId)
             if (hasChildren) {
               setExpanded(currentTaskId, true)
@@ -182,11 +183,9 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
           if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
             e.preventDefault()
             const task = allTasks[currentTaskId]
-            // If expanded, collapse it
             if (expandedTaskIds.has(currentTaskId)) {
               setExpanded(currentTaskId, false)
             } else if (task?.parent_id) {
-              // Navigate to parent
               setCurrentTask(task.parent_id)
             }
           }
@@ -277,6 +276,7 @@ export function TaskListView({ projectId, projectName }: TaskListViewProps): Rea
               tasks={statusTasks}
               allStatuses={statuses}
               selectedTaskId={currentTaskId}
+              dropIndicator={dropIndicator}
               onSelectTask={handleSelectTask}
               onStatusChange={handleStatusChange}
               onTitleChange={handleTitleChange}

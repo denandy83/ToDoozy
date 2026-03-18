@@ -7,8 +7,13 @@ import { useToast } from '../../shared/components/Toast'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import type { Task } from '../../../../shared/types'
+import type { DropIndicator } from '../tasks/useDragAndDrop'
 
-export function MyDayView(): React.JSX.Element {
+interface MyDayViewProps {
+  dropIndicator?: DropIndicator | null
+}
+
+export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
   const statuses = useStatusStore(selectStatusesByProject(projectId))
@@ -234,6 +239,7 @@ export function MyDayView(): React.JSX.Element {
               tasks={statusTasks}
               allStatuses={statuses}
               selectedTaskId={currentTaskId}
+              dropIndicator={dropIndicator}
               onSelectTask={handleSelectTask}
               onStatusChange={handleStatusChange}
               onTitleChange={handleTitleChange}

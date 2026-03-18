@@ -1,3 +1,4 @@
+import { useDroppable } from '@dnd-kit/core'
 import type { LucideIcon } from 'lucide-react'
 
 interface NavItemProps {
@@ -8,6 +9,7 @@ interface NavItemProps {
   collapsed: boolean
   onClick: () => void
   shortcutHint?: string
+  droppableId?: string
 }
 
 export function NavItem({
@@ -17,21 +19,30 @@ export function NavItem({
   active,
   collapsed,
   onClick,
-  shortcutHint
+  shortcutHint,
+  droppableId
 }: NavItemProps): React.JSX.Element {
+  const { isOver, setNodeRef } = useDroppable({
+    id: droppableId ?? `nav-${label.toLowerCase().replace(/\s+/g, '-')}`,
+    disabled: !droppableId
+  })
+
   return (
     <button
+      ref={droppableId ? setNodeRef : undefined}
       onClick={onClick}
       title={collapsed ? `${label}${shortcutHint ? ` (${shortcutHint})` : ''}` : undefined}
       className={`group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
         active
           ? 'bg-accent/12 text-foreground border border-accent/15'
           : 'border border-transparent text-muted hover:bg-foreground/6 hover:border-border/50'
-      } ${collapsed ? 'justify-center px-0' : ''}`}
+      } ${collapsed ? 'justify-center px-0' : ''} ${
+        isOver ? 'bg-accent/15 border-accent/30 scale-[1.02]' : ''
+      }`}
       role="tab"
       aria-selected={active}
     >
-      <Icon size={16} className={active ? 'text-accent' : 'text-muted'} />
+      <Icon size={16} className={active || isOver ? 'text-accent' : 'text-muted'} />
       {!collapsed && (
         <>
           <span className="flex-1 text-[13px] font-light tracking-tight">{label}</span>

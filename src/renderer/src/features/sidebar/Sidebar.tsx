@@ -20,16 +20,23 @@ interface SidebarProps {
   onLogout: () => void
   collapsed: boolean
   pinned: boolean
+  isDragging?: boolean
   onTogglePin: () => void
   onMouseEnter: () => void
   onMouseLeave: () => void
 }
 
-const VIEW_ITEMS: Array<{ id: ViewId; label: string; icon: typeof Sun; shortcut: string }> = [
-  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1' },
-  { id: 'backlog', label: 'Backlog', icon: Inbox, shortcut: '⌘2' },
-  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘3' },
-  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘4' }
+const VIEW_ITEMS: Array<{
+  id: ViewId
+  label: string
+  icon: typeof Sun
+  shortcut: string
+  droppableId: string
+}> = [
+  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' },
+  { id: 'backlog', label: 'Backlog', icon: Inbox, shortcut: '⌘2', droppableId: 'nav-backlog' },
+  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘3', droppableId: 'nav-archive' },
+  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘4', droppableId: 'nav-templates' }
 ]
 
 export function Sidebar({
@@ -38,6 +45,7 @@ export function Sidebar({
   onLogout,
   collapsed,
   pinned,
+  isDragging,
   onTogglePin,
   onMouseEnter,
   onMouseLeave
@@ -101,6 +109,7 @@ export function Sidebar({
               collapsed={collapsed}
               onClick={() => handleViewClick(item.id)}
               shortcutHint={item.shortcut}
+              droppableId={isDragging ? item.droppableId : undefined}
             />
           ))}
         </div>

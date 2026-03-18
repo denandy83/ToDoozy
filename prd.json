@@ -84,7 +84,7 @@
       "title": "Drag and drop",
       "description": "@dnd-kit with PointerSensor (8px) and KeyboardSensor. Drop intent by Y-position (top 20%=above, middle 60%=inside, bottom 20%=below). Batch SQLite transactions for reordering. Visual indicators. Ghost card overlay. Cross-view drag onto sidebar nav items.",
       "spec_section": "§6.4 Drag & Drop",
-      "passes": false
+      "passes": true
     },
     {
       "id": "13",

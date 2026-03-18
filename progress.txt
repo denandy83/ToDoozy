@@ -244,3 +244,22 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Added subtask section to DetailPanel between Snooze and Description
 - Typecheck passes with zero errors
 - Decisions: Used store-side Set<string> for expanded state rather than per-component useState so expand state persists across view switches. Subtask count badge uses `completed_date !== null` as done proxy to avoid extra status lookups.
+
+## Story 12: Drag and drop
+- Implemented @dnd-kit integration with PointerSensor (8px activation) and KeyboardSensor
+- Created `useDragAndDrop` hook encapsulating all DnD state, event handlers, and collision detection
+- Custom collision detection: pointerWithin for sidebar nav targets, rectIntersection/closestCenter for task items
+- Drop intent detection: top 20% = above (reorder), middle 60% = inside (make subtask), bottom 20% = below (reorder)
+- Visual indicators: accent-colored horizontal lines for above/below, background highlight + scale for inside
+- TaskDragOverlay ghost card at 80% opacity with status dot and truncated title
+- TaskRow uses useSortable for individual drag handle (GripVertical icon, appears on hover)
+- StatusSection wraps tasks in SortableContext with verticalListSortingStrategy
+- DndContext lives at AppLayout level to span both sidebar (drop targets) and task views (drag sources)
+- Cross-view drag: sidebar NavItems become droppable when dragging — drop on My Day to pin, Backlog to unpin, Archive to archive
+- NavItem highlights with accent color when task is dragged over it
+- Sidebar only registers droppable IDs when `isDragging` is true to avoid collision during normal clicks
+- Reparenting: dropping inside a task makes the dragged task a child, inheriting the parent's status
+- Reordering: batch SQLite transaction via existing TaskRepository.reorder() and store.reorderTasks()
+- Dragging hides subtask children of the dragged task to prevent visual nesting confusion
+- Typecheck passes, dev server compiles cleanly with Vite auto-optimizing @dnd-kit dependencies
+- Decisions: Lifted DndContext to AppLayout (not per-view) so sidebar nav items can be cross-view drop targets. Used sortable for individual rows rather than droppable-only to get transform animations.
