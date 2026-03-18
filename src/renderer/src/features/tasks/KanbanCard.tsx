@@ -1,4 +1,5 @@
-import { useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Calendar } from 'lucide-react'
@@ -9,7 +10,7 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
-import type { Task, Status } from '../../../../shared/types'
+import type { Task, Status, Label } from '../../../../shared/types'
 
 interface KanbanCardProps {
   task: Task
@@ -159,7 +160,7 @@ export function KanbanCard({
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {showBadge && <PriorityBadge priority={task.priority} />}
 
-          {taskLabels.map((label) => (
+          {taskLabels.slice(0, 3).map((label) => (
             <LabelChip
               key={label.id}
               name={label.name}
@@ -167,6 +168,9 @@ export function KanbanCard({
               onClick={() => toggleLabelFilter(label.id)}
             />
           ))}
+          {taskLabels.length > 3 && (
+            <LabelOverflowBadge labels={taskLabels.slice(3)} />
+          )}
 
           {dueDateStr && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted">
@@ -177,5 +181,46 @@ export function KanbanCard({
         </div>
       )}
     </div>
+  )
+}
+
+function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element {
+  const [hovered, setHovered] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+
+  const handleMouseEnter = useCallback(() => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      setPos({ top: rect.top, left: rect.left + rect.width / 2 })
+    }
+    setHovered(true)
+  }, [])
+
+  return (
+    <>
+      <span
+        ref={ref}
+        className="text-[9px] font-bold tabular-nums text-muted cursor-default"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setHovered(false)}
+      >
+        +{labels.length}
+      </span>
+      {hovered && createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2 shadow-xl"
+          style={{ top: pos.top - 8, left: pos.left, transform: 'translate(-50%, -100%)' }}
+        >
+          {labels.map((l) => (
+            <span key={l.id} className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-foreground">{l.name}</span>
+            </span>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }

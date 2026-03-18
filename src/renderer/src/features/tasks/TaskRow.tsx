@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
-import { Trash2, ChevronRight, GripVertical, Plus } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { Trash2, ChevronRight, GripVertical, Plus } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { StatusButton } from '../../shared/components/StatusButton'
@@ -209,7 +209,17 @@ export function TaskRow({
       const btn = addLabelBtnRef.current
       if (btn) {
         const rect = btn.getBoundingClientRect()
-        setPickerPos({ top: rect.bottom + 4, left: rect.left })
+        const pickerHeight = 280
+
+        let top = rect.top
+        // Position below the + button, right-aligned to window edge with margin
+        let left = window.innerWidth - 230
+
+        // If picker would go off the bottom, shift up
+        if (top + pickerHeight > window.innerHeight - 8) {
+          top = window.innerHeight - pickerHeight - 8
+        }
+        setPickerPos({ top: Math.max(8, top), left: Math.max(8, left) })
       }
       setPickerOpen(true)
     },
@@ -261,7 +271,7 @@ export function TaskRow({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-4 transition-all cursor-pointer ${
+        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-pointer ${
           isSelected
             ? 'bg-accent/12 border-l-2 border-accent/15'
             : 'border-l-2 border-transparent hover:bg-foreground/6'
@@ -349,10 +359,10 @@ export function TaskRow({
         {/* Priority badge */}
         {showBadge && <PriorityBadge priority={task.priority} />}
 
-        {/* Label chips */}
+        {/* Label chips — show max 3, then "+X" */}
         {taskLabels.length > 0 && (
           <div className="flex flex-shrink-0 items-center gap-1">
-            {taskLabels.map((label) => (
+            {taskLabels.slice(0, 3).map((label) => (
               <LabelChip
                 key={label.id}
                 name={label.name}
@@ -360,6 +370,9 @@ export function TaskRow({
                 onClick={() => toggleLabelFilter(label.id)}
               />
             ))}
+            {taskLabels.length > 3 && (
+              <LabelOverflowBadge labels={taskLabels.slice(3)} />
+            )}
           </div>
         )}
 
@@ -510,6 +523,47 @@ function SubtaskList({
           onCreateLabel={onCreateLabel}
         />
       ))}
+    </>
+  )
+}
+
+function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element {
+  const [hovered, setHovered] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+
+  const handleMouseEnter = useCallback(() => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      setPos({ top: rect.top, left: rect.left + rect.width / 2 })
+    }
+    setHovered(true)
+  }, [])
+
+  return (
+    <>
+      <span
+        ref={ref}
+        className="text-[9px] font-bold tabular-nums text-muted cursor-default"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setHovered(false)}
+      >
+        +{labels.length}
+      </span>
+      {hovered && createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2 shadow-xl"
+          style={{ top: pos.top - 8, left: pos.left, transform: 'translate(-50%, -100%)' }}
+        >
+          {labels.map((l) => (
+            <span key={l.id} className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-foreground">{l.name}</span>
+            </span>
+          ))}
+        </div>,
+        document.body
+      )}
     </>
   )
 }

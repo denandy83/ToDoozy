@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
 import { useStatusStore } from './shared/stores/statusStore'
+import { useLabelStore } from './shared/stores/labelStore'
 import { useTaskStore } from './shared/stores/taskStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { LoginScreen } from './features/auth/LoginScreen'
@@ -11,6 +12,7 @@ function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
+  const { hydrateLabels } = useLabelStore()
   const { hydrateAllForProject } = useTaskStore()
   const { hydrateSettings, hydrateThemes } = useSettingsStore()
 
@@ -35,9 +37,10 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (currentProjectId && currentUser) {
       hydrateStatuses(currentProjectId)
+      hydrateLabels(currentProjectId)
       hydrateAllForProject(currentProjectId, currentUser.id)
     }
-  }, [currentProjectId, currentUser, hydrateStatuses, hydrateAllForProject])
+  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
   if (loading) {
     return <SplashScreen />
