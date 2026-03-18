@@ -33,12 +33,9 @@ if [[ "$TOOL" != "amp" && "$TOOL" != "claude" ]]; then
   echo "Error: Invalid tool '$TOOL'. Must be 'amp' or 'claude'."
   exit 1
 fi
-
-# Use project root for all files (2 levels up from scripts/ralph/)
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRD_FILE="$PROJECT_ROOT/prd.json"
-PROGRESS_FILE="$PROJECT_ROOT/progress.txt"
+PRD_FILE="$SCRIPT_DIR/prd.json"
+PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
 ARCHIVE_DIR="$SCRIPT_DIR/archive"
 LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 
@@ -46,20 +43,20 @@ LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
 if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
   CURRENT_BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE" 2>/dev/null || echo "")
   LAST_BRANCH=$(cat "$LAST_BRANCH_FILE" 2>/dev/null || echo "")
-
+  
   if [ -n "$CURRENT_BRANCH" ] && [ -n "$LAST_BRANCH" ] && [ "$CURRENT_BRANCH" != "$LAST_BRANCH" ]; then
     # Archive the previous run
     DATE=$(date +%Y-%m-%d)
     # Strip "ralph/" prefix from branch name for folder
     FOLDER_NAME=$(echo "$LAST_BRANCH" | sed 's|^ralph/||')
     ARCHIVE_FOLDER="$ARCHIVE_DIR/$DATE-$FOLDER_NAME"
-
+    
     echo "Archiving previous run: $LAST_BRANCH"
     mkdir -p "$ARCHIVE_FOLDER"
     [ -f "$PRD_FILE" ] && cp "$PRD_FILE" "$ARCHIVE_FOLDER/"
     [ -f "$PROGRESS_FILE" ] && cp "$PROGRESS_FILE" "$ARCHIVE_FOLDER/"
     echo "   Archived to: $ARCHIVE_FOLDER"
-
+    
     # Reset progress file for new run
     echo "# Ralph Progress Log" > "$PROGRESS_FILE"
     echo "Started: $(date)" >> "$PROGRESS_FILE"
@@ -83,10 +80,6 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 fi
 
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
-echo "Project root: $PROJECT_ROOT"
-
-# Run from project root so Claude has full file access
-cd "$PROJECT_ROOT"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
@@ -94,25 +87,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
   echo "==============================================================="
 
-  # Check if all stories are complete before starting
-  REMAINING=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_FILE" 2>/dev/null || echo "0")
-  if [ "$REMAINING" -eq 0 ]; then
-    echo ""
-    echo "All stories complete!"
-    exit 0
-  fi
-
-  NEXT_STORY=$(jq -r '[.stories[] | select(.passes == false)][0].title' "$PRD_FILE" 2>/dev/null || echo "unknown")
-  echo "Next story: $NEXT_STORY ($REMAINING remaining)"
-
-  # Run the selected tool
+  # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
     OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
   else
-    # Claude Code: pipe CLAUDE.md as prompt, --dangerously-skip-permissions for autonomous operation
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$PROJECT_ROOT/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+    # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
+    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
   fi
-
+  
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
@@ -120,7 +102,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
-
+  
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done
