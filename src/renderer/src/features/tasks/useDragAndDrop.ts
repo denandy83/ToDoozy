@@ -30,6 +30,7 @@ interface UseDragAndDropOptions {
   onReorder: (taskIds: string[]) => Promise<void>
   onReparent: (taskId: string, newParentId: string | null) => Promise<void>
   onMoveToView?: (taskId: string, viewId: string) => Promise<void>
+  onStatusChange?: (taskId: string, newStatusId: string) => Promise<void>
   getTasksForParent: (parentId: string | null, statusId: string) => Task[]
 }
 
@@ -57,8 +58,11 @@ export function useDragAndDrop({
   onReorder,
   onReparent,
   onMoveToView,
+  onStatusChange,
   getTasksForParent
 }: UseDragAndDropOptions): UseDragAndDropReturn {
+  const onStatusChangeRef = useRef(onStatusChange)
+  onStatusChangeRef.current = onStatusChange
   const [dragState, setDragState] = useState<DragState>({
     activeId: null,
     activeTask: null,
@@ -105,6 +109,15 @@ export function useDragAndDrop({
 
       // Check if this is a sidebar nav drop target
       if (overId.startsWith('nav-')) {
+        setDragState((prev) => ({
+          ...prev,
+          dropIndicator: { targetId: overId, intent: 'inside' }
+        }))
+        return
+      }
+
+      // Check if this is a kanban column drop target
+      if (overId.startsWith('kanban-column-')) {
         setDragState((prev) => ({
           ...prev,
           dropIndicator: { targetId: overId, intent: 'inside' }
@@ -165,6 +178,15 @@ export function useDragAndDrop({
         return
       }
 
+      // Handle kanban column drops
+      if (overId.startsWith('kanban-column-') && onStatusChangeRef.current) {
+        const statusId = overId.replace('kanban-column-', '')
+        if (statusId !== activeTask.status_id) {
+          await onStatusChangeRef.current(activeId, statusId)
+        }
+        return
+      }
+
       // Don't drop on self
       if (overId === activeId) return
 
@@ -220,7 +242,7 @@ export function useDragAndDrop({
   // Custom collision detection: use pointer-within for nav items, closestCenter for tasks
   const collisionDetection: CollisionDetection = useCallback(
     (args) => {
-      // First check pointer-within for sidebar nav items
+      // First check pointer-within for sidebar nav items and kanban columns
       const pointerCollisions = pointerWithin(args)
       const navCollisions = pointerCollisions.filter((c) =>
         String(c.id).startsWith('nav-')

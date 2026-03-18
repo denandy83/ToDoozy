@@ -2,9 +2,11 @@ import { create } from 'zustand'
 
 export type ViewId = 'my-day' | 'backlog' | 'archive' | 'templates'
 export type DetailPanelPosition = 'side' | 'bottom'
+export type LayoutMode = 'list' | 'kanban'
 
 interface ViewState {
   currentView: ViewId
+  layoutMode: LayoutMode
   sidebarPinned: boolean
   sidebarExpanded: boolean
   sidebarWidth: number
@@ -14,6 +16,7 @@ interface ViewState {
 
 interface ViewActions {
   setView(view: ViewId): void
+  toggleLayoutMode(): void
   nextView(): void
   prevView(): void
   setSidebarPinned(pinned: boolean): void
@@ -31,6 +34,7 @@ const VIEW_ORDER: ViewId[] = ['my-day', 'backlog', 'archive', 'templates']
 
 export const useViewStore = create<ViewStore>((set, get) => ({
   currentView: 'backlog',
+  layoutMode: 'list' as LayoutMode,
   sidebarPinned: true,
   sidebarExpanded: true,
   sidebarWidth: 224, // 56 * 4 = w-56
@@ -39,6 +43,11 @@ export const useViewStore = create<ViewStore>((set, get) => ({
 
   setView(view: ViewId): void {
     set({ currentView: view })
+  },
+
+  toggleLayoutMode(): void {
+    const { layoutMode } = get()
+    set({ layoutMode: layoutMode === 'list' ? 'kanban' : 'list' })
   },
 
   nextView(): void {
@@ -97,3 +106,4 @@ export const selectSidebarWidth = (state: ViewState): number => state.sidebarWid
 export const selectDetailPanelPosition = (state: ViewState): DetailPanelPosition =>
   state.detailPanelPosition
 export const selectDetailPanelSize = (state: ViewState): number => state.detailPanelSize
+export const selectLayoutMode = (state: ViewState): LayoutMode => state.layoutMode

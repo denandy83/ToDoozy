@@ -9,11 +9,13 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode
 } from '../../shared/stores'
+import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
+import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
 import type { DropIndicator } from './useDragAndDrop'
 
@@ -33,6 +35,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
+  const layoutMode = useViewStore(selectLayoutMode)
   const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -364,40 +367,52 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
       <LabelFilterBar labels={labelsInUse} />
 
-      <div className="flex-1 overflow-y-auto" role="grid" aria-label="Task list">
-        {sortedStatuses.map((status) => {
-          const statusTasks = filteredTasks.filter(
-            (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
-          )
-          return (
-            <StatusSection
-              key={status.id}
-              status={status}
-              tasks={statusTasks}
-              allStatuses={statuses}
-              allLabels={allLabels}
-              selectedTaskId={currentTaskId}
-              taskFilterOpacity={taskFilterOpacity}
-              dropIndicator={dropIndicator}
-              onSelectTask={handleSelectTask}
-              onStatusChange={handleStatusChange}
-              onTitleChange={handleTitleChange}
-              onDeleteTask={handleDeleteTask}
-              onAddLabel={handleAddLabel}
-              onRemoveLabel={handleRemoveLabel}
-              onCreateLabel={handleCreateLabel}
-            />
-          )
-        })}
+      {layoutMode === 'kanban' ? (
+        <KanbanView
+          tasks={filteredTasks.filter((t) => t.is_archived === 0 && t.is_template === 0)}
+          statuses={statuses}
+          selectedTaskId={currentTaskId}
+          taskFilterOpacity={taskFilterOpacity}
+          onSelectTask={handleSelectTask}
+          onStatusChange={handleStatusChange}
+          onDeleteTask={handleDeleteTask}
+        />
+      ) : (
+        <div className="flex-1 overflow-y-auto" role="grid" aria-label="Task list">
+          {sortedStatuses.map((status) => {
+            const statusTasks = filteredTasks.filter(
+              (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
+            )
+            return (
+              <StatusSection
+                key={status.id}
+                status={status}
+                tasks={statusTasks}
+                allStatuses={statuses}
+                allLabels={allLabels}
+                selectedTaskId={currentTaskId}
+                taskFilterOpacity={taskFilterOpacity}
+                dropIndicator={dropIndicator}
+                onSelectTask={handleSelectTask}
+                onStatusChange={handleStatusChange}
+                onTitleChange={handleTitleChange}
+                onDeleteTask={handleDeleteTask}
+                onAddLabel={handleAddLabel}
+                onRemoveLabel={handleRemoveLabel}
+                onCreateLabel={handleCreateLabel}
+              />
+            )
+          })}
 
-        {sortedStatuses.length === 0 && (
-          <div className="flex flex-1 items-center justify-center py-20">
-            <p className="text-sm font-light text-muted/60">
-              No statuses configured. Add statuses in project settings.
-            </p>
-          </div>
-        )}
-      </div>
+          {sortedStatuses.length === 0 && (
+            <div className="flex flex-1 items-center justify-center py-20">
+              <p className="text-sm font-light text-muted/60">
+                No statuses configured. Add statuses in project settings.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

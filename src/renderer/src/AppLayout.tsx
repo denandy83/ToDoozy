@@ -8,6 +8,7 @@ import {
   useSensors
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { LayoutList, Columns3 } from 'lucide-react'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
 import { ThemeSettingsModal, PrioritySettingsModal } from './features/settings'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -22,7 +23,7 @@ import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore, selectCurrentProject } from './shared/stores'
 import { useStatusStore, selectStatusesByProject } from './shared/stores'
 import { useTaskStore } from './shared/stores'
-import { useViewStore } from './shared/stores/viewStore'
+import { useViewStore, selectLayoutMode } from './shared/stores/viewStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
@@ -52,12 +53,17 @@ export function AppLayout(): React.JSX.Element {
   const { updateTask, reorderTasks } = useTaskStore()
   const currentView = useViewStore((s) => s.currentView)
   const rawSetView = useViewStore((s) => s.setView)
+  const layoutMode = useViewStore(selectLayoutMode)
+  const toggleLayoutMode = useViewStore((s) => s.toggleLayoutMode)
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
 
-  // Auto-clear label filters on view switch
+  // Auto-clear label filters on view switch, reset kanban for non-supported views
   const setView = useCallback(
     (view: ViewId) => {
       clearLabelFilters()
+      if (view !== 'my-day' && view !== 'backlog') {
+        useViewStore.setState({ layoutMode: 'list' })
+      }
       rawSetView(view)
     },
     [clearLabelFilters, rawSetView]
@@ -120,6 +126,24 @@ export function AppLayout(): React.JSX.Element {
     [tasks, updateTask]
   )
 
+  const handleDndStatusChange = useCallback(
+    async (taskId: string, newStatusId: string) => {
+      const task = tasks[taskId]
+      if (!task) return
+      const newStatus = statuses.find((s) => s.id === newStatusId)
+      const update: { status_id: string; completed_date?: string | null } = {
+        status_id: newStatusId
+      }
+      if (newStatus?.is_done === 1) {
+        update.completed_date = new Date().toISOString()
+      } else {
+        update.completed_date = null
+      }
+      await updateTask(taskId, update)
+    },
+    [tasks, statuses, updateTask]
+  )
+
   const handleMoveToView = useCallback(
     async (taskId: string, viewId: string) => {
       if (viewId === 'my-day') {
@@ -142,6 +166,7 @@ export function AppLayout(): React.JSX.Element {
       onReorder: reorderTasks,
       onReparent: handleReparent,
       onMoveToView: handleMoveToView,
+      onStatusChange: handleDndStatusChange,
       getTasksForParent
     })
 
@@ -199,6 +224,16 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
+      // Cmd+L = toggle kanban/list (only on my-day and backlog)
+      if (e.key === 'l') {
+        const view = useViewStore.getState().currentView
+        if (view === 'my-day' || view === 'backlog') {
+          e.preventDefault()
+          toggleLayoutMode()
+        }
+        return
+      }
+
       // Cmd+[ = prev view, Cmd+] = next view
       if (e.key === '[') {
         e.preventDefault()
@@ -217,7 +252,7 @@ export function AppLayout(): React.JSX.Element {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentView, setView])
+  }, [currentView, setView, toggleLayoutMode])
 
   const viewTitle = VIEW_TITLES[currentView]
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
@@ -266,6 +301,27 @@ export function AppLayout(): React.JSX.Element {
                   onNewProject={() => setNewProjectOpen(true)}
                   onProjectSettings={handleProjectSettings}
                 />
+              </div>
+            )}
+
+            {/* Layout toggle - only on views that support kanban */}
+            {(currentView === 'my-day' || currentView === 'backlog') && (
+              <div className="ml-auto flex items-center">
+                <button
+                  onClick={toggleLayoutMode}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                  title={`Switch to ${layoutMode === 'list' ? 'kanban' : 'list'} view (Cmd+L)`}
+                  aria-label={`Switch to ${layoutMode === 'list' ? 'kanban' : 'list'} view`}
+                >
+                  {layoutMode === 'list' ? (
+                    <Columns3 size={16} />
+                  ) : (
+                    <LayoutList size={16} />
+                  )}
+                  <span className="text-[11px] font-bold uppercase tracking-widest">
+                    {layoutMode === 'list' ? 'Kanban' : 'List'}
+                  </span>
+                </button>
               </div>
             )}
           </header>

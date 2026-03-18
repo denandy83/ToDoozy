@@ -299,3 +299,15 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Added priority settings button (Gauge icon) to sidebar footer
 - Wired modal through AppLayout with state management
 - All settings persist immediately via the settings store (no Apply button needed since each toggle saves independently)
+
+## Story 16: Kanban toggle
+- Added `layoutMode` ('list' | 'kanban') to viewStore with `toggleLayoutMode()` action
+- Created `KanbanCard` component with priority visuals, label chips, due date, and keyboard support
+- Created `KanbanColumn` component with droppable zone (using @dnd-kit useDroppable), status header, and SortableContext
+- Created `KanbanView` component that renders columns from project statuses with keyboard nav (Arrow Left/Right moves task between columns)
+- Integrated kanban view into both `MyDayView` and `TaskListView` — conditionally renders list or kanban based on layoutMode
+- Added Cmd+L keyboard shortcut in AppLayout (only active on my-day and backlog views)
+- Added layout toggle button in header with Columns3/LayoutList icons
+- Updated drag-and-drop hook to handle kanban column drops (`kanban-column-{statusId}` droppable IDs)
+- Layout mode resets to 'list' when navigating to archive or templates (which don't support kanban)
+- Kanban cards support click to select, Space to cycle status, Delete/Backspace to delete

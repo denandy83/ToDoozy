@@ -10,11 +10,13 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode
 } from '../../shared/stores'
+import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
+import { KanbanView } from '../tasks/KanbanView'
 import type { Task } from '../../../../shared/types'
 import type { DropIndicator } from '../tasks/useDragAndDrop'
 
@@ -32,6 +34,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
+  const layoutMode = useViewStore(selectLayoutMode)
   const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -325,46 +328,58 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
       <LabelFilterBar labels={labelsInUse} />
 
-      <div className="flex-1 overflow-y-auto" role="grid" aria-label="My Day tasks">
-        {sortedStatuses.map((status) => {
-          const statusTasks = filteredMyDayTasks
-            .filter((t) => t.status_id === status.id)
-            .sort(prioritySortFn)
-          if (statusTasks.length === 0) return null
-          return (
-            <StatusSection
-              key={status.id}
-              status={status}
-              tasks={statusTasks}
-              allStatuses={statuses}
-              allLabels={allLabels}
-              selectedTaskId={currentTaskId}
-              taskFilterOpacity={taskFilterOpacity}
-              dropIndicator={dropIndicator}
-              onSelectTask={handleSelectTask}
-              onStatusChange={handleStatusChange}
-              onTitleChange={handleTitleChange}
-              onDeleteTask={handleDeleteTask}
-              onAddLabel={handleAddLabel}
-              onRemoveLabel={handleRemoveLabel}
-              onCreateLabel={handleCreateLabel}
-            />
-          )
-        })}
+      {layoutMode === 'kanban' ? (
+        <KanbanView
+          tasks={filteredMyDayTasks}
+          statuses={statuses}
+          selectedTaskId={currentTaskId}
+          taskFilterOpacity={taskFilterOpacity}
+          onSelectTask={handleSelectTask}
+          onStatusChange={handleStatusChange}
+          onDeleteTask={handleDeleteTask}
+        />
+      ) : (
+        <div className="flex-1 overflow-y-auto" role="grid" aria-label="My Day tasks">
+          {sortedStatuses.map((status) => {
+            const statusTasks = filteredMyDayTasks
+              .filter((t) => t.status_id === status.id)
+              .sort(prioritySortFn)
+            if (statusTasks.length === 0) return null
+            return (
+              <StatusSection
+                key={status.id}
+                status={status}
+                tasks={statusTasks}
+                allStatuses={statuses}
+                allLabels={allLabels}
+                selectedTaskId={currentTaskId}
+                taskFilterOpacity={taskFilterOpacity}
+                dropIndicator={dropIndicator}
+                onSelectTask={handleSelectTask}
+                onStatusChange={handleStatusChange}
+                onTitleChange={handleTitleChange}
+                onDeleteTask={handleDeleteTask}
+                onAddLabel={handleAddLabel}
+                onRemoveLabel={handleRemoveLabel}
+                onCreateLabel={handleCreateLabel}
+              />
+            )
+          })}
 
-        {filteredMyDayTasks.length === 0 && (
-          <div className="flex flex-1 items-center justify-center py-20">
-            <div className="text-center">
-              <p className="text-sm font-light text-muted/60">
-                No tasks for today.
-              </p>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                Add tasks or pin them to My Day
-              </p>
+          {filteredMyDayTasks.length === 0 && (
+            <div className="flex flex-1 items-center justify-center py-20">
+              <div className="text-center">
+                <p className="text-sm font-light text-muted/60">
+                  No tasks for today.
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
+                  Add tasks or pin them to My Day
+                </p>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -112,7 +112,7 @@
       "title": "Kanban toggle",
       "description": "Cmd+L toggles list/kanban on My Day and Backlog. Columns generated dynamically from project statuses. Drag between columns changes status_id. Task cards show priority, labels, due date, assignee avatar. All interactions (click, right-click, hover preview).",
       "spec_section": "§5.6 Kanban Toggle",
-      "passes": false
+      "passes": true
     },
     {
       "id": "17",
