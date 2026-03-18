@@ -85,3 +85,26 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Updated App.tsx: auth routing — splash screen during init, LoginScreen when unauthenticated, main app when authenticated
 - Rebuilt better-sqlite3 native module for Electron with @electron/rebuild
 - Typecheck passes with zero errors, dev server compiles and launches successfully
+
+## Story 7: Projects and configurable statuses
+- Built shared Modal and Toast components (src/renderer/src/shared/components/)
+  - Modal: backdrop blur, escape to close, click-outside to close, zoom-in animation
+  - Toast: global state via useToast() hook, auto-dismiss 5s, action buttons, stacking, variant support
+- Built ProjectSwitcher dropdown (src/renderer/src/features/projects/ProjectSwitcher.tsx)
+  - Lists all user projects with color indicators
+  - Click to switch active project (updates projectStore.currentProjectId)
+  - Settings gear button per project, "New Project" button at bottom
+  - Click-outside and Escape to close
+- Built NewProjectModal: name + color picker, seeds 3 default statuses on create
+- Built ProjectSettingsModal with tabbed layout (General / Statuses)
+  - General tab: autosave name (1s debounce), color picker, danger zone with delete confirmation
+  - Default project cannot be deleted
+  - Statuses tab: full CRUD with StatusList, StatusEditRow, ReassignStatusModal
+- Status CRUD:
+  - Add: name, color picker (8 presets), is_done toggle
+  - Edit inline: same fields, Escape to cancel
+  - Delete: ReassignStatusModal prompts user to reassign tasks to another status before deletion
+  - Cannot delete last status
+- Built AppLayout with sidebar: project switcher header, nav placeholder, settings/logout footer
+- App.tsx hydrates projectStore and statusStore on auth, re-hydrates statuses on project switch
+- Typecheck passes with zero errors, production build succeeds

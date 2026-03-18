@@ -1,13 +1,32 @@
 import { useEffect } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
+import { useProjectStore } from './shared/stores/projectStore'
+import { useStatusStore } from './shared/stores/statusStore'
 import { LoginScreen } from './features/auth/LoginScreen'
+import { AppLayout } from './AppLayout'
 
 function App(): React.JSX.Element {
-  const { isAuthenticated, loading, initAuth } = useAuthStore()
+  const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
+  const { hydrateProjects, currentProjectId } = useProjectStore()
+  const { hydrateStatuses } = useStatusStore()
 
   useEffect(() => {
     initAuth()
   }, [initAuth])
+
+  // Hydrate projects when authenticated
+  useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      hydrateProjects(currentUser.id)
+    }
+  }, [isAuthenticated, currentUser, hydrateProjects])
+
+  // Hydrate statuses when project changes
+  useEffect(() => {
+    if (currentProjectId) {
+      hydrateStatuses(currentProjectId)
+    }
+  }, [currentProjectId, hydrateStatuses])
 
   if (loading) {
     return <SplashScreen />
@@ -17,11 +36,7 @@ function App(): React.JSX.Element {
     return <LoginScreen />
   }
 
-  return (
-    <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-      <h1 className="text-3xl font-light tracking-[0.15em] uppercase">ToDoozy</h1>
-    </div>
-  )
+  return <AppLayout />
 }
 
 function SplashScreen(): React.JSX.Element {

@@ -49,7 +49,7 @@
       "title": "Projects and configurable statuses",
       "description": "Default Personal project auto-created on first login. Project switcher dropdown in sidebar header. Project settings (name, color, icon). Status CRUD in project settings - 3 defaults seeded (Not Started, In Progress, Done). Deleting a status requires reassigning tasks.",
       "spec_section": "§32 Projects, §4.4 Statuses Table",
-      "passes": false
+      "passes": true
     },
     {
       "id": "8",
