@@ -3,7 +3,10 @@
 @theme {
   --color-background: #1a1a2e;
   --color-foreground: #e0e0e0;
+  --color-fg-secondary: #b0b0b0;
+  --color-fg-muted: #666666;
   --color-accent: #6366f1;
+  --color-accent-fg: #ffffff;
   --color-surface: #16213e;
   --color-border: #2a2a4a;
   --color-muted: #888888;
@@ -20,6 +23,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-background);
   color: var(--color-foreground);
+  transition: background-color 300ms, color 300ms;
+}
+
+* {
+  transition: background-color 300ms, color 300ms, border-color 300ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

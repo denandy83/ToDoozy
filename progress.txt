@@ -263,3 +263,14 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Dragging hides subtask children of the dragged task to prevent visual nesting confusion
 - Typecheck passes, dev server compiles cleanly with Vite auto-optimizing @dnd-kit dependencies
 - Decisions: Lifted DndContext to AppLayout (not per-view) so sidebar nav items can be cross-view drop targets. Used sortable for individual rows rather than droppable-only to get transform animations.
+
+## Story 13: Theme system
+- Created `useThemeApplicator` hook that applies 8-color ThemeConfig as CSS custom properties to document root
+- Surface color is derived from background (lighter for dark themes, darker for light)
+- Created ThemeSettingsModal with: mode toggle (dark/light), preset dropdown, 8 color pickers, live UI preview (mock sidebar + task cards), Save As for custom themes, and Apply button to persist
+- Live preview: app UI updates in real-time while editing colors; Apply button persists to DB
+- Hydrate settings + themes on app mount; theme applicator runs in AppLayout
+- Added Palette icon button in sidebar footer for quick access to theme settings
+- Added `transition-colors duration-300` for smooth theme transitions (respects prefers-reduced-motion)
+- Added `--color-fg-secondary`, `--color-fg-muted`, `--color-accent-fg` CSS variables to @theme block
+- All 12 built-in themes (6 dark, 6 light) available from seed data

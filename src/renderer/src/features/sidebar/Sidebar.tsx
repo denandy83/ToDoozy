@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Settings,
+  Palette,
   LogOut
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
@@ -17,6 +18,7 @@ import { NavItem } from './NavItem'
 interface SidebarProps {
   counts: Record<ViewId, number>
   onSettings: () => void
+  onThemeSettings: () => void
   onLogout: () => void
   collapsed: boolean
   pinned: boolean
@@ -42,6 +44,7 @@ const VIEW_ITEMS: Array<{
 export function Sidebar({
   counts,
   onSettings,
+  onThemeSettings,
   onLogout,
   collapsed,
   pinned,
@@ -132,6 +135,13 @@ export function Sidebar({
           {!collapsed && (
             <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>
           )}
+        </button>
+        <button
+          onClick={onThemeSettings}
+          className="rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
+          title="Theme settings"
+        >
+          <Palette size={14} />
         </button>
         <button
           onClick={onLogout}

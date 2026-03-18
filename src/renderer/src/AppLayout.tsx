@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
+import { ThemeSettingsModal } from './features/settings'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
 import { Sidebar } from './features/sidebar'
@@ -16,6 +17,7 @@ import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
+import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore, selectCurrentProject } from './shared/stores'
 import { useStatusStore, selectStatusesByProject } from './shared/stores'
@@ -38,6 +40,10 @@ const VIEW_SHORTCUTS: ViewId[] = ['my-day', 'backlog', 'archive', 'templates']
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null)
+  const [themeSettingsOpen, setThemeSettingsOpen] = useState(false)
+
+  // Apply current theme CSS variables
+  useThemeApplicator()
   const currentProject = useProjectStore(selectCurrentProject)
   const logout = useAuthStore((s) => s.logout)
   const allTasks = useTaskStore((s) => s.tasks)
@@ -221,6 +227,7 @@ export function AppLayout(): React.JSX.Element {
         <Sidebar
           counts={viewCounts}
           onSettings={handleCurrentProjectSettings}
+          onThemeSettings={() => setThemeSettingsOpen(true)}
           onLogout={logout}
           collapsed={collapsed}
           pinned={sidebarPinned}
@@ -282,6 +289,10 @@ export function AppLayout(): React.JSX.Element {
           open={settingsProjectId !== null}
           onClose={() => setSettingsProjectId(null)}
           projectId={settingsProjectId}
+        />
+        <ThemeSettingsModal
+          open={themeSettingsOpen}
+          onClose={() => setThemeSettingsOpen(false)}
         />
 
         {/* Toast notifications */}

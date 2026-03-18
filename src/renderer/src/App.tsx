@@ -3,6 +3,7 @@ import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
 import { useStatusStore } from './shared/stores/statusStore'
 import { useTaskStore } from './shared/stores/taskStore'
+import { useSettingsStore } from './shared/stores/settingsStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 
@@ -11,10 +12,17 @@ function App(): React.JSX.Element {
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
   const { hydrateAllForProject } = useTaskStore()
+  const { hydrateSettings, hydrateThemes } = useSettingsStore()
 
   useEffect(() => {
     initAuth()
   }, [initAuth])
+
+  // Hydrate settings and themes on mount
+  useEffect(() => {
+    hydrateSettings()
+    hydrateThemes()
+  }, [hydrateSettings, hydrateThemes])
 
   // Hydrate projects when authenticated
   useEffect(() => {

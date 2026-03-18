@@ -91,7 +91,7 @@
       "title": "Theme system",
       "description": "8-color palette as CSS custom properties. 12 built-in themes (6 dark, 6 light). Settings > Themes: mode toggle, preset dropdown, color pickers, live UI preview, create/apply/save. Apply button required to persist.",
       "spec_section": "§14 Theme System",
-      "passes": false
+      "passes": true
     },
     {
       "id": "14",
