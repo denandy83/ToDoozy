@@ -10,6 +10,7 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode
 } from '../../shared/stores'
+import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
@@ -41,6 +42,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const { createLabel: createLabelInStore } = useLabelStore()
+  const { autoSort: priorityAutoSort } = usePrioritySettings()
 
   // Hydrate all task labels for this project
   useEffect(() => {
@@ -93,17 +95,28 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return map
   }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
 
+  const prioritySortFn = useCallback(
+    (a: Task, b: Task): number => {
+      if (priorityAutoSort) {
+        const priDiff = b.priority - a.priority
+        if (priDiff !== 0) return priDiff
+      }
+      return a.order_index - b.order_index
+    },
+    [priorityAutoSort]
+  )
+
   const flatTasks = useMemo(() => {
     const result: Task[] = []
     const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
     for (const status of sorted) {
       const statusTasks = filteredMyDayTasks
         .filter((t) => t.status_id === status.id)
-        .sort((a, b) => a.order_index - b.order_index)
+        .sort(prioritySortFn)
       result.push(...statusTasks)
     }
     return result
-  }, [filteredMyDayTasks, statuses])
+  }, [filteredMyDayTasks, statuses, prioritySortFn])
 
   const handleAddTask = useCallback(
     async (title: string) => {
@@ -316,7 +329,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         {sortedStatuses.map((status) => {
           const statusTasks = filteredMyDayTasks
             .filter((t) => t.status_id === status.id)
-            .sort((a, b) => a.order_index - b.order_index)
+            .sort(prioritySortFn)
           if (statusTasks.length === 0) return null
           return (
             <StatusSection

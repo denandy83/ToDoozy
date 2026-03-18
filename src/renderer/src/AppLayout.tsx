@@ -9,7 +9,7 @@ import {
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
-import { ThemeSettingsModal } from './features/settings'
+import { ThemeSettingsModal, PrioritySettingsModal } from './features/settings'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
 import { Sidebar } from './features/sidebar'
@@ -42,6 +42,7 @@ export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null)
   const [themeSettingsOpen, setThemeSettingsOpen] = useState(false)
+  const [prioritySettingsOpen, setPrioritySettingsOpen] = useState(false)
 
   // Apply current theme CSS variables
   useThemeApplicator()
@@ -239,6 +240,7 @@ export function AppLayout(): React.JSX.Element {
           counts={viewCounts}
           onSettings={handleCurrentProjectSettings}
           onThemeSettings={() => setThemeSettingsOpen(true)}
+          onPrioritySettings={() => setPrioritySettingsOpen(true)}
           onLogout={logout}
           collapsed={collapsed}
           pinned={sidebarPinned}
@@ -304,6 +306,10 @@ export function AppLayout(): React.JSX.Element {
         <ThemeSettingsModal
           open={themeSettingsOpen}
           onClose={() => setThemeSettingsOpen(false)}
+        />
+        <PrioritySettingsModal
+          open={prioritySettingsOpen}
+          onClose={() => setPrioritySettingsOpen(false)}
         />
 
         {/* Toast notifications */}

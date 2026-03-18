@@ -288,3 +288,14 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Updated `TaskListView` and `MyDayView` to integrate LabelFilterBar, label filtering (hide/blur modes), and label assignment
 - Auto-clear label filters on view switch (via AppLayout wrapping setView)
 - Keyboard nav flatTasks updated to respect filtered task list
+
+## Story 15: Priority system with visualizations
+- Created `usePrioritySettings` hook to read 5 toggle settings from the settings store
+- Created `PriorityBadge` component showing icon + label chip (Minus for Low, ArrowUp+label for High, AlertTriangle+label for Urgent)
+- Updated `TaskRow` with all 5 visual effects: color bar (1.5px left stripe), badges, background tint (3%/6%), font weight (light→normal→medium), and all driven by settings toggles
+- Updated `StatusSection` to sort by priority descending when auto-sort is enabled
+- Updated `TaskListView` and `MyDayView` flatTasks sorting to respect priority auto-sort
+- Created `PrioritySettingsModal` with toggle switches for all 5 effects plus live preview showing sample tasks
+- Added priority settings button (Gauge icon) to sidebar footer
+- Wired modal through AppLayout with state management
+- All settings persist immediately via the settings store (no Apply button needed since each toggle saves independently)

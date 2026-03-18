@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
+import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import type { Task, Status, Label } from '../../../../shared/types'
 import { TaskRow } from './TaskRow'
 import type { DropIndicator } from './useDragAndDrop'
@@ -42,6 +43,7 @@ export function StatusSection({
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const toggleExpanded = useTaskStore((s) => s.toggleExpanded)
+  const { autoSort } = usePrioritySettings()
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => !prev)
@@ -50,8 +52,15 @@ export function StatusSection({
   // Only render top-level tasks (no parent_id) in status sections
   const topLevel = tasks.filter((t) => t.parent_id === null)
   const sorted = useMemo(
-    () => [...topLevel].sort((a, b) => a.order_index - b.order_index),
-    [topLevel]
+    () =>
+      [...topLevel].sort((a, b) => {
+        if (autoSort) {
+          const priDiff = b.priority - a.priority
+          if (priDiff !== 0) return priDiff
+        }
+        return a.order_index - b.order_index
+      }),
+    [topLevel, autoSort]
   )
   const sortedIds = useMemo(() => sorted.map((t) => t.id), [sorted])
 

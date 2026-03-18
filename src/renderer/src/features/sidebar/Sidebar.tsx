@@ -9,6 +9,7 @@ import {
   PanelLeft,
   Settings,
   Palette,
+  Gauge,
   LogOut
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
@@ -19,6 +20,7 @@ interface SidebarProps {
   counts: Record<ViewId, number>
   onSettings: () => void
   onThemeSettings: () => void
+  onPrioritySettings: () => void
   onLogout: () => void
   collapsed: boolean
   pinned: boolean
@@ -45,6 +47,7 @@ export function Sidebar({
   counts,
   onSettings,
   onThemeSettings,
+  onPrioritySettings,
   onLogout,
   collapsed,
   pinned,
@@ -135,6 +138,13 @@ export function Sidebar({
           {!collapsed && (
             <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>
           )}
+        </button>
+        <button
+          onClick={onPrioritySettings}
+          className="rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
+          title="Priority settings"
+        >
+          <Gauge size={14} />
         </button>
         <button
           onClick={onThemeSettings}

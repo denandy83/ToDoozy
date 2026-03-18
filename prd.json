@@ -105,7 +105,7 @@
       "title": "Priority system with visualizations",
       "description": "5 levels with configurable colors. Toggleable effects: color bar (1.5px), badges (icons+labels), background tint (3%/6%), font weight, auto-sort. Each toggle has live preview in Settings > Priorities.",
       "spec_section": "§9 Priority System",
-      "passes": false
+      "passes": true
     },
     {
       "id": "16",

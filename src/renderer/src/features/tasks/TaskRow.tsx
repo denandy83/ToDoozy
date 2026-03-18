@@ -6,6 +6,9 @@ import { CSS } from '@dnd-kit/utilities'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { LabelPicker } from '../../shared/components/LabelPicker'
+import { PriorityBadge } from '../../shared/components/PriorityBadge'
+import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
+import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore, selectSubtasks, selectChildCount, selectTaskLabels } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import type { Task, Status, Label } from '../../../../shared/types'
@@ -62,6 +65,21 @@ export function TaskRow({
   const hasChildren = childCount.total > 0
   const taskLabels = useTaskStore(selectTaskLabels(task.id))
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
+  const prioritySettings = usePrioritySettings()
+
+  // Priority visual helpers
+  const priorityLevel = PRIORITY_LEVELS[task.priority] ?? PRIORITY_LEVELS[0]
+  const showColorBar = prioritySettings.colorBar && task.priority > 0
+  const showBadge = prioritySettings.badges && task.priority > 0
+  const showTint = prioritySettings.backgroundTint && task.priority >= 3
+  const tintOpacity = task.priority === 4 ? 0.06 : task.priority === 3 ? 0.03 : 0
+  const fontWeightClass = prioritySettings.fontWeight
+    ? task.priority >= 4
+      ? 'font-medium'
+      : task.priority >= 3
+        ? 'font-normal'
+        : 'font-light'
+    : 'font-light'
 
   const {
     attributes,
@@ -214,10 +232,13 @@ export function TaskRow({
   const isDropBelow = dropIndicator?.targetId === task.id && dropIndicator.intent === 'below'
   const isDropInside = dropIndicator?.targetId === task.id && dropIndicator.intent === 'inside'
 
+  const tintStyle = showTint ? { backgroundColor: `${priorityLevel.color}${Math.round(tintOpacity * 255).toString(16).padStart(2, '0')}` } : undefined
+
   const rowStyle = isDragOverlay
-    ? { paddingLeft: `${16 + depth * 24}px` }
+    ? { paddingLeft: `${16 + depth * 24}px`, ...tintStyle }
     : {
         ...style,
+        ...tintStyle,
         opacity: filterOpacity !== undefined ? filterOpacity : (isDragging ? 0.3 : 1)
       }
 
@@ -239,6 +260,14 @@ export function TaskRow({
         aria-expanded={hasChildren ? isExpanded : undefined}
         tabIndex={0}
       >
+        {/* Priority color bar */}
+        {showColorBar && (
+          <div
+            className="absolute left-0 top-1 bottom-1 w-[1.5px] rounded-full"
+            style={{ backgroundColor: priorityLevel.color }}
+          />
+        )}
+
         {/* Drop indicator: above line */}
         {isDropAbove && (
           <div className="absolute left-0 right-0 top-0 z-10 h-0.5 bg-accent" />
@@ -292,17 +321,20 @@ export function TaskRow({
             onChange={handleEditChange}
             onKeyDown={handleEditKeyDown}
             onBlur={saveTitle}
-            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground focus:outline-none"
+            className={`flex-1 bg-transparent text-[15px] ${fontWeightClass} tracking-tight text-foreground focus:outline-none`}
           />
         ) : (
           <span
-            className={`flex-1 truncate text-[15px] font-light tracking-tight ${
+            className={`flex-1 truncate text-[15px] ${fontWeightClass} tracking-tight ${
               isDone ? 'text-muted line-through' : 'text-foreground'
             }`}
           >
             {task.title}
           </span>
         )}
+
+        {/* Priority badge */}
+        {showBadge && <PriorityBadge priority={task.priority} />}
 
         {/* Label chips */}
         {taskLabels.length > 0 && (

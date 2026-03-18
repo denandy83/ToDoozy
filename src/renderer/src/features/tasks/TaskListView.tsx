@@ -9,6 +9,7 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode
 } from '../../shared/stores'
+import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
@@ -42,6 +43,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const { createLabel: createLabelInStore } = useLabelStore()
+  const { autoSort: priorityAutoSort } = usePrioritySettings()
 
   // Hydrate all task labels for this project
   useEffect(() => {
@@ -86,6 +88,17 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     })
   }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
 
+  const prioritySortFn = useCallback(
+    (a: Task, b: Task): number => {
+      if (priorityAutoSort) {
+        const priDiff = b.priority - a.priority
+        if (priDiff !== 0) return priDiff
+      }
+      return a.order_index - b.order_index
+    },
+    [priorityAutoSort]
+  )
+
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
     const result: Task[] = []
@@ -99,14 +112,14 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
             t.is_template === 0 &&
             t.parent_id === null
         )
-        .sort((a, b) => a.order_index - b.order_index)
+        .sort(prioritySortFn)
 
       const addWithChildren = (task: Task): void => {
         result.push(task)
         if (expandedTaskIds.has(task.id)) {
           const children = filteredTasks
             .filter((t) => t.parent_id === task.id)
-            .sort((a, b) => a.order_index - b.order_index)
+            .sort(prioritySortFn)
           for (const child of children) {
             addWithChildren(child)
           }
@@ -118,7 +131,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       }
     }
     return result
-  }, [filteredTasks, statuses, expandedTaskIds])
+  }, [filteredTasks, statuses, expandedTaskIds, prioritySortFn])
 
   const handleAddTask = useCallback(
     async (title: string) => {
