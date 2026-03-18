@@ -1,20 +1,29 @@
 # ToDoozy
 
-## Project Overview
-Electron desktop todo app built with React 19, TypeScript (strict), Tailwind CSS 4, better-sqlite3, and @dnd-kit.
+## What Is This
+ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with Electron. Read `REBUILD_SPEC.md` for the complete 37-section product specification.
 
-## How to Work
-1. Read `prd.json` to find the next story where `passes: false`
-2. Read `REBUILD_SPEC.md` at the section referenced in `spec_section` for full details
-3. Implement the feature
-4. Run `npm run typecheck` — fix all errors
-5. Run `npm run dev` to verify it compiles (kill the process after confirming)
-6. Update `prd.json` to set `passes: true` for the completed story
-7. Git commit with conventional commit message
-8. If `progress.txt` exists, append learnings or decisions made
+## Your Task
+1. Read `prd.json` to find the next story where `passes` is `false`
+2. Read `REBUILD_SPEC.md` at the section referenced in `spec_section` for full implementation details
+3. Implement the feature completely — not a stub, not a skeleton, the real thing
+4. Follow all Architecture Rules and UX Consistency rules below
+5. Run `npm run typecheck` — loop and fix until zero errors
+6. Run `npm run dev` to verify it compiles (use port 5200), then kill the process
+7. Update `prd.json` to set `passes: true` for the completed story
+8. Git commit with a conventional commit message describing what was built
+9. Append any decisions, blockers, or learnings to `progress.txt`
+10. Exit when done with this story — you will be called again for the next one
+
+## Important Context
+- `.env` has Supabase credentials (`SUPABASE_URL` and `SUPABASE_ANON_KEY`)
+- `ToDoozy.png` (1024x1024) is the app icon — copy to `resources/icon.png` during scaffolding
+- Supabase project is live at `https://znmgsyjkaftbnhtlcxrm.supabase.co` with email/password and Google OAuth enabled
+- Dev server must use port **5200** (ports 5173-5185 are occupied)
+- Set `server: { port: 5200 }` in `electron.vite.config.ts` renderer config
 
 ## Dev Server
-- Use port **5200** for the renderer dev server (ports 5173-5185 are occupied)
+- Port: **5200**
 - In `electron.vite.config.ts`, set `server: { port: 5200 }` in the renderer config
 
 ## Key Commands
@@ -34,14 +43,28 @@ Electron desktop todo app built with React 19, TypeScript (strict), Tailwind CSS
 - Use versioned migrations (schema_version table), never try/catch ALTER TABLE.
 - All primary keys are UUIDs. All timestamps are ISO 8601 UTC.
 - Empty catch blocks are forbidden. All errors must be logged or surfaced to the user.
+- SQL injection prevention: column whitelist for update queries.
+- Foreign keys enabled (`PRAGMA foreign_keys = ON`).
 
 ## UX Consistency (see REBUILD_SPEC.md §35)
-- Use shared components everywhere: StatusButton, PriorityIndicator, LabelChip, LabelPicker, Toast, Modal, Avatar, EmptyState
-- Selection: accent bg at 12% opacity + accent border at 15%
+- Use shared components everywhere: StatusButton, PriorityIndicator, LabelChip, LabelPicker, DatePicker, Toast, ContextMenu, Modal, Avatar, EmptyState
+- Selection: accent bg at 12% opacity + accent border at 15% opacity
 - Hover: bg-foreground/6 with faint border
-- Destructive actions: always red, always at bottom, always with undo
-- Escape always closes topmost overlay
-- All animations respect prefers-reduced-motion
+- Destructive actions: always red, always at bottom of menus, always with undo toast
+- Flyout submenus: open on hover (150ms delay), open right unless near viewport edge
+- Autosave: 1s debounce on all text inputs
+- Escape always closes topmost overlay/panel/menu
+- All animations respect `prefers-reduced-motion`
+- Keyboard-first: every feature must be usable without a mouse
+
+## Typography Scale
+- View title: `text-3xl font-light tracking-[0.15em] uppercase`
+- Section label: `text-[10px] font-bold uppercase tracking-[0.3em]`
+- Task title: `text-[15px] font-light tracking-tight`
+- Metadata: `text-[10px] font-bold uppercase tracking-widest`
+- Badge/chip: `text-[9px] font-bold uppercase tracking-wider`
+- Button label: `text-[11px] font-bold uppercase tracking-widest`
+- Body text: `text-sm font-light`
 
 ## Testing
 - Write Vitest unit tests for all repository methods, filter logic, and utility functions.
