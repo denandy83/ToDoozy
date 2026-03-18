@@ -27,12 +27,13 @@ export {
 } from './viewStore'
 
 export { useLabelStore } from './labelStore'
-export type { LabelStore } from './labelStore'
+export type { LabelStore, LabelFilterMode } from './labelStore'
 export {
   selectLabelsByProject,
   selectLabelById,
   selectActiveLabelFilters,
-  selectHasActiveLabelFilters
+  selectHasActiveLabelFilters,
+  selectFilterMode
 } from './labelStore'
 
 export { useStatusStore } from './statusStore'

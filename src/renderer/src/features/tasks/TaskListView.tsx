@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTaskStore, selectTasksByProject } from '../../shared/stores'
 import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import {
+  useLabelStore,
+  selectLabelsByProject,
+  selectActiveLabelFilters,
+  selectHasActiveLabelFilters,
+  selectFilterMode
+} from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
+import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import type { Task } from '../../../../shared/types'
@@ -18,21 +26,72 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTaskStore(selectTasksByProject(projectId))
   const statuses = useStatusStore(selectStatusesByProject(projectId))
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask, toggleExpanded, setExpanded } =
+  const { createTask, updateTask, deleteTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels } =
     useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
+  const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Label state
+  const allLabels = useLabelStore(selectLabelsByProject(projectId))
+  const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
+  const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const filterMode = useLabelStore(selectFilterMode)
+  const { createLabel: createLabelInStore } = useLabelStore()
+
+  // Hydrate all task labels for this project
+  useEffect(() => {
+    if (projectId) hydrateAllTaskLabels(projectId)
+  }, [projectId, hydrateAllTaskLabels])
+
+  // Labels actually in use (assigned to at least one task in this view)
+  const labelsInUse = useMemo(() => {
+    const usedLabelIds = new Set<string>()
+    for (const task of tasks) {
+      const labels = taskLabels[task.id]
+      if (labels) {
+        for (const l of labels) usedLabelIds.add(l.id)
+      }
+    }
+    return allLabels.filter((l) => usedLabelIds.has(l.id))
+  }, [tasks, taskLabels, allLabels])
+
+  // Compute filter opacity for each task (for blur mode)
+  const taskFilterOpacity = useMemo(() => {
+    if (!hasActiveFilters) return undefined
+    const map: Record<string, number> = {}
+    for (const task of tasks) {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      if (filterMode === 'blur') {
+        map[task.id] = matches ? 1 : 0.2
+      }
+      // hide mode: only matching tasks appear (handled in StatusSection filter)
+    }
+    return filterMode === 'blur' ? map : undefined
+  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+
+  // Filter tasks for hide mode
+  const filteredTasks = useMemo(() => {
+    if (!hasActiveFilters || filterMode !== 'hide') return tasks
+    return tasks.filter((task) => {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      return [...activeLabelFilters].some((fid) => labelIds.has(fid))
+    })
+  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
 
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
     const result: Task[] = []
     const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
     for (const status of sorted) {
-      const statusTasks = tasks
+      const statusTasks = filteredTasks
         .filter(
           (t) =>
             t.status_id === status.id &&
@@ -45,7 +104,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const addWithChildren = (task: Task): void => {
         result.push(task)
         if (expandedTaskIds.has(task.id)) {
-          const children = tasks
+          const children = filteredTasks
             .filter((t) => t.parent_id === task.id)
             .sort((a, b) => a.order_index - b.order_index)
           for (const child of children) {
@@ -59,7 +118,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       }
     }
     return result
-  }, [tasks, statuses, expandedTaskIds])
+  }, [filteredTasks, statuses, expandedTaskIds])
 
   const handleAddTask = useCallback(
     async (title: string) => {
@@ -140,6 +199,32 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       setCurrentTask(taskId)
     },
     [setCurrentTask]
+  )
+
+  const handleAddLabel = useCallback(
+    async (taskId: string, labelId: string) => {
+      await addLabel(taskId, labelId)
+    },
+    [addLabel]
+  )
+
+  const handleRemoveLabel = useCallback(
+    async (taskId: string, labelId: string) => {
+      await removeLabel(taskId, labelId)
+    },
+    [removeLabel]
+  )
+
+  const handleCreateLabel = useCallback(
+    async (name: string, color: string) => {
+      await createLabelInStore({
+        id: crypto.randomUUID(),
+        project_id: projectId,
+        name,
+        color
+      })
+    },
+    [createLabelInStore, projectId]
   )
 
   // Keyboard navigation
@@ -264,9 +349,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} />
 
+      <LabelFilterBar labels={labelsInUse} />
+
       <div className="flex-1 overflow-y-auto" role="grid" aria-label="Task list">
         {sortedStatuses.map((status) => {
-          const statusTasks = tasks.filter(
+          const statusTasks = filteredTasks.filter(
             (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
           )
           return (
@@ -275,12 +362,17 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
               status={status}
               tasks={statusTasks}
               allStatuses={statuses}
+              allLabels={allLabels}
               selectedTaskId={currentTaskId}
+              taskFilterOpacity={taskFilterOpacity}
               dropIndicator={dropIndicator}
               onSelectTask={handleSelectTask}
               onStatusChange={handleStatusChange}
               onTitleChange={handleTitleChange}
               onDeleteTask={handleDeleteTask}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              onCreateLabel={handleCreateLabel}
             />
           )
         })}

@@ -78,6 +78,10 @@ export interface TaskLabel {
   label_id: string
 }
 
+export interface TaskLabelMapping extends Label {
+  task_id: string
+}
+
 export interface Theme {
   id: string
   name: string

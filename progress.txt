@@ -274,3 +274,17 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Added `transition-colors duration-300` for smooth theme transitions (respects prefers-reduced-motion)
 - Added `--color-fg-secondary`, `--color-fg-muted`, `--color-accent-fg` CSS variables to @theme block
 - All 12 built-in themes (6 dark, 6 light) available from seed data
+
+## Story 14: Labels with filtering
+- Added bulk task-label fetch (`findTaskLabelsByProject`) to LabelRepository, IPC, and preload bridge to avoid N+1 queries
+- Added `TaskLabelMapping` type to shared types
+- Added `filterMode` (hide/blur) state and `setFilterMode` action to labelStore
+- Added `hydrateAllTaskLabels(projectId)` to taskStore for bulk label loading
+- Created shared `LabelPicker` component (portal popup with toggle checkmarks and inline "New label..." creation)
+- Refactored `DetailLabels` to use shared `LabelPicker` (spec: "Same component everywhere — never 3 different implementations")
+- Created `LabelFilterBar` component showing labels in use, click-to-filter, hide/blur toggle, and clear button
+- Updated `TaskRow` to display label chips (click-to-filter) and inline "+" button with portal-positioned LabelPicker
+- Updated `StatusSection` to pass label props through to TaskRow
+- Updated `TaskListView` and `MyDayView` to integrate LabelFilterBar, label filtering (hide/blur modes), and label assignment
+- Auto-clear label filters on view switch (via AppLayout wrapping setView)
+- Keyboard nav flatTasks updated to respect filtered task list

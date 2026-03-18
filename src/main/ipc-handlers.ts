@@ -227,6 +227,10 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.findByTaskId(taskId)
   })
 
+  ipcMain.handle('labels:findTaskLabelsByProject', (_e, projectId: string) => {
+    return getRepos().labels.findTaskLabelsByProject(projectId)
+  })
+
   // ── Projects ───────────────────────────────────────────────────────
   ipcMain.handle('projects:findById', (_e, id: string) => {
     return getRepos().projects.findById(id) ?? null

@@ -3,7 +3,15 @@ import { useTaskStore } from '../../shared/stores'
 import { useStatusStore, selectStatusesByProject } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import {
+  useLabelStore,
+  selectLabelsByProject,
+  selectActiveLabelFilters,
+  selectHasActiveLabelFilters,
+  selectFilterMode
+} from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
+import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import type { Task } from '../../../../shared/types'
@@ -18,12 +26,26 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const projectId = currentProject?.id ?? ''
   const statuses = useStatusStore(selectStatusesByProject(projectId))
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask } = useTaskStore()
+  const { createTask, updateTask, deleteTask, setCurrentTask, addLabel, removeLabel, hydrateAllTaskLabels } =
+    useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
+  const taskLabels = useTaskStore((s) => s.taskLabels)
   const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Label state
+  const allLabels = useLabelStore(selectLabelsByProject(projectId))
+  const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
+  const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const filterMode = useLabelStore(selectFilterMode)
+  const { createLabel: createLabelInStore } = useLabelStore()
+
+  // Hydrate all task labels for this project
+  useEffect(() => {
+    if (projectId) hydrateAllTaskLabels(projectId)
+  }, [projectId, hydrateAllTaskLabels])
 
   // My Day: is_in_my_day OR due today
   const myDayTasks = useMemo(() => {
@@ -36,17 +58,52 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     )
   }, [allTasks])
 
+  // Labels in use within My Day tasks
+  const labelsInUse = useMemo(() => {
+    const usedLabelIds = new Set<string>()
+    for (const task of myDayTasks) {
+      const labels = taskLabels[task.id]
+      if (labels) {
+        for (const l of labels) usedLabelIds.add(l.id)
+      }
+    }
+    return allLabels.filter((l) => usedLabelIds.has(l.id))
+  }, [myDayTasks, taskLabels, allLabels])
+
+  // Filter tasks
+  const filteredMyDayTasks = useMemo(() => {
+    if (!hasActiveFilters || filterMode !== 'hide') return myDayTasks
+    return myDayTasks.filter((task) => {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      return [...activeLabelFilters].some((fid) => labelIds.has(fid))
+    })
+  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+
+  // Blur opacity map
+  const taskFilterOpacity = useMemo(() => {
+    if (!hasActiveFilters || filterMode !== 'blur') return undefined
+    const map: Record<string, number> = {}
+    for (const task of myDayTasks) {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      map[task.id] = matches ? 1 : 0.2
+    }
+    return map
+  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+
   const flatTasks = useMemo(() => {
     const result: Task[] = []
     const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
     for (const status of sorted) {
-      const statusTasks = myDayTasks
+      const statusTasks = filteredMyDayTasks
         .filter((t) => t.status_id === status.id)
         .sort((a, b) => a.order_index - b.order_index)
       result.push(...statusTasks)
     }
     return result
-  }, [myDayTasks, statuses])
+  }, [filteredMyDayTasks, statuses])
 
   const handleAddTask = useCallback(
     async (title: string) => {
@@ -128,6 +185,33 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       setCurrentTask(taskId)
     },
     [setCurrentTask]
+  )
+
+  const handleAddLabel = useCallback(
+    async (taskId: string, labelId: string) => {
+      await addLabel(taskId, labelId)
+    },
+    [addLabel]
+  )
+
+  const handleRemoveLabel = useCallback(
+    async (taskId: string, labelId: string) => {
+      await removeLabel(taskId, labelId)
+    },
+    [removeLabel]
+  )
+
+  const handleCreateLabel = useCallback(
+    async (name: string, color: string) => {
+      if (!currentProject) return
+      await createLabelInStore({
+        id: crypto.randomUUID(),
+        project_id: currentProject.id,
+        name,
+        color
+      })
+    },
+    [createLabelInStore, currentProject]
   )
 
   // Keyboard navigation
@@ -226,9 +310,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       <AddTaskInput ref={addInputRef} viewName="My Day" onSubmit={handleAddTask} />
 
+      <LabelFilterBar labels={labelsInUse} />
+
       <div className="flex-1 overflow-y-auto" role="grid" aria-label="My Day tasks">
         {sortedStatuses.map((status) => {
-          const statusTasks = myDayTasks
+          const statusTasks = filteredMyDayTasks
             .filter((t) => t.status_id === status.id)
             .sort((a, b) => a.order_index - b.order_index)
           if (statusTasks.length === 0) return null
@@ -238,17 +324,22 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
               status={status}
               tasks={statusTasks}
               allStatuses={statuses}
+              allLabels={allLabels}
               selectedTaskId={currentTaskId}
+              taskFilterOpacity={taskFilterOpacity}
               dropIndicator={dropIndicator}
               onSelectTask={handleSelectTask}
               onStatusChange={handleStatusChange}
               onTitleChange={handleTitleChange}
               onDeleteTask={handleDeleteTask}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              onCreateLabel={handleCreateLabel}
             />
           )
         })}
 
-        {myDayTasks.length === 0 && (
+        {filteredMyDayTasks.length === 0 && (
           <div className="flex flex-1 items-center justify-center py-20">
             <div className="text-center">
               <p className="text-sm font-light text-muted/60">

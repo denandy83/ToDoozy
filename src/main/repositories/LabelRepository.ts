@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Label, CreateLabelInput, UpdateLabelInput } from '../../shared/types'
+import type { Label, CreateLabelInput, UpdateLabelInput, TaskLabelMapping } from '../../shared/types'
 
 export class LabelRepository {
   constructor(private db: Database.Database) {}
@@ -58,5 +58,17 @@ export class LabelRepository {
          ORDER BY l.name ASC`
       )
       .all(taskId) as Label[]
+  }
+
+  findTaskLabelsByProject(projectId: string): TaskLabelMapping[] {
+    return this.db
+      .prepare(
+        `SELECT tl.task_id, l.id, l.project_id, l.name, l.color, l.created_at, l.updated_at
+         FROM task_labels tl
+         INNER JOIN labels l ON l.id = tl.label_id
+         WHERE l.project_id = ?
+         ORDER BY l.name ASC`
+      )
+      .all(projectId) as TaskLabelMapping[]
   }
 }

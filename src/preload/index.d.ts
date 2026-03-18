@@ -5,6 +5,7 @@ import type {
   UpdateTaskInput,
   TaskLabel,
   Label,
+  TaskLabelMapping,
   CreateLabelInput,
   UpdateLabelInput,
   Project,
@@ -52,6 +53,7 @@ export interface LabelsAPI {
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>
   findByTaskId(taskId: string): Promise<Label[]>
+  findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
 }
 
 export interface ProjectsAPI {

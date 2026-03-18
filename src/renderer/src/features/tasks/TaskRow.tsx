@@ -1,18 +1,24 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
-import { Trash2, ChevronRight, GripVertical } from 'lucide-react'
+import { Trash2, ChevronRight, GripVertical, Plus } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { StatusButton } from '../../shared/components/StatusButton'
-import { useTaskStore, selectSubtasks, selectChildCount } from '../../shared/stores'
-import type { Task, Status } from '../../../../shared/types'
+import { LabelChip } from '../../shared/components/LabelChip'
+import { LabelPicker } from '../../shared/components/LabelPicker'
+import { useTaskStore, selectSubtasks, selectChildCount, selectTaskLabels } from '../../shared/stores'
+import { useLabelStore } from '../../shared/stores'
+import type { Task, Status, Label } from '../../../../shared/types'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskRowProps {
   task: Task
   statuses: Status[]
+  allLabels: Label[]
   isSelected: boolean
   depth: number
   isExpanded: boolean
+  filterOpacity?: number
   dropIndicator?: DropIndicator | null
   isDragOverlay?: boolean
   onSelect: (taskId: string) => void
@@ -20,29 +26,42 @@ interface TaskRowProps {
   onTitleChange: (taskId: string, newTitle: string) => void
   onDelete: (taskId: string) => void
   onToggleExpanded: (taskId: string) => void
+  onAddLabel: (taskId: string, labelId: string) => void
+  onRemoveLabel: (taskId: string, labelId: string) => void
+  onCreateLabel: (name: string, color: string) => void
 }
 
 export function TaskRow({
   task,
   statuses,
+  allLabels,
   isSelected,
   depth,
   isExpanded,
+  filterOpacity,
   dropIndicator,
   isDragOverlay,
   onSelect,
   onStatusChange,
   onTitleChange,
   onDelete,
-  onToggleExpanded
+  onToggleExpanded,
+  onAddLabel,
+  onRemoveLabel,
+  onCreateLabel
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const addLabelBtnRef = useRef<HTMLButtonElement>(null)
 
   const childCount = useTaskStore(selectChildCount(task.id))
   const hasChildren = childCount.total > 0
+  const taskLabels = useTaskStore(selectTaskLabels(task.id))
+  const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
 
   const {
     attributes,
@@ -62,7 +81,6 @@ export function TaskRow({
     : {
         transform: CSS.Transform.toString(transform),
         transition: sortableTransition ?? undefined,
-        opacity: isDragging ? 0.3 : 1,
         paddingLeft: `${16 + depth * 24}px`
       }
 
@@ -151,6 +169,44 @@ export function TaskRow({
     [onToggleExpanded, task.id]
   )
 
+  const handleOpenPicker = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (pickerOpen) {
+        setPickerOpen(false)
+        return
+      }
+      const btn = addLabelBtnRef.current
+      if (btn) {
+        const rect = btn.getBoundingClientRect()
+        setPickerPos({ top: rect.bottom + 4, left: rect.left })
+      }
+      setPickerOpen(true)
+    },
+    [pickerOpen]
+  )
+
+  const handleToggleLabel = useCallback(
+    (labelId: string) => {
+      const assignedIds = new Set(taskLabels.map((l) => l.id))
+      if (assignedIds.has(labelId)) {
+        onRemoveLabel(task.id, labelId)
+      } else {
+        onAddLabel(task.id, labelId)
+      }
+    },
+    [task.id, taskLabels, onAddLabel, onRemoveLabel]
+  )
+
+  const handlePickerCreateLabel = useCallback(
+    (name: string, color: string) => {
+      onCreateLabel(name, color)
+    },
+    [onCreateLabel]
+  )
+
+  const assignedLabelIds = new Set(taskLabels.map((l) => l.id))
+
   const doneStatus = statuses.find((s) => s.id === task.status_id)
   const isDone = doneStatus?.is_done === 1
 
@@ -158,18 +214,25 @@ export function TaskRow({
   const isDropBelow = dropIndicator?.targetId === task.id && dropIndicator.intent === 'below'
   const isDropInside = dropIndicator?.targetId === task.id && dropIndicator.intent === 'inside'
 
+  const rowStyle = isDragOverlay
+    ? { paddingLeft: `${16 + depth * 24}px` }
+    : {
+        ...style,
+        opacity: filterOpacity !== undefined ? filterOpacity : (isDragging ? 0.3 : 1)
+      }
+
   return (
     <>
       <div
         ref={setNodeRef}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-4 transition-colors cursor-pointer ${
+        className={`group relative flex items-center gap-2 py-2 pr-4 transition-all cursor-pointer ${
           isSelected
             ? 'bg-accent/12 border-l-2 border-accent/15'
             : 'border-l-2 border-transparent hover:bg-foreground/6'
         } ${isDropInside ? 'bg-accent/8 scale-[1.01]' : ''}`}
-        style={isDragOverlay ? { paddingLeft: `${16 + depth * 24}px` } : style}
+        style={rowStyle}
         {...attributes}
         role="row"
         aria-selected={isSelected}
@@ -241,6 +304,32 @@ export function TaskRow({
           </span>
         )}
 
+        {/* Label chips */}
+        {taskLabels.length > 0 && (
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {taskLabels.map((label) => (
+              <LabelChip
+                key={label.id}
+                name={label.name}
+                color={label.color}
+                onClick={() => toggleLabelFilter(label.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Add label button */}
+        <button
+          ref={addLabelBtnRef}
+          onClick={handleOpenPicker}
+          className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6"
+          title="Add label"
+          aria-label="Add label"
+          tabIndex={-1}
+        >
+          <Plus size={14} />
+        </button>
+
         {/* Subtask count badge + progress */}
         {hasChildren && (
           <SubtaskBadge done={childCount.done} total={childCount.total} />
@@ -256,11 +345,31 @@ export function TaskRow({
         </button>
       </div>
 
+      {/* Label picker portal */}
+      {pickerOpen && pickerPos &&
+        createPortal(
+          <div
+            className="fixed z-[9999]"
+            style={{ top: pickerPos.top, left: pickerPos.left }}
+          >
+            <LabelPicker
+              allLabels={allLabels}
+              assignedLabelIds={assignedLabelIds}
+              onToggleLabel={handleToggleLabel}
+              onCreateLabel={handlePickerCreateLabel}
+              onClose={() => setPickerOpen(false)}
+            />
+          </div>,
+          document.body
+        )
+      }
+
       {/* Render subtasks if expanded */}
       {hasChildren && isExpanded && !isDragging && (
         <SubtaskList
           parentId={task.id}
           statuses={statuses}
+          allLabels={allLabels}
           depth={depth + 1}
           dropIndicator={dropIndicator}
           onSelect={onSelect}
@@ -268,6 +377,9 @@ export function TaskRow({
           onTitleChange={onTitleChange}
           onDelete={onDelete}
           onToggleExpanded={onToggleExpanded}
+          onAddLabel={onAddLabel}
+          onRemoveLabel={onRemoveLabel}
+          onCreateLabel={onCreateLabel}
         />
       )}
     </>
@@ -299,6 +411,7 @@ function SubtaskBadge({ done, total }: SubtaskBadgeProps): React.JSX.Element {
 interface SubtaskListProps {
   parentId: string
   statuses: Status[]
+  allLabels: Label[]
   depth: number
   dropIndicator?: DropIndicator | null
   onSelect: (taskId: string) => void
@@ -306,18 +419,25 @@ interface SubtaskListProps {
   onTitleChange: (taskId: string, newTitle: string) => void
   onDelete: (taskId: string) => void
   onToggleExpanded: (taskId: string) => void
+  onAddLabel: (taskId: string, labelId: string) => void
+  onRemoveLabel: (taskId: string, labelId: string) => void
+  onCreateLabel: (name: string, color: string) => void
 }
 
 function SubtaskList({
   parentId,
   statuses,
+  allLabels,
   depth,
   dropIndicator,
   onSelect,
   onStatusChange,
   onTitleChange,
   onDelete,
-  onToggleExpanded
+  onToggleExpanded,
+  onAddLabel,
+  onRemoveLabel,
+  onCreateLabel
 }: SubtaskListProps): React.JSX.Element {
   const subtasks = useTaskStore(selectSubtasks(parentId))
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -330,6 +450,7 @@ function SubtaskList({
           key={child.id}
           task={child}
           statuses={statuses}
+          allLabels={allLabels}
           isSelected={currentTaskId === child.id}
           depth={depth}
           isExpanded={expandedTaskIds.has(child.id)}
@@ -339,6 +460,9 @@ function SubtaskList({
           onTitleChange={onTitleChange}
           onDelete={onDelete}
           onToggleExpanded={onToggleExpanded}
+          onAddLabel={onAddLabel}
+          onRemoveLabel={onRemoveLabel}
+          onCreateLabel={onCreateLabel}
         />
       ))}
     </>

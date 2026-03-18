@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
-import type { Task, Status } from '../../../../shared/types'
+import type { Task, Status, Label } from '../../../../shared/types'
 import { TaskRow } from './TaskRow'
 import type { DropIndicator } from './useDragAndDrop'
 
@@ -10,24 +10,34 @@ interface StatusSectionProps {
   status: Status
   tasks: Task[]
   allStatuses: Status[]
+  allLabels: Label[]
   selectedTaskId: string | null
+  taskFilterOpacity?: Record<string, number>
   dropIndicator?: DropIndicator | null
   onSelectTask: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
   onDeleteTask: (taskId: string) => void
+  onAddLabel: (taskId: string, labelId: string) => void
+  onRemoveLabel: (taskId: string, labelId: string) => void
+  onCreateLabel: (name: string, color: string) => void
 }
 
 export function StatusSection({
   status,
   tasks,
   allStatuses,
+  allLabels,
   selectedTaskId,
+  taskFilterOpacity,
   dropIndicator,
   onSelectTask,
   onStatusChange,
   onTitleChange,
-  onDeleteTask
+  onDeleteTask,
+  onAddLabel,
+  onRemoveLabel,
+  onCreateLabel
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -77,15 +87,20 @@ export function StatusSection({
                 key={task.id}
                 task={task}
                 statuses={allStatuses}
+                allLabels={allLabels}
                 isSelected={selectedTaskId === task.id}
                 depth={0}
                 isExpanded={expandedTaskIds.has(task.id)}
+                filterOpacity={taskFilterOpacity?.[task.id]}
                 dropIndicator={dropIndicator}
                 onSelect={onSelectTask}
                 onStatusChange={onStatusChange}
                 onTitleChange={onTitleChange}
                 onDelete={onDeleteTask}
                 onToggleExpanded={toggleExpanded}
+                onAddLabel={onAddLabel}
+                onRemoveLabel={onRemoveLabel}
+                onCreateLabel={onCreateLabel}
               />
             ))}
             {sorted.length === 0 && (

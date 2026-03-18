@@ -28,7 +28,9 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('labels:create', input),
     update: (id, input) => ipcRenderer.invoke('labels:update', id, input),
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
-    findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId)
+    findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId),
+    findTaskLabelsByProject: (projectId) =>
+      ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId)
   },
 
   projects: {

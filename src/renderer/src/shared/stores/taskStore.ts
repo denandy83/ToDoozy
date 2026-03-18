@@ -3,7 +3,8 @@ import type {
   Task,
   CreateTaskInput,
   UpdateTaskInput,
-  Label
+  Label,
+  TaskLabelMapping
 } from '../../../../shared/types'
 
 interface TaskState {
@@ -30,6 +31,7 @@ interface TaskActions {
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   hydrateTaskLabels(taskId: string): Promise<void>
+  hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
   toggleExpanded(taskId: string): void
   setExpanded(taskId: string, expanded: boolean): void
@@ -284,6 +286,25 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const labels = await window.api.labels.findByTaskId(taskId)
       set((state) => ({
         taskLabels: { ...state.taskLabels, [taskId]: labels }
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load task labels'
+      set({ error: message })
+    }
+  },
+
+  async hydrateAllTaskLabels(projectId: string): Promise<void> {
+    try {
+      const mappings: TaskLabelMapping[] =
+        await window.api.labels.findTaskLabelsByProject(projectId)
+      const grouped: Record<string, Label[]> = {}
+      for (const m of mappings) {
+        const { task_id, ...label } = m
+        if (!grouped[task_id]) grouped[task_id] = []
+        grouped[task_id].push(label)
+      }
+      set((state) => ({
+        taskLabels: { ...state.taskLabels, ...grouped }
       }))
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load task labels'

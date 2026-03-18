@@ -98,7 +98,7 @@
       "title": "Labels with filtering",
       "description": "Label CRUD (project-scoped). Assignment via detail panel +Add, task row inline + button (portal popup with New label), context menu flyout. Label filter bar at top of views. Hide/blur filter modes. Click label chip to filter, click again to clear. Auto-clear on view switch.",
       "spec_section": "§10 Labels",
-      "passes": false
+      "passes": true
     },
     {
       "id": "15",

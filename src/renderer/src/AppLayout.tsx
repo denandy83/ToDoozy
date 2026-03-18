@@ -23,6 +23,7 @@ import { useProjectStore, selectCurrentProject } from './shared/stores'
 import { useStatusStore, selectStatusesByProject } from './shared/stores'
 import { useTaskStore } from './shared/stores'
 import { useViewStore } from './shared/stores/viewStore'
+import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
@@ -49,7 +50,17 @@ export function AppLayout(): React.JSX.Element {
   const allTasks = useTaskStore((s) => s.tasks)
   const { updateTask, reorderTasks } = useTaskStore()
   const currentView = useViewStore((s) => s.currentView)
-  const setView = useViewStore((s) => s.setView)
+  const rawSetView = useViewStore((s) => s.setView)
+  const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
+
+  // Auto-clear label filters on view switch
+  const setView = useCallback(
+    (view: ViewId) => {
+      clearLabelFilters()
+      rawSetView(view)
+    },
+    [clearLabelFilters, rawSetView]
+  )
   const sidebarPinned = useViewStore((s) => s.sidebarPinned)
   const toggleSidebarPinned = useViewStore((s) => s.toggleSidebarPinned)
   const setSidebarExpanded = useViewStore((s) => s.setSidebarExpanded)

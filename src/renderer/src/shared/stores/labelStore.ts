@@ -1,9 +1,12 @@
 import { create } from 'zustand'
 import type { Label, CreateLabelInput, UpdateLabelInput } from '../../../../shared/types'
 
+export type LabelFilterMode = 'hide' | 'blur'
+
 interface LabelState {
   labels: Record<string, Label>
   activeLabelFilters: Set<string>
+  filterMode: LabelFilterMode
   loading: boolean
   error: string | null
 }
@@ -15,6 +18,7 @@ interface LabelActions {
   deleteLabel(id: string): Promise<boolean>
   toggleLabelFilter(labelId: string): void
   clearLabelFilters(): void
+  setFilterMode(mode: LabelFilterMode): void
   clearError(): void
 }
 
@@ -23,6 +27,7 @@ export type LabelStore = LabelState & LabelActions
 export const useLabelStore = create<LabelStore>((set) => ({
   labels: {},
   activeLabelFilters: new Set(),
+  filterMode: 'hide' as LabelFilterMode,
   loading: false,
   error: null,
 
@@ -106,6 +111,10 @@ export const useLabelStore = create<LabelStore>((set) => ({
     set({ activeLabelFilters: new Set() })
   },
 
+  setFilterMode(mode: LabelFilterMode): void {
+    set({ filterMode: mode })
+  },
+
   clearError(): void {
     set({ error: null })
   }
@@ -123,3 +132,5 @@ export const selectActiveLabelFilters = (state: LabelState): Set<string> =>
 
 export const selectHasActiveLabelFilters = (state: LabelState): boolean =>
   state.activeLabelFilters.size > 0
+
+export const selectFilterMode = (state: LabelState): LabelFilterMode => state.filterMode
