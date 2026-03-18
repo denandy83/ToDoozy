@@ -40,6 +40,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
         icon: 'folder',
         is_default: 0
       })
+      await window.api.projects.addMember(id, currentUser.id, 'owner', currentUser.id)
 
       // Seed default statuses
       const statusDefaults = [

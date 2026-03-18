@@ -102,12 +102,8 @@ export function ProjectGeneralSettings({
         </div>
       </div>
 
-      {/* Danger zone */}
       {project.is_default !== 1 && (
         <div className="mt-4 border-t border-border pt-4">
-          <h3 className="mb-3 text-[10px] font-bold uppercase tracking-[0.3em] text-danger">
-            Danger Zone
-          </h3>
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}

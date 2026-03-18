@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { X } from 'lucide-react'
 
 interface ModalProps {
   open: boolean
@@ -36,7 +37,14 @@ export function Modal({ open, onClose, children, title }: ModalProps): React.JSX
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
       onClick={handleBackdropClick}
     >
-      <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200">
+      <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+          aria-label="Close"
+        >
+          <X size={16} />
+        </button>
         {title && (
           <h2 className="mb-6 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
             {title}

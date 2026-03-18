@@ -352,7 +352,14 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
 
   async ensureDefaultProject(userId: string): Promise<void> {
     const existing = await window.api.projects.findDefault(userId)
-    if (existing) return
+    if (existing) {
+      // Ensure membership exists (fixes projects created before membership was added)
+      const members = await window.api.projects.getMembers(existing.id)
+      if (!members.some((m) => m.user_id === userId)) {
+        await window.api.projects.addMember(existing.id, userId, 'owner', userId)
+      }
+      return
+    }
 
     const crypto = globalThis.crypto
     const id = crypto.randomUUID()
@@ -364,6 +371,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       icon: 'folder',
       is_default: 1
     })
+    await window.api.projects.addMember(id, userId, 'owner', userId)
 
     // Seed default statuses for the new project
     const statusDefaults = [
