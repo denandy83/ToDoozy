@@ -11,6 +11,7 @@ import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore, selectSubtasks, selectChildCount, selectTaskLabels } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
+import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
 import type { DropIndicator } from './useDragAndDrop'
 
@@ -65,6 +66,7 @@ export function TaskRow({
   const hasChildren = childCount.total > 0
   const taskLabels = useTaskStore(selectTaskLabels(task.id))
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
+  const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()
 
   // Priority visual helpers
@@ -160,6 +162,16 @@ export function TaskRow({
     [task.id, task.title, onTitleChange]
   )
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onSelect(task.id)
+      openContextMenu(task.id, e.clientX, e.clientY)
+    },
+    [task.id, onSelect, openContextMenu]
+  )
+
   const handleClick = useCallback(() => {
     if (!isEditing) onSelect(task.id)
   }, [isEditing, onSelect, task.id])
@@ -247,6 +259,7 @@ export function TaskRow({
       <div
         ref={setNodeRef}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
         className={`group relative flex items-center gap-2 py-2 pr-4 transition-all cursor-pointer ${
           isSelected

@@ -119,7 +119,7 @@
       "title": "Context menu with flyout submenus",
       "description": "Compact w-52 menu. Status row (dynamic from project statuses). Flyout submenus on hover (150ms delay): Priority, Recurrence, Labels, Snooze, Focus. Pin/unpin My Day, Add Subtask, Duplicate, Delete. Smart viewport positioning. Submenus open left/right based on space.",
       "spec_section": "§16 Context Menu",
-      "passes": false
+      "passes": true
     },
     {
       "id": "18",

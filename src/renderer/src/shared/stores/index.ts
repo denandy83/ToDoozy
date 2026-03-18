@@ -61,3 +61,6 @@ export { selectThemesByMode, selectCurrentTheme, selectSetting } from './setting
 export { useAuthStore } from './authStore'
 export type { AuthStore } from './authStore'
 export { selectCurrentUser, selectIsAuthenticated, selectUserId } from './authStore'
+
+export { useContextMenuStore } from './contextMenuStore'
+export type { ContextMenuStore } from './contextMenuStore'

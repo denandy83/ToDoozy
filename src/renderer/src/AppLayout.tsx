@@ -28,6 +28,7 @@ import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
+import { ContextMenu } from './shared/components/ContextMenu'
 import type { Task } from '../../shared/types'
 
 const VIEW_TITLES: Record<ViewId, string> = {
@@ -370,6 +371,9 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Toast notifications */}
         <ToastContainer />
+
+        {/* Context menu */}
+        <ContextMenu />
       </div>
 
       {/* Drag overlay - ghost card */}

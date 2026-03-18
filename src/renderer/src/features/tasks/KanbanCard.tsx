@@ -8,6 +8,7 @@ import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore, selectTaskLabels } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
+import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status } from '../../../../shared/types'
 
 interface KanbanCardProps {
@@ -33,6 +34,7 @@ export function KanbanCard({
 }: KanbanCardProps): React.JSX.Element {
   const taskLabels = useTaskStore(selectTaskLabels(task.id))
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
+  const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()
 
   const priorityLevel = PRIORITY_LEVELS[task.priority] ?? PRIORITY_LEVELS[0]
@@ -79,6 +81,16 @@ export function KanbanCard({
   const doneStatus = statuses.find((s) => s.id === task.status_id)
   const isDone = doneStatus?.is_done === 1
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onSelect(task.id)
+      openContextMenu(task.id, e.clientX, e.clientY)
+    },
+    [task.id, onSelect, openContextMenu]
+  )
+
   const handleClick = useCallback(() => {
     onSelect(task.id)
   }, [onSelect, task.id])
@@ -111,6 +123,7 @@ export function KanbanCard({
     <div
       ref={setNodeRef}
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       onKeyDown={handleKeyDown}
       className={`relative cursor-pointer rounded-lg border p-3.5 transition-all motion-safe:duration-150 ${
         isSelected

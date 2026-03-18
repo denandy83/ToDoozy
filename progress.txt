@@ -311,3 +311,15 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Updated drag-and-drop hook to handle kanban column drops (`kanban-column-{statusId}` droppable IDs)
 - Layout mode resets to 'list' when navigating to archive or templates (which don't support kanban)
 - Kanban cards support click to select, Space to cycle status, Delete/Backspace to delete
+
+## Story 17: Context menu with flyout submenus
+- Created `contextMenuStore` (Zustand) tracking open state, position, and target taskId
+- Created `ContextMenu` component rendered via portal at document.body with viewport-clamped positioning
+- Created `ContextMenuSubmenus` module with 6 flyout sub-components: StatusRow, PrioritySubmenu, RecurrenceSubmenu, LabelsSubmenu, SnoozeSubmenu, FocusSubmenu
+- Flyout mechanism: 150ms hover delay, single submenu open at a time, auto-detect left/right opening based on viewport space
+- Menu items: Status row (compact buttons from project statuses), Pin/Unpin My Day, Add Subtask, Priority flyout (5 levels with color dots + checkmark), Recurrence flyout (None/Daily/Weekly/Monthly/Every 3/14 Days), Labels flyout (reuses LabelPicker), Snooze flyout (presets + date picker), Focus flyout (timer presets), Duplicate, Delete (red, with undo toast)
+- Added `onContextMenu` handlers to both TaskRow and KanbanCard, using store to open menu
+- ContextMenu rendered once in AppLayout (above ToastContainer)
+- Click outside or Escape closes the menu
+- Delete action includes undo toast (same pattern as existing delete handlers)
+- Decisions: Used Zustand store for context menu state instead of prop threading — cleaner since TaskRow/KanbanCard are deeply nested. ContextMenu reads task/statuses/labels from existing stores directly. Labels submenu reuses the shared LabelPicker component. Focus flyout shows toast with timer duration (no persistent timer system yet — placeholder for future focus mode feature).
