@@ -94,6 +94,14 @@ const api: TodoozyAPI = {
     update: (id, input) => ipcRenderer.invoke('themes:update', id, input),
     delete: (id) => ipcRenderer.invoke('themes:delete', id),
     getConfig: (id) => ipcRenderer.invoke('themes:getConfig', id)
+  },
+
+  auth: {
+    storeSession: (sessionJson) => ipcRenderer.invoke('auth:storeSession', sessionJson),
+    getSession: () => ipcRenderer.invoke('auth:getSession'),
+    clearSession: () => ipcRenderer.invoke('auth:clearSession'),
+    getSupabaseConfig: () => ipcRenderer.invoke('auth:getSupabaseConfig'),
+    openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url)
   }
 }
 

@@ -42,7 +42,7 @@
       "title": "Supabase Auth - Login screen",
       "description": "Implement login screen with email/password and Google OAuth via Supabase Auth. Store session token in Electron safeStorage. Auto-login on launch if valid token exists. Create default Personal project on first login. Graceful offline fallback.",
       "spec_section": "§31 Authentication",
-      "passes": false
+      "passes": true
     },
     {
       "id": "7",

@@ -116,6 +116,19 @@ export interface ThemesAPI {
   getConfig(id: string): Promise<ThemeConfig | null>
 }
 
+export interface SupabaseConfig {
+  url: string
+  anonKey: string
+}
+
+export interface AuthAPI {
+  storeSession(sessionJson: string): Promise<void>
+  getSession(): Promise<string | null>
+  clearSession(): Promise<void>
+  getSupabaseConfig(): Promise<SupabaseConfig>
+  openOAuthWindow(url: string): Promise<string | null>
+}
+
 export interface TodoozyAPI {
   tasks: TasksAPI
   labels: LabelsAPI
@@ -125,6 +138,7 @@ export interface TodoozyAPI {
   activityLog: ActivityLogAPI
   settings: SettingsAPI
   themes: ThemesAPI
+  auth: AuthAPI
 }
 
 declare global {

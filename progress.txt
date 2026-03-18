@@ -63,3 +63,25 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - AuthStore manages user session state with login/logout/checkAuth
 - Barrel export from shared/stores/index.ts
 - Zero any types, all interfaces defined, typecheck passes clean
+
+## Story 6: Supabase Auth - Login screen
+- Created auth IPC handlers in ipc-handlers.ts: safeStorage-based session persistence (storeSession, getSession, clearSession), getSupabaseConfig, openOAuthWindow
+- safeStorage encrypts session JSON using OS keychain; falls back to plaintext if encryption unavailable
+- OAuth flow: main process opens BrowserWindow popup, watches navigation events for callback URL with code/access_token
+- Added dotenv to main process entry (src/main/index.ts) to load .env credentials
+- Extended preload bridge with AuthAPI interface (5 methods) and type declarations in index.d.ts
+- Created src/renderer/src/lib/supabase.ts: lazy-initialized Supabase client with config from IPC, plus URL token parser
+- Rewrote authStore with full Supabase integration:
+  - signInWithEmail / signUpWithEmail: direct Supabase auth calls
+  - signInWithGoogle: OAuth popup flow via IPC → BrowserWindow → token extraction → session set
+  - initAuth: restores session from safeStorage on launch, auto-refreshes via Supabase, offline fallback using local SQLite users
+  - ensureDefaultProject: creates "Personal" project + 3 default statuses on first login
+  - persistSession: stores access_token + refresh_token to safeStorage after every auth event
+- Created LoginScreen component (src/renderer/src/features/auth/LoginScreen.tsx):
+  - Email/password form with login/signup toggle
+  - Google OAuth button with SVG icon
+  - Loading spinner, error display, keyboard navigation (Enter to submit, Escape clears error)
+  - Typography and styling follow spec (§35 UX Consistency, typography scale)
+- Updated App.tsx: auth routing — splash screen during init, LoginScreen when unauthenticated, main app when authenticated
+- Rebuilt better-sqlite3 native module for Electron with @electron/rebuild
+- Typecheck passes with zero errors, dev server compiles and launches successfully

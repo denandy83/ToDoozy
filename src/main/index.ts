@@ -1,8 +1,12 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { config } from 'dotenv'
 import { join } from 'path'
+import { app, shell, BrowserWindow } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
+
+// Load .env from project root (2 levels up from out/main)
+config({ path: join(__dirname, '../../.env') })
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({

@@ -1,4 +1,7 @@
-import { ipcMain } from 'electron'
+import { ipcMain, safeStorage, BrowserWindow } from 'electron'
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
+import { join } from 'path'
+import { app } from 'electron'
 import { getDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 
@@ -11,7 +14,120 @@ function getRepos(): Repositories {
   return repos
 }
 
+// ── Auth token storage using safeStorage ──────────────────────────────
+const getTokenPath = (): string => join(app.getPath('userData'), '.auth-session')
+
+function storeEncryptedSession(sessionJson: string): void {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(sessionJson)
+    writeFileSync(getTokenPath(), encrypted)
+  } else {
+    // Fallback: store as plain text (less secure, but functional)
+    writeFileSync(getTokenPath(), sessionJson, 'utf-8')
+  }
+}
+
+function getEncryptedSession(): string | null {
+  const tokenPath = getTokenPath()
+  if (!existsSync(tokenPath)) return null
+  try {
+    const data = readFileSync(tokenPath)
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(data)
+    }
+    return data.toString('utf-8')
+  } catch (err) {
+    console.error('Failed to read stored session:', err)
+    return null
+  }
+}
+
+function clearEncryptedSession(): void {
+  const tokenPath = getTokenPath()
+  if (existsSync(tokenPath)) {
+    unlinkSync(tokenPath)
+  }
+}
+
+function registerAuthHandlers(): void {
+  ipcMain.handle('auth:storeSession', (_e, sessionJson: string) => {
+    storeEncryptedSession(sessionJson)
+  })
+
+  ipcMain.handle('auth:getSession', () => {
+    return getEncryptedSession()
+  })
+
+  ipcMain.handle('auth:clearSession', () => {
+    clearEncryptedSession()
+  })
+
+  ipcMain.handle('auth:getSupabaseConfig', () => {
+    return {
+      url: process.env.SUPABASE_URL ?? '',
+      anonKey: process.env.SUPABASE_ANON_KEY ?? ''
+    }
+  })
+
+  ipcMain.handle('auth:openOAuthWindow', async (_e, url: string) => {
+    return new Promise<string | null>((resolve) => {
+      const authWindow = new BrowserWindow({
+        width: 500,
+        height: 700,
+        show: true,
+        autoHideMenuBar: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      })
+
+      let resolved = false
+
+      const handleNavigation = async (navUrl: string): Promise<void> => {
+        if (resolved) return
+        // Look for the auth callback with code (PKCE) or access_token (implicit)
+        if (navUrl.includes('code=') || navUrl.includes('access_token=')) {
+          resolved = true
+          try {
+            const fullUrl = await authWindow.webContents.executeJavaScript(
+              'window.location.href'
+            )
+            resolve(fullUrl)
+          } catch {
+            resolve(navUrl)
+          }
+          authWindow.close()
+        }
+      }
+
+      authWindow.webContents.on('will-navigate', (_event, navUrl) => {
+        handleNavigation(navUrl)
+      })
+
+      authWindow.webContents.on('did-navigate', (_event, navUrl) => {
+        handleNavigation(navUrl)
+      })
+
+      authWindow.webContents.on('will-redirect', (_event, navUrl) => {
+        handleNavigation(navUrl)
+      })
+
+      authWindow.on('closed', () => {
+        if (!resolved) {
+          resolved = true
+          resolve(null)
+        }
+      })
+
+      authWindow.loadURL(url)
+    })
+  })
+}
+
 export function registerIpcHandlers(): void {
+  registerAuthHandlers()
+
   // ── Tasks ──────────────────────────────────────────────────────────
   ipcMain.handle('tasks:findById', (_e, id: string) => {
     return getRepos().tasks.findById(id) ?? null
