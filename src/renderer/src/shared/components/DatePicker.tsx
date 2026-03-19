@@ -17,6 +17,16 @@ function maskDateInput(val: string): string {
   return masked
 }
 
+function maskTimeInput(val: string): string {
+  const digits = val.replace(/[^0-9]/g, '')
+  let masked = ''
+  for (let i = 0; i < digits.length && i < 4; i++) {
+    if (i === 2) masked += ':'
+    masked += digits[i]
+  }
+  return masked
+}
+
 interface DatePickerProps {
   value: string | null
   onChange: (value: string | null) => void
@@ -40,7 +50,7 @@ function formatIso(date: Date, includeTime: boolean): string | null {
   if (!includeTime) return `${yyyy}-${mo}-${dd}`
   const hh = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
-  return `${yyyy}-${mo}-${dd}T${hh}:${mm}:00.000Z`
+  return `${yyyy}-${mo}-${dd}T${hh}:${mm}`
 }
 
 export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Element {
@@ -104,6 +114,34 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
     [dateObj, onChange]
   )
 
+  const handleTimeChangeRaw = useCallback(
+    (event?: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) => {
+      if (!event || !('nativeEvent' in event) || !(event.nativeEvent instanceof InputEvent)) return
+      const target = event.target as HTMLInputElement
+      const raw = target.value
+
+      const masked = maskTimeInput(raw)
+      if (masked !== raw) {
+        target.value = masked
+      }
+
+      // Parse when complete (HH:mm = 5 chars)
+      if (masked.length === 5 && dateObj) {
+        const [hh, mm] = masked.split(':').map(Number)
+        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+          const combined = new Date(dateObj)
+          combined.setHours(hh, mm)
+          onChange(formatIso(combined, true))
+        }
+      }
+    },
+    [dateObj, onChange]
+  )
+
+  const handleTimeFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    e.target.select()
+  }, [])
+
   const handleToggleTime = useCallback(() => {
     if (showTime) {
       // Remove time
@@ -165,6 +203,8 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
           <ReactDatePicker
             selected={timeObj}
             onChange={handleTimeChange}
+            onChangeRaw={handleTimeChangeRaw}
+            onFocus={handleTimeFocus}
             showTimeSelect
             showTimeSelectOnly
             timeIntervals={15}
