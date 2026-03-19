@@ -14,6 +14,7 @@ import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
+import { useLabelStore } from '../../shared/stores/labelStore'
 import type { ThemeConfig } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 
@@ -82,11 +83,14 @@ export function Sidebar({
     }
   }, [currentTheme, isDarkMode, themes, setSetting, setCurrentTheme])
 
+  const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
+
   const handleViewClick = useCallback(
     (view: ViewId) => {
+      clearLabelFilters()
       setView(view)
     },
-    [setView]
+    [setView, clearLabelFilters]
   )
 
   return (

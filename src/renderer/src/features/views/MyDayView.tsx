@@ -11,6 +11,7 @@ import {
   selectFilterMode
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
+import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
@@ -84,6 +85,9 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
 
   // Blur opacity map
+  const blurOpacityStr = useSetting('label_blur_opacity')
+  const blurOpacity = (blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8) / 100
+
   const taskFilterOpacity = useMemo(() => {
     if (!hasActiveFilters || filterMode !== 'blur') return undefined
     const map: Record<string, number> = {}
@@ -91,10 +95,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       const labels = taskLabels[task.id] ?? []
       const labelIds = new Set(labels.map((l) => l.id))
       const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
-      map[task.id] = matches ? 1 : 0.2
+      map[task.id] = matches ? 1 : blurOpacity
     }
     return map
-  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode, blurOpacity])
 
   const prioritySortFn = useCallback(
     (a: Task, b: Task): number => {

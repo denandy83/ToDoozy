@@ -8,9 +8,10 @@ import { useToast } from '../../shared/components/Toast'
 import { StatusList } from '../projects/StatusList'
 import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsContent'
 import { PrioritySettingsContent } from './PrioritySettingsContent'
+import { LabelSettingsContent } from './LabelSettingsContent'
 import type { Project } from '../../../../shared/types'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -146,7 +147,8 @@ export function UnifiedSettingsModal({
     { key: 'general', label: 'General' },
     { key: 'projects', label: 'Projects' },
     { key: 'themes', label: 'Themes' },
-    { key: 'priorities', label: 'Priorities' }
+    { key: 'priorities', label: 'Priorities' },
+    { key: 'labels', label: 'Labels' }
   ]
 
   return (
@@ -207,6 +209,9 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'priorities' && (
             <PrioritySettingsContent />
+          )}
+          {activeTab === 'labels' && (
+            <LabelSettingsContent />
           )}
         </div>
       </div>

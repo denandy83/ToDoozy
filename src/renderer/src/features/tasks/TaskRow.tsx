@@ -383,6 +383,11 @@ export function TaskRow({
           </div>
         )}
 
+        {/* Subtask count badge + progress */}
+        {hasChildren && (
+          <SubtaskBadge done={childCount.done} total={childCount.total} />
+        )}
+
         {/* Add label button */}
         <button
           ref={addLabelBtnRef}
@@ -394,11 +399,6 @@ export function TaskRow({
         >
           <Plus size={14} />
         </button>
-
-        {/* Subtask count badge + progress */}
-        {hasChildren && (
-          <SubtaskBadge done={childCount.done} total={childCount.total} />
-        )}
 
         <button
           onClick={handleDelete}

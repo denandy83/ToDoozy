@@ -10,6 +10,7 @@ import {
   selectFilterMode
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
+import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
@@ -65,6 +66,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   }, [tasks, taskLabels, allLabels])
 
   // Compute filter opacity for each task (for blur mode)
+  const blurOpacityStr = useSetting('label_blur_opacity')
+  const blurOpacity = (blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8) / 100
+
   const taskFilterOpacity = useMemo(() => {
     if (!hasActiveFilters) return undefined
     const map: Record<string, number> = {}
@@ -73,12 +77,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const labelIds = new Set(labels.map((l) => l.id))
       const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
       if (filterMode === 'blur') {
-        map[task.id] = matches ? 1 : 0.2
+        map[task.id] = matches ? 1 : blurOpacity
       }
-      // hide mode: only matching tasks appear (handled in StatusSection filter)
     }
     return filterMode === 'blur' ? map : undefined
-  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode, blurOpacity])
 
   // Filter tasks for hide mode
   const filteredTasks = useMemo(() => {
