@@ -1,19 +1,39 @@
 import { useCallback, useState } from 'react'
-import ReactDatePicker from 'react-datepicker'
+import ReactDatePicker, { registerLocale } from 'react-datepicker'
+import { enGB } from 'date-fns/locale/en-GB'
+import { parse, isValid } from 'date-fns'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Clock, X } from 'lucide-react'
+
+registerLocale('en-GB', enGB)
+
+function maskDateInput(val: string): string {
+  const digits = val.replace(/[^0-9]/g, '')
+  let masked = ''
+  for (let i = 0; i < digits.length && i < 8; i++) {
+    if (i === 2 || i === 4) masked += '/'
+    masked += digits[i]
+  }
+  return masked
+}
 
 interface DatePickerProps {
   value: string | null
   onChange: (value: string | null) => void
 }
 
-function toDate(val: string | null): Date | null {
-  if (!val) return null
-  return new Date(val.includes('T') ? val : val + 'T00:00:00')
+function isValidDate(d: Date): boolean {
+  return d instanceof Date && !isNaN(d.getTime())
 }
 
-function formatIso(date: Date, includeTime: boolean): string {
+function toDate(val: string | null): Date | null {
+  if (!val) return null
+  const d = new Date(val.includes('T') ? val : val + 'T00:00:00')
+  return isValidDate(d) ? d : null
+}
+
+function formatIso(date: Date, includeTime: boolean): string | null {
+  if (!isValidDate(date)) return null
   const yyyy = date.getFullYear()
   const mo = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
@@ -33,7 +53,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
 
   const handleDateChange = useCallback(
     (date: Date | null) => {
-      if (!date) {
+      if (!date || !isValidDate(date)) {
         onChange(null)
         return
       }
@@ -48,6 +68,30 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       }
     },
     [showTime, timeObj, onChange]
+  )
+
+  const handleChangeRaw = useCallback(
+    (event?: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) => {
+      // Only intercept actual keyboard/input events, not programmatic changes from calendar picks
+      if (!event || !('nativeEvent' in event) || !(event.nativeEvent instanceof InputEvent)) return
+      const target = event.target as HTMLInputElement
+      const raw = target.value
+
+      // Apply mask: auto-insert slashes as user types
+      const masked = maskDateInput(raw)
+      if (masked !== raw) {
+        target.value = masked
+      }
+
+      // Only parse when we have a complete date string (dd/MM/yyyy = 10 chars)
+      if (masked.length === 10) {
+        const parsed = parse(masked, 'dd/MM/yyyy', new Date())
+        if (isValid(parsed)) {
+          handleDateChange(parsed)
+        }
+      }
+    },
+    [handleDateChange]
   )
 
   const handleTimeChange = useCallback(
@@ -104,7 +148,9 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
         <ReactDatePicker
           selected={dateObj}
           onChange={handleDateChange}
+          onChangeRaw={handleChangeRaw}
           dateFormat="dd/MM/yyyy"
+          locale="en-GB"
           placeholderText="DD/MM/YYYY"
           isClearable={false}
           className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted/50 focus:outline-none"

@@ -99,7 +99,7 @@ If reading the code isn't enough, add targeted `console.log` or `console.error` 
 1. Add diagnostic logs at key points (store selectors, IPC handlers, event callbacks)
 2. Kill the existing dev server and restart:
    ```bash
-   lsof -ti:5200 | xargs kill -9 2>/dev/null; pkill -f "electron-vite" 2>/dev/null; sleep 1
+   pkill -9 -f "Electron.app" 2>/dev/null; pkill -f "electron-vite" 2>/dev/null; lsof -ti:5200 | xargs kill -9 2>/dev/null; sleep 1
    npm run dev &
    ```
 3. Wait for the app to load (~5 seconds)
@@ -161,7 +161,7 @@ After applying the fix:
 1. Run `npm run typecheck` — fix any type errors before moving on
 2. Kill the existing dev server and restart:
    ```bash
-   lsof -ti:5200 | xargs kill -9 2>/dev/null; pkill -f "electron-vite" 2>/dev/null; sleep 1
+   pkill -9 -f "Electron.app" 2>/dev/null; pkill -f "electron-vite" 2>/dev/null; lsof -ti:5200 | xargs kill -9 2>/dev/null; sleep 1
    npm run dev &
    ```
 3. Wait for the app to load, then use `/screenshot` to capture the result (both UI and DevTools console)
