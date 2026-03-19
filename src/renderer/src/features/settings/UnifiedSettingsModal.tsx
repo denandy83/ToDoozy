@@ -6,7 +6,7 @@ import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { StatusList } from '../projects/StatusList'
-import { ThemeSettingsContent } from './ThemeSettingsContent'
+import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsContent'
 import { PrioritySettingsContent } from './PrioritySettingsContent'
 import type { Project } from '../../../../shared/types'
 
@@ -33,6 +33,10 @@ export function UnifiedSettingsModal({
   const hydrateStatuses = useStatusStore((s) => s.hydrateStatuses)
   const logout = useAuthStore((s) => s.logout)
   const { addToast } = useToast()
+  const themeRef = useRef<ThemeSettingsHandle>(null)
+  const [themeDirty, setThemeDirty] = useState(false)
+  const [pendingUnsaved, setPendingUnsaved] = useState(false)
+  const [shake, setShake] = useState(false)
 
   // Sync selected project when modal opens or projectId changes
   useEffect(() => {
@@ -53,10 +57,70 @@ export function UnifiedSettingsModal({
     }
   }, [open, initialTab])
 
+  const triggerShake = useCallback(() => {
+    setShake(true)
+    setTimeout(() => setShake(false), 300)
+  }, [])
+
+  const showUnsavedThemeToast = useCallback((onDone: () => void): void => {
+    if (pendingUnsaved) {
+      triggerShake()
+      return
+    }
+    setPendingUnsaved(true)
+    triggerShake()
+    addToast({
+      message: 'Unsaved theme changes',
+      persistent: true,
+      actions: [
+        {
+          label: 'Apply',
+          variant: 'accent',
+          onClick: async () => {
+            await themeRef.current?.apply()
+            setPendingUnsaved(false)
+            onDone()
+          }
+        },
+        {
+          label: 'Discard',
+          variant: 'danger',
+          onClick: () => {
+            themeRef.current?.revert()
+            setPendingUnsaved(false)
+            onDone()
+          }
+        },
+        {
+          label: 'Cancel',
+          variant: 'muted',
+          onClick: () => {
+            setPendingUnsaved(false)
+          }
+        }
+      ]
+    })
+  }, [addToast, pendingUnsaved, triggerShake])
+
+  const handleTabChange = useCallback((tab: Tab): void => {
+    if (activeTab === 'themes' && themeDirty && tab !== 'themes') {
+      showUnsavedThemeToast(() => setActiveTab(tab))
+      return
+    }
+    setActiveTab(tab)
+  }, [activeTab, themeDirty, showUnsavedThemeToast])
+
   const handleClose = useCallback((): void => {
+    if (activeTab === 'themes' && themeDirty) {
+      showUnsavedThemeToast(() => {
+        setActiveTab('general')
+        onClose()
+      })
+      return
+    }
     setActiveTab('general')
     onClose()
-  }, [onClose])
+  }, [onClose, activeTab, themeDirty, showUnsavedThemeToast])
 
   const handleLogout = useCallback(async (): Promise<void> => {
     await logout()
@@ -77,14 +141,14 @@ export function UnifiedSettingsModal({
   ]
 
   return (
-    <Modal open={open} onClose={handleClose} title="Settings" size="large">
+    <Modal open={open} onClose={handleClose} title="Settings" size="large" className={shake ? 'modal-shake' : ''}>
       <div className="flex gap-6 h-[500px]">
         {/* Left nav — fixed, no scroll */}
         <nav className="flex flex-col gap-1 min-w-[120px] flex-shrink-0">
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => handleTabChange(tab.key)}
               className={`rounded-lg px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest transition-colors ${
                 activeTab === tab.key
                   ? 'bg-accent/12 text-accent'
@@ -123,7 +187,7 @@ export function UnifiedSettingsModal({
             />
           )}
           {activeTab === 'themes' && (
-            <ThemeSettingsContent />
+            <ThemeSettingsContent ref={themeRef} onDirtyChange={setThemeDirty} />
           )}
           {activeTab === 'priorities' && (
             <PrioritySettingsContent />

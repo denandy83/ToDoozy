@@ -7,9 +7,10 @@ interface ModalProps {
   children: ReactNode
   title?: string
   size?: 'default' | 'large'
+  className?: string
 }
 
-export function Modal({ open, onClose, children, title, size = 'default' }: ModalProps): React.JSX.Element | null {
+export function Modal({ open, onClose, children, title, size = 'default', className }: ModalProps): React.JSX.Element | null {
   const backdropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export function Modal({ open, onClose, children, title, size = 'default' }: Moda
     >
       <div className={`relative w-full rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200 ${
         size === 'large' ? 'max-w-3xl max-h-[80vh] overflow-y-auto' : 'max-w-lg'
-      }`}>
+      } ${className ?? ''}`}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"

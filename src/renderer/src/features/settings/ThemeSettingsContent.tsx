@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
@@ -36,7 +36,17 @@ function parseConfig(theme: Theme): ThemeConfig {
   }
 }
 
-export function ThemeSettingsContent(): React.JSX.Element {
+export interface ThemeSettingsHandle {
+  hasChanges: boolean
+  apply: () => Promise<void>
+  revert: () => void
+}
+
+interface ThemeSettingsContentProps {
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSettingsContentProps>(function ThemeSettingsContent({ onDirtyChange }, ref) {
   const currentTheme = useSettingsStore(selectCurrentTheme)
   const { setSetting, setCurrentTheme, createTheme, updateTheme } = useSettingsStore()
   const { addToast } = useToast()
@@ -119,6 +129,27 @@ export function ThemeSettingsContent(): React.JSX.Element {
       addToast({ message: msg, variant: 'danger' })
     }
   }, [selectedThemeId, editConfig, mode, updateTheme, setSetting, setCurrentTheme, addToast])
+
+  const handleRevert = useCallback(() => {
+    if (currentTheme) {
+      applyThemeConfig(parseConfig(currentTheme))
+      setEditConfig(parseConfig(currentTheme))
+      setSelectedThemeId(currentTheme.id)
+      setMode(currentTheme.mode === 'light' ? 'light' : 'dark')
+    }
+    setHasChanges(false)
+  }, [currentTheme])
+
+  // Notify parent of dirty state
+  useEffect(() => {
+    onDirtyChange?.(hasChanges)
+  }, [hasChanges, onDirtyChange])
+
+  useImperativeHandle(ref, () => ({
+    hasChanges,
+    apply: handleApply,
+    revert: handleRevert
+  }), [hasChanges, handleApply, handleRevert])
 
   const handleSaveAs = useCallback(async () => {
     const name = customName.trim()
@@ -233,4 +264,4 @@ export function ThemeSettingsContent(): React.JSX.Element {
       </button>
     </div>
   )
-}
+})
