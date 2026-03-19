@@ -28,8 +28,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTasksByProject(projectId)
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
+  const { createTask, updateTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
     useTaskStore()
+  const movingTaskId = useTaskStore((s) => s.movingTaskId)
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
@@ -221,10 +222,100 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     const container = containerRef.current
     if (!container) return
 
+    const moveTask = async (direction: 'up' | 'down'): Promise<void> => {
+      if (!movingTaskId) return
+      // Read fresh state from the store to avoid stale closure data
+      const freshTasks = useTaskStore.getState().tasks
+      const task = freshTasks[movingTaskId]
+      if (!task) return
+
+      const sortedStatuses = [...statuses].sort((a, b) => a.order_index - b.order_index)
+      const parentId = task.parent_id
+      const statusId = task.status_id
+
+      // Get siblings sorted the same way the view sorts them (priority + order_index)
+      const siblings = Object.values(freshTasks)
+        .filter((t) => t.parent_id === parentId && t.status_id === statusId && t.is_archived === 0 && t.is_template === 0)
+        .sort(prioritySortFn)
+      const idx = siblings.findIndex((t) => t.id === movingTaskId)
+
+      if (direction === 'up' && idx > 0) {
+        // Swap with previous sibling
+        const newOrder = [...siblings]
+        ;[newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]]
+        await reorderTasks(newOrder.map((t) => t.id))
+      } else if (direction === 'up' && idx === 0 && parentId === null) {
+        // Move to previous status section — place at bottom
+        const statusIdx = sortedStatuses.findIndex((s) => s.id === statusId)
+        if (statusIdx > 0) {
+          const prevStatus = sortedStatuses[statusIdx - 1]
+          const prevSiblings = Object.values(freshTasks)
+            .filter((t) => t.parent_id === null && t.status_id === prevStatus.id && t.is_archived === 0 && t.is_template === 0)
+            .sort(prioritySortFn)
+          // Place at bottom: append after all existing tasks in previous section
+          const newOrder = [...prevSiblings.map((t) => t.id), movingTaskId]
+          await handleStatusChange(movingTaskId, prevStatus.id)
+          await reorderTasks(newOrder)
+        }
+      } else if (direction === 'down' && idx < siblings.length - 1) {
+        // Swap with next sibling
+        const newOrder = [...siblings]
+        ;[newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]]
+        await reorderTasks(newOrder.map((t) => t.id))
+      } else if (direction === 'down' && idx === siblings.length - 1 && parentId === null) {
+        // Move to next status section — place at top
+        const statusIdx = sortedStatuses.findIndex((s) => s.id === statusId)
+        if (statusIdx < sortedStatuses.length - 1) {
+          const nextStatus = sortedStatuses[statusIdx + 1]
+          const nextSiblings = Object.values(freshTasks)
+            .filter((t) => t.parent_id === null && t.status_id === nextStatus.id && t.is_archived === 0 && t.is_template === 0)
+            .sort(prioritySortFn)
+          // Place at top: prepend before all existing tasks in next section
+          const newOrder = [movingTaskId, ...nextSiblings.map((t) => t.id)]
+          await handleStatusChange(movingTaskId, nextStatus.id)
+          await reorderTasks(newOrder)
+        }
+      }
+
+      // Re-focus container so keyboard continues working after status change
+      requestAnimationFrame(() => {
+        containerRef.current?.focus()
+      })
+    }
+
     const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
       const currentIndex = currentTaskId
         ? flatTasks.findIndex((t) => t.id === currentTaskId)
         : -1
+
+      // Move mode: intercept keys
+      if (movingTaskId) {
+        switch (e.key) {
+          case 'ArrowDown': {
+            e.preventDefault()
+            moveTask('down')
+            break
+          }
+          case 'ArrowUp': {
+            e.preventDefault()
+            moveTask('up')
+            break
+          }
+          case 'Enter': {
+            e.preventDefault()
+            setMovingTask(null)
+            break
+          }
+          case 'Escape': {
+            e.preventDefault()
+            setMovingTask(null)
+            break
+          }
+        }
+        return
+      }
 
       switch (e.key) {
         case 'ArrowDown': {
@@ -244,7 +335,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           break
         }
         case 'ArrowRight': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+          if (currentTaskId) {
             e.preventDefault()
             const hasChildren = tasks.some((t) => t.parent_id === currentTaskId)
             if (hasChildren) {
@@ -254,7 +345,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           break
         }
         case 'ArrowLeft': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+          if (currentTaskId) {
             e.preventDefault()
             const task = allTasks[currentTaskId]
             if (expandedTaskIds.has(currentTaskId)) {
@@ -266,14 +357,16 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           break
         }
         case 'Enter': {
-          if (!currentTaskId) {
-            e.preventDefault()
+          e.preventDefault()
+          if (currentTaskId) {
+            setMovingTask(currentTaskId)
+          } else {
             addInputRef.current?.focus()
           }
           break
         }
         case ' ': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+          if (currentTaskId) {
             e.preventDefault()
             const task = allTasks[currentTaskId]
             if (task) {
@@ -287,7 +380,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
         case 'Delete':
         case 'Backspace': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+          if (currentTaskId) {
             e.preventDefault()
             const nextIndex =
               currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
@@ -298,15 +391,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           break
         }
         case 'Tab': {
-          if (!(e.target instanceof HTMLInputElement)) {
-            e.preventDefault()
-            if (e.shiftKey) {
-              const prevIndex = Math.max(currentIndex - 1, 0)
-              if (flatTasks[prevIndex]) setCurrentTask(flatTasks[prevIndex].id)
-            } else {
-              const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-              if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
-            }
+          e.preventDefault()
+          if (e.shiftKey) {
+            const prevIndex = Math.max(currentIndex - 1, 0)
+            if (flatTasks[prevIndex]) setCurrentTask(flatTasks[prevIndex].id)
+          } else {
+            const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
+            if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
           }
           break
         }
@@ -326,7 +417,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     toggleExpanded,
     setExpanded,
     handleStatusChange,
-    handleDeleteTask
+    handleDeleteTask,
+    movingTaskId,
+    setMovingTask,
+    reorderTasks,
+    prioritySortFn
   ])
 
   const sortedStatuses = useMemo(

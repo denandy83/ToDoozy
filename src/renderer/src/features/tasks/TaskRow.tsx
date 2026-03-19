@@ -70,6 +70,8 @@ export function TaskRow({
   const prioritySettings = usePrioritySettings()
   const pendingSubtaskParentId = useTaskStore((s) => s.pendingSubtaskParentId)
   const hasPendingSubtask = pendingSubtaskParentId === task.id
+  const movingTaskId = useTaskStore((s) => s.movingTaskId)
+  const isMoving = movingTaskId === task.id
 
   // Priority visual helpers
   const priorityLevel = PRIORITY_LEVELS[task.priority] ?? PRIORITY_LEVELS[0]
@@ -285,9 +287,11 @@ export function TaskRow({
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
         className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-pointer ${
-          isSelected
-            ? 'bg-accent/12 border-l-2 border-accent/15'
-            : 'border-l-2 border-transparent hover:bg-foreground/6'
+          isMoving
+            ? 'bg-accent/20 border-l-2 border-accent ring-1 ring-accent/40'
+            : isSelected
+              ? 'bg-accent/12 border-l-2 border-accent/15'
+              : 'border-l-2 border-transparent hover:bg-foreground/6'
         } ${isDropInside ? 'bg-accent/15 ring-2 ring-accent/30 scale-[1.01]' : ''}`}
         style={rowStyle}
         {...attributes}

@@ -3,11 +3,9 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  KeyboardSensor,
   useSensor,
   useSensors
 } from '@dnd-kit/core'
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { LayoutList, Columns3 } from 'lucide-react'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
 import { ThemeSettingsModal, PrioritySettingsModal } from './features/settings'
@@ -84,14 +82,11 @@ export function AppLayout(): React.JSX.Element {
 
   const collapsed = !sidebarExpanded
 
-  // DnD sensors
+  // DnD sensors — keyboard drag replaced by custom move mode (Enter + arrows)
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { delay: 200, tolerance: 5 }
   })
-  const keyboardSensor = useSensor(KeyboardSensor, {
-    coordinateGetter: sortableKeyboardCoordinates
-  })
-  const sensors = useSensors(pointerSensor, keyboardSensor)
+  const sensors = useSensors(pointerSensor)
 
   // DnD helpers
   const tasks = useTaskStore((s) => s.tasks)
