@@ -15,6 +15,7 @@ interface TaskState {
   expandedTaskIds: Set<string>
   currentTaskId: string | null
   pendingSubtaskParentId: string | null
+  pendingDeleteTaskId: string | null
   loading: boolean
   error: string | null
 }
@@ -39,6 +40,7 @@ interface TaskActions {
   toggleExpanded(taskId: string): void
   setExpanded(taskId: string, expanded: boolean): void
   setPendingSubtaskParent(parentId: string | null): void
+  setPendingDeleteTask(taskId: string | null): void
   clearError(): void
 }
 
@@ -50,6 +52,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   expandedTaskIds: new Set<string>(),
   currentTaskId: null,
   pendingSubtaskParentId: null,
+  pendingDeleteTaskId: null,
   loading: false,
   error: null,
 
@@ -356,6 +359,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     } else {
       set({ pendingSubtaskParentId: null })
     }
+  },
+
+  setPendingDeleteTask(taskId: string | null): void {
+    set({ pendingDeleteTaskId: taskId })
   },
 
   clearError(): void {

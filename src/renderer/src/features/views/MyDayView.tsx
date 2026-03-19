@@ -12,7 +12,6 @@ import {
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
@@ -29,13 +28,12 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const projectId = currentProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask, addLabel, removeLabel, hydrateAllTaskLabels } =
+  const { createTask, updateTask, setCurrentTask, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
     useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const layoutMode = useViewStore(selectLayoutMode)
-  const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -165,35 +163,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   )
 
   const handleDeleteTask = useCallback(
-    async (taskId: string) => {
-      const task = allTasks[taskId]
-      const deleted = await deleteTask(taskId)
-      if (deleted && task) {
-        addToast({
-          message: `"${task.title}" deleted`,
-          variant: 'danger',
-          action: {
-            label: 'Undo',
-            onClick: async () => {
-              if (!currentUser) return
-              await createTask({
-                id: crypto.randomUUID(),
-                project_id: task.project_id,
-                owner_id: task.owner_id,
-                title: task.title,
-                status_id: task.status_id,
-                priority: task.priority,
-                due_date: task.due_date,
-                description: task.description,
-                order_index: task.order_index,
-                is_in_my_day: task.is_in_my_day
-              })
-            }
-          }
-        })
-      }
+    (taskId: string) => {
+      setPendingDeleteTask(taskId)
     },
-    [allTasks, deleteTask, addToast, createTask, currentUser]
+    [setPendingDeleteTask]
   )
 
   const handleSelectTask = useCallback(

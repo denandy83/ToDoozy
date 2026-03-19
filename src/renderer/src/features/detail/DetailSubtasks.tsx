@@ -15,7 +15,7 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
   const subtasks = useSubtasks(taskId)
   const childCount = useChildCount(taskId)
   const statuses = useStatusesByProject(projectId)
-  const { createSubtask, updateTask, deleteTask, setCurrentTask } = useTaskStore()
+  const { createSubtask, updateTask, setCurrentTask, setPendingDeleteTask } = useTaskStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 
   const [showInput, setShowInput] = useState(false)
@@ -79,10 +79,10 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
   )
 
   const handleDelete = useCallback(
-    async (subtaskId: string) => {
-      await deleteTask(subtaskId)
+    (subtaskId: string) => {
+      setPendingDeleteTask(subtaskId)
     },
-    [deleteTask]
+    [setPendingDeleteTask]
   )
 
   const handleSubtaskClick = useCallback(

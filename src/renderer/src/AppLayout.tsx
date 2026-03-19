@@ -29,6 +29,7 @@ import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
+import { ConfirmDeleteModal } from './shared/components/ConfirmDeleteModal'
 import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
 import type { Task } from '../../shared/types'
@@ -383,6 +384,9 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Context menu */}
         <ContextMenu />
+
+        {/* Delete confirmation */}
+        <ConfirmDeleteModal />
 
         {/* Command palette */}
         <CommandPalette />

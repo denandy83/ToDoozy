@@ -11,7 +11,6 @@ import {
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useToast } from '../../shared/components/Toast'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
@@ -29,14 +28,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTasksByProject(projectId)
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels } =
+  const { createTask, updateTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
     useTaskStore()
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const layoutMode = useViewStore(selectLayoutMode)
-  const { addToast } = useToast()
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -179,35 +177,10 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   )
 
   const handleDeleteTask = useCallback(
-    async (taskId: string) => {
-      const task = allTasks[taskId]
-      const deleted = await deleteTask(taskId)
-      if (deleted && task) {
-        addToast({
-          message: `"${task.title}" deleted`,
-          variant: 'danger',
-          action: {
-            label: 'Undo',
-            onClick: async () => {
-              if (!currentUser) return
-              await createTask({
-                id: crypto.randomUUID(),
-                project_id: task.project_id,
-                owner_id: task.owner_id,
-                title: task.title,
-                status_id: task.status_id,
-                priority: task.priority,
-                due_date: task.due_date,
-                description: task.description,
-                order_index: task.order_index,
-                is_in_my_day: task.is_in_my_day
-              })
-            }
-          }
-        })
-      }
+    (taskId: string) => {
+      setPendingDeleteTask(taskId)
     },
-    [allTasks, deleteTask, addToast, createTask, currentUser]
+    [setPendingDeleteTask]
   )
 
   const handleSelectTask = useCallback(

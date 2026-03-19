@@ -1,10 +1,18 @@
 import { useEffect, useState, useCallback } from 'react'
 
+interface ToastAction {
+  label: string
+  onClick: () => void
+  variant?: 'accent' | 'danger' | 'muted'
+}
+
 interface ToastItem {
   id: string
   message: string
-  action?: { label: string; onClick: () => void }
+  action?: ToastAction
+  actions?: ToastAction[]
   variant?: 'default' | 'danger'
+  persistent?: boolean
 }
 
 interface ToastState {
@@ -31,9 +39,11 @@ export function ToastContainer(): React.JSX.Element {
       addToast: (toast) => {
         const id = crypto.randomUUID()
         setToasts((prev) => [...prev, { ...toast, id }])
-        setTimeout(() => {
-          setToasts((prev) => prev.filter((t) => t.id !== id))
-        }, 5000)
+        if (!toast.persistent) {
+          setTimeout(() => {
+            setToasts((prev) => prev.filter((t) => t.id !== id))
+          }, 5000)
+        }
       },
       removeToast: (id) => {
         setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -66,6 +76,25 @@ export function ToastContainer(): React.JSX.Element {
               {toast.action.label}
             </button>
           )}
+          {toast.actions && toast.actions.map((action, i) => {
+            const colorClass = action.variant === 'danger'
+              ? 'text-danger hover:underline'
+              : action.variant === 'muted'
+                ? 'text-muted hover:text-foreground'
+                : 'text-accent hover:underline'
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  action.onClick()
+                  globalState?.removeToast(toast.id)
+                }}
+                className={`text-[11px] font-bold uppercase tracking-widest ${colorClass}`}
+              >
+                {action.label}
+              </button>
+            )
+          })}
         </div>
       ))}
     </div>

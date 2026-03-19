@@ -9,7 +9,6 @@ import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelStore, useLabelsByProject } from '../stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
-import { useAuthStore } from '../stores/authStore'
 import { useToast } from './Toast'
 import {
   StatusRow,
@@ -19,7 +18,6 @@ import {
   SnoozeSubmenu,
   FocusSubmenu
 } from './ContextMenuSubmenus'
-import type { Task } from '../../../../shared/types'
 
 type SubmenuId = 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | null
 
@@ -37,8 +35,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
-  const currentUser = useAuthStore((s) => s.currentUser)
-  const { updateTask, deleteTask, duplicateTask, createTask, setPendingSubtaskParent } = useTaskStore()
+  const { updateTask, duplicateTask, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
 
   // Viewport clamp positioning
@@ -111,33 +108,8 @@ export function ContextMenu(): React.JSX.Element | null {
   }
 
   const handleDelete = (): void => {
-    const savedTask: Task = { ...task }
-    handleAction(async () => {
-      const deleted = await deleteTask(task.id)
-      if (deleted) {
-        addToast({
-          message: `"${savedTask.title}" deleted`,
-          variant: 'danger',
-          action: {
-            label: 'Undo',
-            onClick: async () => {
-              if (!currentUser) return
-              await createTask({
-                id: crypto.randomUUID(),
-                project_id: savedTask.project_id,
-                owner_id: savedTask.owner_id,
-                title: savedTask.title,
-                status_id: savedTask.status_id,
-                priority: savedTask.priority,
-                due_date: savedTask.due_date,
-                description: savedTask.description,
-                order_index: savedTask.order_index,
-                is_in_my_day: savedTask.is_in_my_day
-              })
-            }
-          }
-        })
-      }
+    handleAction(() => {
+      setPendingDeleteTask(task.id)
     })
   }
 
