@@ -218,9 +218,24 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       const task = await window.api.tasks.duplicate(id, newId)
       if (task) {
-        set((state) => ({
-          tasks: { ...state.tasks, [task.id]: task }
-        }))
+        // Re-hydrate all tasks for the project since subtasks were also created
+        const allTasks = await window.api.tasks.findByProjectId(task.project_id)
+        const taskMap: Record<string, Task> = {}
+        for (const t of allTasks) {
+          taskMap[t.id] = t
+        }
+        set((state) => ({ tasks: { ...state.tasks, ...taskMap } }))
+
+        // Also hydrate labels for the new task and its subtasks
+        const newTaskLabels = await window.api.labels.findByTaskId(task.id)
+        const subtasks = await window.api.tasks.findSubtasks(task.id)
+        const labelUpdates: Record<string, import('../../../../shared/types').Label[]> = {
+          [task.id]: newTaskLabels
+        }
+        for (const st of subtasks) {
+          labelUpdates[st.id] = await window.api.labels.findByTaskId(st.id)
+        }
+        set((state) => ({ taskLabels: { ...state.taskLabels, ...labelUpdates } }))
       }
       return task
     } catch (err) {

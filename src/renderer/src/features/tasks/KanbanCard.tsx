@@ -89,7 +89,6 @@ export function KanbanCard({
     (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      onSelect(task.id)
       openContextMenu(task.id, e.clientX, e.clientY)
     },
     [task.id, onSelect, openContextMenu]

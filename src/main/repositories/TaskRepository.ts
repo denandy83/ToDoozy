@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
@@ -154,7 +155,7 @@ export class TaskRepository {
     const original = this.findById(id)
     if (!original) return undefined
 
-    return this.create({
+    const newTask = this.create({
       id: newId,
       project_id: original.project_id,
       owner_id: original.owner_id,
@@ -169,5 +170,44 @@ export class TaskRepository {
       is_in_my_day: original.is_in_my_day,
       recurrence_rule: original.recurrence_rule
     })
+
+    if (!newTask) return undefined
+
+    // Copy labels
+    const labels = this.getLabels(id)
+    for (const label of labels) {
+      this.addLabel(newTask.id, label.label_id)
+    }
+
+    // Recursively duplicate subtasks
+    const subtasks = this.findSubtasks(id)
+    for (const subtask of subtasks) {
+      const subtaskNewId = randomUUID()
+      const dupSubtask = this.findById(subtask.id)
+      if (dupSubtask) {
+        this.create({
+          id: subtaskNewId,
+          project_id: dupSubtask.project_id,
+          owner_id: dupSubtask.owner_id,
+          title: `${dupSubtask.title} (copy)`,
+          status_id: dupSubtask.status_id,
+          assigned_to: dupSubtask.assigned_to,
+          description: dupSubtask.description,
+          priority: dupSubtask.priority,
+          due_date: dupSubtask.due_date,
+          parent_id: newTask.id,
+          order_index: dupSubtask.order_index,
+          is_in_my_day: dupSubtask.is_in_my_day,
+          recurrence_rule: dupSubtask.recurrence_rule
+        })
+        // Copy subtask labels too
+        const subtaskLabels = this.getLabels(subtask.id)
+        for (const label of subtaskLabels) {
+          this.addLabel(subtaskNewId, label.label_id)
+        }
+      }
+    }
+
+    return newTask
   }
 }
