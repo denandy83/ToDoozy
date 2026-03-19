@@ -103,7 +103,7 @@ export function CommandPalette(): React.JSX.Element | null {
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="max-h-[400px] overflow-y-auto p-2" role="listbox">
+        <div ref={listRef} className={`max-h-[400px] overflow-y-auto ${results.length > 0 || query.trim() ? 'p-2' : ''}`} role="listbox">
           {query.trim() && results.length === 0 && (
             <div className="flex flex-col items-center justify-center py-8">
               <p className="text-sm font-light text-muted">No results found</p>

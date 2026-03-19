@@ -80,11 +80,16 @@ function parseQuery(query: string): ParsedQuery {
 
 function matchesPriority(task: Task, filters: string[]): boolean {
   for (const filter of filters) {
+    // Exact match
     const numericValue = PRIORITY_NAME_TO_VALUE[filter]
     if (numericValue !== undefined && task.priority === numericValue) return true
-    // Also try numeric match
+    // Numeric match
     const parsed = parseInt(filter, 10)
     if (!isNaN(parsed) && task.priority === parsed) return true
+    // Substring match against priority names
+    for (const [name, value] of Object.entries(PRIORITY_NAME_TO_VALUE)) {
+      if (name.startsWith(filter) && task.priority === value) return true
+    }
   }
   return false
 }
@@ -115,7 +120,7 @@ function matchesStatus(
 
 function matchesDue(task: Task, filters: string[]): boolean {
   for (const filter of filters) {
-    if (filter === 'overdue') {
+    if ('overdue'.startsWith(filter)) {
       if (!task.due_date) continue
       return new Date(task.due_date) < new Date(new Date().toISOString().split('T')[0])
     }
@@ -125,10 +130,10 @@ function matchesDue(task: Task, filters: string[]): boolean {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
-    if (filter === 'today') {
+    if ('today'.startsWith(filter)) {
       const todayStr = today.toISOString().split('T')[0]
       if (task.due_date.startsWith(todayStr)) return true
-    } else if (filter === 'week') {
+    } else if ('week'.startsWith(filter)) {
       const weekEnd = new Date(today)
       weekEnd.setDate(weekEnd.getDate() + 7)
       if (dueDate >= today && dueDate <= weekEnd) return true
@@ -143,18 +148,19 @@ function matchesHas(
   allTasks: Record<string, Task>
 ): boolean {
   for (const filter of filters) {
-    switch (filter) {
-      case 'subtasks': {
+    const f = filter.toLowerCase()
+    switch (true) {
+      case 'subtasks'.startsWith(f): {
         const hasChildren = Object.values(allTasks).some((t) => t.parent_id === task.id)
         if (hasChildren) return true
         break
       }
-      case 'image':
+      case 'image'.startsWith(f):
         if (task.description && (task.description.includes('![') || task.description.includes('<img'))) {
           return true
         }
         break
-      case 'recurrence':
+      case 'recurrence'.startsWith(f):
         if (task.recurrence_rule && task.recurrence_rule !== 'none') return true
         break
     }
