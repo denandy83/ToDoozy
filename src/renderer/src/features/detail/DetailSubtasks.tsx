@@ -129,7 +129,9 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
 
       {/* Add subtask input */}
       {showInput ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          {/* Spacer to align with subtask title text (after the status icon) */}
+          <div className="flex-shrink-0 invisible"><div className="h-4 w-4" /></div>
           <input
             ref={inputRef}
             type="text"

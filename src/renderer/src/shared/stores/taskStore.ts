@@ -14,6 +14,7 @@ interface TaskState {
   taskLabels: Record<string, Label[]>
   expandedTaskIds: Set<string>
   currentTaskId: string | null
+  pendingSubtaskParentId: string | null
   loading: boolean
   error: string | null
 }
@@ -37,6 +38,7 @@ interface TaskActions {
   setCurrentTask(id: string | null): void
   toggleExpanded(taskId: string): void
   setExpanded(taskId: string, expanded: boolean): void
+  setPendingSubtaskParent(parentId: string | null): void
   clearError(): void
 }
 
@@ -47,6 +49,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   taskLabels: {},
   expandedTaskIds: new Set<string>(),
   currentTaskId: null,
+  pendingSubtaskParentId: null,
   loading: false,
   error: null,
 
@@ -340,6 +343,19 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       }
       return { expandedTaskIds: next }
     })
+  },
+
+  setPendingSubtaskParent(parentId: string | null): void {
+    if (parentId) {
+      // Expand the parent so the inline input is visible
+      set((state) => {
+        const next = new Set(state.expandedTaskIds)
+        next.add(parentId)
+        return { pendingSubtaskParentId: parentId, expandedTaskIds: next }
+      })
+    } else {
+      set({ pendingSubtaskParentId: null })
+    }
   },
 
   clearError(): void {

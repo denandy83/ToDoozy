@@ -11,6 +11,7 @@ import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
+import { useAuthStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
 import type { DropIndicator } from './useDragAndDrop'
@@ -68,6 +69,8 @@ export function TaskRow({
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()
+  const pendingSubtaskParentId = useTaskStore((s) => s.pendingSubtaskParentId)
+  const hasPendingSubtask = pendingSubtaskParentId === task.id
 
   // Priority visual helpers
   const priorityLevel = PRIORITY_LEVELS[task.priority] ?? PRIORITY_LEVELS[0]
@@ -437,10 +440,11 @@ export function TaskRow({
         )
       }
 
-      {/* Render subtasks if expanded */}
-      {hasChildren && isExpanded && !isDragging && (
+      {/* Render subtasks if expanded or pending inline add */}
+      {((hasChildren && isExpanded) || hasPendingSubtask) && !isDragging && (
         <SubtaskList
           parentId={task.id}
+          projectId={task.project_id}
           statuses={statuses}
           allLabels={allLabels}
           depth={depth + 1}
@@ -483,6 +487,7 @@ function SubtaskBadge({ done, total }: SubtaskBadgeProps): React.JSX.Element {
 
 interface SubtaskListProps {
   parentId: string
+  projectId: string
   statuses: Status[]
   allLabels: Label[]
   depth: number
@@ -499,6 +504,7 @@ interface SubtaskListProps {
 
 function SubtaskList({
   parentId,
+  projectId,
   statuses,
   allLabels,
   depth,
@@ -515,6 +521,55 @@ function SubtaskList({
   const subtasks = useSubtasks(parentId)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const pendingSubtaskParentId = useTaskStore((s) => s.pendingSubtaskParentId)
+  const { createSubtask, setPendingSubtaskParent } = useTaskStore()
+  const currentUser = useAuthStore((s) => s.currentUser)
+
+  const isPending = pendingSubtaskParentId === parentId
+  const [inputValue, setInputValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isPending) {
+      inputRef.current?.focus()
+    }
+  }, [isPending])
+
+  const handleAdd = useCallback(async () => {
+    const trimmed = inputValue.trim()
+    if (!trimmed || !currentUser) return
+
+    const defaultStatus = statuses.find((s) => s.is_default === 1)
+    if (!defaultStatus) return
+
+    const maxOrder = subtasks.reduce((max, t) => Math.max(max, t.order_index), -1)
+    await createSubtask(parentId, {
+      id: crypto.randomUUID(),
+      project_id: projectId,
+      owner_id: currentUser.id,
+      title: trimmed,
+      status_id: defaultStatus.id,
+      order_index: maxOrder + 1
+    })
+    setInputValue('')
+    inputRef.current?.focus()
+  }, [inputValue, currentUser, statuses, subtasks, createSubtask, parentId, projectId])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        handleAdd()
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setInputValue('')
+        setPendingSubtaskParent(null)
+      }
+    },
+    [handleAdd, setPendingSubtaskParent]
+  )
 
   return (
     <>
@@ -538,6 +593,31 @@ function SubtaskList({
           onCreateLabel={onCreateLabel}
         />
       ))}
+      {isPending && (
+        <div
+          className="flex items-center gap-2 rounded border border-transparent py-2 pr-6"
+          style={{ paddingLeft: `${16 + depth * 24}px` }}
+        >
+          {/* Spacers to align with task title: grip + chevron + status icon */}
+          <div className="flex-shrink-0 p-0.5 invisible"><GripVertical size={12} /></div>
+          <div className="flex-shrink-0 p-0.5 invisible"><ChevronRight size={12} /></div>
+          <div className="flex-shrink-0 p-0.5 invisible"><div className="h-4 w-4" /></div>
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => {
+              if (!inputValue.trim()) {
+                setPendingSubtaskParent(null)
+              }
+            }}
+            placeholder="Subtask title..."
+            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:outline-none"
+          />
+        </div>
+      )}
     </>
   )
 }

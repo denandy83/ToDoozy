@@ -38,7 +38,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { updateTask, deleteTask, duplicateTask, createTask } = useTaskStore()
+  const { updateTask, deleteTask, duplicateTask, createTask, setPendingSubtaskParent } = useTaskStore()
   const { addToast } = useToast()
 
   // Viewport clamp positioning
@@ -164,18 +164,8 @@ export function ContextMenu(): React.JSX.Element | null {
         icon={<Plus size={14} />}
         label="Add Subtask"
         onClick={() =>
-          handleAction(async () => {
-            if (!currentUser) return
-            const defaultStatus = statuses.find((s) => s.is_default === 1)
-            if (!defaultStatus) return
-            await createTask({
-              id: crypto.randomUUID(),
-              project_id: task.project_id,
-              owner_id: currentUser.id,
-              title: 'New subtask',
-              status_id: defaultStatus.id,
-              parent_id: task.id
-            })
+          handleAction(() => {
+            setPendingSubtaskParent(task.id)
           })
         }
       />
