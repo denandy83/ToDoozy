@@ -160,7 +160,7 @@ export function UnifiedSettingsModal({
           onClick={(e) => { e.stopPropagation(); triggerShake() }}
         />
       )}
-      <div className={`flex gap-6 h-[500px] ${(pendingUnsaved || themeBlocked) ? 'pointer-events-none opacity-60' : ''}`}>
+      <div className={`flex gap-6 h-[600px] ${(pendingUnsaved || themeBlocked) ? 'pointer-events-none opacity-60' : ''}`}>
         {/* Left nav — fixed, no scroll */}
         <nav className="flex flex-col gap-1 min-w-[120px] flex-shrink-0">
           {tabs.map((tab) => (

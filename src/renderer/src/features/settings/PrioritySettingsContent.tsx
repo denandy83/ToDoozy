@@ -1,22 +1,23 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Minus, ArrowUp, AlertTriangle } from 'lucide-react'
+import { Minus, Circle, ArrowUp, AlertTriangle } from 'lucide-react'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 
 const TOGGLE_KEYS = [
   { key: 'priority_color_bar', label: 'Color Bar', description: '1.5px colored stripe on left edge' },
-  { key: 'priority_badges', label: 'Badges', description: 'Icon + label chip by priority' },
+  { key: 'priority_badge_icons', label: 'Badge Icons', description: 'Priority icon indicator' },
+  { key: 'priority_badge_labels', label: 'Badge Labels', description: 'Priority text label (LOW, NORMAL, etc.)' },
   { key: 'priority_background_tint', label: 'Background Tint', description: '3% for High, 6% for Urgent' },
   { key: 'priority_font_weight', label: 'Font Weight', description: 'Heavier text for higher priority' },
   { key: 'priority_auto_sort', label: 'Auto-Sort', description: 'Sort by priority descending within sections' }
 ] as const
 
 const PREVIEW_TASKS = [
-  { priority: 4, title: 'Fix critical production bug' },
+  { priority: 0, title: 'Organize bookmarks' },
   { priority: 3, title: 'Review pull request' },
-  { priority: 2, title: 'Update documentation' },
   { priority: 1, title: 'Clean up test files' },
-  { priority: 0, title: 'Organize bookmarks' }
+  { priority: 4, title: 'Fix critical production bug' },
+  { priority: 2, title: 'Update documentation' }
 ]
 
 export function PrioritySettingsContent(): React.JSX.Element {
@@ -66,7 +67,7 @@ export function PrioritySettingsContent(): React.JSX.Element {
   return (
     <div>
       {/* Toggles */}
-      <div className="space-y-3">
+      <div className="space-y-1">
         {TOGGLE_KEYS.map((toggle) => (
           <ToggleRow
             key={toggle.key}
@@ -79,7 +80,7 @@ export function PrioritySettingsContent(): React.JSX.Element {
       </div>
 
       {/* Live Preview */}
-      <div className="mt-8">
+      <div className="mt-4">
         <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Preview
         </p>
@@ -90,7 +91,8 @@ export function PrioritySettingsContent(): React.JSX.Element {
               priority={task.priority}
               title={task.title}
               showColorBar={localToggles.priority_color_bar ?? false}
-              showBadge={localToggles.priority_badges ?? false}
+              showBadgeIcon={localToggles.priority_badge_icons ?? false}
+              showBadgeLabel={localToggles.priority_badge_labels ?? false}
               showTint={localToggles.priority_background_tint ?? false}
               showFontWeight={localToggles.priority_font_weight ?? false}
             />
@@ -137,7 +139,8 @@ interface PreviewRowProps {
   priority: number
   title: string
   showColorBar: boolean
-  showBadge: boolean
+  showBadgeIcon: boolean
+  showBadgeLabel: boolean
   showTint: boolean
   showFontWeight: boolean
 }
@@ -146,7 +149,8 @@ function PreviewRow({
   priority,
   title,
   showColorBar,
-  showBadge,
+  showBadgeIcon,
+  showBadgeLabel,
   showTint,
   showFontWeight
 }: PreviewRowProps): React.JSX.Element {
@@ -161,8 +165,7 @@ function PreviewRow({
         : 'font-light'
     : 'font-light'
 
-  const Icon = priority === 1 ? Minus : priority === 3 ? ArrowUp : priority === 4 ? AlertTriangle : null
-  const showLabel = priority >= 3
+  const Icon = priority === 1 ? Minus : priority === 2 ? Circle : priority === 3 ? ArrowUp : priority === 4 ? AlertTriangle : null
 
   const tintStyle = hasTint
     ? { backgroundColor: `${level.color}${Math.round(tintOpacity * 255).toString(16).padStart(2, '0')}` }
@@ -182,13 +185,13 @@ function PreviewRow({
       <span className={`flex-1 truncate text-[15px] ${fontWeightClass} tracking-tight text-foreground`}>
         {title}
       </span>
-      {showBadge && priority > 0 && priority !== 2 && Icon && (
+      {(showBadgeIcon || showBadgeLabel) && priority > 0 && (
         <span
           className="inline-flex flex-shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider"
           style={{ color: level.color, backgroundColor: `${level.color}15` }}
         >
-          <Icon size={10} />
-          {showLabel && <span>{level.label}</span>}
+          {showBadgeIcon && Icon && <Icon size={10} />}
+          {showBadgeLabel && <span>{level.label}</span>}
         </span>
       )}
     </div>

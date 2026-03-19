@@ -23,11 +23,11 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
   return (
     <div
       className="flex overflow-hidden rounded-lg border text-sm"
-      style={{ borderColor: config.border, backgroundColor: config.bg }}
+      style={{ borderColor: config.border, backgroundColor: config.bg, minHeight: '180px' }}
     >
       {/* Mock sidebar */}
       <div
-        className="flex w-28 flex-col gap-1.5 p-2"
+        className="flex w-32 flex-col gap-2 p-3"
         style={{ backgroundColor: surface, borderRight: `1px solid ${config.border}` }}
       >
         <div className="flex items-center gap-1.5 px-1.5 py-1">
@@ -36,7 +36,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
             style={{ backgroundColor: config.accent + '26' }}
           >
             <div className="flex h-full items-center justify-center">
-              <span style={{ color: config.accent, fontSize: '8px', fontWeight: 700 }}>TD</span>
+              <span style={{ color: config.accent, fontSize: '9px', fontWeight: 700 }}>TD</span>
             </div>
           </div>
           <span style={{ color: config.fg, fontSize: '9px', fontWeight: 700 }}>ToDoozy</span>
@@ -49,7 +49,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         {['My Day', 'Backlog', 'Archive'].map((item, i) => (
           <div
             key={item}
-            className="flex items-center gap-1.5 rounded px-1.5 py-0.5"
+            className="flex items-center gap-1.5 rounded px-1.5 py-1"
             style={
               i === 0
                 ? { backgroundColor: config.accent + '1f', borderLeft: `2px solid ${config.accent}` }
@@ -60,7 +60,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
               className="h-2.5 w-2.5 rounded-sm"
               style={{ backgroundColor: i === 0 ? config.accent : config.muted + '40' }}
             />
-            <span style={{ color: i === 0 ? config.fg : config.fgSecondary, fontSize: '8px' }}>
+            <span style={{ color: i === 0 ? config.fg : config.fgSecondary, fontSize: '9px' }}>
               {item}
             </span>
           </div>
@@ -88,15 +88,16 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         </div>
 
         {/* Mock task list */}
-        <div className="flex flex-col gap-1 p-2">
+        <div className="flex flex-col gap-1.5 p-3">
           {[
             { title: 'Design system review', priority: config.accent, done: false },
             { title: 'Update documentation', priority: config.muted, done: false },
+            { title: 'Prepare presentation', priority: '#f59e0b', done: false },
             { title: 'Fix login bug', priority: '#ef4444', done: true }
           ].map((task) => (
             <div
               key={task.title}
-              className="flex items-center gap-1.5 rounded px-2 py-1"
+              className="flex items-center gap-2 rounded px-2 py-1.5"
               style={{ backgroundColor: surface }}
             >
               <div
@@ -113,7 +114,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
               <span
                 style={{
                   color: task.done ? config.fgMuted : config.fg,
-                  fontSize: '8px',
+                  fontSize: '9px',
                   fontWeight: 300,
                   textDecoration: task.done ? 'line-through' : 'none'
                 }}

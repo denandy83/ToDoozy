@@ -170,7 +170,7 @@ export function KanbanCard({
       {/* Metadata row */}
       {(showBadge || taskLabels.length > 0 || dueDateStr || childCount.total > 0) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {showBadge && <PriorityBadge priority={task.priority} />}
+          {showBadge && <PriorityBadge priority={task.priority} showIcon={prioritySettings.badgeIcons} showLabel={prioritySettings.badgeLabels} />}
 
           {taskLabels.slice(0, 3).map((label) => (
             <LabelChip

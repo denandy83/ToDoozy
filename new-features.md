@@ -11,6 +11,12 @@ Feature requests and improvements to be implemented after bugs are resolved.
 - Persist the setting in the database
 - **Context:** Currently hardcoded to en-GB (dd/MM/yyyy). User is in Europe and expects dd/MM/yyyy. Should be configurable for all users.
 
+### Customizable priority colors and levels
+- Allow users to change the color associated with each priority level
+- Allow adding/removing/renaming priority levels beyond the default 5
+- Settings > Priorities should have color pickers per level
+- **Context:** Currently hardcoded 5 levels with fixed colors (None=#888, Low=#22c55e, Normal=#3b82f6, High=#f59e0b, Urgent=#ef4444)
+
 ### Per-view statuses
 - Backlog and My Day should each have their own unique set of statuses
 - Default statuses: Not Started, In Progress, Done (always present initially, can be edited/removed later)

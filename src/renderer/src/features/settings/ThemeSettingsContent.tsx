@@ -3,7 +3,7 @@ import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../sha
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { Trash2, RotateCcw, Save } from 'lucide-react'
-import { ColorPicker } from './ColorPicker'
+import { ColorSquare, ColorHex } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
@@ -473,7 +473,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
             <select
               value={selectedThemeId ?? ''}
               onChange={(e) => handlePresetChangeOrNew(e.target.value)}
-              className="w-48 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground text-center outline-none focus:border-accent"
+              className="w-48 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
             >
               {sortedThemes.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -512,15 +512,30 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       </div>
 
       {/* Color pickers */}
-      <div className="grid grid-cols-2 gap-2">
-        {(Object.keys(COLOR_LABELS) as Array<keyof ThemeConfig>).map((key) => (
-          <ColorPicker
-            key={key}
-            label={COLOR_LABELS[key]}
-            value={editConfig[key]}
-            onChange={(v) => handleColorChange(key, v)}
-          />
-        ))}
+      <div className="flex flex-col gap-1">
+        {(() => {
+          const keys = Object.keys(COLOR_LABELS) as Array<keyof ThemeConfig>
+          const rows: React.JSX.Element[] = []
+          for (let i = 0; i < keys.length; i += 2) {
+            const left = keys[i]
+            const right = keys[i + 1]
+            rows.push(
+              <div key={`row-${i}`} className="flex items-center gap-1.5 h-7">
+                <span className="w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[8px] font-bold uppercase tracking-widest text-muted text-right">{COLOR_LABELS[left]}</span>
+                <ColorSquare value={editConfig[left]} onChange={(v) => handleColorChange(left, v)} />
+                <span className="w-[52px] flex-shrink-0 text-xs font-mono text-fg-secondary"><ColorHex value={editConfig[left]} onChange={(v) => handleColorChange(left, v)} /></span>
+                {right && (
+                  <>
+                    <span className="ml-2 w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[8px] font-bold uppercase tracking-widest text-muted text-right">{COLOR_LABELS[right]}</span>
+                    <ColorSquare value={editConfig[right]} onChange={(v) => handleColorChange(right, v)} />
+                    <span className="w-[52px] flex-shrink-0 text-xs font-mono text-fg-secondary"><ColorHex value={editConfig[right]} onChange={(v) => handleColorChange(right, v)} /></span>
+                  </>
+                )}
+              </div>
+            )
+          }
+          return rows
+        })()}
       </div>
 
       {/* Live preview */}

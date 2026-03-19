@@ -364,7 +364,7 @@ export function TaskRow({
         )}
 
         {/* Priority badge */}
-        {showBadge && <PriorityBadge priority={task.priority} />}
+        {showBadge && <PriorityBadge priority={task.priority} showIcon={prioritySettings.badgeIcons} showLabel={prioritySettings.badgeLabels} />}
 
         {/* Label chips — show max 3, then "+X" */}
         {taskLabels.length > 0 && (
