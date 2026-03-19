@@ -6,9 +6,10 @@ interface ModalProps {
   onClose: () => void
   children: ReactNode
   title?: string
+  size?: 'default' | 'large'
 }
 
-export function Modal({ open, onClose, children, title }: ModalProps): React.JSX.Element | null {
+export function Modal({ open, onClose, children, title, size = 'default' }: ModalProps): React.JSX.Element | null {
   const backdropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,7 +38,9 @@ export function Modal({ open, onClose, children, title }: ModalProps): React.JSX
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
       onClick={handleBackdropClick}
     >
-      <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200">
+      <div className={`relative w-full rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200 ${
+        size === 'large' ? 'max-w-3xl max-h-[80vh] overflow-y-auto' : 'max-w-lg'
+      }`}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"

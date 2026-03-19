@@ -7,8 +7,8 @@ import {
   useSensors
 } from '@dnd-kit/core'
 import { LayoutList, Columns3 } from 'lucide-react'
-import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
-import { ThemeSettingsModal, PrioritySettingsModal } from './features/settings'
+import { ProjectSwitcher, NewProjectModal } from './features/projects'
+import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { KanbanCard } from './features/tasks/KanbanCard'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
@@ -18,7 +18,6 @@ import { MyDayView } from './features/views/MyDayView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
-import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore, selectCurrentProject } from './shared/stores'
 import { useStatusesByProject } from './shared/stores'
 import { useTaskStore } from './shared/stores'
@@ -44,14 +43,11 @@ const VIEW_SHORTCUTS: ViewId[] = ['my-day', 'backlog', 'archive', 'templates']
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null)
-  const [themeSettingsOpen, setThemeSettingsOpen] = useState(false)
-  const [prioritySettingsOpen, setPrioritySettingsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Apply current theme CSS variables
   useThemeApplicator()
   const currentProject = useProjectStore(selectCurrentProject)
-  const logout = useAuthStore((s) => s.logout)
   const allTasks = useTaskStore((s) => s.tasks)
   const { updateTask, reorderTasks } = useTaskStore()
   const currentView = useViewStore((s) => s.currentView)
@@ -170,15 +166,13 @@ export function AppLayout(): React.JSX.Element {
       getTasksForParent
     })
 
-  const handleProjectSettings = useCallback((projectId: string) => {
-    setSettingsProjectId(projectId)
+  const handleProjectSettings = useCallback(() => {
+    setSettingsOpen(true)
   }, [])
 
-  const handleCurrentProjectSettings = useCallback(() => {
-    if (currentProject) {
-      setSettingsProjectId(currentProject.id)
-    }
-  }, [currentProject])
+  const handleOpenSettings = useCallback(() => {
+    setSettingsOpen(true)
+  }, [])
 
   const handleSidebarMouseEnter = useCallback(() => {
     if (!sidebarPinned) {
@@ -280,10 +274,7 @@ export function AppLayout(): React.JSX.Element {
         {/* Sidebar */}
         <Sidebar
           counts={viewCounts}
-          onSettings={handleCurrentProjectSettings}
-          onThemeSettings={() => setThemeSettingsOpen(true)}
-          onPrioritySettings={() => setPrioritySettingsOpen(true)}
-          onLogout={logout}
+          onSettings={handleOpenSettings}
           collapsed={collapsed}
           pinned={sidebarPinned}
           isDragging={dragState.isDragging}
@@ -306,7 +297,7 @@ export function AppLayout(): React.JSX.Element {
                 />
                 <ProjectSwitcher
                   onNewProject={() => setNewProjectOpen(true)}
-                  onProjectSettings={handleProjectSettings}
+                  onProjectSettings={() => handleProjectSettings()}
                 />
               </div>
             )}
@@ -361,18 +352,10 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Modals */}
         <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
-        <ProjectSettingsModal
-          open={settingsProjectId !== null}
-          onClose={() => setSettingsProjectId(null)}
-          projectId={settingsProjectId}
-        />
-        <ThemeSettingsModal
-          open={themeSettingsOpen}
-          onClose={() => setThemeSettingsOpen(false)}
-        />
-        <PrioritySettingsModal
-          open={prioritySettingsOpen}
-          onClose={() => setPrioritySettingsOpen(false)}
+        <UnifiedSettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          projectId={currentProject?.id ?? null}
         />
 
         {/* Toast notifications */}

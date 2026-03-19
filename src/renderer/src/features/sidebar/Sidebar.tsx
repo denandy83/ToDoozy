@@ -1,27 +1,25 @@
 import { useCallback, useRef } from 'react'
 import {
   Sun,
+  Moon,
   Archive,
   LayoutTemplate,
   ListTodo,
   Inbox,
   PanelLeftClose,
   PanelLeft,
-  Settings,
-  Palette,
-  Gauge,
-  LogOut
+  Settings
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
+import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
+import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
+import type { ThemeConfig } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 
 interface SidebarProps {
   counts: Record<ViewId, number>
   onSettings: () => void
-  onThemeSettings: () => void
-  onPrioritySettings: () => void
-  onLogout: () => void
   collapsed: boolean
   pinned: boolean
   isDragging?: boolean
@@ -46,9 +44,6 @@ const VIEW_ITEMS: Array<{
 export function Sidebar({
   counts,
   onSettings,
-  onThemeSettings,
-  onPrioritySettings,
-  onLogout,
   collapsed,
   pinned,
   isDragging,
@@ -58,7 +53,34 @@ export function Sidebar({
 }: SidebarProps): React.JSX.Element {
   const currentView = useViewStore((s) => s.currentView)
   const setView = useViewStore((s) => s.setView)
+  const currentTheme = useSettingsStore(selectCurrentTheme)
+  const themes = useSettingsStore((s) => s.themes)
+  const { setSetting, setCurrentTheme } = useSettingsStore()
   const sidebarRef = useRef<HTMLElement>(null)
+  const isDarkMode = currentTheme?.mode === 'dark'
+
+  const handleToggleDayNight = useCallback(async () => {
+    if (!currentTheme) return
+    const newMode = isDarkMode ? 'light' : 'dark'
+    // Find matching theme in opposite mode
+    const currentName = currentTheme.name.replace(/ (Dark|Light)$/, '')
+    const match = Object.values(themes).find((t) => {
+      const name = t.name.replace(/ (Dark|Light)$/, '')
+      return name === currentName && t.mode === newMode
+    })
+    const target = match ?? Object.values(themes).find((t) => t.mode === newMode)
+    if (target) {
+      try {
+        const config = JSON.parse(target.config) as ThemeConfig
+        applyThemeConfig(config)
+        await setSetting('theme_id', target.id)
+        await setSetting('theme_mode', newMode)
+        setCurrentTheme(target.id)
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, [currentTheme, isDarkMode, themes, setSetting, setCurrentTheme])
 
   const handleViewClick = useCallback(
     (view: ViewId) => {
@@ -122,43 +144,26 @@ export function Sidebar({
       </nav>
 
       {/* Footer */}
-      <div
-        className={`flex items-center border-t border-border ${
-          collapsed ? 'flex-col gap-1 p-1.5' : 'gap-1 p-3'
-        }`}
-      >
+      <div className="flex flex-col gap-1 border-t border-border p-1.5">
         <button
           onClick={onSettings}
-          className={`flex items-center gap-2 rounded-lg text-muted transition-colors hover:bg-foreground/6 ${
-            collapsed ? 'p-2' : 'flex-1 px-2 py-1.5'
+          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
+            collapsed ? 'justify-center' : ''
           }`}
-          title="Project settings"
+          title="Settings"
         >
           <Settings size={14} />
-          {!collapsed && (
-            <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>
-          )}
+          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>}
         </button>
         <button
-          onClick={onPrioritySettings}
-          className="rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
-          title="Priority settings"
+          onClick={handleToggleDayNight}
+          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
+            collapsed ? 'justify-center' : ''
+          }`}
+          title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-          <Gauge size={14} />
-        </button>
-        <button
-          onClick={onThemeSettings}
-          className="rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
-          title="Theme settings"
-        >
-          <Palette size={14} />
-        </button>
-        <button
-          onClick={onLogout}
-          className="rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
-          title="Log out"
-        >
-          <LogOut size={14} />
+          {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>}
         </button>
       </div>
     </aside>

@@ -1,2 +1,5 @@
 export { ThemeSettingsModal } from './ThemeSettingsModal'
 export { PrioritySettingsModal } from './PrioritySettingsModal'
+export { UnifiedSettingsModal } from './UnifiedSettingsModal'
+export { ThemeSettingsContent } from './ThemeSettingsContent'
+export { PrioritySettingsContent } from './PrioritySettingsContent'
