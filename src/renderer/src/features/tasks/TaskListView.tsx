@@ -346,6 +346,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           statuses={statuses}
           selectedTaskId={currentTaskId}
           taskFilterOpacity={taskFilterOpacity}
+          dropIndicator={dropIndicator}
           onSelectTask={handleSelectTask}
           onStatusChange={handleStatusChange}
           onDeleteTask={handleDeleteTask}

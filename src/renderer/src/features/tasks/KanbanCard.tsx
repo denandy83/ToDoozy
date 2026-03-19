@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { Calendar } from 'lucide-react'
+import type { DropIndicator } from './useDragAndDrop'
 import { PriorityBadge } from '../../shared/components/PriorityBadge'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useTaskLabelsHook } from '../../shared/stores'
+import { useTaskLabelsHook, useChildCount } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
@@ -18,6 +18,7 @@ interface KanbanCardProps {
   isSelected: boolean
   filterOpacity?: number
   isDragOverlay?: boolean
+  dropIndicator?: DropIndicator | null
   onSelect: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
@@ -29,11 +30,13 @@ export function KanbanCard({
   isSelected,
   filterOpacity,
   isDragOverlay,
+  dropIndicator,
   onSelect,
   onStatusChange,
   onDeleteTask
 }: KanbanCardProps): React.JSX.Element {
   const taskLabels = useTaskLabelsHook(task.id)
+  const childCount = useChildCount(task.id)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const prioritySettings = usePrioritySettings()
@@ -55,19 +58,19 @@ export function KanbanCard({
     attributes,
     listeners,
     setNodeRef,
-    transform,
-    transition: sortableTransition,
     isDragging
   } = useSortable({
     id: task.id,
     disabled: isDragOverlay ?? false
   })
 
+  const isDropAbove = dropIndicator?.targetId === task.id && dropIndicator.intent === 'above'
+  const isDropBelow = dropIndicator?.targetId === task.id && dropIndicator.intent === 'below'
+  const isDropInside = dropIndicator?.targetId === task.id && dropIndicator.intent === 'inside'
+
   const style = isDragOverlay
     ? { opacity: 0.8 }
     : {
-        transform: CSS.Transform.toString(transform),
-        transition: sortableTransition ?? undefined,
         opacity: filterOpacity !== undefined ? filterOpacity : isDragging ? 0.3 : 1
       }
 
@@ -130,7 +133,7 @@ export function KanbanCard({
         isSelected
           ? 'border-accent/15 bg-accent/12'
           : 'border-border hover:border-foreground/10 hover:bg-foreground/6'
-      }`}
+      } ${isDropInside ? 'bg-accent/15 ring-2 ring-accent/30 scale-[1.01]' : ''}`}
       style={{ ...style, ...tintStyle }}
       {...attributes}
       {...listeners}
@@ -138,6 +141,15 @@ export function KanbanCard({
       aria-selected={isSelected}
       tabIndex={0}
     >
+      {/* Drop indicator: above line */}
+      {isDropAbove && (
+        <div className="absolute left-0 right-0 top-0 z-10 h-0.5 rounded-t bg-accent" />
+      )}
+      {/* Drop indicator: below line */}
+      {isDropBelow && (
+        <div className="absolute bottom-0 left-0 right-0 z-10 h-0.5 rounded-b bg-accent" />
+      )}
+
       {/* Priority color bar */}
       {showColorBar && (
         <div
@@ -156,7 +168,7 @@ export function KanbanCard({
       </p>
 
       {/* Metadata row */}
-      {(showBadge || taskLabels.length > 0 || dueDateStr) && (
+      {(showBadge || taskLabels.length > 0 || dueDateStr || childCount.total > 0) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {showBadge && <PriorityBadge priority={task.priority} />}
 
@@ -176,6 +188,20 @@ export function KanbanCard({
             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted">
               <Calendar size={10} />
               {dueDateStr}
+            </span>
+          )}
+
+          {childCount.total > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-1 w-6 overflow-hidden rounded-full bg-foreground/10">
+                <span
+                  className="block h-full rounded-full bg-accent"
+                  style={{ width: `${(childCount.done / childCount.total) * 100}%` }}
+                />
+              </span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
+                {childCount.done}/{childCount.total}
+              </span>
             </span>
           )}
         </div>

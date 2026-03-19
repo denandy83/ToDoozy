@@ -1,8 +1,9 @@
 import { useDroppable } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext } from '@dnd-kit/sortable'
 import { useMemo } from 'react'
 import type { Task, Status } from '../../../../shared/types'
 import { KanbanCard } from './KanbanCard'
+import type { DropIndicator } from './useDragAndDrop'
 
 interface KanbanColumnProps {
   status: Status
@@ -10,6 +11,7 @@ interface KanbanColumnProps {
   allStatuses: Status[]
   selectedTaskId: string | null
   taskFilterOpacity?: Record<string, number>
+  dropIndicator?: DropIndicator | null
   onSelectTask: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
@@ -21,6 +23,7 @@ export function KanbanColumn({
   allStatuses,
   selectedTaskId,
   taskFilterOpacity,
+  dropIndicator,
   onSelectTask,
   onStatusChange,
   onDeleteTask
@@ -60,7 +63,7 @@ export function KanbanColumn({
           isOver ? 'bg-accent/8' : ''
         }`}
       >
-        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+        <SortableContext items={taskIds}>
           {tasks.map((task) => (
             <KanbanCard
               key={task.id}
@@ -68,6 +71,7 @@ export function KanbanColumn({
               statuses={allStatuses}
               isSelected={selectedTaskId === task.id}
               filterOpacity={taskFilterOpacity?.[task.id]}
+              dropIndicator={dropIndicator}
               onSelect={onSelectTask}
               onStatusChange={onStatusChange}
               onDeleteTask={onDeleteTask}

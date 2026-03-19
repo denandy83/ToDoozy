@@ -3,12 +3,14 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore } from '../../shared/stores'
 import type { Task, Status } from '../../../../shared/types'
 import { KanbanColumn } from './KanbanColumn'
+import type { DropIndicator } from './useDragAndDrop'
 
 interface KanbanViewProps {
   tasks: Task[]
   statuses: Status[]
   selectedTaskId: string | null
   taskFilterOpacity?: Record<string, number>
+  dropIndicator?: DropIndicator | null
   onSelectTask: (taskId: string) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
@@ -19,6 +21,7 @@ export function KanbanView({
   statuses,
   selectedTaskId,
   taskFilterOpacity,
+  dropIndicator,
   onSelectTask,
   onStatusChange,
   onDeleteTask
@@ -132,6 +135,7 @@ export function KanbanView({
           allStatuses={statuses}
           selectedTaskId={selectedTaskId}
           taskFilterOpacity={taskFilterOpacity}
+          dropIndicator={dropIndicator}
           onSelectTask={onSelectTask}
           onStatusChange={onStatusChange}
           onDeleteTask={onDeleteTask}

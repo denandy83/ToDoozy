@@ -307,6 +307,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           statuses={statuses}
           selectedTaskId={currentTaskId}
           taskFilterOpacity={taskFilterOpacity}
+          dropIndicator={dropIndicator}
           onSelectTask={handleSelectTask}
           onStatusChange={handleStatusChange}
           onDeleteTask={handleDeleteTask}

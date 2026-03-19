@@ -6,8 +6,7 @@ import {
   UniqueIdentifier,
   CollisionDetection,
   closestCenter,
-  pointerWithin,
-  rectIntersection
+  pointerWithin
 } from '@dnd-kit/core'
 import type { Task } from '../../../../shared/types'
 
@@ -43,14 +42,9 @@ interface UseDragAndDropReturn {
   collisionDetection: CollisionDetection
 }
 
-function getDropIntent(overRect: DOMRect, pointerY: number): DropIntent {
-  const relativeY = pointerY - overRect.top
-  const height = overRect.height
-  const pct = relativeY / height
-
-  if (pct < 0.2) return 'above'
-  if (pct > 0.8) return 'below'
-  return 'inside'
+function getAboveOrBelow(overRect: DOMRect, pointerY: number): 'above' | 'below' {
+  const midY = overRect.top + overRect.height / 2
+  return pointerY < midY ? 'above' : 'below'
 }
 
 export function useDragAndDrop({
@@ -71,11 +65,40 @@ export function useDragAndDrop({
   })
 
   const lastOverIdRef = useRef<UniqueIdentifier | null>(null)
+  const dropIndicatorRef = useRef<DropIndicator | null>(null)
+  const pointerYRef = useRef<number>(0)
+  const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Track actual pointer position via native event
+  const pointerMoveHandler = useRef<((e: PointerEvent) => void) | null>(null)
+
+  const cleanupPointerListener = useCallback(() => {
+    if (pointerMoveHandler.current) {
+      window.removeEventListener('pointermove', pointerMoveHandler.current)
+      pointerMoveHandler.current = null
+    }
+  }, [])
+
+  const clearDwellTimer = useCallback(() => {
+    if (dwellTimerRef.current) {
+      clearTimeout(dwellTimerRef.current)
+      dwellTimerRef.current = null
+    }
+  }, [])
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const { active } = event
       const activeTask = tasks[active.id as string] ?? null
+
+      // Track live pointer position
+      cleanupPointerListener()
+      const handler = (e: PointerEvent): void => {
+        pointerYRef.current = e.clientY
+      }
+      pointerMoveHandler.current = handler
+      window.addEventListener('pointermove', handler)
+
       setDragState({
         activeId: active.id as string,
         activeTask,
@@ -83,14 +106,15 @@ export function useDragAndDrop({
         isDragging: true
       })
     },
-    [tasks]
+    [tasks, cleanupPointerListener]
   )
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
-      const { over, activatorEvent } = event
+      const { over } = event
 
       if (!over || !dragState.activeId) {
+        clearDwellTimer()
         if (dragState.dropIndicator !== null) {
           setDragState((prev) => ({ ...prev, dropIndicator: null }))
         }
@@ -101,6 +125,7 @@ export function useDragAndDrop({
 
       // Skip if hovering over self
       if (overId === dragState.activeId) {
+        clearDwellTimer()
         if (dragState.dropIndicator !== null) {
           setDragState((prev) => ({ ...prev, dropIndicator: null }))
         }
@@ -109,49 +134,58 @@ export function useDragAndDrop({
 
       // Check if this is a sidebar nav drop target
       if (overId.startsWith('nav-')) {
-        setDragState((prev) => ({
-          ...prev,
-          dropIndicator: { targetId: overId, intent: 'inside' }
-        }))
+        const indicator: DropIndicator = { targetId: overId, intent: 'inside' }
+        dropIndicatorRef.current = indicator
+        setDragState((prev) => ({ ...prev, dropIndicator: indicator }))
         return
       }
 
       // Check if this is a kanban column drop target
       if (overId.startsWith('kanban-column-')) {
-        setDragState((prev) => ({
-          ...prev,
-          dropIndicator: { targetId: overId, intent: 'inside' }
-        }))
+        const indicator: DropIndicator = { targetId: overId, intent: 'inside' }
+        dropIndicatorRef.current = indicator
+        setDragState((prev) => ({ ...prev, dropIndicator: indicator }))
         return
       }
 
-      // Calculate drop intent based on pointer position
+      // If we moved to a different target, reset dwell timer
+      const prevOverId = lastOverIdRef.current
+      const sameTarget = prevOverId === overId
+
+      // If already dwelling on this target and showing 'inside', keep it
+      if (sameTarget && dropIndicatorRef.current?.intent === 'inside') {
+        lastOverIdRef.current = over.id
+        return
+      }
+
+      // Calculate above/below based on pointer position
       const overElement = over.rect
-      if (overElement && activatorEvent instanceof PointerEvent) {
-        // Use the delta from the event to approximate current pointer Y
+      let intent: DropIntent = 'above'
+      if (overElement && pointerYRef.current > 0) {
         const overRect = {
           top: overElement.top,
           height: overElement.height
         } as DOMRect
+        intent = getAboveOrBelow(overRect, pointerYRef.current)
+      }
 
-        // Get current pointer position from the active event's client coordinates
-        const pointerY = (activatorEvent as PointerEvent).clientY + (event.delta?.y ?? 0)
-        const intent = getDropIntent(overRect, pointerY)
+      const indicator: DropIndicator = { targetId: overId, intent }
+      dropIndicatorRef.current = indicator
+      setDragState((prev) => ({ ...prev, dropIndicator: indicator }))
 
-        setDragState((prev) => ({
-          ...prev,
-          dropIndicator: { targetId: overId, intent }
-        }))
-      } else {
-        setDragState((prev) => ({
-          ...prev,
-          dropIndicator: { targetId: overId, intent: 'above' }
-        }))
+      // Start dwell timer: if hovering over same task for 500ms, switch to 'inside'
+      if (!sameTarget) {
+        clearDwellTimer()
+        dwellTimerRef.current = setTimeout(() => {
+          const insideIndicator: DropIndicator = { targetId: overId, intent: 'inside' }
+          dropIndicatorRef.current = insideIndicator
+          setDragState((prev) => ({ ...prev, dropIndicator: insideIndicator }))
+        }, 750)
       }
 
       lastOverIdRef.current = over.id
     },
-    [dragState.activeId, dragState.dropIndicator]
+    [dragState.activeId, dragState.dropIndicator, clearDwellTimer]
   )
 
   const handleDragEnd = useCallback(
@@ -160,12 +194,18 @@ export function useDragAndDrop({
       const activeId = active.id as string
       const activeTask = tasks[activeId]
 
+      // Save the drop indicator from ref BEFORE clearing state
+      const savedIndicator = dropIndicatorRef.current
+
+      clearDwellTimer()
+      cleanupPointerListener()
       setDragState({
         activeId: null,
         activeTask: null,
         dropIndicator: null,
         isDragging: false
       })
+      dropIndicatorRef.current = null
 
       if (!over || !activeTask) return
 
@@ -193,9 +233,9 @@ export function useDragAndDrop({
       const overTask = tasks[overId]
       if (!overTask) return
 
-      // Calculate the intent from the last known drop indicator
-      const intent = dragState.dropIndicator?.targetId === overId
-        ? dragState.dropIndicator.intent
+      // Read intent from the saved indicator (not from cleared state)
+      const intent = savedIndicator?.targetId === overId
+        ? savedIndicator.intent
         : 'above'
 
       if (intent === 'inside') {
@@ -215,7 +255,12 @@ export function useDragAndDrop({
           await onReparent(activeId, targetParentId)
         }
 
-        // If moving to a different status, that's handled by reparent/update
+        // If moving to a different status, change it
+        if (activeTask.status_id !== targetStatusId && onStatusChangeRef.current) {
+          await onStatusChangeRef.current(activeId, targetStatusId)
+        }
+
+        // Reorder within the target context
         const siblings = getTasksForParent(targetParentId, targetStatusId)
         const filtered = siblings.filter((t) => t.id !== activeId)
         const overIndex = filtered.findIndex((t) => t.id === overId)
@@ -227,33 +272,47 @@ export function useDragAndDrop({
         await onReorder(newOrder.map((t) => t.id))
       }
     },
-    [tasks, dragState.dropIndicator, onReorder, onReparent, onMoveToView, getTasksForParent]
+    [tasks, onReorder, onReparent, onMoveToView, getTasksForParent, cleanupPointerListener, clearDwellTimer]
   )
 
   const handleDragCancel = useCallback(() => {
+    clearDwellTimer()
+    cleanupPointerListener()
     setDragState({
       activeId: null,
       activeTask: null,
       dropIndicator: null,
       isDragging: false
     })
-  }, [])
+    dropIndicatorRef.current = null
+  }, [cleanupPointerListener, clearDwellTimer])
 
-  // Custom collision detection: use pointer-within for nav items, closestCenter for tasks
+  // Custom collision detection: pointer-within for all elements, closestCenter as fallback
   const collisionDetection: CollisionDetection = useCallback(
     (args) => {
-      // First check pointer-within for sidebar nav items and kanban columns
       const pointerCollisions = pointerWithin(args)
+
+      // Nav items always take priority
       const navCollisions = pointerCollisions.filter((c) =>
         String(c.id).startsWith('nav-')
       )
       if (navCollisions.length > 0) return navCollisions
 
-      // Then use rectIntersection for task items
-      const rectCollisions = rectIntersection(args)
-      if (rectCollisions.length > 0) return rectCollisions
+      // For kanban: prefer card collisions over column collisions
+      // (cards are children of columns, so both match pointerWithin)
+      const cardCollisions = pointerCollisions.filter((c) => {
+        const id = String(c.id)
+        return !id.startsWith('nav-') && !id.startsWith('kanban-column-')
+      })
+      if (cardCollisions.length > 0) return cardCollisions
 
-      // Fall back to closest center
+      // Kanban column (when pointer is in empty space within column, not over a card)
+      const kanbanCollisions = pointerCollisions.filter((c) =>
+        String(c.id).startsWith('kanban-column-')
+      )
+      if (kanbanCollisions.length > 0) return kanbanCollisions
+
+      // Fallback to closestCenter when pointer isn't inside any element
       return closestCenter(args)
     },
     []

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import type { Task, Status, Label } from '../../../../shared/types'
@@ -89,7 +89,7 @@ export function StatusSection({
       </button>
 
       {!collapsed && (
-        <SortableContext items={sortedIds} strategy={verticalListSortingStrategy}>
+        <SortableContext items={sortedIds}>
           <div role="rowgroup">
             {sorted.map((task) => (
               <TaskRow

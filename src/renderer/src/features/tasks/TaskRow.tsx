@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, GripVertical, Plus } from 'lucide-react'
+import { Trash2, ChevronRight, Plus } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { LabelPicker } from '../../shared/components/LabelPicker'
@@ -90,9 +89,6 @@ export function TaskRow({
     attributes,
     listeners,
     setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition: sortableTransition,
     isDragging
   } = useSortable({
     id: task.id,
@@ -102,9 +98,8 @@ export function TaskRow({
   const style = isDragOverlay
     ? undefined
     : {
-        transform: CSS.Transform.toString(transform),
-        transition: sortableTransition ?? undefined,
-        paddingLeft: `${16 + depth * 24}px`
+        paddingLeft: `${16 + depth * 24}px`,
+        opacity: isDragging ? 0.3 : undefined
       }
 
   useEffect(() => {
@@ -279,7 +274,7 @@ export function TaskRow({
     : {
         ...style,
         ...tintStyle,
-        opacity: filterOpacity !== undefined ? filterOpacity : (isDragging ? 0.3 : 1)
+        opacity: filterOpacity !== undefined ? filterOpacity : style?.opacity
       }
 
   return (
@@ -293,9 +288,10 @@ export function TaskRow({
           isSelected
             ? 'bg-accent/12 border-l-2 border-accent/15'
             : 'border-l-2 border-transparent hover:bg-foreground/6'
-        } ${isDropInside ? 'bg-accent/8 scale-[1.01]' : ''}`}
+        } ${isDropInside ? 'bg-accent/15 ring-2 ring-accent/30 scale-[1.01]' : ''}`}
         style={rowStyle}
         {...attributes}
+        {...listeners}
         role="row"
         aria-selected={isSelected}
         aria-expanded={hasChildren ? isExpanded : undefined}
@@ -317,17 +313,6 @@ export function TaskRow({
         {isDropBelow && (
           <div className="absolute bottom-0 left-0 right-0 z-10 h-0.5 bg-accent" />
         )}
-
-        {/* Drag handle */}
-        <button
-          ref={setActivatorNodeRef}
-          {...listeners}
-          className="flex-shrink-0 cursor-grab rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground active:cursor-grabbing"
-          tabIndex={-1}
-          aria-label="Drag to reorder"
-        >
-          <GripVertical size={12} />
-        </button>
 
         {/* Expand/collapse chevron */}
         <button
@@ -598,8 +583,7 @@ function SubtaskList({
           className="flex items-center gap-2 rounded border border-transparent py-2 pr-6"
           style={{ paddingLeft: `${16 + depth * 24}px` }}
         >
-          {/* Spacers to align with task title: grip + chevron + status icon */}
-          <div className="flex-shrink-0 p-0.5 invisible"><GripVertical size={12} /></div>
+          {/* Spacers to align with task title: chevron + status icon */}
           <div className="flex-shrink-0 p-0.5 invisible"><ChevronRight size={12} /></div>
           <div className="flex-shrink-0 p-0.5 invisible"><div className="h-4 w-4" /></div>
           <input

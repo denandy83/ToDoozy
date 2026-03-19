@@ -12,6 +12,7 @@ import { LayoutList, Columns3 } from 'lucide-react'
 import { ProjectSwitcher, NewProjectModal, ProjectSettingsModal } from './features/projects'
 import { ThemeSettingsModal, PrioritySettingsModal } from './features/settings'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
+import { KanbanCard } from './features/tasks/KanbanCard'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
 import { Sidebar } from './features/sidebar'
 import { DetailPanel } from './features/detail'
@@ -85,7 +86,7 @@ export function AppLayout(): React.JSX.Element {
 
   // DnD sensors
   const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { distance: 8 }
+    activationConstraint: { delay: 200, tolerance: 5 }
   })
   const keyboardSensor = useSensor(KeyboardSensor, {
     coordinateGetter: sortableKeyboardCoordinates
@@ -395,7 +396,19 @@ export function AppLayout(): React.JSX.Element {
       {/* Drag overlay - ghost card */}
       <DragOverlay dropAnimation={null}>
         {dragState.activeTask ? (
-          <TaskDragOverlay task={dragState.activeTask} statuses={statuses} />
+          layoutMode === 'kanban' ? (
+            <KanbanCard
+              task={dragState.activeTask}
+              statuses={statuses}
+              isSelected={false}
+              isDragOverlay
+              onSelect={() => {}}
+              onStatusChange={() => {}}
+              onDeleteTask={() => {}}
+            />
+          ) : (
+            <TaskDragOverlay task={dragState.activeTask} statuses={statuses} />
+          )
         ) : null}
       </DragOverlay>
     </DndContext>
