@@ -146,16 +146,6 @@ export function Sidebar({
       {/* Footer */}
       <div className="flex flex-col gap-1 border-t border-border p-1.5">
         <button
-          onClick={onSettings}
-          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
-            collapsed ? 'justify-center' : ''
-          }`}
-          title="Settings"
-        >
-          <Settings size={14} />
-          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>}
-        </button>
-        <button
           onClick={handleToggleDayNight}
           className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
             collapsed ? 'justify-center' : ''
@@ -164,6 +154,16 @@ export function Sidebar({
         >
           {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
           {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+        </button>
+        <button
+          onClick={onSettings}
+          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
+            collapsed ? 'justify-center' : ''
+          }`}
+          title="Settings"
+        >
+          <Settings size={14} />
+          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>}
         </button>
       </div>
     </aside>
