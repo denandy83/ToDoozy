@@ -36,6 +36,7 @@ export function UnifiedSettingsModal({
   const themeRef = useRef<ThemeSettingsHandle>(null)
   const [themeDirty, setThemeDirty] = useState(false)
   const [pendingUnsaved, setPendingUnsaved] = useState(false)
+  const [themeBlocked, setThemeBlocked] = useState(false)
   const [shake, setShake] = useState(false)
 
   // Sync selected project when modal opens or projectId changes
@@ -103,20 +104,28 @@ export function UnifiedSettingsModal({
   }, [addToast, pendingUnsaved, triggerShake])
 
   const handleTabChange = useCallback((tab: Tab): void => {
-    if (activeTab === 'themes' && themeDirty && tab !== 'themes') {
-      showUnsavedThemeToast(() => setActiveTab(tab))
-      return
+    if (activeTab === 'themes' && tab !== 'themes') {
+      if (themeDirty) {
+        showUnsavedThemeToast(() => setActiveTab(tab))
+        return
+      }
+      // Revert preview even if just browsing (no color edits)
+      themeRef.current?.revert()
     }
     setActiveTab(tab)
   }, [activeTab, themeDirty, showUnsavedThemeToast])
 
   const handleClose = useCallback((): void => {
-    if (activeTab === 'themes' && themeDirty) {
-      showUnsavedThemeToast(() => {
-        setActiveTab('general')
-        onClose()
-      })
-      return
+    if (activeTab === 'themes') {
+      if (themeDirty) {
+        showUnsavedThemeToast(() => {
+          setActiveTab('general')
+          onClose()
+        })
+        return
+      }
+      // Revert preview even if just browsing
+      themeRef.current?.revert()
     }
     setActiveTab('general')
     onClose()
@@ -142,7 +151,14 @@ export function UnifiedSettingsModal({
 
   return (
     <Modal open={open} onClose={handleClose} title="Settings" size="large" className={shake ? 'modal-shake' : ''}>
-      <div className="flex gap-6 h-[500px]">
+      {/* Block interaction when a persistent toast is active */}
+      {(pendingUnsaved || themeBlocked) && (
+        <div
+          className="absolute inset-0 z-10 cursor-not-allowed"
+          onClick={(e) => { e.stopPropagation(); triggerShake() }}
+        />
+      )}
+      <div className={`flex gap-6 h-[500px] ${(pendingUnsaved || themeBlocked) ? 'pointer-events-none opacity-60' : ''}`}>
         {/* Left nav — fixed, no scroll */}
         <nav className="flex flex-col gap-1 min-w-[120px] flex-shrink-0">
           {tabs.map((tab) => (
@@ -187,7 +203,7 @@ export function UnifiedSettingsModal({
             />
           )}
           {activeTab === 'themes' && (
-            <ThemeSettingsContent ref={themeRef} onDirtyChange={setThemeDirty} />
+            <ThemeSettingsContent ref={themeRef} onDirtyChange={setThemeDirty} onBlockingChange={setThemeBlocked} />
           )}
           {activeTab === 'priorities' && (
             <PrioritySettingsContent />

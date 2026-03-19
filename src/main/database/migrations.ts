@@ -138,4 +138,21 @@ const migration_1: Migration = (db) => {
   }
 }
 
-export const migrations: Migration[] = [migration_1]
+const migration_2: Migration = (db) => {
+  db.exec(`ALTER TABLE themes ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0`)
+  // Mark the 12 built-in themes by name
+  const builtinNames = [
+    'Standard Dark', 'Standard Light',
+    'Warm Earth Dark', 'Warm Earth Light',
+    'Ocean Blue Dark', 'Ocean Blue Light',
+    'Amethyst Dark', 'Amethyst Light',
+    'Forest Dark', 'Forest Light',
+    'Rosewood Dark', 'Rosewood Light'
+  ]
+  const stmt = db.prepare('UPDATE themes SET is_builtin = 1 WHERE name = ?')
+  for (const name of builtinNames) {
+    stmt.run(name)
+  }
+}
+
+export const migrations: Migration[] = [migration_1, migration_2]

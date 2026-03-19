@@ -87,6 +87,7 @@ export interface Theme {
   name: string
   mode: string
   config: string // JSON string of ThemeConfig
+  is_builtin: number
   created_at: string
   updated_at: string
 }
