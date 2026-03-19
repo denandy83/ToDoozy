@@ -33,3 +33,9 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Root cause**: IPC can only serialize plain objects. Class instances, functions, or circular references get dropped.
 - **Fix**: Return plain objects from IPC handlers. Use `.toJSON()` or spread into plain objects.
 - **Check first**: Is the IPC handler returning a class instance or complex object?
+
+### react-datepicker locale / manual input parsing
+- **Symptoms**: App crashes with `RangeError: Invalid time value` when opening a component that renders a date. Stored value is `NaN-NaN-NaN` or similar garbage.
+- **Root cause**: react-datepicker's `dateFormat` prop only controls display, not parsing. Without the correct locale registered, manual input in dd/MM/yyyy is parsed as MM/dd/yyyy (en-US default), creating Invalid Date objects that get stored as garbage.
+- **Fix**: Register the correct date-fns locale (`registerLocale('en-GB', enGB)`) and pass `locale="en-GB"` to ReactDatePicker. Add `isValidDate` guards on `toDate` and `formatIso` so invalid dates never crash or store garbage. Use `onChangeRaw` with `InputEvent` detection for input masking without interfering with calendar picks.
+- **Check first**: Is a locale registered for react-datepicker? Does the `dateFormat` match what the locale expects? Is `toDate` defensive against invalid stored values?
