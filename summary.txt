@@ -1,0 +1,103 @@
+ToDoozy Session Summary — 2026-03-19
+=====================================
+
+## What We Did
+
+Walked through the PRD stories (prd.json) one by one with the user to QA the app.
+All 18 stories show passes: true, but we found and fixed real bugs during testing.
+
+## Stories Reviewed
+
+### Story 1-5 (Scaffold, DB, Repos, IPC, Stores) — PASSED
+No user-visible issues.
+
+### Story 6 (Auth / Login) — FIXED
+- BUG: Google OAuth worked but after login the app showed a black screen.
+  Root cause: Zustand 5's `create()` uses `useSyncExternalStore` without selector caching.
+  Any selector returning a new reference caused infinite re-render loops.
+  FIX: Switched all 9 stores to `createWithEqualityFn` with `shallow` equality.
+  Also added `use-sync-external-store` peer dep.
+- BUG: Default "Personal" project not visible after first login.
+  Root cause: `ensureDefaultProject` created the project but never added a `project_members` row.
+  `getProjectsForUser` JOINs on `project_members`, so the project was invisible.
+  FIX: Added `addMember` call in `ensureDefaultProject` and `NewProjectModal`.
+  Also added backfill for existing users on login.
+
+### Story 7 (Projects & Statuses) — FIXED
+- Removed "Danger Zone" label from project settings (too alarming, "Delete Project" is enough)
+- Status reordering: replaced non-functional grip handle with @dnd-kit drag-and-drop
+- Added X close button to shared Modal component
+
+### Story 8 (Task CRUD) — PASSED
+- Status cycling works as designed (wraps around). User initially thought tasks "disappeared"
+  when clicking Done status — they just moved to the "Not Started" section.
+
+### Story 9 (Views & Sidebar) — FIXED
+- Collapsed sidebar count badges were floating to wrong position (missing `relative` on parent)
+- Adjusted badge style to match expanded view (text-only, not pill badge)
+- Positioned badge inside the button background area
+
+### Story 10 (Detail Panel) — PARTIALLY REVIEWED, IN PROGRESS
+Fixed so far:
+- Dynamic multi-column layout for bottom panel position using ResizeObserver
+  (adapts 1/2/3+ columns based on width, each column scrollable)
+- Labels not loading: `hydrateLabels` was never called — added to App.tsx project hydration
+- Label chips capped at 3 with "+X" overflow badge and portal tooltip on hover
+- Label picker positioning: opens within task list container, doesn't overlap detail panel
+- Renamed "Pin/Unpin My Day" to "Add/Remove from My Day"
+- My Day now shows all status sections (including empty ones) like Backlog
+- Snooze: extracted shared utility (shared/utils/snooze.ts), preserves time on due date
+- Snooze context menu now also preserves time (was using separate `addDays` that stripped time)
+- Date picker: replaced custom hand-rolled input with `react-datepicker` library
+- Image paste in description: shows placeholder in edit mode instead of base64 blob
+
+### UNCOMMITTED CHANGES
+DatePicker.tsx has been updated to use two separate react-datepicker instances:
+- One for date (always visible)
+- One for time (appears when clock icon clicked)
+- Clock icon toggles time on/off
+- X button removes time if showing, removes date if no time
+These changes in DatePicker.tsx and main.css are NOT yet committed.
+
+## Stories NOT YET Reviewed
+- Story 11: Subtasks and hierarchy
+- Story 12: Drag and drop
+- Story 13: Theme system
+- Story 14: Labels with filtering
+- Story 15: Priority system with visualizations
+- Story 16: Kanban toggle
+- Story 17: Context menu with flyout submenus
+- Story 18: Command palette with search operators
+
+## User Preferences Learned
+- Wants consistent UX across the app (same drag-and-drop pattern everywhere)
+- Prefers "Add/Remove" over "Pin/Unpin" language
+- Doesn't like "Danger Zone" labels — the action name is scary enough
+- Wants hover-to-reveal for secondary actions (X buttons)
+- Prefers using established libraries over building custom inputs from scratch
+- Asks to commit/push after each batch of fixes
+- Wants to go through stories 1 by 1, testing each feature, and getting asked for feedback after each
+
+## Key Files Modified This Session
+- All 9 Zustand stores: switched to createWithEqualityFn + shallow
+- src/renderer/src/App.tsx: added hydrateLabels
+- src/renderer/src/shared/components/DatePicker.tsx: react-datepicker
+- src/renderer/src/shared/components/Modal.tsx: X close button
+- src/renderer/src/shared/utils/snooze.ts: shared snooze utility (new)
+- src/renderer/src/features/detail/DetailPanel.tsx: dynamic columns
+- src/renderer/src/features/detail/DetailDescription.tsx: image paste placeholder
+- src/renderer/src/features/detail/DetailSnooze.tsx: uses shared snooze
+- src/renderer/src/features/tasks/TaskRow.tsx: label overflow, picker positioning
+- src/renderer/src/features/tasks/KanbanCard.tsx: label overflow
+- src/renderer/src/features/tasks/StatusList.tsx: dnd-kit reordering
+- src/renderer/src/features/sidebar/NavItem.tsx: badge positioning
+- src/renderer/src/features/views/MyDayView.tsx: show all status sections
+- src/renderer/src/shared/components/ContextMenu.tsx: snooze with time, rename labels
+- src/renderer/src/shared/components/ContextMenuSubmenus.tsx: shared snooze
+- src/renderer/src/assets/main.css: react-datepicker theme overrides
+
+## Next Steps
+1. Commit the uncommitted DatePicker changes
+2. Finish testing Story 10 (detail panel) — user may have more feedback
+3. Continue with Stories 11-18
+4. After all stories reviewed: commit, push, and decide on next priorities

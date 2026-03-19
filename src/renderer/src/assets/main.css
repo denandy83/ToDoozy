@@ -35,8 +35,14 @@ body {
   width: 10rem;
 }
 
+.datepicker-wrapper-time {
+  width: 5rem;
+}
+
 .datepicker-wrapper .react-datepicker-wrapper,
-.datepicker-wrapper .react-datepicker__input-container {
+.datepicker-wrapper .react-datepicker__input-container,
+.datepicker-wrapper-time .react-datepicker-wrapper,
+.datepicker-wrapper-time .react-datepicker__input-container {
   width: 100%;
 }
 
