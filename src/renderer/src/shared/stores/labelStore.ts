@@ -18,6 +18,7 @@ interface LabelActions {
   createLabel(input: CreateLabelInput): Promise<Label>
   updateLabel(id: string, input: UpdateLabelInput): Promise<Label | null>
   deleteLabel(id: string): Promise<boolean>
+  reorderLabels(labelIds: string[]): Promise<void>
   toggleLabelFilter(labelId: string): void
   clearLabelFilters(): void
   setFilterMode(mode: LabelFilterMode): void
@@ -51,9 +52,14 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   async createLabel(input: CreateLabelInput): Promise<Label> {
     try {
       const label = await window.api.labels.create(input)
-      set((state) => ({
-        labels: { ...state.labels, [label.id]: label }
-      }))
+      // Re-hydrate all labels to get fresh order_index values
+      // (create shifts existing labels in the database)
+      const allLabels = await window.api.labels.findByProjectId(input.project_id)
+      const labelMap: Record<string, Label> = {}
+      for (const l of allLabels) {
+        labelMap[l.id] = l
+      }
+      set({ labels: labelMap })
       return label
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create label'
@@ -88,10 +94,39 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
           newFilters.delete(id)
           return { labels: remaining, activeLabelFilters: newFilters }
         })
+        // Remove deleted label from task labels in the task store
+        const { useTaskStore } = await import('./taskStore')
+        useTaskStore.setState((state) => {
+          const updated: Record<string, Label[]> = {}
+          for (const [taskId, labels] of Object.entries(state.taskLabels)) {
+            updated[taskId] = labels.filter((l) => l.id !== id)
+          }
+          return { taskLabels: updated }
+        })
       }
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete label'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  async reorderLabels(labelIds: string[]): Promise<void> {
+    try {
+      await window.api.labels.reorder(labelIds)
+      set((state) => {
+        const updated = { ...state.labels }
+        for (let i = 0; i < labelIds.length; i++) {
+          const label = updated[labelIds[i]]
+          if (label) {
+            updated[labelIds[i]] = { ...label, order_index: i }
+          }
+        }
+        return { labels: updated }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reorder labels'
       set({ error: message })
       throw err
     }

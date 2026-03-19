@@ -30,7 +30,8 @@ const api: TodoozyAPI = {
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
     findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId),
     findTaskLabelsByProject: (projectId) =>
-      ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId)
+      ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId),
+    reorder: (labelIds) => ipcRenderer.invoke('labels:reorder', labelIds)
   },
 
   projects: {

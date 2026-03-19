@@ -54,6 +54,7 @@ export interface LabelsAPI {
   delete(id: string): Promise<boolean>
   findByTaskId(taskId: string): Promise<Label[]>
   findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
+  reorder(labelIds: string[]): Promise<void>
 }
 
 export interface ProjectsAPI {

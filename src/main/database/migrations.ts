@@ -155,4 +155,12 @@ const migration_2: Migration = (db) => {
   }
 }
 
-export const migrations: Migration[] = [migration_1, migration_2]
+const migration_3: Migration = (db) => {
+  db.exec(`ALTER TABLE labels ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0`)
+  // Set initial order based on name
+  const labels = db.prepare('SELECT id FROM labels ORDER BY name ASC').all() as Array<{ id: string }>
+  const stmt = db.prepare('UPDATE labels SET order_index = ? WHERE id = ?')
+  labels.forEach((l, i) => stmt.run(i, l.id))
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3]

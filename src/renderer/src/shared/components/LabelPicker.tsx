@@ -97,28 +97,30 @@ export function LabelPicker({
         </div>
       ) : (
         <>
-          {allLabels.map((label) => {
-            const isAssigned = assignedLabelIds.has(label.id)
-            return (
-              <button
-                key={label.id}
-                onClick={() => onToggleLabel(label.id)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6"
-              >
-                <span
-                  className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                  style={{ backgroundColor: label.color }}
-                />
-                <span className="flex-1 truncate">{label.name}</span>
-                {isAssigned && (
-                  <span className="text-accent text-xs">&#10003;</span>
-                )}
-              </button>
-            )
-          })}
-          {allLabels.length === 0 && (
-            <p className="px-2 py-1.5 text-[10px] text-muted">No labels</p>
-          )}
+          <div className="max-h-48 overflow-y-auto">
+            {allLabels.map((label) => {
+              const isAssigned = assignedLabelIds.has(label.id)
+              return (
+                <button
+                  key={label.id}
+                  onClick={() => onToggleLabel(label.id)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6"
+                >
+                  <span
+                    className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: label.color }}
+                  />
+                  <span className="flex-1 truncate">{label.name}</span>
+                  {isAssigned && (
+                    <span className="text-accent text-xs">&#10003;</span>
+                  )}
+                </button>
+              )
+            })}
+            {allLabels.length === 0 && (
+              <p className="px-2 py-1.5 text-[10px] text-muted">No labels</p>
+            )}
+          </div>
           <div className="mt-1 border-t border-border pt-1">
             <button
               onClick={() => setNewLabelMode(true)}

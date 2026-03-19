@@ -193,6 +193,19 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 
 ---
 
+## Scrollbars
+
+Global scrollbar style applied via `::-webkit-scrollbar` in `main.css`:
+- **Width:** 6px
+- **Track:** transparent
+- **Thumb (idle):** `color-mix(in srgb, var(--color-foreground) 20%, transparent)` — always visible at 20% opacity
+- **Thumb (hover):** `color-mix(in srgb, var(--color-foreground) 50%, transparent)` — 50% on hover
+- **Border radius:** 3px
+
+Applied globally — no class needed. All scrollable areas use this consistently.
+
+---
+
 ## Layout
 
 ### Sidebar

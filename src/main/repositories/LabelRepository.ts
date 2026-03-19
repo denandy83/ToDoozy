@@ -10,19 +10,31 @@ export class LabelRepository {
 
   findByProjectId(projectId: string): Label[] {
     return this.db
-      .prepare('SELECT * FROM labels WHERE project_id = ? ORDER BY name ASC')
+      .prepare('SELECT * FROM labels WHERE project_id = ? ORDER BY order_index ASC')
       .all(projectId) as Label[]
   }
 
   create(input: CreateLabelInput): Label {
     const now = new Date().toISOString()
+    // Shift existing labels down to make room at top
+    this.db.prepare('UPDATE labels SET order_index = order_index + 1 WHERE project_id = ?').run(input.project_id)
     this.db
       .prepare(
-        `INSERT INTO labels (id, project_id, name, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO labels (id, project_id, name, color, order_index, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`
       )
       .run(input.id, input.project_id, input.name, input.color ?? '#888888', now, now)
     return this.findById(input.id)!
+  }
+
+  reorder(labelIds: string[]): void {
+    const reorderTx = this.db.transaction(() => {
+      const stmt = this.db.prepare('UPDATE labels SET order_index = ? WHERE id = ?')
+      for (let i = 0; i < labelIds.length; i++) {
+        stmt.run(i, labelIds[i])
+      }
+    })
+    reorderTx()
   }
 
   update(id: string, input: UpdateLabelInput): Label | undefined {
@@ -55,7 +67,7 @@ export class LabelRepository {
         `SELECT l.* FROM labels l
          INNER JOIN task_labels tl ON tl.label_id = l.id
          WHERE tl.task_id = ?
-         ORDER BY l.name ASC`
+         ORDER BY l.order_index ASC`
       )
       .all(taskId) as Label[]
   }
@@ -67,7 +79,7 @@ export class LabelRepository {
          FROM task_labels tl
          INNER JOIN labels l ON l.id = tl.label_id
          WHERE l.project_id = ?
-         ORDER BY l.name ASC`
+         ORDER BY l.order_index ASC`
       )
       .all(projectId) as TaskLabelMapping[]
   }

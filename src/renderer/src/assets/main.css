@@ -150,3 +150,21 @@ body {
 .modal-shake {
   animation: modal-shake 0.3s ease-in-out;
 }
+
+/* Global scrollbar — always visible, subtle when idle */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--color-foreground) 20%, transparent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-foreground) 50%, transparent);
+}

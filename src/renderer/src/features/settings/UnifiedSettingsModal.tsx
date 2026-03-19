@@ -189,7 +189,7 @@ export function UnifiedSettingsModal({
         </nav>
 
         {/* Content — scrollable */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pr-3">
           {activeTab === 'general' && (
             <GeneralSettings />
           )}

@@ -1,7 +1,32 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Plus, Trash2, Pencil } from 'lucide-react'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+function ColorDot({ color, onChange }: { color: string; onChange: (c: string) => void }): React.JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null)
+  return (
+    <button
+      className="relative h-3.5 w-3.5 flex-shrink-0 rounded-full cursor-pointer ring-1 ring-foreground/10 hover:ring-foreground/30 transition-all"
+      style={{ backgroundColor: color }}
+      onClick={() => inputRef.current?.click()}
+      title="Change color"
+    >
+      <input
+        ref={inputRef}
+        type="color"
+        value={color}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      />
+    </button>
+  )
+}
 import { useLabelStore, useLabelsByProject } from '../../shared/stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores/projectStore'
+import { useTaskStore } from '../../shared/stores/taskStore'
+import { useToast } from '../../shared/components/Toast'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import type { Label } from '../../../../shared/types'
 
@@ -9,27 +34,68 @@ export function LabelSettingsContent(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
   const labels = useLabelsByProject(projectId)
-  const { createLabel, updateLabel, deleteLabel, filterMode, setFilterMode } = useLabelStore()
+  const { createLabel, updateLabel, deleteLabel, reorderLabels, filterMode, setFilterMode } = useLabelStore()
+  const taskLabels = useTaskStore((s) => s.taskLabels)
+  const { addToast } = useToast()
   const setSetting = useSettingsStore((s) => s.setSetting)
   const blurOpacityStr = useSetting('label_blur_opacity')
   const blurOpacity = blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8
 
+  const [showAddInput, setShowAddInput] = useState(false)
   const [newName, setNewName] = useState('')
   const [newColor, setNewColor] = useState('#6366f1')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
+  const addInputRef = useRef<HTMLInputElement>(null)
+  const addRowRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (editingId) editInputRef.current?.focus()
   }, [editingId])
+
+  useEffect(() => {
+    if (showAddInput) {
+      requestAnimationFrame(() => {
+        addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        addInputRef.current?.focus()
+      })
+    }
+  }, [showAddInput])
 
   const handleCreate = useCallback(async () => {
     const name = newName.trim()
     if (!name || !projectId) return
     await createLabel({ id: crypto.randomUUID(), project_id: projectId, name, color: newColor })
     setNewName('')
+    requestAnimationFrame(() => {
+      addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      addInputRef.current?.focus()
+    })
   }, [newName, newColor, projectId, createLabel])
+
+  const sortedLabels = useMemo(
+    () => [...labels].sort((a, b) => a.order_index - b.order_index),
+    [labels]
+  )
+  const labelIds = useMemo(() => sortedLabels.map((l) => l.id), [sortedLabels])
+
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 5 } }))
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      const oldIndex = sortedLabels.findIndex((l) => l.id === active.id)
+      const newIndex = sortedLabels.findIndex((l) => l.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return
+      const newOrder = [...sortedLabels]
+      const [moved] = newOrder.splice(oldIndex, 1)
+      newOrder.splice(newIndex, 0, moved)
+      reorderLabels(newOrder.map((l) => l.id))
+    },
+    [sortedLabels, reorderLabels]
+  )
 
   const handleStartEdit = useCallback((label: Label) => {
     setEditingId(label.id)
@@ -45,9 +111,25 @@ export function LabelSettingsContent(): React.JSX.Element {
     setEditingId(null)
   }, [editingId, editName, updateLabel])
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteLabel(id)
-  }, [deleteLabel])
+  const handleDelete = useCallback((id: string) => {
+    // Count tasks that have this label assigned
+    const assignedCount = Object.values(taskLabels).filter(
+      (labels) => labels.some((l) => l.id === id)
+    ).length
+
+    if (assignedCount > 0) {
+      addToast({
+        message: `This label is assigned to ${assignedCount} task${assignedCount === 1 ? '' : 's'}. Remove it?`,
+        persistent: true,
+        actions: [
+          { label: 'Remove', variant: 'danger', onClick: () => deleteLabel(id) },
+          { label: 'Cancel', variant: 'muted', onClick: () => {} }
+        ]
+      })
+    } else {
+      deleteLabel(id)
+    }
+  }, [deleteLabel, taskLabels, addToast])
 
   return (
     <div className="flex flex-col gap-6">
@@ -100,80 +182,156 @@ export function LabelSettingsContent(): React.JSX.Element {
         <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Labels
         </p>
-        <div className="flex flex-col gap-1">
-          {labels.map((label) => (
-            <div
-              key={label.id}
-              className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/6"
-            >
-              <div
-                className="h-3 w-3 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: label.color }}
-              />
-              {editingId === label.id ? (
-                <input
-                  ref={editInputRef}
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSaveEdit()
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                  onBlur={handleSaveEdit}
-                  className="flex-1 bg-transparent text-sm font-light text-foreground focus:outline-none"
+
+        {/* Add label — on top */}
+        {showAddInput ? (
+          <div
+            ref={addRowRef}
+            className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-accent/30 bg-accent/5 px-2 py-1.5"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                if (!newName.trim()) { setShowAddInput(false); setNewName('') }
+              }
+            }}
+          >
+            <ColorDot color={newColor} onChange={setNewColor} />
+            <input
+              ref={addInputRef}
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreate()
+                if (e.key === 'Escape') { e.stopPropagation(); setShowAddInput(false); setNewName('') }
+              }}
+              placeholder="Label name..."
+              className="flex-1 bg-transparent text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none"
+            />
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAddInput(true)}
+            className="mb-2 flex items-center gap-1.5 py-1 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
+          >
+            <Plus size={12} />
+            Add Label
+          </button>
+        )}
+
+        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={labelIds} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-1">
+              {sortedLabels.map((label) => (
+                <SortableLabelRow
+                  key={label.id}
+                  label={label}
+                  disabled={showAddInput}
+                  isEditing={editingId === label.id}
+                  editName={editName}
+                  editInputRef={editingId === label.id ? editInputRef : undefined}
+                  onEditNameChange={setEditName}
+                  onSaveEdit={handleSaveEdit}
+                  onCancelEdit={() => setEditingId(null)}
+                  onStartEdit={() => handleStartEdit(label)}
+                  onDelete={() => handleDelete(label.id)}
+                  onColorChange={(c) => updateLabel(label.id, { color: c })}
                 />
-              ) : (
-                <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
+              ))}
+
+              {sortedLabels.length === 0 && !showAddInput && (
+                <p className="py-2 text-sm font-light text-muted/40">No labels yet</p>
               )}
-              <button
-                onClick={() => handleStartEdit(label)}
-                className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                title="Rename"
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                onClick={() => handleDelete(label.id)}
-                className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-                title="Delete"
-              >
-                <Trash2 size={12} />
-              </button>
             </div>
-          ))}
-
-          {labels.length === 0 && (
-            <p className="py-2 text-sm font-light text-muted/40">No labels yet</p>
-          )}
-        </div>
+          </SortableContext>
+        </DndContext>
       </div>
+    </div>
+  )
+}
 
-      {/* Add new label */}
-      <div className="flex items-center gap-2">
+interface SortableLabelRowProps {
+  label: Label
+  disabled: boolean
+  isEditing: boolean
+  editName: string
+  editInputRef?: React.RefObject<HTMLInputElement | null>
+  onEditNameChange: (name: string) => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onStartEdit: () => void
+  onDelete: () => void
+  onColorChange: (color: string) => void
+}
+
+function SortableLabelRow({
+  label,
+  disabled,
+  isEditing,
+  editName,
+  editInputRef,
+  onEditNameChange,
+  onSaveEdit,
+  onCancelEdit,
+  onStartEdit,
+  onDelete,
+  onColorChange
+}: SortableLabelRowProps): React.JSX.Element {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: label.id, disabled })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+    opacity: isDragging ? 0.3 : undefined
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors ${
+        disabled ? 'pointer-events-none opacity-50' : 'hover:bg-foreground/6'
+      }`}
+      {...attributes}
+      {...listeners}
+    >
+      <ColorDot color={label.color} onChange={onColorChange} />
+      {isEditing ? (
         <input
-          type="color"
-          value={newColor}
-          onChange={(e) => setNewColor(e.target.value)}
-          className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
-        />
-        <input
+          ref={editInputRef}
           type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-          placeholder="New label name..."
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted outline-none focus:border-accent"
+          value={editName}
+          onChange={(e) => onEditNameChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSaveEdit()
+            if (e.key === 'Escape') { e.stopPropagation(); onCancelEdit() }
+          }}
+          onBlur={onSaveEdit}
+          className="flex-1 bg-transparent text-sm font-light text-foreground focus:outline-none"
         />
-        <button
-          onClick={handleCreate}
-          disabled={!newName.trim()}
-          className="flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Plus size={12} />
-          Add
-        </button>
-      </div>
+      ) : (
+        <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
+      )}
+      <button
+        onClick={onStartEdit}
+        className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        title="Rename"
+      >
+        <Pencil size={12} />
+      </button>
+      <button
+        onClick={onDelete}
+        className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
+        title="Delete"
+      >
+        <Trash2 size={12} />
+      </button>
     </div>
   )
 }

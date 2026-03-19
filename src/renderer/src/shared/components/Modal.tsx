@@ -40,7 +40,7 @@ export function Modal({ open, onClose, children, title, size = 'default', classN
       onClick={handleBackdropClick}
     >
       <div className={`relative w-full rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200 ${
-        size === 'large' ? 'max-w-3xl max-h-[80vh] overflow-y-auto' : 'max-w-lg'
+        size === 'large' ? 'max-w-3xl overflow-hidden' : 'max-w-lg'
       } ${className ?? ''}`}>
         <button
           onClick={onClose}
