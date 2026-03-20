@@ -135,7 +135,7 @@ export function KanbanCard({
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       onKeyDown={handleKeyDown}
-      className={`relative cursor-pointer rounded-lg border p-3.5 transition-all motion-safe:duration-150 ${
+      className={`relative cursor-pointer select-none rounded-lg border p-3.5 transition-all motion-safe:duration-150 ${
         isSelected
           ? 'border-accent/15 bg-accent/12'
           : 'border-border hover:border-foreground/10 hover:bg-foreground/6'

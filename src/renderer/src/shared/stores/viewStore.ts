@@ -1,5 +1,6 @@
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
+import { useTaskStore } from './taskStore'
 
 export type ViewId = 'my-day' | 'backlog' | 'archive' | 'templates'
 export type DetailPanelPosition = 'side' | 'bottom'
@@ -44,6 +45,7 @@ export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
 
   setView(view: ViewId): void {
     set({ currentView: view })
+    useTaskStore.getState().clearSelection()
   },
 
   toggleLayoutMode(): void {
@@ -56,6 +58,7 @@ export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
     const idx = VIEW_ORDER.indexOf(currentView)
     const next = VIEW_ORDER[(idx + 1) % VIEW_ORDER.length]
     set({ currentView: next })
+    useTaskStore.getState().clearSelection()
   },
 
   prevView(): void {
@@ -63,6 +66,7 @@ export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
     const idx = VIEW_ORDER.indexOf(currentView)
     const prev = VIEW_ORDER[(idx - 1 + VIEW_ORDER.length) % VIEW_ORDER.length]
     set({ currentView: prev })
+    useTaskStore.getState().clearSelection()
   },
 
   setSidebarPinned(pinned: boolean): void {
