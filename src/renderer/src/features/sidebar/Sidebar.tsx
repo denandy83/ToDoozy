@@ -87,6 +87,7 @@ export function Sidebar({
   const [projectsExpanded, setProjectsExpanded] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectColor, setNewProjectColor] = useState('#6366f1')
   const addProjectRef = useRef<HTMLInputElement>(null)
   const createProject = useProjectStore((s) => s.createProject)
   const createStatus = useStatusStore((s) => s.createStatus)
@@ -98,7 +99,7 @@ export function Sidebar({
     const id = crypto.randomUUID()
     const maxOrder = projects.reduce((max, p) => Math.max(max, p.sidebar_order ?? 0, projects.length - 1), 0)
     const project = await createProject({
-      id, name, owner_id: currentUser.id, color: '#6366f1', icon: 'folder', is_default: 0, sidebar_order: maxOrder + 1
+      id, name, owner_id: currentUser.id, color: newProjectColor, icon: 'folder', is_default: 0, sidebar_order: maxOrder + 1
     })
     await window.api.projects.addMember(id, currentUser.id, 'owner', currentUser.id)
     for (const s of [
@@ -112,7 +113,8 @@ export function Sidebar({
     setSelectedProject(project.id)
     setAddingProject(false)
     setNewProjectName('')
-  }, [newProjectName, currentUser, projects, createProject, createStatus, setSelectedProject])
+    setNewProjectColor('#6366f1')
+  }, [newProjectName, newProjectColor, currentUser, projects, createProject, createStatus, setSelectedProject])
 
   // Auto-expand projects when the selected project is beyond the visible top 5
   useEffect(() => {
@@ -226,11 +228,12 @@ export function Sidebar({
               <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Projects</span>
               <button
                 onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
-                className="rounded p-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
+                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
                 title="New project"
                 aria-label="New project"
               >
-                <Plus size={14} />
+                <Plus size={10} />
+                <span className="text-[8px] font-bold uppercase tracking-wider">Add</span>
               </button>
             </div>
           ) : (
@@ -241,25 +244,38 @@ export function Sidebar({
           {!collapsed && (
             <div className="flex flex-col gap-0.5 pl-4">
               {addingProject && (
-                <input
-                  ref={addProjectRef}
-                  type="text"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newProjectName.trim()) {
-                      handleCreateProject()
-                    }
-                    if (e.key === 'Escape') {
-                      e.stopPropagation()
-                      setAddingProject(false)
-                      setNewProjectName('')
-                    }
-                  }}
-                  onBlur={() => { setAddingProject(false); setNewProjectName('') }}
-                  placeholder="Project name..."
-                  className="rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-[13px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
-                />
+                <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
+                  <input
+                    ref={addProjectRef}
+                    type="text"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newProjectName.trim()) {
+                        handleCreateProject()
+                      }
+                      if (e.key === 'Escape') {
+                        e.stopPropagation()
+                        setAddingProject(false)
+                        setNewProjectName('')
+                        setNewProjectColor('#6366f1')
+                      }
+                    }}
+                    placeholder="Project name..."
+                    className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-1">
+                    {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setNewProjectColor(c)}
+                        className={`h-3.5 w-3.5 rounded-full ${newProjectColor === c ? 'ring-1.5 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                </div>
               )}
               {visibleProjects.map((project) => (
                 <ProjectNavItem
