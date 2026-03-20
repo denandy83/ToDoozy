@@ -79,17 +79,9 @@ If there are completed stories:
 
 ---
 
-## Phase 4: Branch
+## Phase 4: Write the Story
 
-1. Generate a slug from the title (e.g., "Bulk task selection" -> `bulk-task-selection`)
-2. Create a new branch: `git checkout -b ralph/<slug>`
-3. Update prd.json's `branchName` field to `ralph/<slug>`
-
----
-
-## Phase 5: Write the Story
-
-Add the new story to prd.json's `stories` array:
+Add the new story to prd.json's `stories` array **on the current branch** (do NOT create a new branch yet):
 
 ```json
 {
@@ -104,45 +96,45 @@ Add the new story to prd.json's `stories` array:
 
 The description footer is mandatory. It ensures ralph reads the reference files, writes tests, and verifies before marking the story done.
 
----
-
-## Phase 6: Commit
-
-Stage prd.json and implemented-stories.md (if changed). Commit:
-
-```
-feat: add story #<id> — <title>
-```
+Do NOT commit yet — wait until the user is done adding stories.
 
 ---
 
-## Phase 7: Add Another?
+## Phase 5: Add Another?
 
 Ask the user: "Would you like to add another feature?"
 
 - **Yes** — go back to Phase 1
-- **No** — continue to Phase 8
+- **No** — continue to Phase 6
 
 ---
 
-## Phase 8: Launch Ralph
+## Phase 6: Branch, Commit, and Launch Ralph
 
-Tell the user: "Ready to launch ralph to implement this. Starting `./ralph.sh --tool claude 3`."
+Now that all stories are defined:
 
-Run:
-```bash
-./ralph.sh --tool claude 3
-```
+1. Generate a branch name from the stories. If one story, use its slug (e.g., `ralph/bulk-task-selection`). If multiple stories, use a general name (e.g., `ralph/features-20-21-22`).
+2. Create the branch: `git checkout -b ralph/<name>`
+3. Update prd.json's `branchName` field to `ralph/<name>`
+4. Stage prd.json and implemented-stories.md (if changed). Commit:
+   ```
+   feat: add stories #<ids> — <brief summary>
+   ```
+5. Tell the user: "Ready to launch ralph to implement these stories. Starting `./ralph.sh --tool claude 3`."
+6. Run:
+   ```bash
+   ./ralph.sh --tool claude 3
+   ```
 
 Wait for ralph to complete.
 
 ---
 
-## Phase 9: Push
+## Phase 7: Push
 
-After ralph finishes, ask the user: "Ralph is done. Want me to push `ralph/<slug>` to origin?"
+After ralph finishes, ask the user: "Ralph is done. Want me to push `ralph/<name>` to origin?"
 
-- **Yes** — run `git push -u origin ralph/<slug>`
+- **Yes** — run `git push -u origin ralph/<name>`
 - **No** — tell the user the branch is local and ready for review
 
 ---
@@ -152,7 +144,7 @@ After ralph finishes, ask the user: "Ralph is done. Want me to push `ralph/<slug
 - Never skip the grill-me phase. A vague story produces a bad implementation.
 - Always confirm the story with the user before writing it.
 - Always archive completed stories before adding new ones.
-- Always branch. Never add features directly to main.
+- Do NOT create branches or commit until the user is done adding all stories and says "no" to adding another.
 - The description footer (ui-reference, debug-learnings, tests, typecheck) is mandatory on every story.
 - Ralph runs with `--tool claude 3`. Do not change the iteration count.
 - Ask before pushing. Never push automatically.
