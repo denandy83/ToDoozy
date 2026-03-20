@@ -76,7 +76,7 @@
         "Cmd+C does normal text copy when a text input is focused",
         "Works in both list and kanban views"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "23",

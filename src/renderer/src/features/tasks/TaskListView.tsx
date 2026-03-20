@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore, useTasksByProject } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
@@ -49,6 +50,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const filterMode = useLabelStore(selectFilterMode)
   const { createLabel: createLabelInStore } = useLabelStore()
   const { autoSort: priorityAutoSort } = usePrioritySettings()
+  const { copySelectedTasks } = useCopyTasks()
 
   // Hydrate all task labels for this project
   useEffect(() => {
@@ -328,6 +330,15 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         return
       }
 
+      // Cmd+C = copy selected task titles
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        if (selectedTaskIds.size > 0) {
+          e.preventDefault()
+          copySelectedTasks(flatTasks)
+        }
+        return
+      }
+
       // Escape clears selection
       if (e.key === 'Escape') {
         if (selectedTaskIds.size > 0) {
@@ -475,7 +486,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     movingTaskId,
     setMovingTask,
     reorderTasks,
-    prioritySortFn
+    prioritySortFn,
+    copySelectedTasks
   ])
 
   const sortedStatuses = useMemo(

@@ -30,3 +30,14 @@ Started: Fri Mar 20 12:30:44 CET 2026
 - Decision: popup uses document.body portal with z-[9999] positioned via getBoundingClientRect
 - Decision: label-create resolves async but popup closes immediately for responsive UX
 - Decision: suppressed positions tracked per operator instance to allow Escape-then-retype behavior
+
+## Story #22 — Copy task titles to clipboard
+- Added `useCopyTasks` hook (shared/hooks/useCopyTasks.ts) with clipboard logic + toast feedback
+- Added Cmd+C keyboard handler to TaskListView and MyDayView (works in both list and kanban modes)
+- Added "Copy" menu item to single-task ContextMenu (after Duplicate, before Delete) with Clipboard icon
+- Added "Copy" menu item to BulkContextMenu (after Snooze, before Delete) with Clipboard icon
+- Single task: copies title as plain text. Multiple tasks: copies as bulleted markdown list
+- Toast: "Copied" for single, "Copied N tasks" for multiple
+- Cmd+C falls through to default browser behavior when no tasks selected or input is focused
+- Kanban view: Cmd+C works via event bubbling from parent container handler
+- Pre-existing test failures: better-sqlite3 native module version mismatch (NODE_MODULE_VERSION 145 vs 141)

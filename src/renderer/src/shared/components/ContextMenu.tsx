@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, SunMedium, Plus, Copy, Trash2,
+  ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
   Signal, Repeat, Tag, Clock, Focus
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
@@ -185,6 +185,19 @@ export function ContextMenu(): React.JSX.Element | null {
         icon={<Copy size={14} />}
         label="Duplicate"
         onClick={() => handleAction(() => duplicateTask(task.id, crypto.randomUUID()))}
+      />
+      {/* Copy to clipboard */}
+      <MenuItem
+        icon={<Clipboard size={14} />}
+        label="Copy"
+        onClick={() => {
+          navigator.clipboard.writeText(task.title).then(() => {
+            addToast({ message: 'Copied' })
+          }, (err) => {
+            console.error('Failed to copy to clipboard:', err)
+          })
+          close()
+        }}
       />
       <Divider />
 

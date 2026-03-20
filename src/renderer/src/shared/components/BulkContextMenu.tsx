@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, Signal, Tag, Clock, Trash2
+  ChevronRight, Sun, Signal, Tag, Clock, Clipboard, Trash2
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore } from '../stores/taskStore'
@@ -14,6 +14,7 @@ import {
   LabelsSubmenu,
   SnoozeSubmenu
 } from './ContextMenuSubmenus'
+import { useToast } from './Toast'
 import type { Status } from '../../../../shared/types'
 
 type SubmenuId = 'priority' | 'labels' | 'snooze' | null
@@ -28,6 +29,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
 
   const tasks = useTaskStore((s) => s.tasks)
   const { bulkUpdateTasks, setPendingBulkDeleteTasks } = useTaskStore()
+  const { addToast } = useToast()
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)
@@ -161,6 +163,26 @@ export function BulkContextMenu(): React.JSX.Element | null {
       <FlyoutItem id="snooze" icon={<Clock size={14} />} label="Snooze" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <SnoozeSubmenu openLeft={openLeft} onSnooze={(date) => handleAction(() => bulkUpdateTasks(bulkTaskIds, { due_date: date }))} />
       </FlyoutItem>
+      <Divider />
+
+      {/* Copy to clipboard */}
+      <MenuItem
+        icon={<Clipboard size={14} />}
+        label="Copy"
+        onClick={() => {
+          const titles = bulkTaskIds
+            .map((id) => tasks[id]?.title)
+            .filter(Boolean) as string[]
+          if (titles.length === 0) return
+          const text = titles.length === 1 ? titles[0] : titles.map((t) => `- ${t}`).join('\n')
+          navigator.clipboard.writeText(text).then(() => {
+            addToast({ message: titles.length === 1 ? 'Copied' : `Copied ${titles.length} tasks` })
+          }, (err) => {
+            console.error('Failed to copy to clipboard:', err)
+          })
+          close()
+        }}
+      />
       <Divider />
 
       {/* Delete */}

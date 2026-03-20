@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useEffect } from 'react'
+import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
@@ -47,6 +48,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const filterMode = useLabelStore(selectFilterMode)
   const { createLabel: createLabelInStore } = useLabelStore()
   const { autoSort: priorityAutoSort } = usePrioritySettings()
+  const { copySelectedTasks } = useCopyTasks()
 
   // Hydrate all task labels for this project
   useEffect(() => {
@@ -251,6 +253,15 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         return
       }
 
+      // Cmd+C = copy selected task titles
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        if (selectedTaskIds.size > 0) {
+          e.preventDefault()
+          copySelectedTasks(flatTasks)
+        }
+        return
+      }
+
       // Escape clears selection
       if (e.key === 'Escape') {
         if (selectedTaskIds.size > 0) {
@@ -341,7 +352,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     allTasks,
     statuses,
     handleStatusChange,
-    handleDeleteTask
+    handleDeleteTask,
+    copySelectedTasks
   ])
 
   const sortedStatuses = useMemo(
