@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Sun } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
@@ -360,9 +360,11 @@ export function TaskRow({
           onStatusChange={handleStatusChange}
         />
 
-        {project && (
+        {project ? (
           <ProjectIndicator project={project} />
-        )}
+        ) : task.is_in_my_day === 1 ? (
+          <MyDayIndicator />
+        ) : null}
 
         {isEditing ? (
           <input
@@ -669,6 +671,17 @@ function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element 
         document.body
       )}
     </>
+  )
+}
+
+function MyDayIndicator(): React.JSX.Element {
+  return (
+    <div
+      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-accent/15"
+      title="In My Day"
+    >
+      <Sun size={10} className="text-accent" />
+    </div>
   )
 }
 
