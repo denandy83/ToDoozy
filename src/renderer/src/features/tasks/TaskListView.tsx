@@ -58,10 +58,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     if (projectId) hydrateAllTaskLabels(projectId)
   }, [projectId, hydrateAllTaskLabels])
 
-  // Labels actually in use (assigned to at least one task in this view)
+  // Labels actually in use (assigned to at least one non-archived task in this view)
   const labelsInUse = useMemo(() => {
     const usedLabelIds = new Set<string>()
     for (const task of tasks) {
+      if (task.is_archived === 1 || task.is_template === 1) continue
       const labels = taskLabels[task.id]
       if (labels) {
         for (const l of labels) usedLabelIds.add(l.id)

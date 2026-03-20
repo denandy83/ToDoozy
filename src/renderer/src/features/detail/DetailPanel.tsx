@@ -17,6 +17,7 @@ import { DetailSubtasks } from './DetailSubtasks'
 import { PriorityIndicator } from '../../shared/components/PriorityIndicator'
 import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
+import { formatDate } from '../../shared/utils/dateFormat'
 
 export function DetailPanel(): React.JSX.Element | null {
   const task = useTaskStore(selectCurrentTask)
@@ -252,7 +253,7 @@ function DetailPanelContent({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-1.5">
+      <div className="flex h-[36px] items-center justify-between border-b border-border px-4">
         <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Task Details
         </span>
@@ -346,6 +347,11 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     <Section key="due" label="Due Date">
       <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
     </Section>,
+    task.completed_date ? (
+      <Section key="completed" label="Completed">
+        <span className="text-sm font-light text-success">{formatDate(task.completed_date)}</span>
+      </Section>
+    ) : null,
     <Section key="recurrence" label="Recurrence">
       <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
     </Section>,

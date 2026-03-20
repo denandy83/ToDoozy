@@ -177,8 +177,8 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
     }, [smart.popupState, labels])
 
     return (
-      <div className="border-b border-border px-4 py-1.5">
-        <div className="flex items-center gap-2">
+      <div>
+        <div className="flex h-[36px] items-center gap-2 border-b border-border px-4">
           {projectSelector}
           <Plus size={14} className="flex-shrink-0 text-muted" />
           <input

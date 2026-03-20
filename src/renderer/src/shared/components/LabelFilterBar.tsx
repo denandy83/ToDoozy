@@ -27,7 +27,7 @@ export function LabelFilterBar({ labels }: LabelFilterBarProps): React.JSX.Eleme
   if (labels.length === 0) return null
 
   return (
-    <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+    <div className="flex items-center gap-2 px-4 py-2">
       <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
         Labels
       </span>

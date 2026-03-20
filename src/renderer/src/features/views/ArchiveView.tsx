@@ -5,6 +5,7 @@ import type { Task } from '../../../../shared/types'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { useStatusesByProject } from '../../shared/stores'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores'
+import { formatDate } from '../../shared/utils/dateFormat'
 
 export function ArchiveView(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
@@ -106,7 +107,7 @@ export function ArchiveView(): React.JSX.Element {
             </span>
             {task.completed_date && (
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                {new Date(task.completed_date).toLocaleDateString()}
+                {formatDate(task.completed_date)}
               </span>
             )}
             <button

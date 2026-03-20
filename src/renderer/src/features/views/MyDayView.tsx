@@ -567,7 +567,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
       {/* Project filter bar — only show when multiple projects have My Day tasks */}
       {myDayProjects.length > 1 && (
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+        <div className="flex items-center gap-2 px-4 py-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Projects</span>
           <div className="flex items-center gap-1">
             {myDayProjects.map((p) => {
@@ -596,6 +596,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
             })}
           </div>
         </div>
+      )}
+
+      {(labelsInUse.length > 0 || myDayProjects.length > 1) && (
+        <div className="border-b border-border" />
       )}
 
       {layoutMode === 'kanban' ? (
