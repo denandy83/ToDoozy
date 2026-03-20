@@ -106,9 +106,9 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         {/* Mock task list */}
         <div className="flex flex-col gap-1 px-3">
           {[
-            { title: 'Design system review', priority: config.accent, done: false, project: config.accent },
-            { title: 'Update documentation', priority: config.muted, done: false, project: '#f59e0b' },
-            { title: 'Prepare presentation', priority: '#f59e0b', done: false, project: config.accent }
+            { title: 'Design system review', done: false, projectColor: config.accent, initials: 'PE', inMyDay: true },
+            { title: 'Update documentation', done: false, projectColor: '#f59e0b', initials: 'WO', inMyDay: true },
+            { title: 'Prepare presentation', done: false, projectColor: config.accent, initials: 'PE', inMyDay: false }
           ].map((task) => (
             <div
               key={task.title}
@@ -119,8 +119,16 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
                 className="h-2.5 w-2.5 rounded-full border"
                 style={{ borderColor: config.border, backgroundColor: 'transparent' }}
               />
-              <div className="flex h-3 w-3 items-center justify-center rounded-full" style={{ backgroundColor: task.project }}>
-                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>P</span>
+              <div className="relative flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: task.projectColor }}>
+                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>{task.initials}</span>
+                {task.inMyDay && (
+                  <div
+                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full"
+                    style={{ backgroundColor: surface, border: `1px solid ${config.border}` }}
+                  >
+                    <span style={{ fontSize: '5px' }}>☀</span>
+                  </div>
+                )}
               </div>
               <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300 }}>{task.title}</span>
             </div>
@@ -136,8 +144,14 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         <div className="flex flex-col gap-1 px-3">
           <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
             <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-            <div className="flex h-3 w-3 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
-              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>P</span>
+            <div className="relative flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
+              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>PE</span>
+              <div
+                className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full"
+                style={{ backgroundColor: surface, border: `1px solid ${config.border}` }}
+              >
+                <span style={{ fontSize: '5px' }}>☀</span>
+              </div>
             </div>
             <span style={{ color: config.fgMuted, fontSize: '8px', fontWeight: 300, textDecoration: 'line-through' }}>Fix login bug</span>
           </div>
