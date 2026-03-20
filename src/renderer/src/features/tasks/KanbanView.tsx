@@ -32,9 +32,11 @@ export function KanbanView({
   const { setCurrentTask } = useTaskStore()
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const sortedStatuses = useMemo(
-    () => [...statuses].sort((a, b) => a.order_index - b.order_index),
-    [statuses]
+  const sortedStatuses = useMemo(() => [
+    ...statuses.filter((s) => s.is_default === 1),
+    ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
+    ...statuses.filter((s) => s.is_done === 1)
+  ], [statuses]
   )
 
   const tasksByStatus = useMemo(() => {

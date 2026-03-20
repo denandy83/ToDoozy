@@ -263,7 +263,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const task = freshTasks[movingTaskId]
       if (!task) return
 
-      const sortedStatuses = [...statuses].sort((a, b) => a.order_index - b.order_index)
+      const sortedStatuses = [
+        ...statuses.filter((s) => s.is_default === 1),
+        ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
+        ...statuses.filter((s) => s.is_done === 1)
+      ]
       const parentId = task.parent_id
       const statusId = task.status_id
 
@@ -506,10 +510,12 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     copySelectedTasks
   ])
 
-  const sortedStatuses = useMemo(
-    () => [...statuses].sort((a, b) => a.order_index - b.order_index),
-    [statuses]
-  )
+  const sortedStatuses = useMemo(() => {
+    const defaults = statuses.filter((s) => s.is_default === 1)
+    const middle = statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index)
+    const done = statuses.filter((s) => s.is_done === 1)
+    return [...defaults, ...middle, ...done]
+  }, [statuses])
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
