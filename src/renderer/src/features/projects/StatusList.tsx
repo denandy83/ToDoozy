@@ -100,12 +100,14 @@ function SortableStatusRow({
       >
         Edit
       </button>
-      <button
-        onClick={onDelete}
-        className="rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-      >
-        <Trash2 size={12} />
-      </button>
+      {status.is_default !== 1 && status.is_done !== 1 && (
+        <button
+          onClick={onDelete}
+          className="rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
     </div>
   )
 }
