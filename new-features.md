@@ -11,6 +11,23 @@ Feature requests and improvements to be implemented after bugs are resolved.
 - Persist the setting in the database
 - **Context:** Currently hardcoded to en-GB (dd/MM/yyyy). User is in Europe and expects dd/MM/yyyy. Should be configurable for all users.
 
+### Global quick-add window (Cmd+Shift+Space)
+- Floating, always-on-top, frameless, transparent 600×120 window
+- Auto-focus with retry (50/150/300ms)
+- Creates task in My Day, closes on submit/Escape/blur
+- Requires Electron `globalShortcut` API in main process + new BrowserWindow
+- **Spec ref:** REBUILD_SPEC.md §22, §23
+
+### Global show/minimize shortcut (Cmd+Shift+B)
+- Shows or minimizes the app window
+- Uses `minimize()` not `hide()` for Cmd+Tab visibility
+- **Spec ref:** REBUILD_SPEC.md §23
+
+### Menu bar tray icon
+- Context menu: My Day, Backlog, Quick Add, Settings, Quit
+- After tray creation, `app.dock.show()` ensures Cmd+Tab visibility
+- **Spec ref:** REBUILD_SPEC.md §24
+
 ### Customizable priority colors and levels
 - Allow users to change the color associated with each priority level
 - Allow adding/removing/renaming priority levels beyond the default 5
