@@ -224,6 +224,16 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     }))
   }, [filteredMyDayTasks, allStatuses])
 
+  // Map a real status ID to a bucket status ID
+  const mapStatusToBucketId = useCallback(
+    (statusId: string): string => {
+      const status = allStatuses[statusId]
+      const bucket = getBucketForStatus(status)
+      return `__bucket_${bucket}`
+    },
+    [allStatuses]
+  )
+
   // Synthetic statuses for kanban columns
   const bucketStatuses = useMemo(
     () => MY_DAY_BUCKETS.map(createBucketStatus),
@@ -611,6 +621,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
                 projectMap={projectMap}
                 bucketName={group.bucket.name}
                 bucketColor={group.bucket.color}
+                mapStatusId={mapStatusToBucketId}
               />
             )
           })}

@@ -25,6 +25,7 @@ interface StatusSectionProps {
   projectMap?: Record<string, Project>
   bucketName?: string
   bucketColor?: string
+  mapStatusId?: (statusId: string) => string
 }
 
 export function StatusSection({
@@ -44,7 +45,8 @@ export function StatusSection({
   onCreateLabel,
   projectMap,
   bucketName,
-  bucketColor
+  bucketColor,
+  mapStatusId
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -98,10 +100,9 @@ export function StatusSection({
         <SortableContext items={sortedIds}>
           <div role="rowgroup">
             {sorted.map((task) => {
-              // In My Day (when projectMap is set), filter statuses to task's project only
-              const taskStatuses = projectMap
-                ? allStatuses.filter((s) => s.project_id === task.project_id)
-                : allStatuses
+              // In My Day with buckets: use allStatuses as-is (they're the 3 bucket statuses)
+              // In project views: allStatuses are already the project's own statuses
+              const taskStatuses = allStatuses
               return (
               <TaskRow
                 key={task.id}
@@ -122,6 +123,7 @@ export function StatusSection({
                 onRemoveLabel={onRemoveLabel}
                 onCreateLabel={onCreateLabel}
                 project={projectMap?.[task.project_id]}
+                statusIdOverride={mapStatusId ? mapStatusId(task.status_id) : undefined}
               />
               )
             })}

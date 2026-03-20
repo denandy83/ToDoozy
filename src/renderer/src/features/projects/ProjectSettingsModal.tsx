@@ -75,7 +75,6 @@ export function ProjectSettingsModal({
             <StatusList
               projectId={projectId}
               statuses={statuses}
-              addToast={addToast}
             />
           )}
         </div>

@@ -17,16 +17,15 @@ import {
   sortableKeyboardCoordinates
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Plus, GripVertical, Trash2, Check } from 'lucide-react'
+import { Plus, Trash2, Check } from 'lucide-react'
 import type { Status } from '../../../../shared/types'
 import { useStatusStore } from '../../shared/stores'
+import { useToast } from '../../shared/components/Toast'
 import { StatusEditRow } from './StatusEditRow'
-import { ReassignStatusModal } from './ReassignStatusModal'
 
 interface StatusListProps {
   projectId: string
   statuses: Status[]
-  addToast: (toast: { message: string; variant?: 'default' | 'danger' }) => void
 }
 
 function SortableStatusRow({
@@ -35,7 +34,8 @@ function SortableStatusRow({
   onEdit,
   onCancelEdit,
   onSave,
-  onDelete
+  onDelete,
+  disabled
 }: {
   status: Status
   isEditing: boolean
@@ -43,6 +43,7 @@ function SortableStatusRow({
   onCancelEdit: () => void
   onSave: (name: string, color: string, isDone: boolean) => void
   onDelete: () => void
+  disabled?: boolean
 }): React.JSX.Element {
   const {
     attributes,
@@ -51,7 +52,7 @@ function SortableStatusRow({
     transform,
     transition,
     isDragging
-  } = useSortable({ id: status.id })
+  } = useSortable({ id: status.id, disabled })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -77,15 +78,9 @@ function SortableStatusRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-foreground/6"
+      className={`group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-foreground/6 ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
+      {...(disabled ? {} : { ...attributes, ...listeners })}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="cursor-grab touch-none text-muted/40 transition-colors hover:text-foreground active:cursor-grabbing"
-      >
-        <GripVertical size={14} />
-      </button>
       <div
         className="h-3 w-3 rounded-full"
         style={{ backgroundColor: status.color }}
@@ -117,16 +112,14 @@ function SortableStatusRow({
 
 export function StatusList({
   projectId,
-  statuses,
-  addToast
+  statuses
 }: StatusListProps): React.JSX.Element {
+  const { addToast } = useToast()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [addingNew, setAddingNew] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<Status | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const createStatus = useStatusStore((s) => s.createStatus)
   const updateStatus = useStatusStore((s) => s.updateStatus)
-  const deleteStatus = useStatusStore((s) => s.deleteStatus)
   const reassignAndDelete = useStatusStore((s) => s.reassignAndDelete)
 
   const pointerSensor = useSensor(PointerSensor, {
@@ -166,6 +159,11 @@ export function StatusList({
   )
 
   const handleAddStatus = async (name: string, color: string, isDone: boolean): Promise<void> => {
+    const existingDone = statuses.find((s) => s.is_done === 1)
+    if (isDone && existingDone) {
+      addToast({ message: 'There can only be one done status', variant: 'danger' })
+      return
+    }
     try {
       await createStatus({
         id: crypto.randomUUID(),
@@ -193,6 +191,11 @@ export function StatusList({
     color: string,
     isDone: boolean
   ): Promise<void> => {
+    const existingDone = statuses.find((s) => s.is_done === 1 && s.id !== id)
+    if (isDone && existingDone) {
+      addToast({ message: 'There can only be one done status', variant: 'danger' })
+      return
+    }
     try {
       await updateStatus(id, {
         name: name.trim(),
@@ -214,35 +217,49 @@ export function StatusList({
       addToast({ message: 'Cannot delete the last status', variant: 'danger' })
       return
     }
-    setDeleteTarget(status)
-  }
-
-  const handleReassignAndDelete = async (targetStatusId: string): Promise<void> => {
-    if (!deleteTarget) return
-    try {
-      await reassignAndDelete(deleteTarget.id, targetStatusId)
-      addToast({ message: `Deleted "${deleteTarget.name}"`, variant: 'danger' })
-      setDeleteTarget(null)
-    } catch (err) {
-      addToast({
-        message: err instanceof Error ? err.message : 'Failed to delete status',
-        variant: 'danger'
-      })
+    if (status.is_default === 1) {
+      addToast({ message: 'Cannot delete the default status', variant: 'danger' })
+      return
     }
-  }
-
-  const handleDirectDelete = async (): Promise<void> => {
-    if (!deleteTarget) return
-    try {
-      await deleteStatus(deleteTarget.id)
-      addToast({ message: `Deleted "${deleteTarget.name}"`, variant: 'danger' })
-      setDeleteTarget(null)
-    } catch (err) {
-      addToast({
-        message: err instanceof Error ? err.message : 'Failed to delete status',
-        variant: 'danger'
-      })
+    const middleStatuses = statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1)
+    if (status.is_done !== 1 && status.is_default !== 1 && middleStatuses.length <= 1) {
+      addToast({ message: 'Must have at least one in-progress status', variant: 'danger' })
+      return
     }
+    if (status.is_done === 1) {
+      addToast({ message: 'Cannot delete the done status', variant: 'danger' })
+      return
+    }
+    const defaultStatus = statuses.find((s) => s.is_default === 1)
+    const targetStatusId = defaultStatus?.id ?? statuses.find((s) => s.id !== status.id)?.id
+    if (!targetStatusId) return
+
+    addToast({
+      message: `Delete "${status.name}"? Tasks will be moved to "${defaultStatus?.name ?? 'default'}"`,
+      persistent: true,
+      actions: [
+        {
+          label: 'Delete',
+          variant: 'danger' as const,
+          onClick: async () => {
+            try {
+              await reassignAndDelete(status.id, targetStatusId)
+              addToast({ message: `Deleted "${status.name}"` })
+            } catch (err) {
+              addToast({
+                message: err instanceof Error ? err.message : 'Failed to delete status',
+                variant: 'danger'
+              })
+            }
+          }
+        },
+        {
+          label: 'Cancel',
+          variant: 'muted' as const,
+          onClick: () => {}
+        }
+      ]
+    })
   }
 
   const activeStatus = activeId ? statuses.find((s) => s.id === activeId) : null
@@ -268,12 +285,30 @@ export function StatusList({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
+        {/* Default status locked at top */}
+        {statuses.filter((s) => s.is_default === 1).map((status) => (
+          <SortableStatusRow
+            key={status.id}
+            status={status}
+            isEditing={editingId === status.id}
+            onEdit={() => setEditingId(status.id)}
+            onCancelEdit={() => setEditingId(null)}
+            onSave={(name, color, isDone) =>
+              handleUpdateStatus(status.id, name, color, isDone)
+            }
+            onDelete={() => handleDeleteClick(status)}
+            disabled
+          />
+        ))}
+
+        <div className="my-1 border-t border-border/20" />
+        {/* Middle statuses (not default, not done) — sortable */}
         <SortableContext
-          items={statuses.map((s) => s.id)}
+          items={statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).map((s) => s.id)}
           strategy={verticalListSortingStrategy}
         >
           <div className="flex flex-col gap-1">
-            {statuses.map((status) => (
+            {statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).map((status) => (
               <SortableStatusRow
                 key={status.id}
                 status={status}
@@ -289,10 +324,26 @@ export function StatusList({
           </div>
         </SortableContext>
 
+        <div className="my-1 border-t border-border/20" />
+        {/* Done status locked at bottom */}
+        {statuses.filter((s) => s.is_done === 1).map((status) => (
+          <SortableStatusRow
+            key={status.id}
+            status={status}
+            isEditing={editingId === status.id}
+            onEdit={() => setEditingId(status.id)}
+            onCancelEdit={() => setEditingId(null)}
+            onSave={(name, color, isDone) =>
+              handleUpdateStatus(status.id, name, color, isDone)
+            }
+            onDelete={() => handleDeleteClick(status)}
+            disabled
+          />
+        ))}
+
         <DragOverlay dropAnimation={null}>
           {activeStatus ? (
             <div className="flex items-center gap-2 rounded-lg border border-accent/20 bg-surface px-2 py-2 shadow-lg">
-              <GripVertical size={14} className="text-muted/40" />
               <div
                 className="h-3 w-3 rounded-full"
                 style={{ backgroundColor: activeStatus.color }}
@@ -313,16 +364,6 @@ export function StatusList({
         />
       )}
 
-      {deleteTarget && (
-        <ReassignStatusModal
-          open={true}
-          onClose={() => setDeleteTarget(null)}
-          statusToDelete={deleteTarget}
-          availableStatuses={statuses.filter((s) => s.id !== deleteTarget.id)}
-          onReassignAndDelete={handleReassignAndDelete}
-          onDirectDelete={handleDirectDelete}
-        />
-      )}
     </div>
   )
 }

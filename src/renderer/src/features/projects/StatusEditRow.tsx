@@ -23,12 +23,11 @@ export function StatusEditRow({
 }: StatusEditRowProps): React.JSX.Element {
   const [name, setName] = useState(initialName)
   const [color, setColor] = useState(initialColor)
-  const [isDone, setIsDone] = useState(initialIsDone)
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault()
     if (!name.trim()) return
-    onSave(name, color, isDone)
+    onSave(name, color, initialIsDone)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -52,33 +51,21 @@ export function StatusEditRow({
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
-        {STATUS_COLORS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => setColor(c)}
-            className={`h-5 w-5 rounded-full ${
-              color === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''
-            }`}
-            style={{ backgroundColor: c }}
-          />
-        ))}
-      </div>
-
       <div className="flex items-center justify-between">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={isDone}
-            onChange={(e) => setIsDone(e.target.checked)}
-            className="accent-accent"
-          />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-            Marks as done
-          </span>
-        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
+          {STATUS_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(c)}
+              className={`h-5 w-5 rounded-full ${
+                color === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
 
         <div className="flex items-center gap-1">
           <button

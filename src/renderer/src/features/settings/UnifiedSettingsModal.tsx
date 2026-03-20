@@ -487,7 +487,6 @@ function ProjectsTab({
           <StatusList
             projectId={selectedProjectId}
             statuses={statuses}
-            addToast={addToast}
           />
 
           {/* Delete — always last */}

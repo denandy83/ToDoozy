@@ -90,14 +90,18 @@ export function ToastContainer(): React.JSX.Element {
     setTimeout(() => setShaking(false), 300)
   }, [])
 
+  const hasPersistent = toasts.some((t) => t.persistent)
+
   if (toasts.length === 0) return <></>
 
   return (
     <>
-      <div
-        className="fixed inset-0 z-[99]"
-        onClick={handleOverlayClick}
-      />
+      {hasPersistent && (
+        <div
+          className="fixed inset-0 z-[99]"
+          onClick={handleOverlayClick}
+        />
+      )}
       <div className={`fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col gap-2 ${shaking ? 'modal-shake' : ''}`}>
         {toasts.map((toast) => (
           <div

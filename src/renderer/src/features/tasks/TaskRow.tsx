@@ -34,6 +34,7 @@ interface TaskRowProps {
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
   project?: Project
+  statusIdOverride?: string
 }
 
 export function TaskRow({
@@ -54,7 +55,8 @@ export function TaskRow({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
-  project
+  project,
+  statusIdOverride
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -346,7 +348,7 @@ export function TaskRow({
         </button>
 
         <StatusButton
-          currentStatusId={task.status_id}
+          currentStatusId={statusIdOverride ?? task.status_id}
           statuses={statuses}
           onStatusChange={handleStatusChange}
         />
