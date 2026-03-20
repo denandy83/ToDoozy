@@ -192,10 +192,18 @@ export function AppLayout(): React.JSX.Element {
       } else if (viewId.startsWith('nav-project-')) {
         // Dropped on a project nav item — move to that project
         const targetProjectId = viewId.replace('nav-project-', '')
-        await updateTask(taskId, { is_in_my_day: 0 })
-        // Could also change project_id if needed
-        addToast({ message: 'Removed from My Day' })
-        void targetProjectId
+        const task = tasks[taskId]
+        if (task && task.project_id !== targetProjectId) {
+          // Find default status in target project
+          const targetStatuses = Object.values(useStatusStore.getState().statuses)
+            .filter((s) => s.project_id === targetProjectId)
+          const defaultStatus = targetStatuses.find((s) => s.is_default === 1) ?? targetStatuses[0]
+          if (defaultStatus) {
+            await updateTask(taskId, { project_id: targetProjectId, status_id: defaultStatus.id })
+            const targetProject = allProjects.find((p) => p.id === targetProjectId)
+            addToast({ message: `Moved to ${targetProject?.name ?? 'project'}` })
+          }
+        }
       } else if (viewId === 'archive' || viewId === 'nav-archive') {
         await updateTask(taskId, { is_archived: 1 })
         addToast({ message: 'Archived' })

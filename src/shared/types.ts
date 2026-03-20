@@ -197,6 +197,7 @@ export interface CreateTaskInput {
 export const TASK_UPDATABLE_COLUMNS = [
   'title',
   'description',
+  'project_id',
   'status_id',
   'priority',
   'due_date',
