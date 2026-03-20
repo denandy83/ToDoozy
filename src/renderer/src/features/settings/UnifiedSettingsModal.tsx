@@ -4,7 +4,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type D
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Modal } from '../../shared/components/Modal'
-import { useProjectStore, selectAllProjects, useStatusStore } from '../../shared/stores'
+import { useProjectStore, selectAllProjects, useStatusStore, useTaskStore } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
@@ -357,8 +357,18 @@ function ProjectsTab({
       addToast({ message: 'Cannot delete the default project', variant: 'danger' })
       return
     }
+    const allTasks = Object.values(useTaskStore.getState().tasks)
+    const projectTasks = allTasks.filter((t) => t.project_id === project.id && t.is_archived === 0)
+    const archivedTasks = allTasks.filter((t) => t.project_id === project.id && t.is_archived === 1)
+    const parts = [`Delete "${project.name}"?`]
+    if (projectTasks.length > 0 || archivedTasks.length > 0) {
+      const counts: string[] = []
+      if (projectTasks.length > 0) counts.push(`${projectTasks.length} task${projectTasks.length !== 1 ? 's' : ''}`)
+      if (archivedTasks.length > 0) counts.push(`${archivedTasks.length} archived`)
+      parts.push(`This will delete ${counts.join(' and ')}.`)
+    }
     addToast({
-      message: `Delete "${project.name}" and all its tasks?`,
+      message: parts.join(' '),
       persistent: true,
       actions: [
         {
