@@ -4,10 +4,12 @@ import { useToast } from './Toast'
 
 export function ConfirmDeleteModal(): React.JSX.Element | null {
   const pendingDeleteTaskId = useTaskStore((s) => s.pendingDeleteTaskId)
+  const pendingBulkDeleteTaskIds = useTaskStore((s) => s.pendingBulkDeleteTaskIds)
   const tasks = useTaskStore((s) => s.tasks)
-  const { deleteTask, updateTask, setPendingDeleteTask, setCurrentTask } = useTaskStore()
+  const { deleteTask, updateTask, bulkDeleteTasks, bulkUpdateTasks, setPendingDeleteTask, setPendingBulkDeleteTasks, clearSelection } = useTaskStore()
   const { addToast } = useToast()
 
+  // Single task delete
   useEffect(() => {
     if (!pendingDeleteTaskId) return
     const task = tasks[pendingDeleteTaskId]
@@ -28,7 +30,7 @@ export function ConfirmDeleteModal(): React.JSX.Element | null {
           variant: 'danger',
           onClick: async () => {
             await deleteTask(taskId)
-            setCurrentTask(null)
+            clearSelection()
           }
         },
         {
@@ -36,7 +38,7 @@ export function ConfirmDeleteModal(): React.JSX.Element | null {
           variant: 'accent',
           onClick: async () => {
             await updateTask(taskId, { is_archived: 1 })
-            setCurrentTask(null)
+            clearSelection()
           }
         },
         {
@@ -48,7 +50,45 @@ export function ConfirmDeleteModal(): React.JSX.Element | null {
     })
 
     setPendingDeleteTask(null)
-  }, [pendingDeleteTaskId, tasks, deleteTask, updateTask, setPendingDeleteTask, setCurrentTask, addToast])
+  }, [pendingDeleteTaskId, tasks, deleteTask, updateTask, setPendingDeleteTask, clearSelection, addToast])
+
+  // Bulk delete
+  useEffect(() => {
+    if (!pendingBulkDeleteTaskIds || pendingBulkDeleteTaskIds.length === 0) return
+
+    const ids = pendingBulkDeleteTaskIds
+    const count = ids.length
+
+    addToast({
+      message: `Delete ${count} tasks?`,
+      persistent: true,
+      actions: [
+        {
+          label: 'Delete',
+          variant: 'danger',
+          onClick: async () => {
+            await bulkDeleteTasks(ids)
+            clearSelection()
+          }
+        },
+        {
+          label: 'Archive',
+          variant: 'accent',
+          onClick: async () => {
+            await bulkUpdateTasks(ids, { is_archived: 1 })
+            clearSelection()
+          }
+        },
+        {
+          label: 'Cancel',
+          variant: 'muted',
+          onClick: () => {}
+        }
+      ]
+    })
+
+    setPendingBulkDeleteTasks(null)
+  }, [pendingBulkDeleteTaskIds, bulkDeleteTasks, bulkUpdateTasks, setPendingBulkDeleteTasks, clearSelection, addToast])
 
   return null
 }

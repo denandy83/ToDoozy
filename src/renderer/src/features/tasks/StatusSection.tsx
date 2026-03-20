@@ -12,10 +12,10 @@ interface StatusSectionProps {
   tasks: Task[]
   allStatuses: Status[]
   allLabels: Label[]
-  selectedTaskId: string | null
+  selectedTaskIds: Set<string>
   taskFilterOpacity?: Record<string, number>
   dropIndicator?: DropIndicator | null
-  onSelectTask: (taskId: string) => void
+  onSelectTask: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
   onDeleteTask: (taskId: string) => void
@@ -29,7 +29,7 @@ export function StatusSection({
   tasks,
   allStatuses,
   allLabels,
-  selectedTaskId,
+  selectedTaskIds,
   taskFilterOpacity,
   dropIndicator,
   onSelectTask,
@@ -97,7 +97,7 @@ export function StatusSection({
                 task={task}
                 statuses={allStatuses}
                 allLabels={allLabels}
-                isSelected={selectedTaskId === task.id}
+                isSelected={selectedTaskIds.has(task.id)}
                 depth={0}
                 isExpanded={expandedTaskIds.has(task.id)}
                 filterOpacity={taskFilterOpacity?.[task.id]}

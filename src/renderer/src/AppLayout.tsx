@@ -27,6 +27,7 @@ import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
+import { BulkContextMenu } from './shared/components/BulkContextMenu'
 import { ConfirmDeleteModal } from './shared/components/ConfirmDeleteModal'
 import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
@@ -56,10 +57,11 @@ export function AppLayout(): React.JSX.Element {
   const toggleLayoutMode = useViewStore((s) => s.toggleLayoutMode)
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
 
-  // Auto-clear label filters on view switch, reset kanban for non-supported views
+  // Auto-clear label filters and selection on view switch, reset kanban for non-supported views
   const setView = useCallback(
     (view: ViewId) => {
       clearLabelFilters()
+      useTaskStore.getState().clearSelection()
       if (view !== 'my-day' && view !== 'backlog') {
         useViewStore.setState({ layoutMode: 'list' })
       }
@@ -256,9 +258,9 @@ export function AppLayout(): React.JSX.Element {
   }, [currentView, setView, toggleLayoutMode])
 
   const viewTitle = VIEW_TITLES[currentView]
-  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
-  const hasDetailPanel = currentTaskId !== null
+  const hasDetailPanel = selectedTaskIds.size === 1
   const isSidePanel = detailPanelPosition === 'side'
 
   return (
@@ -363,6 +365,7 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Context menu */}
         <ContextMenu />
+        <BulkContextMenu />
 
         {/* Delete confirmation */}
         <ConfirmDeleteModal />

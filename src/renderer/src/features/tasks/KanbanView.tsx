@@ -8,10 +8,10 @@ import type { DropIndicator } from './useDragAndDrop'
 interface KanbanViewProps {
   tasks: Task[]
   statuses: Status[]
-  selectedTaskId: string | null
+  selectedTaskIds: Set<string>
   taskFilterOpacity?: Record<string, number>
   dropIndicator?: DropIndicator | null
-  onSelectTask: (taskId: string) => void
+  onSelectTask: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
 }
@@ -19,7 +19,7 @@ interface KanbanViewProps {
 export function KanbanView({
   tasks,
   statuses,
-  selectedTaskId,
+  selectedTaskIds,
   taskFilterOpacity,
   dropIndicator,
   onSelectTask,
@@ -69,8 +69,9 @@ export function KanbanView({
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.target instanceof HTMLInputElement) return
 
-      const currentIndex = selectedTaskId
-        ? flatTasks.findIndex((t) => t.id === selectedTaskId)
+      const currentId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
+      const currentIndex = currentId
+        ? flatTasks.findIndex((t) => t.id === currentId)
         : -1
 
       switch (e.key) {
@@ -87,9 +88,9 @@ export function KanbanView({
           break
         }
         case 'ArrowRight': {
-          if (selectedTaskId) {
+          if (currentId) {
             e.preventDefault()
-            const task = flatTasks.find((t) => t.id === selectedTaskId)
+            const task = flatTasks.find((t) => t.id === currentId)
             if (task) {
               const statusIdx = sortedStatuses.findIndex((s) => s.id === task.status_id)
               if (statusIdx < sortedStatuses.length - 1) {
@@ -100,9 +101,9 @@ export function KanbanView({
           break
         }
         case 'ArrowLeft': {
-          if (selectedTaskId) {
+          if (currentId) {
             e.preventDefault()
-            const task = flatTasks.find((t) => t.id === selectedTaskId)
+            const task = flatTasks.find((t) => t.id === currentId)
             if (task) {
               const statusIdx = sortedStatuses.findIndex((s) => s.id === task.status_id)
               if (statusIdx > 0) {
@@ -117,7 +118,7 @@ export function KanbanView({
 
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
-  }, [selectedTaskId, flatTasks, sortedStatuses, setCurrentTask, onStatusChange])
+  }, [selectedTaskIds, flatTasks, sortedStatuses, setCurrentTask, onStatusChange])
 
   return (
     <div
@@ -133,7 +134,7 @@ export function KanbanView({
           status={status}
           tasks={tasksByStatus[status.id] ?? []}
           allStatuses={statuses}
-          selectedTaskId={selectedTaskId}
+          selectedTaskIds={selectedTaskIds}
           taskFilterOpacity={taskFilterOpacity}
           dropIndicator={dropIndicator}
           onSelectTask={onSelectTask}

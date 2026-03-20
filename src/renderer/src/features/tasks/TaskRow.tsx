@@ -25,7 +25,7 @@ interface TaskRowProps {
   filterOpacity?: number
   dropIndicator?: DropIndicator | null
   isDragOverlay?: boolean
-  onSelect: (taskId: string) => void
+  onSelect: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
   onDelete: (taskId: string) => void
@@ -67,6 +67,8 @@ export function TaskRow({
   const taskLabels = useTaskLabelsHook(task.id)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
+  const openBulkContextMenu = useContextMenuStore((s) => s.openBulk)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const prioritySettings = usePrioritySettings()
   const pendingSubtaskParentId = useTaskStore((s) => s.pendingSubtaskParentId)
   const hasPendingSubtask = pendingSubtaskParentId === task.id
@@ -166,13 +168,18 @@ export function TaskRow({
     (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      openContextMenu(task.id, e.clientX, e.clientY)
+      if (selectedTaskIds.has(task.id) && selectedTaskIds.size > 1) {
+        openBulkContextMenu([...selectedTaskIds], e.clientX, e.clientY)
+      } else {
+        useTaskStore.getState().selectTask(task.id)
+        openContextMenu(task.id, e.clientX, e.clientY)
+      }
     },
-    [task.id, openContextMenu]
+    [task.id, selectedTaskIds, openContextMenu, openBulkContextMenu]
   )
 
-  const handleClick = useCallback(() => {
-    if (!isEditing) onSelect(task.id)
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (!isEditing) onSelect(task.id, e)
   }, [isEditing, onSelect, task.id])
 
   const handleStatusChange = useCallback(
@@ -480,7 +487,7 @@ interface SubtaskListProps {
   allLabels: Label[]
   depth: number
   dropIndicator?: DropIndicator | null
-  onSelect: (taskId: string) => void
+  onSelect: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onTitleChange: (taskId: string, newTitle: string) => void
   onDelete: (taskId: string) => void
@@ -508,7 +515,7 @@ function SubtaskList({
 }: SubtaskListProps): React.JSX.Element {
   const subtasks = useSubtasks(parentId)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
-  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const pendingSubtaskParentId = useTaskStore((s) => s.pendingSubtaskParentId)
   const { createSubtask, setPendingSubtaskParent } = useTaskStore()
   const currentUser = useAuthStore((s) => s.currentUser)
@@ -567,7 +574,7 @@ function SubtaskList({
           task={child}
           statuses={statuses}
           allLabels={allLabels}
-          isSelected={currentTaskId === child.id}
+          isSelected={selectedTaskIds.has(child.id)}
           depth={depth}
           isExpanded={expandedTaskIds.has(child.id)}
           dropIndicator={dropIndicator}

@@ -349,3 +349,22 @@ Started: Wed Mar 18 10:59:51 CET 2026
 - Max 12 results, sorted by priority (highest first) then updated_at (most recent first)
 - Excludes archived and template tasks from search
 - Decisions: All filtering is done client-side against the in-memory task store (tasks are already fully hydrated). No IPC needed. Used useMemo for search results to avoid recomputation on unrelated renders.
+
+## Story 19: Bulk task selection and context menu
+- Replaced `currentTaskId: string | null` with `selectedTaskIds: Set<string>` + `lastSelectedTaskId: string | null` in taskStore
+- Added selection methods: selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection
+- Added bulk action methods: bulkUpdateTasks, bulkDeleteTasks, bulkAddLabel, bulkRemoveLabel
+- Updated all consumers (TaskListView, MyDayView, KanbanView, ArchiveView, TemplatesView, StatusSection, KanbanColumn, TaskRow, KanbanCard, DetailPanel, AppLayout)
+- Click selects one task, Cmd+Click toggles individual, Shift+Click selects range (across status sections in list, same flat list in kanban)
+- Cmd+A selects all visible tasks, Escape clears selection
+- Selection clears on view switch (in AppLayout setView callback)
+- Detail panel only shows when exactly 1 task selected (selectedTaskIds.size === 1)
+- Right-click on selected task (when multi-selected) shows BulkContextMenu with "N tasks selected" header
+- Right-click on unselected task clears selection and shows normal single-task context menu
+- BulkContextMenu includes: status row, Add/Remove My Day, Priority flyout, Labels flyout, Snooze flyout, Delete (red, bottom)
+- Bulk delete shows persistent toast with Delete/Archive/Cancel (via ConfirmDeleteModal bulk path)
+- contextMenuStore extended with openBulk() and isBulk/bulkTaskIds state
+- Selected tasks use same visual style: bg-accent/12 border-l-2 border-accent/15
+- Drag-and-drop unchanged (single-task only)
+- Wrote 15 unit tests for selection store methods
+- All 188 tests pass, zero typecheck errors

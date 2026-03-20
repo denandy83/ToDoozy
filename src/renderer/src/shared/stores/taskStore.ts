@@ -13,9 +13,11 @@ interface TaskState {
   tasks: Record<string, Task>
   taskLabels: Record<string, Label[]>
   expandedTaskIds: Set<string>
-  currentTaskId: string | null
+  selectedTaskIds: Set<string>
+  lastSelectedTaskId: string | null
   pendingSubtaskParentId: string | null
   pendingDeleteTaskId: string | null
+  pendingBulkDeleteTaskIds: string[] | null
   movingTaskId: string | null
   loading: boolean
   error: string | null
@@ -38,6 +40,16 @@ interface TaskActions {
   hydrateTaskLabels(taskId: string): Promise<void>
   hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
+  selectTask(id: string): void
+  toggleTaskInSelection(id: string): void
+  selectTaskRange(ids: string[]): void
+  selectAllTasks(ids: string[]): void
+  clearSelection(): void
+  bulkUpdateTasks(ids: string[], input: UpdateTaskInput): Promise<void>
+  bulkDeleteTasks(ids: string[]): Promise<void>
+  bulkAddLabel(ids: string[], labelId: string): Promise<void>
+  bulkRemoveLabel(ids: string[], labelId: string): Promise<void>
+  setPendingBulkDeleteTasks(ids: string[] | null): void
   toggleExpanded(taskId: string): void
   setExpanded(taskId: string, expanded: boolean): void
   setPendingSubtaskParent(parentId: string | null): void
@@ -52,9 +64,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   tasks: {},
   taskLabels: {},
   expandedTaskIds: new Set<string>(),
-  currentTaskId: null,
+  selectedTaskIds: new Set<string>(),
+  lastSelectedTaskId: null,
   pendingSubtaskParentId: null,
   pendingDeleteTaskId: null,
+  pendingBulkDeleteTaskIds: null,
   movingTaskId: null,
   loading: false,
   error: null,
@@ -198,11 +212,15 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           const newExpanded = new Set(state.expandedTaskIds)
           for (const rid of idsToRemove) newExpanded.delete(rid)
 
+          const newSelected = new Set(state.selectedTaskIds)
+          for (const rid of idsToRemove) newSelected.delete(rid)
+
           return {
             tasks: remaining,
             taskLabels: remainingLabels,
             expandedTaskIds: newExpanded,
-            currentTaskId: idsToRemove.has(state.currentTaskId ?? '') ? null : state.currentTaskId
+            selectedTaskIds: newSelected,
+            lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
           }
         })
       }
@@ -339,7 +357,147 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   setCurrentTask(id: string | null): void {
-    set({ currentTaskId: id })
+    if (id === null) {
+      set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null })
+    } else {
+      set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
+    }
+  },
+
+  selectTask(id: string): void {
+    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
+  },
+
+  toggleTaskInSelection(id: string): void {
+    set((state) => {
+      const next = new Set(state.selectedTaskIds)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return { selectedTaskIds: next, lastSelectedTaskId: id }
+    })
+  },
+
+  selectTaskRange(ids: string[]): void {
+    set((state) => {
+      const next = new Set(state.selectedTaskIds)
+      for (const id of ids) next.add(id)
+      const lastId = ids.length > 0 ? ids[ids.length - 1] : state.lastSelectedTaskId
+      return { selectedTaskIds: next, lastSelectedTaskId: lastId }
+    })
+  },
+
+  selectAllTasks(ids: string[]): void {
+    set({ selectedTaskIds: new Set<string>(ids) })
+  },
+
+  clearSelection(): void {
+    set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null })
+  },
+
+  async bulkUpdateTasks(ids: string[], input: UpdateTaskInput): Promise<void> {
+    try {
+      const results = await Promise.all(
+        ids.map((id) => window.api.tasks.update(id, input))
+      )
+      set((state) => {
+        const updated = { ...state.tasks }
+        for (const task of results) {
+          if (task) updated[task.id] = task
+        }
+        return { tasks: updated }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to bulk update tasks'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  async bulkDeleteTasks(ids: string[]): Promise<void> {
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.delete(id)))
+      set((state) => {
+        const idsToRemove = new Set<string>(ids)
+        // Collect descendants
+        const collectChildren = (parentId: string): void => {
+          for (const task of Object.values(state.tasks)) {
+            if (task.parent_id === parentId && !idsToRemove.has(task.id)) {
+              idsToRemove.add(task.id)
+              collectChildren(task.id)
+            }
+          }
+        }
+        for (const id of ids) collectChildren(id)
+
+        const remaining: Record<string, Task> = {}
+        const remainingLabels: Record<string, Label[]> = {}
+        for (const [tid, task] of Object.entries(state.tasks)) {
+          if (!idsToRemove.has(tid)) remaining[tid] = task
+        }
+        for (const [tid, labels] of Object.entries(state.taskLabels)) {
+          if (!idsToRemove.has(tid)) remainingLabels[tid] = labels
+        }
+        const newExpanded = new Set(state.expandedTaskIds)
+        const newSelected = new Set(state.selectedTaskIds)
+        for (const rid of idsToRemove) {
+          newExpanded.delete(rid)
+          newSelected.delete(rid)
+        }
+        return {
+          tasks: remaining,
+          taskLabels: remainingLabels,
+          expandedTaskIds: newExpanded,
+          selectedTaskIds: newSelected,
+          lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
+        }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to bulk delete tasks'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  async bulkAddLabel(ids: string[], labelId: string): Promise<void> {
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.addLabel(id, labelId)))
+      // Re-hydrate labels for affected tasks
+      const labelResults: Record<string, Label[]> = {}
+      for (const id of ids) {
+        labelResults[id] = await window.api.labels.findByTaskId(id)
+      }
+      set((state) => ({
+        taskLabels: { ...state.taskLabels, ...labelResults }
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add label to tasks'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  async bulkRemoveLabel(ids: string[], labelId: string): Promise<void> {
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.removeLabel(id, labelId)))
+      const labelResults: Record<string, Label[]> = {}
+      for (const id of ids) {
+        labelResults[id] = await window.api.labels.findByTaskId(id)
+      }
+      set((state) => ({
+        taskLabels: { ...state.taskLabels, ...labelResults }
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to remove label from tasks'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  setPendingBulkDeleteTasks(ids: string[] | null): void {
+    set({ pendingBulkDeleteTaskIds: ids })
   },
 
   toggleExpanded(taskId: string): void {
@@ -436,8 +594,20 @@ export const selectChildCount = (parentId: string) => (state: TaskState): { tota
 export const selectHasChildren = (taskId: string) => (state: TaskState): boolean =>
   Object.values(state.tasks).some((t) => t.parent_id === taskId)
 
-export const selectCurrentTask = (state: TaskState): Task | null =>
-  state.currentTaskId ? state.tasks[state.currentTaskId] ?? null : null
+export const selectCurrentTaskId = (state: TaskState): string | null => {
+  if (state.selectedTaskIds.size === 1) {
+    const [id] = state.selectedTaskIds
+    return id
+  }
+  return null
+}
+
+export const selectCurrentTask = (state: TaskState): Task | null => {
+  const id = selectCurrentTaskId(state)
+  return id ? state.tasks[id] ?? null : null
+}
+
+export const selectSelectedTaskIds = (state: TaskState): Set<string> => state.selectedTaskIds
 
 export const selectTaskLabels = (taskId: string) => (state: TaskState): Label[] =>
   state.taskLabels[taskId] ?? []

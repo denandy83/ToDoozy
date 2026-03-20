@@ -14,7 +14,7 @@ export function TemplatesView(): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const allTasks = useTaskStore((s) => s.tasks)
   const { createTask, setCurrentTask } = useTaskStore()
-  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const { addToast } = useToast()
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -53,6 +53,7 @@ export function TemplatesView(): React.JSX.Element {
     if (!container) return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
+      const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
       const currentIndex = currentTaskId
         ? templateTasks.findIndex((t) => t.id === currentTaskId)
         : -1
@@ -86,7 +87,7 @@ export function TemplatesView(): React.JSX.Element {
 
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
-  }, [currentTaskId, templateTasks, setCurrentTask, allTasks, handleUseTemplate])
+  }, [selectedTaskIds, templateTasks, setCurrentTask, allTasks, handleUseTemplate])
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
@@ -96,7 +97,7 @@ export function TemplatesView(): React.JSX.Element {
             key={task.id}
             onClick={() => setCurrentTask(task.id)}
             className={`group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors ${
-              currentTaskId === task.id
+              selectedTaskIds.has(task.id)
                 ? 'bg-accent/12 border-l-2 border-l-accent/15'
                 : 'hover:bg-foreground/6'
             }`}

@@ -9,10 +9,10 @@ interface KanbanColumnProps {
   status: Status
   tasks: Task[]
   allStatuses: Status[]
-  selectedTaskId: string | null
+  selectedTaskIds: Set<string>
   taskFilterOpacity?: Record<string, number>
   dropIndicator?: DropIndicator | null
-  onSelectTask: (taskId: string) => void
+  onSelectTask: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
 }
@@ -21,7 +21,7 @@ export function KanbanColumn({
   status,
   tasks,
   allStatuses,
-  selectedTaskId,
+  selectedTaskIds,
   taskFilterOpacity,
   dropIndicator,
   onSelectTask,
@@ -69,7 +69,7 @@ export function KanbanColumn({
               key={task.id}
               task={task}
               statuses={allStatuses}
-              isSelected={selectedTaskId === task.id}
+              isSelected={selectedTaskIds.has(task.id)}
               filterOpacity={taskFilterOpacity?.[task.id]}
               dropIndicator={dropIndicator}
               onSelect={onSelectTask}

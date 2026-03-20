@@ -29,10 +29,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTasksByProject(projectId)
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, setCurrentTask, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
+  const { createTask, updateTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
     useTaskStore()
   const movingTaskId = useTaskStore((s) => s.movingTaskId)
-  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
+  const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -188,10 +189,25 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   )
 
   const handleSelectTask = useCallback(
-    (taskId: string) => {
-      setCurrentTask(taskId)
+    (taskId: string, e: React.MouseEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        toggleTaskInSelection(taskId)
+      } else if (e.shiftKey && lastSelectedTaskId) {
+        const startIdx = flatTasks.findIndex((t) => t.id === lastSelectedTaskId)
+        const endIdx = flatTasks.findIndex((t) => t.id === taskId)
+        if (startIdx !== -1 && endIdx !== -1) {
+          const lo = Math.min(startIdx, endIdx)
+          const hi = Math.max(startIdx, endIdx)
+          const rangeIds = flatTasks.slice(lo, hi + 1).map((t) => t.id)
+          selectTaskRange(rangeIds)
+        } else {
+          selectTask(taskId)
+        }
+      } else {
+        selectTask(taskId)
+      }
     },
-    [setCurrentTask]
+    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
   )
 
   const handleAddLabel = useCallback(
@@ -289,9 +305,26 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
+      const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
       const currentIndex = currentTaskId
         ? flatTasks.findIndex((t) => t.id === currentTaskId)
         : -1
+
+      // Cmd+A = select all visible tasks
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault()
+        selectAllTasks(flatTasks.map((t) => t.id))
+        return
+      }
+
+      // Escape clears selection
+      if (e.key === 'Escape') {
+        if (selectedTaskIds.size > 0) {
+          e.preventDefault()
+          clearSelection()
+          return
+        }
+      }
 
       // Move mode: intercept keys
       if (movingTaskId) {
@@ -383,7 +416,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
         case 'Delete':
         case 'Backspace': {
-          if (currentTaskId) {
+          if (selectedTaskIds.size > 1) {
+            e.preventDefault()
+            setPendingDeleteTask(null)
+            useTaskStore.getState().setPendingBulkDeleteTasks([...selectedTaskIds])
+          } else if (currentTaskId) {
             e.preventDefault()
             const nextIndex =
               currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
@@ -410,9 +447,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
   }, [
-    currentTaskId,
+    selectedTaskIds,
     flatTasks,
     setCurrentTask,
+    selectAllTasks,
+    clearSelection,
     allTasks,
     tasks,
     statuses,
@@ -421,6 +460,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     setExpanded,
     handleStatusChange,
     handleDeleteTask,
+    setPendingDeleteTask,
     movingTaskId,
     setMovingTask,
     reorderTasks,
@@ -442,7 +482,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         <KanbanView
           tasks={filteredTasks.filter((t) => t.is_archived === 0 && t.is_template === 0)}
           statuses={statuses}
-          selectedTaskId={currentTaskId}
+          selectedTaskIds={selectedTaskIds}
           taskFilterOpacity={taskFilterOpacity}
           dropIndicator={dropIndicator}
           onSelectTask={handleSelectTask}
@@ -462,7 +502,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 tasks={statusTasks}
                 allStatuses={statuses}
                 allLabels={allLabels}
-                selectedTaskId={currentTaskId}
+                selectedTaskIds={selectedTaskIds}
                 taskFilterOpacity={taskFilterOpacity}
                 dropIndicator={dropIndicator}
                 onSelectTask={handleSelectTask}

@@ -7,7 +7,7 @@ import { PriorityBadge } from '../../shared/components/PriorityBadge'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import { useTaskLabelsHook, useChildCount } from '../../shared/stores'
+import { useTaskStore, useTaskLabelsHook, useChildCount } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
@@ -19,7 +19,7 @@ interface KanbanCardProps {
   filterOpacity?: number
   isDragOverlay?: boolean
   dropIndicator?: DropIndicator | null
-  onSelect: (taskId: string) => void
+  onSelect: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
 }
@@ -39,6 +39,8 @@ export function KanbanCard({
   const childCount = useChildCount(task.id)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
+  const openBulkContextMenu = useContextMenuStore((s) => s.openBulk)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const prioritySettings = usePrioritySettings()
 
   const priorityLevel = PRIORITY_LEVELS[task.priority] ?? PRIORITY_LEVELS[0]
@@ -89,13 +91,18 @@ export function KanbanCard({
     (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      openContextMenu(task.id, e.clientX, e.clientY)
+      if (selectedTaskIds.has(task.id) && selectedTaskIds.size > 1) {
+        openBulkContextMenu([...selectedTaskIds], e.clientX, e.clientY)
+      } else {
+        useTaskStore.getState().selectTask(task.id)
+        openContextMenu(task.id, e.clientX, e.clientY)
+      }
     },
-    [task.id, onSelect, openContextMenu]
+    [task.id, selectedTaskIds, openContextMenu, openBulkContextMenu]
   )
 
-  const handleClick = useCallback(() => {
-    onSelect(task.id)
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    onSelect(task.id, e)
   }, [onSelect, task.id])
 
   const handleKeyDown = useCallback(

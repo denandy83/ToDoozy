@@ -29,9 +29,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const projectId = currentProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, setCurrentTask, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
+  const { createTask, updateTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
     useTaskStore()
-  const currentTaskId = useTaskStore((s) => s.currentTaskId)
+  const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
+  const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const layoutMode = useViewStore(selectLayoutMode)
@@ -174,10 +175,25 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   )
 
   const handleSelectTask = useCallback(
-    (taskId: string) => {
-      setCurrentTask(taskId)
+    (taskId: string, e: React.MouseEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        toggleTaskInSelection(taskId)
+      } else if (e.shiftKey && lastSelectedTaskId) {
+        const startIdx = flatTasks.findIndex((t) => t.id === lastSelectedTaskId)
+        const endIdx = flatTasks.findIndex((t) => t.id === taskId)
+        if (startIdx !== -1 && endIdx !== -1) {
+          const lo = Math.min(startIdx, endIdx)
+          const hi = Math.max(startIdx, endIdx)
+          const rangeIds = flatTasks.slice(lo, hi + 1).map((t) => t.id)
+          selectTaskRange(rangeIds)
+        } else {
+          selectTask(taskId)
+        }
+      } else {
+        selectTask(taskId)
+      }
     },
-    [setCurrentTask]
+    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
   )
 
   const handleAddLabel = useCallback(
@@ -213,9 +229,26 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     if (!container) return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
+      const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
       const currentIndex = currentTaskId
         ? flatTasks.findIndex((t) => t.id === currentTaskId)
         : -1
+
+      // Cmd+A = select all visible tasks
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault()
+        selectAllTasks(flatTasks.map((t) => t.id))
+        return
+      }
+
+      // Escape clears selection
+      if (e.key === 'Escape') {
+        if (selectedTaskIds.size > 0) {
+          e.preventDefault()
+          clearSelection()
+          return
+        }
+      }
 
       switch (e.key) {
         case 'ArrowDown': {
@@ -256,13 +289,18 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         }
         case 'Delete':
         case 'Backspace': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
-            e.preventDefault()
-            const nextIndex =
-              currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
-            const nextTask = flatTasks[nextIndex]
-            handleDeleteTask(currentTaskId)
-            setCurrentTask(nextTask?.id ?? null)
+          if (!(e.target instanceof HTMLInputElement)) {
+            if (selectedTaskIds.size > 1) {
+              e.preventDefault()
+              useTaskStore.getState().setPendingBulkDeleteTasks([...selectedTaskIds])
+            } else if (currentTaskId) {
+              e.preventDefault()
+              const nextIndex =
+                currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
+              const nextTask = flatTasks[nextIndex]
+              handleDeleteTask(currentTaskId)
+              setCurrentTask(nextTask?.id ?? null)
+            }
           }
           break
         }
@@ -285,9 +323,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
   }, [
-    currentTaskId,
+    selectedTaskIds,
     flatTasks,
     setCurrentTask,
+    selectAllTasks,
+    clearSelection,
     allTasks,
     statuses,
     handleStatusChange,
@@ -309,7 +349,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         <KanbanView
           tasks={filteredMyDayTasks}
           statuses={statuses}
-          selectedTaskId={currentTaskId}
+          selectedTaskIds={selectedTaskIds}
           taskFilterOpacity={taskFilterOpacity}
           dropIndicator={dropIndicator}
           onSelectTask={handleSelectTask}
@@ -329,7 +369,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
                 tasks={statusTasks}
                 allStatuses={statuses}
                 allLabels={allLabels}
-                selectedTaskId={currentTaskId}
+                selectedTaskIds={selectedTaskIds}
                 taskFilterOpacity={taskFilterOpacity}
                 dropIndicator={dropIndicator}
                 onSelectTask={handleSelectTask}
