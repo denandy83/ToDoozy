@@ -403,6 +403,7 @@ export function TaskRow({
                 name={label.name}
                 color={label.color}
                 onClick={() => toggleLabelFilter(label.id)}
+                onRemove={() => onRemoveLabel(task.id, label.id)}
               />
             ))}
             {taskLabels.length > 3 && (
