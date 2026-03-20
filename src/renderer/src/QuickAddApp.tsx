@@ -223,16 +223,9 @@ export default function QuickAddApp(): React.JSX.Element {
       } else if (data.type === 'date') {
         smart.selectDate(data.option.date)
       } else if (data.type === 'project') {
-        // Just switch the dropdown, no chip
+        // Just switch the dropdown, no chip — use selectProject which clears suppressed positions
         setSelectedProjectId(data.project.id)
-        // Remove the /text from input
-        if (smart.popupState?.operator) {
-          const newValue =
-            smart.inputValue.slice(0, smart.popupState.operator.startIndex) +
-            smart.inputValue.slice(smart.popupState.operator.endIndex)
-          smart.setInputValue(newValue.replace(/  +/g, ' '))
-        }
-        smart.dismissPopup()
+        smart.selectProject(data.project)
       }
     },
     [smart, targetProjectId]
