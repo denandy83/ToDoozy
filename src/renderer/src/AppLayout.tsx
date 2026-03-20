@@ -434,7 +434,7 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Main content area */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          <header className="flex items-center gap-3 border-b border-border px-6 py-4">
+          <header className="flex h-[57px] items-center gap-3 border-b border-border px-6">
             {currentView === 'project' && selectedProject && (
               <div
                 className="h-2.5 w-2.5 flex-shrink-0 rounded-full"

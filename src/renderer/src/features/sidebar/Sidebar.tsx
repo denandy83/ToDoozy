@@ -181,7 +181,7 @@ export function Sidebar({
       }`}
     >
       {/* Header */}
-      <div className={`flex items-center border-b border-border ${collapsed ? 'justify-center px-2 py-4' : 'gap-2 px-3 py-4'}`}>
+      <div className={`flex h-[57px] items-center border-b border-border ${collapsed ? 'justify-center px-2' : 'gap-2 px-3'}`}>
         {!collapsed && (
           <>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15">
