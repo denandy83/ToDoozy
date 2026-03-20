@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { LogOut, Pencil, Trash2 } from 'lucide-react'
+import { LogOut, Pencil, Trash2, Plus, X, Check } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -454,9 +454,16 @@ function ProjectsTab({
 }: ProjectsTabProps): React.JSX.Element {
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(selectedProject?.name ?? '')
+  const [addingProject, setAddingProject] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectColor, setNewProjectColor] = useState('#6366f1')
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const newProjectInputRef = useRef<HTMLInputElement>(null)
   const updateProject = useProjectStore((s) => s.updateProject)
   const deleteProject = useProjectStore((s) => s.deleteProject)
+  const createProject = useProjectStore((s) => s.createProject)
+  const createStatus = useStatusStore((s) => s.createStatus)
+  const currentUser = useAuthStore((s) => s.currentUser)
 
   const doDeleteProject = useCallback(async (project: Project) => {
     try {
@@ -564,6 +571,39 @@ function ProjectsTab({
   )
 
   useEffect(() => {
+    if (addingProject) newProjectInputRef.current?.focus()
+  }, [addingProject])
+
+  const handleAddProject = useCallback(async () => {
+    const name = newProjectName.trim()
+    if (!name || !currentUser) return
+    const id = crypto.randomUUID()
+    const maxOrder = sortedProjects.reduce((max, p) => Math.max(max, p.sidebar_order ?? 0, sortedProjects.length - 1), 0)
+    const project = await createProject({
+      id,
+      name,
+      owner_id: currentUser.id,
+      color: newProjectColor,
+      icon: 'folder',
+      is_default: 0,
+      sidebar_order: maxOrder + 1
+    })
+    await window.api.projects.addMember(id, currentUser.id, 'owner', currentUser.id)
+    // Seed default statuses
+    for (const s of [
+      { name: 'Not Started', color: '#888888', icon: 'circle', order_index: 0, is_default: 1, is_done: 0 },
+      { name: 'In Progress', color: '#f59e0b', icon: 'clock', order_index: 1, is_default: 0, is_done: 0 },
+      { name: 'Done', color: '#22c55e', icon: 'check-circle', order_index: 2, is_default: 0, is_done: 1 }
+    ]) {
+      await createStatus({ id: crypto.randomUUID(), project_id: id, ...s })
+    }
+    onProjectChange(project.id)
+    setNewProjectName('')
+    setNewProjectColor('#6366f1')
+    setAddingProject(false)
+  }, [newProjectName, newProjectColor, currentUser, sortedProjects, createProject, createStatus, onProjectChange])
+
+  useEffect(() => {
     setNameValue(selectedProject?.name ?? '')
     setEditingName(false)
   }, [selectedProject?.id, selectedProject?.name])
@@ -584,9 +624,56 @@ function ProjectsTab({
     <div className="flex flex-col gap-6">
       {/* Sidebar order */}
       <div>
-        <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-          Sidebar Order
-        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+            Sidebar Order
+          </p>
+          <button
+            onClick={() => setAddingProject(true)}
+            className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/10"
+          >
+            <Plus size={12} />
+            Add
+          </button>
+        </div>
+        {addingProject && (
+          <div className="mb-2 flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
+            <input
+              ref={newProjectInputRef}
+              type="text"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddProject()
+                if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false) }
+              }}
+              placeholder="Project name"
+              className="rounded border border-border bg-surface px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+            />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
+                {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setNewProjectColor(c)}
+                    className={`h-5 w-5 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setAddingProject(false)} className="rounded p-1.5 text-muted transition-colors hover:bg-foreground/6">
+                  <X size={14} />
+                </button>
+                <button onClick={handleAddProject} disabled={!newProjectName.trim()} className="rounded p-1.5 text-accent transition-colors hover:bg-accent/10 disabled:opacity-50">
+                  <Check size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
             <div className="flex flex-col gap-0.5">
