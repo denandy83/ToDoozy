@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -46,6 +46,7 @@ export function LabelSettingsContent(): React.JSX.Element {
   const [newColor, setNewColor] = useState('#6366f1')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
   const addRowRef = useRef<HTMLDivElement>(null)
@@ -100,16 +101,21 @@ export function LabelSettingsContent(): React.JSX.Element {
   const handleStartEdit = useCallback((label: Label) => {
     setEditingId(label.id)
     setEditName(label.name)
+    setEditColor(label.color)
   }, [])
 
   const handleSaveEdit = useCallback(async () => {
     if (!editingId) return
     const name = editName.trim()
     if (name) {
-      await updateLabel(editingId, { name })
+      await updateLabel(editingId, { name, color: editColor })
     }
     setEditingId(null)
-  }, [editingId, editName, updateLabel])
+  }, [editingId, editName, editColor, updateLabel])
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null)
+  }, [])
 
   const handleDelete = useCallback((id: string) => {
     // Count tasks that have this label assigned
@@ -228,13 +234,14 @@ export function LabelSettingsContent(): React.JSX.Element {
                   disabled={showAddInput}
                   isEditing={editingId === label.id}
                   editName={editName}
+                  editColor={editColor}
                   editInputRef={editingId === label.id ? editInputRef : undefined}
                   onEditNameChange={setEditName}
+                  onEditColorChange={setEditColor}
                   onSaveEdit={handleSaveEdit}
-                  onCancelEdit={() => setEditingId(null)}
+                  onCancelEdit={handleCancelEdit}
                   onStartEdit={() => handleStartEdit(label)}
                   onDelete={() => handleDelete(label.id)}
-                  onColorChange={(c) => updateLabel(label.id, { color: c })}
                 />
               ))}
 
@@ -249,18 +256,24 @@ export function LabelSettingsContent(): React.JSX.Element {
   )
 }
 
+const LABEL_COLORS = [
+  '#888888', '#ef4444', '#f59e0b', '#22c55e',
+  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'
+]
+
 interface SortableLabelRowProps {
   label: Label
   disabled: boolean
   isEditing: boolean
   editName: string
+  editColor: string
   editInputRef?: React.RefObject<HTMLInputElement | null>
   onEditNameChange: (name: string) => void
+  onEditColorChange: (color: string) => void
   onSaveEdit: () => void
   onCancelEdit: () => void
   onStartEdit: () => void
   onDelete: () => void
-  onColorChange: (color: string) => void
 }
 
 function SortableLabelRow({
@@ -268,13 +281,14 @@ function SortableLabelRow({
   disabled,
   isEditing,
   editName,
+  editColor,
   editInputRef,
   onEditNameChange,
+  onEditColorChange,
   onSaveEdit,
   onCancelEdit,
   onStartEdit,
-  onDelete,
-  onColorChange
+  onDelete
 }: SortableLabelRowProps): React.JSX.Element {
   const {
     attributes,
@@ -291,6 +305,62 @@ function SortableLabelRow({
     opacity: isDragging ? 0.3 : undefined
   }
 
+  if (isEditing) {
+    return (
+      <div ref={setNodeRef} style={style}>
+        <form
+          onSubmit={(e) => { e.preventDefault(); onSaveEdit() }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancelEdit() } }}
+          className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              ref={editInputRef}
+              type="text"
+              value={editName}
+              onChange={(e) => onEditNameChange(e.target.value)}
+              placeholder="Label name"
+              autoFocus
+              className="flex-1 rounded border border-border bg-surface px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
+              {LABEL_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onEditColorChange(c)}
+                  className={`h-5 w-5 rounded-full ${
+                    editColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                className="rounded p-1.5 text-muted transition-colors hover:bg-foreground/6"
+              >
+                <X size={14} />
+              </button>
+              <button
+                type="submit"
+                disabled={!editName.trim()}
+                className="rounded p-1.5 text-accent transition-colors hover:bg-accent/10 disabled:opacity-50"
+              >
+                <Check size={14} />
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    )
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -301,27 +371,15 @@ function SortableLabelRow({
       {...attributes}
       {...listeners}
     >
-      <ColorDot color={label.color} onChange={onColorChange} />
-      {isEditing ? (
-        <input
-          ref={editInputRef}
-          type="text"
-          value={editName}
-          onChange={(e) => onEditNameChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onSaveEdit()
-            if (e.key === 'Escape') { e.stopPropagation(); onCancelEdit() }
-          }}
-          onBlur={onSaveEdit}
-          className="flex-1 bg-transparent text-sm font-light text-foreground focus:outline-none"
-        />
-      ) : (
-        <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
-      )}
+      <div
+        className="h-3 w-3 flex-shrink-0 rounded-full"
+        style={{ backgroundColor: label.color }}
+      />
+      <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
       <button
         onClick={onStartEdit}
         className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-        title="Rename"
+        title="Edit"
       >
         <Pencil size={12} />
       </button>
