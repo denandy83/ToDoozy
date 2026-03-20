@@ -269,8 +269,8 @@ export function Sidebar({
                       <button
                         key={c}
                         type="button"
-                        onClick={() => setNewProjectColor(c)}
-                        className={`h-3.5 w-3.5 rounded-full ${newProjectColor === c ? 'ring-1.5 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
+                        onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
+                        className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
                         style={{ backgroundColor: c }}
                       />
                     ))}
