@@ -369,6 +369,11 @@ export function TaskRow({
           </span>
         )}
 
+        {/* Subtask count badge + progress */}
+        {hasChildren && (
+          <SubtaskBadge done={childCount.done} total={childCount.total} />
+        )}
+
         {/* Priority badge */}
         {showBadge && <PriorityBadge priority={task.priority} showIcon={prioritySettings.badgeIcons} showLabel={prioritySettings.badgeLabels} />}
 
@@ -387,11 +392,6 @@ export function TaskRow({
               <LabelOverflowBadge labels={taskLabels.slice(3)} />
             )}
           </div>
-        )}
-
-        {/* Subtask count badge + progress */}
-        {hasChildren && (
-          <SubtaskBadge done={childCount.done} total={childCount.total} />
         )}
 
         {/* Add label button */}
