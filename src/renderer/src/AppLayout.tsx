@@ -197,13 +197,14 @@ export function AppLayout(): React.JSX.Element {
         (t) =>
           t.is_archived === 0 &&
           t.is_template === 0 &&
+          t.parent_id === null &&
           (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
       ).length,
       backlog: taskList.filter(
-        (t) => t.is_archived === 0 && t.is_template === 0
+        (t) => t.is_archived === 0 && t.is_template === 0 && t.parent_id === null
       ).length,
-      archive: taskList.filter((t) => t.is_archived === 1).length,
-      templates: taskList.filter((t) => t.is_template === 1).length
+      archive: taskList.filter((t) => t.is_archived === 1 && t.parent_id === null).length,
+      templates: taskList.filter((t) => t.is_template === 1 && t.parent_id === null).length
     }
   }, [allTasks])
 

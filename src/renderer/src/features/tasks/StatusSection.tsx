@@ -84,7 +84,7 @@ export function StatusSection({
           {status.name}
         </span>
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-          {tasks.length}
+          {topLevel.length}
         </span>
       </button>
 
