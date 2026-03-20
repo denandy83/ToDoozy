@@ -272,7 +272,8 @@ export function TaskRow({
 
   const assignedLabelIds = new Set(taskLabels.map((l) => l.id))
 
-  const doneStatus = statuses.find((s) => s.id === task.status_id)
+  const effectiveStatusId = statusIdOverride ?? task.status_id
+  const doneStatus = statuses.find((s) => s.id === effectiveStatusId)
   const isDone = doneStatus?.is_done === 1
 
   const isDropAbove = dropIndicator?.targetId === task.id && dropIndicator.intent === 'above'
