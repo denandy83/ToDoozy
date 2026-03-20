@@ -1,6 +1,7 @@
 // Known macOS reserved shortcuts that cannot be overridden by the app.
 // Keys are Electron accelerator strings; values are the macOS feature name.
 export const RESERVED_MACOS_SHORTCUTS: Record<string, string> = {
+  // macOS system shortcuts
   'CommandOrControl+Space': 'Spotlight',
   'Command+Space': 'Spotlight',
   'CommandOrControl+Shift+3': 'Screenshot (Full Screen)',
@@ -12,7 +13,25 @@ export const RESERVED_MACOS_SHORTCUTS: Record<string, string> = {
   'Command+Tab': 'App Switcher',
   'CommandOrControl+Tab': 'App Switcher',
   'Command+Option+Escape': 'Force Quit',
-  'CommandOrControl+Alt+Escape': 'Force Quit'
+  'CommandOrControl+Alt+Escape': 'Force Quit',
+  // Essential app/system shortcuts
+  'CommandOrControl+C': 'Copy',
+  'CommandOrControl+V': 'Paste',
+  'CommandOrControl+X': 'Cut',
+  'CommandOrControl+Z': 'Undo',
+  'CommandOrControl+Shift+Z': 'Redo',
+  'CommandOrControl+A': 'Select All',
+  'CommandOrControl+Q': 'Quit',
+  'CommandOrControl+W': 'Close Window',
+  'CommandOrControl+H': 'Hide App',
+  'CommandOrControl+M': 'Minimize',
+  'CommandOrControl+N': 'New Window',
+  'CommandOrControl+K': 'Command Palette',
+  'CommandOrControl+L': 'Toggle Layout',
+  'CommandOrControl+1': 'My Day',
+  'CommandOrControl+2': 'Projects',
+  'CommandOrControl+3': 'Archive',
+  'CommandOrControl+4': 'Templates'
 }
 
 /**

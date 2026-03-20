@@ -13,6 +13,11 @@ if (!rootElement) {
 const params = new URLSearchParams(window.location.search)
 const isQuickAdd = params.get('window') === 'quickadd'
 
+if (isQuickAdd) {
+  document.body.style.backgroundColor = 'transparent'
+  document.documentElement.style.backgroundColor = 'transparent'
+}
+
 createRoot(rootElement).render(
   <StrictMode>
     {isQuickAdd ? <QuickAddApp /> : <App />}

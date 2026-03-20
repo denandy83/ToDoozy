@@ -227,6 +227,8 @@ export function UnifiedSettingsModal({
 function GeneralSettings(): React.JSX.Element {
   const addPosition = useSetting('new_task_position') ?? 'top'
   const { setSetting } = useSettingsStore()
+  const projects = useProjectStore(selectAllProjects)
+  const quickAddDefaultProject = useSetting('quickadd_default_project') ?? ''
 
   return (
     <div className="flex flex-col gap-6">
@@ -260,6 +262,49 @@ function GeneralSettings(): React.JSX.Element {
             Bottom
           </button>
         </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Quick-add default My Day</p>
+          <p className="text-[10px] text-muted">Auto-check "My Day" when using the quick-add window</p>
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setSetting('quickadd_default_myday', 'true')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('quickadd_default_myday') ?? 'true') === 'true'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            On
+          </button>
+          <button
+            onClick={() => setSetting('quickadd_default_myday', 'false')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('quickadd_default_myday') ?? 'true') === 'false'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            Off
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Quick-add default project</p>
+          <p className="text-[10px] text-muted">Pre-selected project when opening quick-add</p>
+        </div>
+        <select
+          value={quickAddDefaultProject || (projects.find((p) => p.is_default === 1)?.id ?? projects[0]?.id ?? '')}
+          onChange={(e) => setSetting('quickadd_default_project', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
       </div>
       <ShortcutRecorder />
     </div>

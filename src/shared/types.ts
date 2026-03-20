@@ -150,6 +150,7 @@ export interface UpdateProjectInput {
   color?: string
   icon?: string
   sidebar_order?: number
+  is_default?: number
 }
 
 export interface CreateStatusInput {

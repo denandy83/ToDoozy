@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { ChevronDown, Calendar, X } from 'lucide-react'
+import { Calendar, X } from 'lucide-react'
 import type { Project, Label, ThemeConfig } from '../../shared/types'
 import { applyThemeConfig } from './shared/hooks/useThemeApplicator'
 import { useSmartInput } from './shared/hooks/useSmartInput'
@@ -13,35 +13,27 @@ import {
   getNextAutoColor
 } from './shared/hooks/smartInputParser'
 
-interface ProjectOption {
-  id: string
-  name: string
-  color: string
-  isMyDay: boolean
-}
-
-const MY_DAY_ID = '__my_day__'
 
 export default function QuickAddApp(): React.JSX.Element {
   const [projects, setProjects] = useState<Project[]>([])
   const [projectLabels, setProjectLabels] = useState<Label[]>([])
-  const [selectedDestination, setSelectedDestination] = useState(MY_DAY_ID)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [addToMyDay, setAddToMyDay] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [newTaskPosition, setNewTaskPosition] = useState<string>('top')
-  const [dropdownOpen, setDropdownOpen] = useState(false)
   const [ready, setReady] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
   const smart = useSmartInput(inputRef)
 
-  // Resolve the target project ID for the current destination
-  const targetProjectId = useMemo(() => {
-    if (selectedDestination === MY_DAY_ID) {
+  // Auto-select default project once loaded
+  useEffect(() => {
+    if (projects.length > 0 && !selectedProjectId) {
       const defaultProject = projects.find((p) => p.is_default === 1) ?? projects[0]
-      return defaultProject?.id ?? null
+      setSelectedProjectId(defaultProject.id)
     }
-    return selectedDestination
-  }, [selectedDestination, projects])
+  }, [projects, selectedProjectId])
+
+  const targetProjectId = selectedProjectId
 
   // Load labels when target project changes
   useEffect(() => {
@@ -72,6 +64,12 @@ export default function QuickAddApp(): React.JSX.Element {
           settingsMap[s.key] = s.value
         }
         setNewTaskPosition(settingsMap['new_task_position'] ?? 'top')
+        setAddToMyDay((settingsMap['quickadd_default_myday'] ?? 'true') === 'true')
+
+        // Set default project from settings, fallback to is_default project
+        const quickAddProject = settingsMap['quickadd_default_project']
+        const defaultProj = userProjects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? userProjects[0]
+        if (defaultProj) setSelectedProjectId(defaultProj.id)
 
         const themeId = settingsMap['theme_id']
         if (themeId) {
@@ -93,9 +91,17 @@ export default function QuickAddApp(): React.JSX.Element {
   useEffect(() => {
     const unsub = window.api.quickadd.onFocus(() => {
       smart.reset()
-      setSelectedDestination(MY_DAY_ID)
-      setDropdownOpen(false)
       inputRef.current?.focus()
+      // Re-read settings in case they changed in the main window
+      window.api.settings.getAll().then((allSettings) => {
+        const map: Record<string, string | null> = {}
+        for (const s of allSettings) map[s.key] = s.value
+        setNewTaskPosition(map['new_task_position'] ?? 'top')
+        setAddToMyDay((map['quickadd_default_myday'] ?? 'true') === 'true')
+        const quickAddProject = map['quickadd_default_project']
+        const defaultProj = projects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? projects[0]
+        if (defaultProj) setSelectedProjectId(defaultProj.id)
+      }).catch(() => {})
     })
     return unsub
   }, [smart])
@@ -107,44 +113,19 @@ export default function QuickAddApp(): React.JSX.Element {
     }
   }, [ready])
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent): void => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
 
-  const destinations: ProjectOption[] = [
-    { id: MY_DAY_ID, name: 'My Day', color: '#f59e0b', isMyDay: true },
-    ...projects.map((p) => ({ id: p.id, name: p.name, color: p.color, isMyDay: false }))
-  ]
-
-  const selectedDest = destinations.find((d) => d.id === selectedDestination) ?? destinations[0]
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     const trimmed = smart.getSubmitTitle()
-    if (!trimmed || !userId) return
+    if (!trimmed || !userId || !selectedProjectId) return
 
     try {
-      const isMyDay = selectedDestination === MY_DAY_ID
-      let projectId: string
-      if (isMyDay) {
-        const defaultProject = projects.find((p) => p.is_default === 1) ?? projects[0]
-        if (!defaultProject) return
-        projectId = defaultProject.id
-      } else {
-        projectId = selectedDestination
-      }
-
-      const defaultStatus = await window.api.statuses.findDefault(projectId)
+      const defaultStatus = await window.api.statuses.findDefault(selectedProjectId)
       if (!defaultStatus) return
 
-      const allTasks = await window.api.tasks.findByProjectId(projectId)
-      const orderIndices = allTasks.map((t) => t.order_index)
+      const allTasks = await window.api.tasks.findByProjectId(selectedProjectId)
+      const statusTasks = allTasks.filter((t) => t.status_id === defaultStatus.id && t.parent_id === null)
+      const orderIndices = statusTasks.map((t) => t.order_index)
       const maxIndex = orderIndices.length > 0 ? Math.max(...orderIndices) : 0
       const minIndex = orderIndices.length > 0 ? Math.min(...orderIndices) : 0
       const orderIndex = newTaskPosition === 'bottom' ? maxIndex + 1 : minIndex - 1
@@ -152,12 +133,12 @@ export default function QuickAddApp(): React.JSX.Element {
       const taskId = crypto.randomUUID()
       await window.api.tasks.create({
         id: taskId,
-        project_id: projectId,
+        project_id: selectedProjectId,
         owner_id: userId,
         title: trimmed,
         status_id: defaultStatus.id,
         order_index: orderIndex,
-        is_in_my_day: isMyDay ? 1 : 0,
+        is_in_my_day: addToMyDay ? 1 : 0,
         priority: smart.selectedPriority ?? 0,
         due_date: smart.selectedDate
       })
@@ -174,13 +155,13 @@ export default function QuickAddApp(): React.JSX.Element {
     } catch (err) {
       console.error('Failed to create task:', err)
     }
-  }, [smart, userId, selectedDestination, projects, newTaskPosition])
+  }, [smart, userId, selectedProjectId, addToMyDay, newTaskPosition])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (smart.popupState) return // Popup handles its own keys
 
-      if (e.key === 'Enter' && !dropdownOpen) {
+      if (e.key === 'Enter') {
         e.preventDefault()
         handleSubmit()
       }
@@ -193,7 +174,7 @@ export default function QuickAddApp(): React.JSX.Element {
         smart.removeLastChip()
       }
     },
-    [handleSubmit, dropdownOpen, smart]
+    [handleSubmit, smart]
   )
 
   const handleChange = useCallback(
@@ -293,12 +274,12 @@ export default function QuickAddApp(): React.JSX.Element {
   const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null
 
   if (!ready) {
-    return <div className="h-full w-full" />
+    return <div className="w-screen bg-transparent" />
   }
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center p-0">
-      <div className="w-full rounded-xl border border-border bg-surface shadow-2xl overflow-hidden">
+    <div className="flex w-screen flex-col justify-end bg-transparent p-1" style={{ height: '100vh' }}>
+      <div className="relative w-full overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         {/* Title input */}
         <div className="px-4 py-3">
           <input
@@ -351,50 +332,44 @@ export default function QuickAddApp(): React.JSX.Element {
           )}
         </div>
 
-        {/* Destination dropdown */}
+        {/* Project selector + My Day checkbox */}
         <div className="flex items-center justify-between border-t border-border px-4 py-2">
-          <div ref={dropdownRef} className="relative">
-            <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+          <div className="flex items-center gap-3">
+            {/* Project dropdown — native select for macOS behavior */}
+            <select
+              value={selectedProjectId ?? ''}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value)
+                inputRef.current?.focus()
+              }}
+              className="rounded-lg border border-border bg-transparent px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 hover:text-foreground focus:outline-none cursor-pointer"
             >
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: selectedDest?.color ?? '#888' }}
-              />
-              {selectedDest?.name ?? 'My Day'}
-              <ChevronDown size={10} />
-            </button>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
 
-            {dropdownOpen && (
-              <div className="absolute bottom-full left-0 mb-1 w-48 rounded-lg border border-border bg-surface py-1 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100">
-                {destinations.map((dest) => (
-                  <button
-                    key={dest.id}
-                    onClick={() => {
-                      setSelectedDestination(dest.id)
-                      setDropdownOpen(false)
-                      inputRef.current?.focus()
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${
-                      selectedDestination === dest.id ? 'text-accent' : 'text-foreground'
-                    }`}
-                  >
-                    <span
-                      className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: dest.color }}
-                    />
-                    {dest.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Add to My Day checkbox */}
+            <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground">
+              <input
+                type="checkbox"
+                checked={addToMyDay}
+                onChange={(e) => {
+                  setAddToMyDay(e.target.checked)
+                  inputRef.current?.focus()
+                }}
+                className="h-3 w-3 rounded border-border accent-accent"
+              />
+              My Day
+            </label>
           </div>
 
           <div className="flex items-center gap-1 text-[10px] text-muted/40">
-            <kbd className="rounded border border-border px-1 py-0.5 text-[9px]">Enter</kbd>
+            <span className="text-[9px] font-bold uppercase tracking-wider">Enter</span>
             <span>to add</span>
-            <kbd className="ml-1 rounded border border-border px-1 py-0.5 text-[9px]">Esc</kbd>
+            <span className="ml-1 text-[9px] font-bold uppercase tracking-wider">Esc</span>
             <span>to close</span>
           </div>
         </div>

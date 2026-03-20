@@ -1,0 +1,370 @@
+# Ralph Progress Log
+Started: Wed Mar 18 10:59:51 CET 2026
+---
+
+## Story 1: Scaffold Electron + React + TypeScript project
+- Scaffolded manually (electron-vite create is interactive, so set up structure by hand)
+- Installed all deps: better-sqlite3, @dnd-kit/core, @dnd-kit/sortable, lucide-react, tailwindcss@4, @tailwindcss/vite@4, zustand, @modelcontextprotocol/sdk, @supabase/supabase-js
+- Configured TypeScript strict mode (tsconfig.node.json + tsconfig.web.json)
+- Set up Tailwind CSS 4 via @tailwindcss/vite plugin with theme colors
+- Dev server configured on port 5200
+- Copied ToDoozy.png to resources/icon.png
+- electron-vite v5 requires vite@^7 (not v8) — pinned accordingly
+- Preload uses globalThis cast instead of window to avoid DOM type issues in Node tsconfig
+- Typecheck passes, dev server compiles and launches successfully
+
+## Story 2: Database layer with versioned migrations
+- Created src/main/database/ module with index.ts, migrations.ts, seed.ts
+- All 10 tables from §4 Data Model: users, projects, project_members, statuses, tasks, labels, task_labels, themes, settings, activity_log
+- schema_version table tracks migration versions; migrations run in transactions
+- PRAGMA foreign_keys = ON, WAL mode enabled
+- Seeded 12 built-in themes (6 dark, 6 light) and default settings
+- Default statuses (Not Started, In Progress, Done) are seeded per-project at project creation time (Story 7), not globally
+- Ran @electron/rebuild to fix better-sqlite3 native module for Electron's Node version
+- Database initializes on app.whenReady(), closes on app.will-quit
+- Typecheck passes, dev server compiles and migration runs successfully
+
+## Story 3: Repository pattern
+- Created src/shared/types.ts with all domain types (User, Project, Status, Task, Label, Theme, Setting, ActivityLogEntry) plus create/update input types
+- TASK_UPDATABLE_COLUMNS whitelist for SQL injection prevention on task updates
+- Created 8 repository classes in src/main/repositories/:
+  - UserRepository: CRUD, findByEmail
+  - ProjectRepository: CRUD, findByOwnerId, findDefault, member management (add/remove/get), getProjectsForUser
+  - StatusRepository: CRUD, findByProjectId, findDefault, findDone, reassignAndDelete (transactional)
+  - TaskRepository: CRUD, findByProjectId/StatusId/MyDay/Archived/Templates, findSubtasks, getSubtaskCount, reorder (batch transaction), label assignments, duplicate
+  - LabelRepository: CRUD, findByProjectId, findByTaskId
+  - ThemeRepository: CRUD, listByMode, getConfig (parsed JSON)
+  - SettingsRepository: get/set/getAll/getMultiple/setMultiple (transactional), delete
+  - ActivityLogRepository: create, findByTaskId/UserId, deleteByTaskId, getRecent
+- createRepositories() factory function returns all repos from a single db instance
+- Updated tsconfig.node.json and tsconfig.web.json to include src/shared/**/*.ts
+- 54 Vitest unit tests covering all repository methods — all pass
+- Typecheck passes, dev server compiles successfully
+
+## Story 4: IPC layer and preload bridge
+- Created src/main/ipc-handlers.ts with registerIpcHandlers() mapping every repository method to an ipcMain.handle() channel
+- Channel naming convention: `namespace:method` (e.g., `tasks:findById`, `labels:create`)
+- Lazy initialization of repositories via getRepos() — repos created on first IPC call after DB is ready
+- Updated src/preload/index.ts: fully typed api object exposed via contextBridge with all 8 namespaces (tasks, labels, projects, statuses, users, activityLog, settings, themes)
+- Updated src/preload/index.d.ts: complete type declarations for TodoozyAPI with separate interfaces per namespace
+- Return values: undefined from repos converted to null for IPC serialization (undefined not serializable)
+- All methods return Promises in the preload API (ipcRenderer.invoke is async)
+- Registered IPC handlers in main/index.ts after initDatabase()
+- Typecheck passes with zero errors, dev server compiles successfully
+
+## Story 5: Zustand Stores
+- Created 6 Zustand stores: taskStore, labelStore, statusStore, projectStore, settingsStore, authStore
+- Each store follows hydration pattern: load from IPC, store in Record<id, Entity> maps
+- All actions wrap IPC calls with try/catch, storing error messages in state
+- Exported typed selectors for common queries (by project, by status, current selection, etc.)
+- LabelStore includes activeLabelFilters (Set<string>) for filter UI
+- ProjectStore auto-selects default project on hydration if none selected
+- SettingsStore combines settings + themes management, restores currentThemeId from settings
+- AuthStore manages user session state with login/logout/checkAuth
+- Barrel export from shared/stores/index.ts
+- Zero any types, all interfaces defined, typecheck passes clean
+
+## Story 6: Supabase Auth - Login screen
+- Created auth IPC handlers in ipc-handlers.ts: safeStorage-based session persistence (storeSession, getSession, clearSession), getSupabaseConfig, openOAuthWindow
+- safeStorage encrypts session JSON using OS keychain; falls back to plaintext if encryption unavailable
+- OAuth flow: main process opens BrowserWindow popup, watches navigation events for callback URL with code/access_token
+- Added dotenv to main process entry (src/main/index.ts) to load .env credentials
+- Extended preload bridge with AuthAPI interface (5 methods) and type declarations in index.d.ts
+- Created src/renderer/src/lib/supabase.ts: lazy-initialized Supabase client with config from IPC, plus URL token parser
+- Rewrote authStore with full Supabase integration:
+  - signInWithEmail / signUpWithEmail: direct Supabase auth calls
+  - signInWithGoogle: OAuth popup flow via IPC → BrowserWindow → token extraction → session set
+  - initAuth: restores session from safeStorage on launch, auto-refreshes via Supabase, offline fallback using local SQLite users
+  - ensureDefaultProject: creates "Personal" project + 3 default statuses on first login
+  - persistSession: stores access_token + refresh_token to safeStorage after every auth event
+- Created LoginScreen component (src/renderer/src/features/auth/LoginScreen.tsx):
+  - Email/password form with login/signup toggle
+  - Google OAuth button with SVG icon
+  - Loading spinner, error display, keyboard navigation (Enter to submit, Escape clears error)
+  - Typography and styling follow spec (§35 UX Consistency, typography scale)
+- Updated App.tsx: auth routing — splash screen during init, LoginScreen when unauthenticated, main app when authenticated
+- Rebuilt better-sqlite3 native module for Electron with @electron/rebuild
+- Typecheck passes with zero errors, dev server compiles and launches successfully
+
+## Story 7: Projects and configurable statuses
+- Built shared Modal and Toast components (src/renderer/src/shared/components/)
+  - Modal: backdrop blur, escape to close, click-outside to close, zoom-in animation
+  - Toast: global state via useToast() hook, auto-dismiss 5s, action buttons, stacking, variant support
+- Built ProjectSwitcher dropdown (src/renderer/src/features/projects/ProjectSwitcher.tsx)
+  - Lists all user projects with color indicators
+  - Click to switch active project (updates projectStore.currentProjectId)
+  - Settings gear button per project, "New Project" button at bottom
+  - Click-outside and Escape to close
+- Built NewProjectModal: name + color picker, seeds 3 default statuses on create
+- Built ProjectSettingsModal with tabbed layout (General / Statuses)
+  - General tab: autosave name (1s debounce), color picker, danger zone with delete confirmation
+  - Default project cannot be deleted
+  - Statuses tab: full CRUD with StatusList, StatusEditRow, ReassignStatusModal
+- Status CRUD:
+  - Add: name, color picker (8 presets), is_done toggle
+  - Edit inline: same fields, Escape to cancel
+  - Delete: ReassignStatusModal prompts user to reassign tasks to another status before deletion
+  - Cannot delete last status
+- Built AppLayout with sidebar: project switcher header, nav placeholder, settings/logout footer
+- App.tsx hydrates projectStore and statusStore on auth, re-hydrates statuses on project switch
+- Typecheck passes with zero errors, production build succeeds
+
+## Story 8: Task CRUD with basic list view
+- Created StatusButton shared component (src/renderer/src/shared/components/StatusButton.tsx)
+  - Cycles through project statuses in order_index order, wraps around
+  - Displays Circle/CircleDot/CheckCircle2 icons based on status state
+  - Color-coded from status.color
+- Created AddTaskInput (src/renderer/src/features/tasks/AddTaskInput.tsx)
+  - Always visible at top of list, placeholder "Add to [view name]..."
+  - Enter submits, Escape clears and blurs
+  - Exposes focus() via forwardRef for keyboard navigation
+- Created TaskRow (src/renderer/src/features/tasks/TaskRow.tsx)
+  - StatusButton for cycling, inline title display, delete button (red, on hover)
+  - Double-click to edit inline, Enter saves, Escape cancels
+  - Autosave with 1s debounce on text changes
+  - Selection highlight: accent bg 12% + accent border 15%
+  - Done tasks show strikethrough + muted text
+- Created StatusSection (src/renderer/src/features/tasks/StatusSection.tsx)
+  - Collapsible sections with chevron toggle
+  - Status name + task count, color-coded
+  - Empty state message when no tasks
+- Created TaskListView (src/renderer/src/features/tasks/TaskListView.tsx)
+  - Orchestrates all task operations: create, update, delete with undo toast
+  - Tasks grouped by status sections, sorted by order_index
+  - Status change auto-sets completed_date for done statuses, clears for non-done
+  - Full keyboard navigation: ↑/↓ move selection, Enter focuses add-input, Space toggles status, Delete/Backspace deletes with auto-select next, Tab/Shift+Tab navigation
+  - Delete undo: toast with "Undo" button recreates task
+- Updated AppLayout: replaced placeholder with TaskListView, added project header
+- Updated App.tsx: hydrates taskStore on project change alongside statusStore
+- Typecheck passes with zero errors, production build succeeds
+
+## Story 9: Views and sidebar navigation (2026-03-18)
+
+### What was built
+- Created viewStore (src/renderer/src/shared/stores/viewStore.ts)
+  - Tracks current view (my-day, backlog, archive, templates)
+  - Sidebar state: pinned, expanded, width (clamped 120-600px)
+  - nextView/prevView for Cmd+[ / Cmd+] navigation
+- Created Sidebar component (src/renderer/src/features/sidebar/Sidebar.tsx)
+  - Collapsible: 56px icon-only ↔ 224px expanded, 200ms ease-out transition
+  - Pinnable: when unpinned, expands on hover and collapses on mouse leave
+  - Header with app logo + pin/unpin toggle button
+  - Footer with Settings + Logout buttons (adapts to collapsed state)
+- Created NavItem component (src/renderer/src/features/sidebar/NavItem.tsx)
+  - Active state: accent bg at 12% opacity + accent border at 15%
+  - Hover state: bg-foreground/6 with faint border
+  - Count badges (right-aligned in expanded, dot overlay in collapsed)
+  - Shortcut hints in collapsed tooltip
+  - role="tab" + aria-selected for accessibility
+- Created MyDayView (src/renderer/src/features/views/MyDayView.tsx)
+  - Cross-project: shows tasks where is_in_my_day=1 OR due_date is today
+  - Grouped by status sections, same keyboard nav as TaskListView
+  - New tasks created with is_in_my_day=1
+- Created ArchiveView (src/renderer/src/features/views/ArchiveView.tsx)
+  - Read-only browsing of is_archived tasks, sorted by completed_date desc
+  - Restore button (unarchive) with undo toast
+  - Keyboard nav: ↑/↓ arrow keys
+- Created TemplatesView (src/renderer/src/features/views/TemplatesView.tsx)
+  - Shows is_template tasks with "Use Template" button
+  - Creates a copy in backlog with default status
+  - Enter key on selected template triggers use
+- Updated AppLayout
+  - Replaced old sidebar with new Sidebar component
+  - View routing: renders correct view component based on currentView
+  - View title in header, project switcher shown only in Backlog view
+  - Global keyboard shortcuts: Cmd+1-4 (jump to views), Cmd+[/] (prev/next)
+- Updated App.tsx: uses hydrateAllForProject to load all task types (regular + my day + archived + templates) into a single store for cross-view filtering
+- Added hydrateTemplates and hydrateAllForProject to taskStore
+- Updated store barrel exports with viewStore
+
+### Decisions
+- Loaded all task types into a single task store map rather than separate stores, enabling cross-view counts and in-memory filtering
+- Sidebar defaults to pinned+expanded; defaults to backlog view on launch
+- Archive view is read-only (status button renders but clicking is a no-op)
+- Templates view "Use Template" creates task with default status in the current project
+
+## Story 10: Detail Panel - Task editor (2026-03-18)
+
+### What was built
+- Created DetailPanel feature (src/renderer/src/features/detail/)
+  - Resizable panel, toggleable between side (right) and bottom positions
+  - Drag-to-resize via mouse on left edge (side mode) or top edge (bottom mode)
+  - Size clamped 200-800px, position persisted in viewStore
+  - Escape closes panel (sets currentTaskId to null)
+  - Toggle position button (PanelBottom/PanelRight icons)
+- DetailTitle: Large text input with 1s autosave debounce, blur saves
+- DetailStatusRow: Button row dynamically generated from project statuses + Archive toggle
+  - Active status highlighted with status color background
+  - Archive button with pressed state
+- PriorityIndicator shared component (src/renderer/src/shared/components/PriorityIndicator.tsx)
+  - 5 levels: None, Low, Normal, High, Urgent with color-coded buttons
+  - Radio group pattern with aria-checked
+- DetailLabels: Assigned labels as LabelChip components with X removal
+  - "+Add" dropdown listing unassigned labels
+  - "New label..." inline creation with name input + color picker
+  - Click-outside to close, Escape to close
+- LabelChip shared component (src/renderer/src/shared/components/LabelChip.tsx)
+  - Colored chips with translucent background, X remove button
+  - Keyboard accessible (Enter/Space to click, Delete to remove)
+- DatePicker shared component (src/renderer/src/shared/components/DatePicker.tsx)
+  - Native date input with optional time toggle
+  - Clear button, Calendar/Clock icons
+- DetailRecurrence: Button row for None/Daily/Weekly/Monthly/Custom
+  - Custom mode shows inline text input for interval
+- DetailSnooze: Quick buttons for Later Today, Tomorrow, In 3 Days, Next Week, Pick Date
+  - Sets due_date to the snoozed date
+- DetailDescription: Markdown textarea with edit/preview toggle
+  - 1s autosave debounce, Cmd+V image paste (10MB limit, base64 embedded)
+  - Simple markdown preview (headings, bold, italic, code, images)
+- DetailActivityLog: Collapsible timeline of task changes
+  - Loads from activityLog IPC on task selection
+  - Shows action type, old/new values, timestamps
+- Activity logging: status, priority, title, due date, archive changes logged via activityLog.create()
+- Updated viewStore with detailPanelPosition ('side' | 'bottom') and detailPanelSize
+- Updated AppLayout: flex layout adapts to panel position (flex-row for side, flex-col for bottom)
+
+### Decisions
+- Panel opens automatically when any task is selected (currentTaskId !== null)
+- Side position is the default (400px width)
+- Activity log entries are created from the detail panel when fields change
+- Markdown preview is a simple inline renderer (no external library) — sufficient for bold, italic, code, headings, images
+- Image paste converts to base64 data URL embedded in markdown (no external storage needed)
+
+## Story 11: Subtasks and hierarchy
+- Added `expandedTaskIds` Set + `toggleExpanded`/`setExpanded` actions to taskStore
+- Added `createSubtask` action that auto-expands parent after creation
+- Updated `deleteTask` to cascade-remove children from store (mirrors DB CASCADE)
+- Added selectors: `selectTopLevelTasks`, `selectExpandedTaskIds`, `selectIsExpanded`, `selectChildCount`, `selectHasChildren`
+- TaskRow now renders expand/collapse chevron, subtask count badge with progress bar, and nested depth indentation (24px per level)
+- TaskRow recursively renders SubtaskList when expanded, supporting arbitrary nesting depth
+- StatusSection filters to top-level tasks (parent_id === null); subtasks render inline under their parents
+- TaskListView flatTasks respects expand/collapse state for keyboard navigation
+- Arrow Right: expand children; Arrow Left: collapse or navigate to parent
+- Created DetailSubtasks component with inline add-subtask input, status cycling, delete, and click-to-navigate
+- Added subtask section to DetailPanel between Snooze and Description
+- Typecheck passes with zero errors
+- Decisions: Used store-side Set<string> for expanded state rather than per-component useState so expand state persists across view switches. Subtask count badge uses `completed_date !== null` as done proxy to avoid extra status lookups.
+
+## Story 12: Drag and drop
+- Implemented @dnd-kit integration with PointerSensor (8px activation) and KeyboardSensor
+- Created `useDragAndDrop` hook encapsulating all DnD state, event handlers, and collision detection
+- Custom collision detection: pointerWithin for sidebar nav targets, rectIntersection/closestCenter for task items
+- Drop intent detection: top 20% = above (reorder), middle 60% = inside (make subtask), bottom 20% = below (reorder)
+- Visual indicators: accent-colored horizontal lines for above/below, background highlight + scale for inside
+- TaskDragOverlay ghost card at 80% opacity with status dot and truncated title
+- TaskRow uses useSortable for individual drag handle (GripVertical icon, appears on hover)
+- StatusSection wraps tasks in SortableContext with verticalListSortingStrategy
+- DndContext lives at AppLayout level to span both sidebar (drop targets) and task views (drag sources)
+- Cross-view drag: sidebar NavItems become droppable when dragging — drop on My Day to pin, Backlog to unpin, Archive to archive
+- NavItem highlights with accent color when task is dragged over it
+- Sidebar only registers droppable IDs when `isDragging` is true to avoid collision during normal clicks
+- Reparenting: dropping inside a task makes the dragged task a child, inheriting the parent's status
+- Reordering: batch SQLite transaction via existing TaskRepository.reorder() and store.reorderTasks()
+- Dragging hides subtask children of the dragged task to prevent visual nesting confusion
+- Typecheck passes, dev server compiles cleanly with Vite auto-optimizing @dnd-kit dependencies
+- Decisions: Lifted DndContext to AppLayout (not per-view) so sidebar nav items can be cross-view drop targets. Used sortable for individual rows rather than droppable-only to get transform animations.
+
+## Story 13: Theme system
+- Created `useThemeApplicator` hook that applies 8-color ThemeConfig as CSS custom properties to document root
+- Surface color is derived from background (lighter for dark themes, darker for light)
+- Created ThemeSettingsModal with: mode toggle (dark/light), preset dropdown, 8 color pickers, live UI preview (mock sidebar + task cards), Save As for custom themes, and Apply button to persist
+- Live preview: app UI updates in real-time while editing colors; Apply button persists to DB
+- Hydrate settings + themes on app mount; theme applicator runs in AppLayout
+- Added Palette icon button in sidebar footer for quick access to theme settings
+- Added `transition-colors duration-300` for smooth theme transitions (respects prefers-reduced-motion)
+- Added `--color-fg-secondary`, `--color-fg-muted`, `--color-accent-fg` CSS variables to @theme block
+- All 12 built-in themes (6 dark, 6 light) available from seed data
+
+## Story 14: Labels with filtering
+- Added bulk task-label fetch (`findTaskLabelsByProject`) to LabelRepository, IPC, and preload bridge to avoid N+1 queries
+- Added `TaskLabelMapping` type to shared types
+- Added `filterMode` (hide/blur) state and `setFilterMode` action to labelStore
+- Added `hydrateAllTaskLabels(projectId)` to taskStore for bulk label loading
+- Created shared `LabelPicker` component (portal popup with toggle checkmarks and inline "New label..." creation)
+- Refactored `DetailLabels` to use shared `LabelPicker` (spec: "Same component everywhere — never 3 different implementations")
+- Created `LabelFilterBar` component showing labels in use, click-to-filter, hide/blur toggle, and clear button
+- Updated `TaskRow` to display label chips (click-to-filter) and inline "+" button with portal-positioned LabelPicker
+- Updated `StatusSection` to pass label props through to TaskRow
+- Updated `TaskListView` and `MyDayView` to integrate LabelFilterBar, label filtering (hide/blur modes), and label assignment
+- Auto-clear label filters on view switch (via AppLayout wrapping setView)
+- Keyboard nav flatTasks updated to respect filtered task list
+
+## Story 15: Priority system with visualizations
+- Created `usePrioritySettings` hook to read 5 toggle settings from the settings store
+- Created `PriorityBadge` component showing icon + label chip (Minus for Low, ArrowUp+label for High, AlertTriangle+label for Urgent)
+- Updated `TaskRow` with all 5 visual effects: color bar (1.5px left stripe), badges, background tint (3%/6%), font weight (light→normal→medium), and all driven by settings toggles
+- Updated `StatusSection` to sort by priority descending when auto-sort is enabled
+- Updated `TaskListView` and `MyDayView` flatTasks sorting to respect priority auto-sort
+- Created `PrioritySettingsModal` with toggle switches for all 5 effects plus live preview showing sample tasks
+- Added priority settings button (Gauge icon) to sidebar footer
+- Wired modal through AppLayout with state management
+- All settings persist immediately via the settings store (no Apply button needed since each toggle saves independently)
+
+## Story 16: Kanban toggle
+- Added `layoutMode` ('list' | 'kanban') to viewStore with `toggleLayoutMode()` action
+- Created `KanbanCard` component with priority visuals, label chips, due date, and keyboard support
+- Created `KanbanColumn` component with droppable zone (using @dnd-kit useDroppable), status header, and SortableContext
+- Created `KanbanView` component that renders columns from project statuses with keyboard nav (Arrow Left/Right moves task between columns)
+- Integrated kanban view into both `MyDayView` and `TaskListView` — conditionally renders list or kanban based on layoutMode
+- Added Cmd+L keyboard shortcut in AppLayout (only active on my-day and backlog views)
+- Added layout toggle button in header with Columns3/LayoutList icons
+- Updated drag-and-drop hook to handle kanban column drops (`kanban-column-{statusId}` droppable IDs)
+- Layout mode resets to 'list' when navigating to archive or templates (which don't support kanban)
+- Kanban cards support click to select, Space to cycle status, Delete/Backspace to delete
+
+## Story 17: Context menu with flyout submenus
+- Created `contextMenuStore` (Zustand) tracking open state, position, and target taskId
+- Created `ContextMenu` component rendered via portal at document.body with viewport-clamped positioning
+- Created `ContextMenuSubmenus` module with 6 flyout sub-components: StatusRow, PrioritySubmenu, RecurrenceSubmenu, LabelsSubmenu, SnoozeSubmenu, FocusSubmenu
+- Flyout mechanism: 150ms hover delay, single submenu open at a time, auto-detect left/right opening based on viewport space
+- Menu items: Status row (compact buttons from project statuses), Pin/Unpin My Day, Add Subtask, Priority flyout (5 levels with color dots + checkmark), Recurrence flyout (None/Daily/Weekly/Monthly/Every 3/14 Days), Labels flyout (reuses LabelPicker), Snooze flyout (presets + date picker), Focus flyout (timer presets), Duplicate, Delete (red, with undo toast)
+- Added `onContextMenu` handlers to both TaskRow and KanbanCard, using store to open menu
+- ContextMenu rendered once in AppLayout (above ToastContainer)
+- Click outside or Escape closes the menu
+- Delete action includes undo toast (same pattern as existing delete handlers)
+- Decisions: Used Zustand store for context menu state instead of prop threading — cleaner since TaskRow/KanbanCard are deeply nested. ContextMenu reads task/statuses/labels from existing stores directly. Labels submenu reuses the shared LabelPicker component. Focus flyout shows toast with timer duration (no persistent timer system yet — placeholder for future focus mode feature).
+
+## Story 18: Command palette with search operators
+- Created `commandPaletteStore` (Zustand) tracking open state, query string, and selected result index
+- Created `useCommandPaletteSearch` hook with full operator parsing:
+  - `p:high` / `priority:urgent` — filter by priority name or numeric value
+  - `l:work` / `label:design` — substring match on assigned label names
+  - `s:done` / `status:review` — substring match on project status names
+  - `due:today`, `due:week`, `due:overdue` — date-based filtering
+  - `has:subtasks`, `has:image`, `has:recurrence` — property-based filtering
+  - Operators are combinable: `p:high l:work due:week`
+  - Plain text does substring match on task title; all text terms must match
+- Created `CommandPalette` component rendered via portal, positioned top-center (15vh from top)
+  - Search input with placeholder showing operator syntax
+  - Esc key badge, backdrop blur, click-outside to close
+  - Arrow up/down keyboard navigation with scroll-into-view
+  - Enter to select + open detail panel
+  - Operator hint footer when query is empty
+- Created `CommandPaletteResult` component showing:
+  - Priority color dot, priority badge (for priority > 0), task title (truncated)
+  - Up to 2 label chips with overflow count, status badge, due date with relative formatting
+  - Selection highlight: accent bg 12% + accent border 15% (matching spec)
+  - Overdue dates shown in red
+- Added Cmd+K keyboard shortcut in AppLayout global keydown handler
+- Max 12 results, sorted by priority (highest first) then updated_at (most recent first)
+- Excludes archived and template tasks from search
+- Decisions: All filtering is done client-side against the in-memory task store (tasks are already fully hydrated). No IPC needed. Used useMemo for search results to avoid recomputation on unrelated renders.
+
+## Story 19: Bulk task selection and context menu
+- Replaced `currentTaskId: string | null` with `selectedTaskIds: Set<string>` + `lastSelectedTaskId: string | null` in taskStore
+- Added selection methods: selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection
+- Added bulk action methods: bulkUpdateTasks, bulkDeleteTasks, bulkAddLabel, bulkRemoveLabel
+- Updated all consumers (TaskListView, MyDayView, KanbanView, ArchiveView, TemplatesView, StatusSection, KanbanColumn, TaskRow, KanbanCard, DetailPanel, AppLayout)
+- Click selects one task, Cmd+Click toggles individual, Shift+Click selects range (across status sections in list, same flat list in kanban)
+- Cmd+A selects all visible tasks, Escape clears selection
+- Selection clears on view switch (in AppLayout setView callback)
+- Detail panel only shows when exactly 1 task selected (selectedTaskIds.size === 1)
+- Right-click on selected task (when multi-selected) shows BulkContextMenu with "N tasks selected" header
+- Right-click on unselected task clears selection and shows normal single-task context menu
+- BulkContextMenu includes: status row, Add/Remove My Day, Priority flyout, Labels flyout, Snooze flyout, Delete (red, bottom)
+- Bulk delete shows persistent toast with Delete/Archive/Cancel (via ConfirmDeleteModal bulk path)
+- contextMenuStore extended with openBulk() and isBulk/bulkTaskIds state
+- Selected tasks use same visual style: bg-accent/12 border-l-2 border-accent/15
+- Drag-and-drop unchanged (single-task only)
+- Wrote 15 unit tests for selection store methods
+- All 188 tests pass, zero typecheck errors

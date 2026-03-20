@@ -71,6 +71,10 @@ export class ProjectRepository {
       sets.push('sidebar_order = ?')
       values.push(String(input.sidebar_order))
     }
+    if (input.is_default !== undefined) {
+      sets.push('is_default = ?')
+      values.push(String(input.is_default))
+    }
 
     values.push(id)
     this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)

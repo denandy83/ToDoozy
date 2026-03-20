@@ -38,11 +38,16 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
     set({ loading: true, error: null })
     try {
       const labels = await window.api.labels.findByProjectId(projectId)
-      const labelMap: Record<string, Label> = {}
-      for (const label of labels) {
-        labelMap[label.id] = label
-      }
-      set({ labels: labelMap, loading: false })
+      set((state) => {
+        const updated: Record<string, Label> = {}
+        for (const [id, l] of Object.entries(state.labels)) {
+          if (l.project_id !== projectId) updated[id] = l
+        }
+        for (const label of labels) {
+          updated[label.id] = label
+        }
+        return { labels: updated, loading: false }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load labels'
       set({ error: message, loading: false })

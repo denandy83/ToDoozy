@@ -79,11 +79,14 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return [...ids]
   }, [allTasks])
 
+  const hydrateStatuses = useStatusStore((s) => s.hydrateStatuses)
+
   useEffect(() => {
     for (const pid of myDayProjectIds) {
       hydrateAllTaskLabels(pid)
+      hydrateStatuses(pid)
     }
-  }, [myDayProjectIds, hydrateAllTaskLabels])
+  }, [myDayProjectIds, hydrateAllTaskLabels, hydrateStatuses])
 
   // My Day tasks
   const myDayTasks = useMemo(() => {

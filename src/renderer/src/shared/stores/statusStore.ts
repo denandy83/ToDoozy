@@ -29,11 +29,17 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
     set({ loading: true, error: null })
     try {
       const statuses = await window.api.statuses.findByProjectId(projectId)
-      const statusMap: Record<string, Status> = {}
-      for (const status of statuses) {
-        statusMap[status.id] = status
-      }
-      set({ statuses: statusMap, loading: false })
+      set((state) => {
+        // Remove old statuses for this project, then add new ones
+        const updated: Record<string, Status> = {}
+        for (const [id, s] of Object.entries(state.statuses)) {
+          if (s.project_id !== projectId) updated[id] = s
+        }
+        for (const status of statuses) {
+          updated[status.id] = status
+        }
+        return { statuses: updated, loading: false }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load statuses'
       set({ error: message, loading: false })

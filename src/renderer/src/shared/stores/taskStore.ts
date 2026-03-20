@@ -79,11 +79,16 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const tasks = await window.api.tasks.findByProjectId(projectId)
-      const taskMap: Record<string, Task> = {}
-      for (const task of tasks) {
-        taskMap[task.id] = task
-      }
-      set({ tasks: taskMap, loading: false })
+      set((state) => {
+        const updated: Record<string, Task> = {}
+        for (const [id, t] of Object.entries(state.tasks)) {
+          if (t.project_id !== projectId) updated[id] = t
+        }
+        for (const task of tasks) {
+          updated[task.id] = task
+        }
+        return { tasks: updated, loading: false }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load tasks'
       set({ error: message, loading: false })
@@ -91,61 +96,69 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async hydrateMyDay(userId: string): Promise<void> {
-    set({ loading: true, error: null })
     try {
       const tasks = await window.api.tasks.findMyDay(userId)
-      const taskMap: Record<string, Task> = {}
-      for (const task of tasks) {
-        taskMap[task.id] = task
-      }
-      set({ tasks: taskMap, loading: false })
+      set((state) => {
+        const updated = { ...state.tasks }
+        for (const task of tasks) {
+          updated[task.id] = task
+        }
+        return { tasks: updated }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load My Day tasks'
-      set({ error: message, loading: false })
+      set({ error: message })
     }
   },
 
   async hydrateArchived(projectId: string): Promise<void> {
-    set({ loading: true, error: null })
     try {
       const tasks = await window.api.tasks.findArchived(projectId)
-      const taskMap: Record<string, Task> = {}
-      for (const task of tasks) {
-        taskMap[task.id] = task
-      }
-      set({ tasks: taskMap, loading: false })
+      set((state) => {
+        const updated = { ...state.tasks }
+        for (const task of tasks) {
+          updated[task.id] = task
+        }
+        return { tasks: updated }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load archived tasks'
-      set({ error: message, loading: false })
+      set({ error: message })
     }
   },
 
   async hydrateTemplates(projectId: string): Promise<void> {
-    set({ loading: true, error: null })
     try {
       const tasks = await window.api.tasks.findTemplates(projectId)
-      const taskMap: Record<string, Task> = {}
-      for (const task of tasks) {
-        taskMap[task.id] = task
-      }
-      set({ tasks: taskMap, loading: false })
+      set((state) => {
+        const updated = { ...state.tasks }
+        for (const task of tasks) {
+          updated[task.id] = task
+        }
+        return { tasks: updated }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load templates'
-      set({ error: message, loading: false })
+      set({ error: message })
     }
   },
 
   async hydrateAllForProject(projectId: string, userId: string): Promise<void> {
     set({ loading: true, error: null })
     try {
-      const [regular, myDay, archived, templates] = await Promise.all([
-        window.api.tasks.findByProjectId(projectId),
+      // Load all projects' tasks for accurate sidebar counts
+      const allProjects = await window.api.projects.getProjectsForUser(userId)
+      const projectTaskPromises = allProjects.map((p) => window.api.tasks.findByProjectId(p.id))
+      const [myDay, archived, templates, ...projectTasks] = await Promise.all([
         window.api.tasks.findMyDay(userId),
         window.api.tasks.findArchived(projectId),
-        window.api.tasks.findTemplates(projectId)
+        window.api.tasks.findTemplates(projectId),
+        ...projectTaskPromises
       ])
       const taskMap: Record<string, Task> = {}
-      for (const task of regular) taskMap[task.id] = task
+      for (const tasks of projectTasks) {
+        for (const task of tasks) taskMap[task.id] = task
+      }
       for (const task of myDay) taskMap[task.id] = task
       for (const task of archived) taskMap[task.id] = task
       for (const task of templates) taskMap[task.id] = task

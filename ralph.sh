@@ -79,31 +79,69 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
+LOG_FILE="$SCRIPT_DIR/ralph.log"
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Log file: $LOG_FILE"
+echo "Ralph started at $(date) - Tool: $TOOL - Max iterations: $MAX_ITERATIONS" > "$LOG_FILE"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
   echo "==============================================================="
+  echo "" >> "$LOG_FILE"
+  echo "===============================================================" >> "$LOG_FILE"
+  echo "  Iteration $i of $MAX_ITERATIONS ($TOOL) - $(date)" >> "$LOG_FILE"
+  echo "===============================================================" >> "$LOG_FILE"
 
   # Run the selected tool with the ralph prompt
+  # Use --output-format stream-json to get real-time streaming, tee to log file
   if [[ "$TOOL" == "amp" ]]; then
-    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee -a "$LOG_FILE" | tee /dev/stderr) || true
   else
-    # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+    # Claude Code: use --verbose --output-format stream-json for real-time streaming to log
+    ITER_LOG="$SCRIPT_DIR/.ralph-iter-$i.jsonl"
+    claude --dangerously-skip-permissions --verbose --output-format stream-json < "$SCRIPT_DIR/CLAUDE.md" 2>>"$LOG_FILE" | tee "$ITER_LOG" | while IFS= read -r line; do
+      # Extract assistant text messages for human-readable log
+      type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
+      if [[ "$type" == "assistant" ]]; then
+        msg=$(echo "$line" | jq -r '.message // empty' 2>/dev/null)
+        if [[ -n "$msg" ]]; then
+          echo "$msg" >> "$LOG_FILE"
+          echo "$msg" >&2
+        fi
+      elif [[ "$type" == "result" ]]; then
+        msg=$(echo "$line" | jq -r '.result // empty' 2>/dev/null)
+        if [[ -n "$msg" ]]; then
+          echo "$msg" >> "$LOG_FILE"
+          echo "$msg" >&2
+        fi
+      fi
+    done || true
+    # Extract the final result for completion check
+    if [[ -f "$ITER_LOG" ]]; then
+      OUTPUT=$(tail -1 "$ITER_LOG" | jq -r '.result // .message // empty' 2>/dev/null || echo "")
+      # Also check all result lines for completion signal
+      if grep -q "COMPLETE" "$ITER_LOG" 2>/dev/null; then
+        OUTPUT="<promise>COMPLETE</promise>"
+      fi
+      rm -f "$ITER_LOG"
+    else
+      OUTPUT=""
+    fi
   fi
-  
+
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
+    echo "Completed at iteration $i - $(date)" >> "$LOG_FILE"
     exit 0
   fi
-  
+
   echo "Iteration $i complete. Continuing..."
+  echo "Iteration $i complete - $(date)" >> "$LOG_FILE"
   sleep 2
 done
 
