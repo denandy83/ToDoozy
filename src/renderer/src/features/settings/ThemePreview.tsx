@@ -96,43 +96,69 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
           </span>
         </div>
 
-        {/* Status section header */}
+        {/* Not Started section */}
         <div className="px-3 pt-2 pb-1">
           <span style={{ color: '#888888', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
             Not Started
           </span>
         </div>
 
-        {/* Mock task list */}
         <div className="flex flex-col gap-1 px-3">
           {[
-            { title: 'Design system review', done: false, projectColor: config.accent, initials: 'PE', inMyDay: true },
-            { title: 'Update documentation', done: false, projectColor: '#f59e0b', initials: 'WO', inMyDay: true },
-            { title: 'Prepare presentation', done: false, projectColor: config.accent, initials: 'PE', inMyDay: false }
+            { title: 'Design system review', projectColor: config.accent, initials: 'PE', label: { name: 'UI', color: config.accent } },
+            { title: 'Update documentation', projectColor: '#f59e0b', initials: 'WO', label: null }
           ].map((task) => (
             <div
               key={task.title}
               className="flex items-center gap-1.5 rounded px-2 py-1"
               style={{ backgroundColor: surface }}
             >
+              {/* Project indicator → Status circle → Title → Labels */}
+              <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: task.projectColor }}>
+                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>{task.initials}</span>
+              </div>
               <div
                 className="h-2.5 w-2.5 rounded-full border"
                 style={{ borderColor: config.border, backgroundColor: 'transparent' }}
               />
-              <div className="relative flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: task.projectColor }}>
-                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>{task.initials}</span>
-                {task.inMyDay && (
-                  <div
-                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full"
-                    style={{ backgroundColor: surface, border: `1px solid ${config.border}` }}
-                  >
-                    <span style={{ fontSize: '5px' }}>☀</span>
-                  </div>
-                )}
-              </div>
-              <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300 }}>{task.title}</span>
+              <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300, flex: 1 }}>{task.title}</span>
+              {task.label && (
+                <span
+                  className="rounded-full px-1 py-0"
+                  style={{ backgroundColor: task.label.color + '20', color: task.label.color, fontSize: '5px', fontWeight: 700, border: `1px solid ${task.label.color}30` }}
+                >
+                  {task.label.name}
+                </span>
+              )}
             </div>
           ))}
+        </div>
+
+        {/* In Progress section */}
+        <div className="px-3 pt-2 pb-1">
+          <span style={{ color: '#f59e0b', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+            In Progress
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1 px-3">
+          <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
+            <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
+              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>PE</span>
+            </div>
+            <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#f59e0b', border: `1px solid #f59e0b` }}>
+              <div className="flex h-full items-center justify-center">
+                <div className="h-1 w-1 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
+              </div>
+            </div>
+            <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300, flex: 1 }}>Prepare presentation</span>
+            <span
+              className="rounded-full px-1 py-0"
+              style={{ backgroundColor: '#ef4444' + '20', color: '#ef4444', fontSize: '5px', fontWeight: 700, border: '1px solid #ef444430' }}
+            >
+              Urgent
+            </span>
+          </div>
         </div>
 
         {/* Done section */}
@@ -143,17 +169,11 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         </div>
         <div className="flex flex-col gap-1 px-3">
           <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
-            <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-            <div className="relative flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
-              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>PE</span>
-              <div
-                className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full"
-                style={{ backgroundColor: surface, border: `1px solid ${config.border}` }}
-              >
-                <span style={{ fontSize: '5px' }}>☀</span>
-              </div>
+            <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: '#f59e0b' }}>
+              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>WO</span>
             </div>
-            <span style={{ color: config.fgMuted, fontSize: '8px', fontWeight: 300, textDecoration: 'line-through' }}>Fix login bug</span>
+            <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+            <span style={{ color: config.fgMuted, fontSize: '8px', fontWeight: 300, textDecoration: 'line-through', flex: 1 }}>Fix login bug</span>
           </div>
         </div>
       </div>
