@@ -131,6 +131,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const [customName, setCustomName] = useState('')
   const [configEdited, setConfigEdited] = useState(false)
   const [colorsEdited, setColorsEdited] = useState(false)
+  const [changedKeys, setChangedKeys] = useState<Set<keyof ThemeConfig>>(new Set())
   const [isNaming, setIsNaming] = useState(false)
   const [blocked, setBlocked] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -184,6 +185,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const currentId = useSettingsStore.getState().currentThemeId
       setConfigEdited(themeId !== currentId)
       setColorsEdited(false)
+      setChangedKeys(new Set())
     }
   }, [])
 
@@ -197,6 +199,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
     })
     setConfigEdited(true)
     setColorsEdited(true)
+    setChangedKeys((prev) => new Set([...prev, key]))
   }, [])
 
   const handleApply = useCallback(async () => {
@@ -210,6 +213,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       setCurrentTheme(selectedThemeId)
       setConfigEdited(false)
       setColorsEdited(false)
+      setChangedKeys(new Set())
 
       // Only offer counterpart update if colors were actually edited
       const currentName = selectedTheme?.name ?? ''
@@ -230,8 +234,14 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
               label: 'Update',
               variant: 'accent',
               onClick: async () => {
-                const counterpartConfig = generateCounterpartConfig(editConfig)
-                await updateTheme(counterpart.id, { config: JSON.stringify(counterpartConfig) })
+                // Only update the changed keys in the counterpart, preserving its other values
+                const existingCounterpartConfig = parseConfig(counterpart)
+                const invertedChanges = generateCounterpartConfig(editConfig)
+                const mergedConfig = { ...existingCounterpartConfig }
+                for (const key of changedKeys) {
+                  mergedConfig[key] = invertedChanges[key]
+                }
+                await updateTheme(counterpart.id, { config: JSON.stringify(mergedConfig) })
                 setBlocked(false)
                 addToast({ message: `${counterpart.name} updated` })
               }
