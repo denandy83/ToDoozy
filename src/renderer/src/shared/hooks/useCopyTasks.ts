@@ -29,7 +29,7 @@ export function useCopyTasks(): CopyTasksResult {
       const text =
         orderedTitles.length === 1
           ? orderedTitles[0]
-          : orderedTitles.map((t) => `- ${t}`).join('\n')
+          : orderedTitles.join('\n')
 
       navigator.clipboard.writeText(text).then(() => {
         addToast({

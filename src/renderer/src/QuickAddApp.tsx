@@ -318,7 +318,7 @@ export default function QuickAddApp(): React.JSX.Element {
               {smart.selectedDate && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
                   <Calendar size={10} />
-                  {smart.selectedDate}
+                  {smart.selectedDate.split('-').reverse().join('/')}
                   <button
                     onClick={smart.removeDate}
                     className="ml-0.5 rounded-full p-0 hover:text-foreground"

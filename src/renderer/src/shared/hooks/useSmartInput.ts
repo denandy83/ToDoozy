@@ -48,8 +48,13 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
   const [popupState, setPopupState] = useState<PopupState | null>(null)
   const suppressedPositionsRef = useRef<Set<number>>(new Set())
   const inputValueRef = useRef('')
+  const justSelectedRef = useRef(false)
 
   const updatePopup = useCallback((text: string, cursorPos: number) => {
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false
+      return
+    }
     const operator = detectOperator(text, cursorPos, suppressedPositionsRef.current)
     if (!operator) {
       setPopupState(null)
@@ -92,6 +97,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
 
   const selectLabel = useCallback((label: Label) => {
     if (!popupState?.operator) return
+    justSelectedRef.current = true
     setAttachedLabels((prev) => {
       if (prev.some((l) => l.id === label.id)) return prev
       return [...prev, label]
@@ -113,6 +119,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
 
   const selectPriority = useCallback((value: number) => {
     if (!popupState?.operator) return
+    justSelectedRef.current = true
     setSelectedPriority(value)
     const newValue = removeOperatorText(
       inputValueRef.current,
@@ -131,6 +138,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
 
   const selectDate = useCallback((isoDate: string) => {
     if (!popupState?.operator) return
+    justSelectedRef.current = true
     setSelectedDate(isoDate)
     const newValue = removeOperatorText(
       inputValueRef.current,
