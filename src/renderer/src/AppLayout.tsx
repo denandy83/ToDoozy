@@ -192,15 +192,15 @@ export function AppLayout(): React.JSX.Element {
       } else if (viewId.startsWith('project-')) {
         // Dropped on a project nav item — move to that project
         const targetProjectId = viewId.replace('project-', '')
-        const task = tasks[taskId]
+        const task = useTaskStore.getState().tasks[taskId]
         if (task && task.project_id !== targetProjectId) {
-          // Find default status in target project
           const targetStatuses = Object.values(useStatusStore.getState().statuses)
             .filter((s) => s.project_id === targetProjectId)
           const defaultStatus = targetStatuses.find((s) => s.is_default === 1) ?? targetStatuses[0]
           if (defaultStatus) {
             await updateTask(taskId, { project_id: targetProjectId, status_id: defaultStatus.id })
-            const targetProject = allProjects.find((p) => p.id === targetProjectId)
+            const projects = useProjectStore.getState().projects
+            const targetProject = Object.values(projects).find((p) => p.id === targetProjectId)
             addToast({ message: `Moved to ${targetProject?.name ?? 'project'}` })
           }
         }
