@@ -40,7 +40,7 @@ export function KanbanColumn({
       className="flex min-w-[260px] max-w-[320px] flex-1 flex-col"
     >
       {/* Column header */}
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex items-center justify-center gap-2 px-3 py-2">
         <div
           className="h-2 w-2 flex-shrink-0 rounded-full"
           style={{ backgroundColor: status.color || 'var(--color-muted)' }}
@@ -80,11 +80,9 @@ export function KanbanColumn({
         </SortableContext>
 
         {tasks.length === 0 && (
-          <div className="flex flex-1 items-center justify-center py-8">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted/40">
-              No tasks
-            </p>
-          </div>
+          <p className="py-3 text-center text-[10px] font-bold uppercase tracking-widest text-muted/40">
+            No tasks
+          </p>
         )}
       </div>
     </div>

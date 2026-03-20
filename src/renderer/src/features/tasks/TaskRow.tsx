@@ -12,7 +12,7 @@ import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../
 import { useLabelStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
-import type { Task, Status, Label } from '../../../../shared/types'
+import type { Task, Status, Label, Project } from '../../../../shared/types'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskRowProps {
@@ -33,6 +33,7 @@ interface TaskRowProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  project?: Project
 }
 
 export function TaskRow({
@@ -52,7 +53,8 @@ export function TaskRow({
   onToggleExpanded,
   onAddLabel,
   onRemoveLabel,
-  onCreateLabel
+  onCreateLabel,
+  project
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -348,6 +350,10 @@ export function TaskRow({
           statuses={statuses}
           onStatusChange={handleStatusChange}
         />
+
+        {project && (
+          <ProjectIndicator project={project} />
+        )}
 
         {isEditing ? (
           <input
@@ -654,5 +660,27 @@ function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element 
         document.body
       )}
     </>
+  )
+}
+
+function getProjectInitials(name: string): string {
+  const words = name.trim().split(/\s+/)
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase()
+  }
+  return name.slice(0, 2).toUpperCase()
+}
+
+function ProjectIndicator({ project }: { project: Project }): React.JSX.Element {
+  return (
+    <div
+      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full"
+      style={{ backgroundColor: project.color }}
+      title={project.name}
+    >
+      <span className="text-[7px] font-bold leading-none text-white">
+        {getProjectInitials(project.name)}
+      </span>
+    </div>
   )
 }

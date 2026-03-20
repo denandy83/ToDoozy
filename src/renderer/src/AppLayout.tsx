@@ -15,11 +15,12 @@ import { useDragAndDrop } from './features/tasks/useDragAndDrop'
 import { Sidebar } from './features/sidebar'
 import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
+import { findProjectStatusForBucket, type BucketKey } from './features/views/myDayBuckets'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
 import { useProjectStore, selectAllProjects } from './shared/stores'
-import { useStatusesByProject } from './shared/stores'
+import { useStatusesByProject, useStatusStore } from './shared/stores'
 import { useTaskStore } from './shared/stores'
 import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './shared/stores/viewStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
@@ -203,6 +204,19 @@ export function AppLayout(): React.JSX.Element {
     [updateTask, addToast]
   )
 
+  const handleBucketDrop = useCallback(
+    async (taskId: string, bucketKey: string) => {
+      const task = tasks[taskId]
+      if (!task) return
+      const allStatusMap = useStatusStore.getState().statuses
+      const targetStatus = findProjectStatusForBucket(task.project_id, bucketKey as BucketKey, allStatusMap)
+      if (targetStatus && targetStatus.id !== task.status_id) {
+        await handleDndStatusChange(taskId, targetStatus.id)
+      }
+    },
+    [tasks, handleDndStatusChange]
+  )
+
   const { dragState, handleDragStart, handleDragOver, handleDragEnd, handleDragCancel, collisionDetection } =
     useDragAndDrop({
       tasks,
@@ -210,6 +224,7 @@ export function AppLayout(): React.JSX.Element {
       onReparent: handleReparent,
       onMoveToView: handleMoveToView,
       onStatusChange: handleDndStatusChange,
+      onBucketDrop: handleBucketDrop,
       getTasksForParent
     })
 
@@ -379,6 +394,7 @@ export function AppLayout(): React.JSX.Element {
           projectCounts={projectCounts}
           projects={sortedProjects}
           onSettings={handleOpenSettings}
+          onNewProject={() => setNewProjectOpen(true)}
           collapsed={collapsed}
           pinned={sidebarPinned}
           isDragging={dragState.isDragging}

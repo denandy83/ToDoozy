@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import { SortableContext } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
-import type { Task, Status, Label } from '../../../../shared/types'
+import type { Task, Status, Label, Project } from '../../../../shared/types'
 import { TaskRow } from './TaskRow'
 import type { DropIndicator } from './useDragAndDrop'
 
@@ -22,6 +22,9 @@ interface StatusSectionProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  projectMap?: Record<string, Project>
+  bucketName?: string
+  bucketColor?: string
 }
 
 export function StatusSection({
@@ -38,7 +41,10 @@ export function StatusSection({
   onDeleteTask,
   onAddLabel,
   onRemoveLabel,
-  onCreateLabel
+  onCreateLabel,
+  projectMap,
+  bucketName,
+  bucketColor
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -79,9 +85,9 @@ export function StatusSection({
         />
         <span
           className="text-[10px] font-bold uppercase tracking-[0.3em]"
-          style={{ color: status.color || undefined }}
+          style={{ color: (bucketColor ?? status.color) || undefined }}
         >
-          {status.name}
+          {bucketName ?? status.name}
         </span>
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
           {topLevel.length}
@@ -91,11 +97,16 @@ export function StatusSection({
       {!collapsed && (
         <SortableContext items={sortedIds}>
           <div role="rowgroup">
-            {sorted.map((task) => (
+            {sorted.map((task) => {
+              // In My Day (when projectMap is set), filter statuses to task's project only
+              const taskStatuses = projectMap
+                ? allStatuses.filter((s) => s.project_id === task.project_id)
+                : allStatuses
+              return (
               <TaskRow
                 key={task.id}
                 task={task}
-                statuses={allStatuses}
+                statuses={taskStatuses}
                 allLabels={allLabels}
                 isSelected={selectedTaskIds.has(task.id)}
                 depth={0}
@@ -110,8 +121,10 @@ export function StatusSection({
                 onAddLabel={onAddLabel}
                 onRemoveLabel={onRemoveLabel}
                 onCreateLabel={onCreateLabel}
+                project={projectMap?.[task.project_id]}
               />
-            ))}
+              )
+            })}
             {sorted.length === 0 && (
               <p className="px-4 py-3 text-sm font-light text-muted/40">No tasks</p>
             )}

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import {
   Sun,
@@ -6,6 +6,8 @@ import {
   Archive,
   LayoutTemplate,
   ListTodo,
+  FolderOpen,
+  Plus,
   PanelLeftClose,
   PanelLeft,
   Settings,
@@ -26,6 +28,7 @@ interface SidebarProps {
   projectCounts: Record<string, number>
   projects: Project[]
   onSettings: () => void
+  onNewProject: () => void
   collapsed: boolean
   pinned: boolean
   isDragging?: boolean
@@ -62,6 +65,7 @@ export function Sidebar({
   projectCounts,
   projects,
   onSettings,
+  onNewProject,
   collapsed,
   pinned,
   isDragging,
@@ -79,6 +83,15 @@ export function Sidebar({
   const sidebarRef = useRef<HTMLElement>(null)
   const isDarkMode = currentTheme?.mode === 'dark'
   const [projectsExpanded, setProjectsExpanded] = useState(false)
+
+  // Auto-expand projects when the selected project is beyond the visible top 5
+  useEffect(() => {
+    if (currentView !== 'project' || !selectedProjectId) return
+    const idx = projects.findIndex((p) => p.id === selectedProjectId)
+    if (idx >= MAX_VISIBLE_PROJECTS && !projectsExpanded) {
+      setProjectsExpanded(true)
+    }
+  }, [currentView, selectedProjectId, projects, projectsExpanded])
 
   const handleToggleDayNight = useCallback(async () => {
     if (!currentTheme) return
@@ -158,12 +171,7 @@ export function Sidebar({
 
       {/* Navigation */}
       <nav className={`flex-1 overflow-y-auto ${collapsed ? 'p-1.5' : 'p-3'}`}>
-        {/* Views section */}
-        {!collapsed && (
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-            Views
-          </p>
-        )}
+        {/* My Day */}
         <div className="flex flex-col gap-0.5" role="tablist" aria-label="Views">
           {TOP_VIEW_ITEMS.map((item) => (
             <NavItem
@@ -180,49 +188,78 @@ export function Sidebar({
           ))}
         </div>
 
-        {/* Projects section */}
-        {!collapsed && (
-          <p className="mb-2 mt-4 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-            Projects
-          </p>
-        )}
-        {collapsed && <div className="my-2 border-t border-border" />}
-        <div className="flex flex-col gap-0.5">
-          {visibleProjects.map((project, index) => (
-            <ProjectNavItem
-              key={project.id}
-              project={project}
-              count={projectCounts[project.id] ?? 0}
-              active={currentView === 'project' && selectedProjectId === project.id}
-              collapsed={collapsed}
-              onClick={() => handleProjectClick(project.id)}
-              shortcutHint={index === 0 ? '⌘2' : undefined}
-              isDragging={isDragging}
-            />
-          ))}
-          {!collapsed && hasMoreProjects && (
-            <button
-              onClick={() => setProjectsExpanded(!projectsExpanded)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
-            >
-              {projectsExpanded ? (
-                <>
-                  <ChevronUp size={12} />
-                  Less
-                </>
-              ) : (
-                <>
-                  <ChevronDown size={12} />
-                  More
-                </>
+        {/* Projects — header as nav item, projects indented */}
+        <div className="mt-1 flex flex-col gap-0.5">
+          {!collapsed ? (
+            <div className="group/projects flex items-center gap-3 rounded-lg px-2.5 py-2">
+              <FolderOpen size={16} className="text-muted" />
+              <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Projects</span>
+              <button
+                onClick={onNewProject}
+                className="rounded p-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
+                title="New project"
+                aria-label="New project"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-center rounded-lg px-0 py-2">
+              <FolderOpen size={16} className="text-muted" />
+            </div>
+          )}
+          {!collapsed && (
+            <div className="flex flex-col gap-0.5 pl-4">
+              {visibleProjects.map((project) => (
+                <ProjectNavItem
+                  key={project.id}
+                  project={project}
+                  count={projectCounts[project.id] ?? 0}
+                  active={currentView === 'project' && selectedProjectId === project.id}
+                  collapsed={collapsed}
+                  onClick={() => handleProjectClick(project.id)}
+                  isDragging={isDragging}
+                />
+              ))}
+              {hasMoreProjects && (
+                <button
+                  onClick={() => setProjectsExpanded(!projectsExpanded)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
+                >
+                  {projectsExpanded ? (
+                    <>
+                      <ChevronUp size={12} />
+                      Less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} />
+                      More
+                    </>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
+          )}
+          {collapsed && (
+            <div className="flex flex-col gap-0.5">
+              {visibleProjects.map((project) => (
+                <ProjectNavItem
+                  key={project.id}
+                  project={project}
+                  count={projectCounts[project.id] ?? 0}
+                  active={currentView === 'project' && selectedProjectId === project.id}
+                  collapsed={collapsed}
+                  onClick={() => handleProjectClick(project.id)}
+                  isDragging={isDragging}
+                />
+              ))}
+            </div>
           )}
         </div>
 
         {/* Archive & Templates */}
-        {!collapsed && <div className="my-2 border-t border-border" />}
-        {collapsed && <div className="my-2 border-t border-border" />}
+        <div className="mt-1" />
         <div className="flex flex-col gap-0.5">
           {BOTTOM_VIEW_ITEMS.map((item) => (
             <NavItem

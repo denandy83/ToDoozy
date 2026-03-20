@@ -30,6 +30,7 @@ interface UseDragAndDropOptions {
   onReparent: (taskId: string, newParentId: string | null) => Promise<void>
   onMoveToView?: (taskId: string, viewId: string) => Promise<void>
   onStatusChange?: (taskId: string, newStatusId: string) => Promise<void>
+  onBucketDrop?: (taskId: string, bucketKey: string) => Promise<void>
   getTasksForParent: (parentId: string | null, statusId: string) => Task[]
 }
 
@@ -53,6 +54,7 @@ export function useDragAndDrop({
   onReparent,
   onMoveToView,
   onStatusChange,
+  onBucketDrop,
   getTasksForParent
 }: UseDragAndDropOptions): UseDragAndDropReturn {
   const onStatusChangeRef = useRef(onStatusChange)
@@ -218,11 +220,16 @@ export function useDragAndDrop({
         return
       }
 
-      // Handle kanban column drops
-      if (overId.startsWith('kanban-column-') && onStatusChangeRef.current) {
-        const statusId = overId.replace('kanban-column-', '')
-        if (statusId !== activeTask.status_id) {
-          await onStatusChangeRef.current(activeId, statusId)
+      // Handle kanban column drops — bucket columns (My Day) or regular status columns
+      if (overId.startsWith('kanban-column-')) {
+        const columnId = overId.replace('kanban-column-', '')
+        if (columnId.startsWith('__bucket_') && onBucketDrop) {
+          const bucketKey = columnId.replace('__bucket_', '')
+          await onBucketDrop(activeId, bucketKey)
+          return
+        }
+        if (onStatusChangeRef.current && columnId !== activeTask.status_id) {
+          await onStatusChangeRef.current(activeId, columnId)
         }
         return
       }

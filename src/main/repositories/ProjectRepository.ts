@@ -29,8 +29,8 @@ export class ProjectRepository {
     const now = new Date().toISOString()
     this.db
       .prepare(
-        `INSERT INTO projects (id, name, description, color, icon, owner_id, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO projects (id, name, description, color, icon, owner_id, is_default, sidebar_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -40,6 +40,7 @@ export class ProjectRepository {
         input.icon ?? 'folder',
         input.owner_id,
         input.is_default ?? 0,
+        input.sidebar_order ?? 0,
         now,
         now
       )

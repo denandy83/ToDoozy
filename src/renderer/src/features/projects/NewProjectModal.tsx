@@ -21,6 +21,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
   const [error, setError] = useState<string | null>(null)
   const createProject = useProjectStore((s) => s.createProject)
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject)
+  const allProjects = useProjectStore((s) => s.projects)
   const createStatus = useStatusStore((s) => s.createStatus)
   const currentUser = useAuthStore((s) => s.currentUser)
 
@@ -32,13 +33,18 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
     setError(null)
     try {
       const id = crypto.randomUUID()
+      const projectList = Object.values(allProjects)
+      const maxOrder = projectList.length > 0
+        ? Math.max(...projectList.map((p) => p.sidebar_order ?? 0), projectList.length - 1)
+        : 0
       const project = await createProject({
         id,
         name: name.trim(),
         owner_id: currentUser.id,
         color,
         icon: 'folder',
-        is_default: 0
+        is_default: 0,
+        sidebar_order: maxOrder + 1
       })
       await window.api.projects.addMember(id, currentUser.id, 'owner', currentUser.id)
 

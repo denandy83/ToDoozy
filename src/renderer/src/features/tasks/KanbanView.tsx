@@ -14,6 +14,7 @@ interface KanbanViewProps {
   onSelectTask: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
   onDeleteTask: (taskId: string) => void
+  preGroupedTasks?: Record<string, Task[]>
 }
 
 export function KanbanView({
@@ -24,7 +25,8 @@ export function KanbanView({
   dropIndicator,
   onSelectTask,
   onStatusChange,
-  onDeleteTask
+  onDeleteTask,
+  preGroupedTasks
 }: KanbanViewProps): React.JSX.Element {
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { setCurrentTask } = useTaskStore()
@@ -36,6 +38,7 @@ export function KanbanView({
   )
 
   const tasksByStatus = useMemo(() => {
+    if (preGroupedTasks) return preGroupedTasks
     const map: Record<string, Task[]> = {}
     for (const status of sortedStatuses) {
       const statusTasks = tasks

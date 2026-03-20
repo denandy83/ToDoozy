@@ -142,6 +142,7 @@ export interface CreateProjectInput {
   color?: string
   icon?: string
   is_default?: number
+  sidebar_order?: number
 }
 
 export interface UpdateProjectInput {

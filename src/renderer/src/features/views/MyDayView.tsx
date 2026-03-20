@@ -18,8 +18,16 @@ import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
-import type { Task, Status, Label, Project } from '../../../../shared/types'
+import type { Task, Label, Project } from '../../../../shared/types'
 import type { DropIndicator } from '../tasks/useDragAndDrop'
+import {
+  MY_DAY_BUCKETS,
+  getBucketForTask,
+  getBucketForStatus,
+  findProjectStatusForBucket,
+  createBucketStatus,
+  type BucketKey
+} from './myDayBuckets'
 
 interface MyDayViewProps {
   dropIndicator?: DropIndicator | null
@@ -40,12 +48,17 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Project selector for add-task input
-  const defaultProject = useMemo(
-    () => allProjects.find((p) => p.is_default === 1) ?? allProjects[0],
-    [allProjects]
-  )
+  // Project selector for add-task input — uses setting, falls back to is_default project
+  const myDayDefaultProjectSetting = useSetting('myday_default_project')
+  const defaultProject = useMemo(() => {
+    if (myDayDefaultProjectSetting) {
+      const found = allProjects.find((p) => p.id === myDayDefaultProjectSetting)
+      if (found) return found
+    }
+    return allProjects.find((p) => p.is_default === 1) ?? allProjects[0]
+  }, [allProjects, myDayDefaultProjectSetting])
   const [addTaskProjectId, setAddTaskProjectId] = useState<string>('')
+  const [hiddenProjectIds, setHiddenProjectIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (defaultProject && !addTaskProjectId) {
@@ -138,8 +151,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
   }, [myDayTasks, taskLabels, allLabelsAcrossProjects])
 
-  // Filter tasks
-  const filteredMyDayTasks = useMemo(() => {
+  // Filter tasks by labels
+  const labelFilteredTasks = useMemo(() => {
     if (!hasActiveFilters || filterMode !== 'hide') return myDayTasks
     return myDayTasks.filter((task) => {
       const labels = taskLabels[task.id] ?? []
@@ -147,6 +160,32 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       return [...activeLabelFilters].some((fid) => labelIds.has(fid))
     })
   }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+
+  // Filter tasks by project visibility
+  const filteredMyDayTasks = useMemo(() => {
+    if (hiddenProjectIds.size === 0) return labelFilteredTasks
+    return labelFilteredTasks.filter((t) => !hiddenProjectIds.has(t.project_id))
+  }, [labelFilteredTasks, hiddenProjectIds])
+
+  // Projects that have My Day tasks (for project filter bar)
+  const myDayProjects = useMemo(() => {
+    const projectIds = [...new Set(myDayTasks.map((t) => t.project_id))]
+    return allProjects
+      .filter((p) => projectIds.includes(p.id))
+      .sort((a, b) => (a.sidebar_order ?? 0) - (b.sidebar_order ?? 0))
+  }, [myDayTasks, allProjects])
+
+  const toggleProjectFilter = useCallback((projectId: string) => {
+    setHiddenProjectIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(projectId)) {
+        next.delete(projectId)
+      } else {
+        next.add(projectId)
+      }
+      return next
+    })
+  }, [])
 
   // Blur opacity map
   const blurOpacityStr = useSetting('label_blur_opacity')
@@ -175,54 +214,46 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     [priorityAutoSort]
   )
 
-  // Group tasks by project, then by status within each project
-  const projectGroups = useMemo(() => {
-    const groups: Array<{
-      project: Project
-      statuses: Status[]
-      tasks: Task[]
-    }> = []
+  // Group tasks into 3 universal buckets based on status flags
+  const bucketGroups = useMemo(() => {
+    return MY_DAY_BUCKETS.map((bucket) => ({
+      bucket,
+      tasks: filteredMyDayTasks.filter(
+        (t) => getBucketForTask(t, allStatuses) === bucket.key
+      )
+    }))
+  }, [filteredMyDayTasks, allStatuses])
 
-    // Get unique project IDs from filtered tasks
-    const projectIds = [...new Set(filteredMyDayTasks.map((t) => t.project_id))]
+  // Synthetic statuses for kanban columns
+  const bucketStatuses = useMemo(
+    () => MY_DAY_BUCKETS.map(createBucketStatus),
+    []
+  )
 
-    // Sort projects by sidebar_order
-    const sortedProjectIds = projectIds.sort((a, b) => {
-      const pa = allProjects.find((p) => p.id === a)
-      const pb = allProjects.find((p) => p.id === b)
-      return (pa?.sidebar_order ?? 0) - (pb?.sidebar_order ?? 0)
-    })
-
-    for (const pid of sortedProjectIds) {
-      const project = allProjects.find((p) => p.id === pid)
-      if (!project) continue
-
-      const projectStatuses = Object.values(allStatuses)
-        .filter((s) => s.project_id === pid)
-        .sort((a, b) => a.order_index - b.order_index)
-
-      const projectTasks = filteredMyDayTasks.filter((t) => t.project_id === pid)
-
-      groups.push({ project, statuses: projectStatuses, tasks: projectTasks })
+  // Pre-grouped tasks for kanban (keyed by synthetic bucket status ID)
+  const kanbanPreGrouped = useMemo(() => {
+    const map: Record<string, Task[]> = {}
+    for (const group of bucketGroups) {
+      map[`__bucket_${group.bucket.key}`] = [...group.tasks].sort(prioritySortFn)
     }
+    return map
+  }, [bucketGroups, prioritySortFn])
 
-    return groups
-  }, [filteredMyDayTasks, allProjects, allStatuses])
+  // Build a project lookup for task indicators
+  const projectMap = useMemo(() => {
+    const map: Record<string, Project> = {}
+    for (const p of allProjects) map[p.id] = p
+    return map
+  }, [allProjects])
 
   // Flat task list for keyboard navigation
   const flatTasks = useMemo(() => {
     const result: Task[] = []
-    for (const group of projectGroups) {
-      const sortedStatuses = [...group.statuses].sort((a, b) => a.order_index - b.order_index)
-      for (const status of sortedStatuses) {
-        const statusTasks = group.tasks
-          .filter((t) => t.status_id === status.id)
-          .sort(prioritySortFn)
-        result.push(...statusTasks)
-      }
+    for (const group of bucketGroups) {
+      result.push(...[...group.tasks].sort(prioritySortFn))
     }
     return result
-  }, [projectGroups, prioritySortFn])
+  }, [bucketGroups, prioritySortFn])
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
@@ -458,12 +489,38 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     copySelectedTasks
   ])
 
-  // For kanban view, use all statuses from the first project group (or merged)
-  const kanbanStatuses = useMemo(() => {
-    if (projectGroups.length === 0) return []
-    // Use statuses from the first project for kanban layout
-    return projectGroups[0].statuses
-  }, [projectGroups])
+  // Handle status changes in My Day — map bucket IDs or cross-project statuses to correct project status
+  const handleMyDayStatusChange = useCallback(
+    async (taskId: string, newStatusId: string) => {
+      const task = allTasks[taskId]
+      if (!task) return
+
+      // Handle synthetic bucket status IDs (from StatusButton cycling through buckets)
+      if (newStatusId.startsWith('__bucket_')) {
+        const bucketKey = newStatusId.replace('__bucket_', '') as BucketKey
+        const correctStatus = findProjectStatusForBucket(task.project_id, bucketKey, allStatuses)
+        if (correctStatus && correctStatus.id !== task.status_id) {
+          await handleStatusChange(taskId, correctStatus.id)
+        }
+        return
+      }
+
+      const newStatus = allStatuses[newStatusId]
+      if (!newStatus) return
+
+      if (newStatus.project_id !== task.project_id) {
+        const bucket = getBucketForStatus(newStatus)
+        const correctStatus = findProjectStatusForBucket(task.project_id, bucket, allStatuses)
+        if (correctStatus) {
+          await handleStatusChange(taskId, correctStatus.id)
+        }
+        return
+      }
+      await handleStatusChange(taskId, newStatusId)
+    },
+    [allTasks, allStatuses, handleStatusChange]
+  )
+
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
@@ -484,67 +541,77 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
       <LabelFilterBar labels={labelsInUse} />
 
+      {/* Project filter bar — only show when multiple projects have My Day tasks */}
+      {myDayProjects.length > 1 && (
+        <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Projects</span>
+          <div className="flex items-center gap-1">
+            {myDayProjects.map((p) => {
+              const isHidden = hiddenProjectIds.has(p.id)
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => toggleProjectFilter(p.id)}
+                  className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                    isHidden
+                      ? 'text-muted/40 hover:text-muted'
+                      : 'text-foreground'
+                  }`}
+                  style={{
+                    backgroundColor: isHidden ? 'transparent' : `${p.color}20`,
+                    border: `1px solid ${isHidden ? 'transparent' : `${p.color}30`}`
+                  }}
+                >
+                  <div
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: isHidden ? 'var(--color-muted)' : p.color, opacity: isHidden ? 0.3 : 1 }}
+                  />
+                  {p.name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {layoutMode === 'kanban' ? (
         <KanbanView
           tasks={filteredMyDayTasks}
-          statuses={kanbanStatuses}
+          statuses={bucketStatuses}
           selectedTaskIds={selectedTaskIds}
           taskFilterOpacity={taskFilterOpacity}
           dropIndicator={dropIndicator}
           onSelectTask={handleSelectTask}
-          onStatusChange={handleStatusChange}
+          onStatusChange={handleMyDayStatusChange}
           onDeleteTask={handleDeleteTask}
+          preGroupedTasks={kanbanPreGrouped}
         />
       ) : (
         <div className="flex-1 overflow-y-auto" role="grid" aria-label="My Day tasks">
-          {projectGroups.map((group) => {
-            const sortedStatuses = [...group.statuses].sort(
-              (a, b) => a.order_index - b.order_index
-            )
-            const groupLabels = allLabelsAcrossProjects.filter(
-              (l) => l.project_id === group.project.id
-            )
-
+          {bucketGroups.map((group) => {
+            const sortedTasks = [...group.tasks].sort(prioritySortFn)
+            const bucketStatus = createBucketStatus(group.bucket)
             return (
-              <div key={group.project.id}>
-                {/* Project header */}
-                {projectGroups.length > 1 && (
-                  <div className="flex items-center gap-2 px-6 pt-4 pb-1">
-                    <div
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: group.project.color }}
-                    />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-                      {group.project.name}
-                    </span>
-                  </div>
-                )}
-
-                {sortedStatuses.map((status) => {
-                  const statusTasks = group.tasks
-                    .filter((t) => t.status_id === status.id)
-                    .sort(prioritySortFn)
-                  return (
-                    <StatusSection
-                      key={status.id}
-                      status={status}
-                      tasks={statusTasks}
-                      allStatuses={group.statuses}
-                      allLabels={groupLabels}
-                      selectedTaskIds={selectedTaskIds}
-                      taskFilterOpacity={taskFilterOpacity}
-                      dropIndicator={dropIndicator}
-                      onSelectTask={handleSelectTask}
-                      onStatusChange={handleStatusChange}
-                      onTitleChange={handleTitleChange}
-                      onDeleteTask={handleDeleteTask}
-                      onAddLabel={handleAddLabel}
-                      onRemoveLabel={handleRemoveLabel}
-                      onCreateLabel={handleCreateLabel}
-                    />
-                  )
-                })}
-              </div>
+              <StatusSection
+                key={group.bucket.key}
+                status={bucketStatus}
+                tasks={sortedTasks}
+                allStatuses={bucketStatuses}
+                allLabels={allLabelsAcrossProjects}
+                selectedTaskIds={selectedTaskIds}
+                taskFilterOpacity={taskFilterOpacity}
+                dropIndicator={dropIndicator}
+                onSelectTask={handleSelectTask}
+                onStatusChange={handleMyDayStatusChange}
+                onTitleChange={handleTitleChange}
+                onDeleteTask={handleDeleteTask}
+                onAddLabel={handleAddLabel}
+                onRemoveLabel={handleRemoveLabel}
+                onCreateLabel={handleCreateLabel}
+                projectMap={projectMap}
+                bucketName={group.bucket.name}
+                bucketColor={group.bucket.color}
+              />
             )
           })}
 

@@ -4,6 +4,7 @@ import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared
 import { useStatusesByProject } from '../../shared/stores'
 import { useLabelStore, useLabelsByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import { useProjectStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { DetailTitle } from './DetailTitle'
 import { DetailStatusRow } from './DetailStatusRow'
@@ -247,6 +248,7 @@ function DetailPanelContent({
   onRemoveLabel,
   onCreateLabel
 }: DetailPanelContentProps): React.JSX.Element {
+  const project = useProjectStore((s) => task.project_id ? s.projects[task.project_id] : undefined)
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -254,7 +256,19 @@ function DetailPanelContent({
         <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Task Details
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
+          {project && (
+            <div className="flex items-center gap-1.5">
+              <div
+                className="h-2 w-2 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: project.color }}
+              />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                {project.name}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
           <button
             onClick={onTogglePosition}
             className="rounded p-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
@@ -271,6 +285,7 @@ function DetailPanelContent({
           >
             <X size={14} />
           </button>
+          </div>
         </div>
       </div>
 

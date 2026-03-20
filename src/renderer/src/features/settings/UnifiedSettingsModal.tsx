@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { LogOut, Pencil, GripVertical } from 'lucide-react'
+import { LogOut, Pencil } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -229,6 +229,7 @@ function GeneralSettings(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const projects = useProjectStore(selectAllProjects)
   const quickAddDefaultProject = useSetting('quickadd_default_project') ?? ''
+  const myDayDefaultProject = useSetting('myday_default_project') ?? ''
 
   return (
     <div className="flex flex-col gap-6">
@@ -299,6 +300,21 @@ function GeneralSettings(): React.JSX.Element {
         <select
           value={quickAddDefaultProject || (projects.find((p) => p.is_default === 1)?.id ?? projects[0]?.id ?? '')}
           onChange={(e) => setSetting('quickadd_default_project', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">My Day default project</p>
+          <p className="text-[10px] text-muted">Pre-selected project when adding tasks in My Day</p>
+        </div>
+        <select
+          value={myDayDefaultProject || (projects.find((p) => p.is_default === 1)?.id ?? projects[0]?.id ?? '')}
+          onChange={(e) => setSetting('myday_default_project', e.target.value)}
           className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
         >
           {projects.map((p) => (
@@ -509,18 +525,13 @@ function SortableProjectRow({
     <div
       ref={setNodeRef}
       style={style}
+      {...attributes}
+      {...listeners}
       className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors cursor-pointer ${
         isSelected ? 'bg-accent/12 border border-accent/15' : 'border border-transparent hover:bg-foreground/6'
       }`}
       onClick={onClick}
     >
-      <div
-        {...attributes}
-        {...listeners}
-        className="cursor-grab text-muted/40 hover:text-muted active:cursor-grabbing"
-      >
-        <GripVertical size={12} />
-      </div>
       <div
         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
         style={{ backgroundColor: project.color }}

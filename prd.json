@@ -1,17 +1,17 @@
-1. Cmd+Shift+Space opens a small frameless floating window from any app on macOS
-  2. Window contains auto-focused title input and destination dropdown (My Day + all projects)
-  3. My Day is selected by default in the destination dropdown
-  4. Enter creates the task and closes the window
-  5. Escape closes the window without creating a task
-  6. Task is created with default status, correct project, and respects new task position setting
-  7. When My Day is selected, task has is_in_my_day: 1
-  8. Main window task list refreshes silently after quick-add without being shown or focused
-  9. Shortcut is customizable in Settings > General via a Record button
-  10. Known macOS shortcuts are blocked with a message naming the specific macOS feature
-  11. Unknown shortcut conflicts warn and ask to overwrite
-  12. Shortcut persists across app restarts (saved in settings)
-  13. Closing the main window hides it — app stays alive, shortcut stays registered
-  14. Clicking dock icon re-opens the main window
-  15. Cmd+Q fully quits the app and unregisters the shortcut
-  16. Shortcut does nothing if user is not logged in
-  17. Quick-add window matches the current app theme
+ 1. Sidebar shows My Day, then a PROJECTS section with top 5 projects, then Archive and Templates
+  2. More expands to show all projects inline, Less collapses to top 5
+  3. Clicking a project loads its tasks in the main view with the project name as title
+  4. Project nav items show color dot, name, and task count badge
+  5. Project order is configurable via drag-and-drop in Settings > Projects using @dnd-kit
+  6. Project order persists to database via sidebar_order field
+  7. Cmd+2 opens project view with topmost project selected
+  8. Tab/Shift+Tab cycles through projects when in project view
+  9. Each project remembers its list/kanban layout preference (persisted in settings table)
+  10. Cmd+L toggles and saves layout per project
+  11. My Day groups tasks by project first, then by status within each project
+  12. Each project group in My Day has a project name header with project color
+  13. My Day label filter aggregates labels from all projects with tasks in My Day
+  14. My Day add-task input has an inline project selector dropdown defaulting to default project
+  15. Backlog view and ProjectSwitcher component are fully removed
+  16. Cmd+1 = My Day, Cmd+2 = Projects, Cmd+3 = Archive, Cmd+4 = Templates
+  17. Database migration adds sidebar_order to projects table

@@ -291,6 +291,8 @@ Common icons:
 - Drop indicators: horizontal line (above/below), `bg-accent/8 scale-[1.01]` (inside)
 - Ghost overlay: same as card at 50% opacity
 - Cursor zones: top 20% = above, middle 60% = inside, bottom 20% = below
+- **No grip/drag handles.** Items are dragged by clicking and holding anywhere on the row. No visible drag icons or grip dots.
+- **Activation distance:** PointerSensor requires 8px of movement before drag starts, preventing accidental drags from clicks.
 
 ### Form Inputs
 - Text: `bg-transparent text-sm font-light text-foreground focus:outline-none`
