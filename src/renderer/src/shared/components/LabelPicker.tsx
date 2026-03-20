@@ -69,16 +69,25 @@ export function LabelPicker({
       }
       if (e.key === 'ArrowDown' && !newLabelMode) {
         e.preventDefault()
-        setHighlightedIndex((prev) => Math.min(prev + 1, filteredLabels.length - 1))
+        setHighlightedIndex((prev) => Math.min(prev + 1, filteredLabels.length))
       }
       if (e.key === 'ArrowUp' && !newLabelMode) {
         e.preventDefault()
         setHighlightedIndex((prev) => Math.max(prev - 1, 0))
       }
-      if (e.key === 'Enter' && !newLabelMode && filteredLabels.length > 0) {
+      if (e.key === 'Enter' && !newLabelMode) {
         e.preventDefault()
-        onToggleLabel(filteredLabels[highlightedIndex].id)
-        setSearchQuery('')
+        if (highlightedIndex < filteredLabels.length) {
+          onToggleLabel(filteredLabels[highlightedIndex].id)
+          setSearchQuery('')
+        } else {
+          // "New label" is selected
+          if (searchQuery.trim()) {
+            setNewLabelName(searchQuery.trim())
+          }
+          setNewLabelMode(true)
+          setSearchQuery('')
+        }
         return
       }
       if (e.key === 'Enter' && newLabelMode) {
@@ -86,7 +95,7 @@ export function LabelPicker({
         handleCreateLabel()
       }
     },
-    [newLabelMode, handleCreateLabel, onClose, filteredLabels, highlightedIndex, onToggleLabel]
+    [newLabelMode, handleCreateLabel, onClose, filteredLabels, highlightedIndex, onToggleLabel, searchQuery]
   )
 
   return (
@@ -159,7 +168,7 @@ export function LabelPicker({
           <div className="mt-1 border-t border-border pt-1">
             <button
               onClick={() => setNewLabelMode(true)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-light text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+              className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-light text-muted transition-colors hover:bg-foreground/6 hover:text-foreground ${highlightedIndex === filteredLabels.length ? 'bg-foreground/6 text-foreground' : ''}`}
             >
               <Plus size={14} />
               New label...
