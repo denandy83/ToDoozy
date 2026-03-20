@@ -5,7 +5,6 @@ import {
   Moon,
   Archive,
   LayoutTemplate,
-  ListTodo,
   FolderOpen,
   Plus,
   PanelLeftClose,
@@ -20,6 +19,7 @@ import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
 import type { ThemeConfig } from '../../../../shared/types'
+import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 
@@ -153,7 +153,7 @@ export function Sidebar({
         {!collapsed && (
           <>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15">
-              <ListTodo size={14} className="text-accent" />
+              <img src={appIcon} alt="ToDoozy" className="h-5 w-5" />
             </div>
             <span className="flex-1 text-[13px] font-bold tracking-tight text-foreground">
               ToDoozy

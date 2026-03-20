@@ -130,6 +130,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [configEdited, setConfigEdited] = useState(false)
+  const [colorsEdited, setColorsEdited] = useState(false)
   const [isNaming, setIsNaming] = useState(false)
   const [blocked, setBlocked] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -179,7 +180,10 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       setSelectedThemeId(themeId)
       setEditConfig(parseConfig(theme))
       applyThemeConfig(parseConfig(theme))
-      setConfigEdited(false)
+      // Mark as edited if switching to a different theme than the current one
+      const currentId = useSettingsStore.getState().currentThemeId
+      setConfigEdited(themeId !== currentId)
+      setColorsEdited(false)
     }
   }, [])
 
@@ -192,18 +196,22 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       return next
     })
     setConfigEdited(true)
+    setColorsEdited(true)
   }, [])
 
   const handleApply = useCallback(async () => {
     if (!selectedThemeId) return
     try {
-      await updateTheme(selectedThemeId, { config: JSON.stringify(editConfig) })
+      if (colorsEdited) {
+        await updateTheme(selectedThemeId, { config: JSON.stringify(editConfig) })
+      }
       await setSetting('theme_id', selectedThemeId)
       await setSetting('theme_mode', mode)
       setCurrentTheme(selectedThemeId)
       setConfigEdited(false)
+      setColorsEdited(false)
 
-      // Offer to update the counterpart theme
+      // Only offer counterpart update if colors were actually edited
       const currentName = selectedTheme?.name ?? ''
       const baseName = currentName.replace(/ (Dark|Light)$/, '')
       const counterpartMode = mode === 'dark' ? 'light' : 'dark'
@@ -212,7 +220,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
         (t) => t.id !== selectedThemeId && t.name.replace(/ (Dark|Light)$/, '') === baseName && t.mode === counterpartMode
       )
 
-      if (counterpart) {
+      if (counterpart && colorsEdited) {
         setBlocked(true)
         addToast({
           message: `Theme saved. Update ${counterpartMode} counterpart too?`,

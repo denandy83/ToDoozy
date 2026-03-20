@@ -92,6 +92,30 @@ export function ToastContainer(): React.JSX.Element {
 
   const hasPersistent = toasts.some((t) => t.persistent)
 
+  // Enter confirms first action, Escape cancels (last action) on persistent toasts
+  useEffect(() => {
+    if (!hasPersistent) return
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      const persistentToast = toasts.find((t) => t.persistent)
+      if (!persistentToast) return
+      const actions = persistentToast.actions ?? (persistentToast.action ? [persistentToast.action] : [])
+      if (e.key === 'Enter' && actions.length > 0) {
+        e.preventDefault()
+        e.stopPropagation()
+        actions[0].onClick()
+        globalState?.removeToast(persistentToast.id)
+      } else if (e.key === 'Escape' && actions.length > 0) {
+        e.preventDefault()
+        e.stopPropagation()
+        const cancelAction = actions[actions.length - 1]
+        cancelAction.onClick()
+        globalState?.removeToast(persistentToast.id)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [hasPersistent, toasts])
+
   if (toasts.length === 0) return <></>
 
   return (
