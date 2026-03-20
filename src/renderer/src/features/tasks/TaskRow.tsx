@@ -13,6 +13,7 @@ import { useLabelStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label, Project } from '../../../../shared/types'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskRowProps {
@@ -193,12 +194,17 @@ export function TaskRow({
     [onStatusChange, task.id]
   )
 
+  const { deleteTask: forceDelete } = useTaskStore()
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      onDelete(task.id)
+      if (shouldForceDelete(e)) {
+        forceDelete(task.id)
+      } else {
+        onDelete(task.id)
+      }
     },
-    [onDelete, task.id]
+    [onDelete, task.id, forceDelete]
   )
 
   const handleChevronClick = useCallback(

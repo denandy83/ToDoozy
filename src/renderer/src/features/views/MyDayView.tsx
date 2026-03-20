@@ -19,6 +19,7 @@ import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../ta
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
 import type { Task, Label, Project } from '../../../../shared/types'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import type { DropIndicator } from '../tasks/useDragAndDrop'
 import {
   MY_DAY_BUCKETS,
@@ -36,7 +37,7 @@ interface MyDayViewProps {
 export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element {
   const allProjects = useProjectStore(selectAllProjects)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
+  const { createTask, updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
     useTaskStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
@@ -454,7 +455,20 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         case 'Delete':
         case 'Backspace': {
           if (!(e.target instanceof HTMLInputElement)) {
-            if (selectedTaskIds.size > 1) {
+            if (shouldForceDelete(e)) {
+              e.preventDefault()
+              if (selectedTaskIds.size > 1) {
+                const ids = [...selectedTaskIds]
+                clearSelection()
+                for (const id of ids) deleteTask(id)
+              } else if (currentTaskId) {
+                const nextIndex =
+                  currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
+                const nextTask = flatTasks[nextIndex]
+                deleteTask(currentTaskId)
+                setCurrentTask(nextTask?.id ?? null)
+              }
+            } else if (selectedTaskIds.size > 1) {
               e.preventDefault()
               useTaskStore.getState().setPendingBulkDeleteTasks([...selectedTaskIds])
             } else if (currentTaskId) {

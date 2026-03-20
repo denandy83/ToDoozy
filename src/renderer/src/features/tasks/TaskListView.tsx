@@ -18,6 +18,7 @@ import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './Add
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskListViewProps {
@@ -30,7 +31,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTasksByProject(projectId)
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
+  const { createTask, updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
     useTaskStore()
   const movingTaskId = useTaskStore((s) => s.movingTaskId)
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
@@ -438,7 +439,21 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
         case 'Delete':
         case 'Backspace': {
-          if (selectedTaskIds.size > 1) {
+          if (shouldForceDelete(e)) {
+            // Shift+Delete: silent delete without confirmation
+            e.preventDefault()
+            if (selectedTaskIds.size > 1) {
+              const ids = [...selectedTaskIds]
+              clearSelection()
+              for (const id of ids) deleteTask(id)
+            } else if (currentTaskId) {
+              const nextIndex =
+                currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
+              const nextTask = flatTasks[nextIndex]
+              deleteTask(currentTaskId)
+              setCurrentTask(nextTask?.id ?? null)
+            }
+          } else if (selectedTaskIds.size > 1) {
             e.preventDefault()
             setPendingDeleteTask(null)
             useTaskStore.getState().setPendingBulkDeleteTasks([...selectedTaskIds])

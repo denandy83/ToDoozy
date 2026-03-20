@@ -5,6 +5,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { Modal } from '../../shared/components/Modal'
 import { useProjectStore, selectAllProjects, useStatusStore, useTaskStore } from '../../shared/stores'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
@@ -337,6 +338,34 @@ function GeneralSettings(): React.JSX.Element {
           ))}
         </select>
       </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Shift+click to delete</p>
+          <p className="text-[10px] text-muted">Hold Shift while clicking delete to skip confirmation</p>
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setSetting('shift_delete_enabled', 'true')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('shift_delete_enabled') ?? 'false') === 'true'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            On
+          </button>
+          <button
+            onClick={() => setSetting('shift_delete_enabled', 'false')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('shift_delete_enabled') ?? 'false') === 'false'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            Off
+          </button>
+        </div>
+      </div>
       <ShortcutRecorder />
     </div>
   )
@@ -367,9 +396,30 @@ function ProjectsTab({
   const updateProject = useProjectStore((s) => s.updateProject)
   const deleteProject = useProjectStore((s) => s.deleteProject)
 
-  const handleDeleteProject = useCallback((project: Project) => {
+  const doDeleteProject = useCallback(async (project: Project) => {
+    try {
+      await deleteProject(project.id)
+      const remainingTasks: Record<string, import('../../../../shared/types').Task> = {}
+      for (const [id, t] of Object.entries(useTaskStore.getState().tasks)) {
+        if (t.project_id !== project.id) remainingTasks[id] = t
+      }
+      useTaskStore.setState({ tasks: remainingTasks })
+      if (selectedProjectId === project.id) {
+        const remaining = projects.filter((p) => p.id !== project.id)
+        if (remaining.length > 0) onProjectChange(remaining[0].id)
+      }
+    } catch (err) {
+      addToast({ message: err instanceof Error ? err.message : 'Failed to delete project', variant: 'danger' })
+    }
+  }, [deleteProject, selectedProjectId, projects, onProjectChange, addToast])
+
+  const handleDeleteProject = useCallback((project: Project, e?: React.MouseEvent) => {
     if (project.is_default === 1) {
       addToast({ message: 'Cannot delete the default project', variant: 'danger' })
+      return
+    }
+    if (e && shouldForceDelete(e)) {
+      doDeleteProject(project)
       return
     }
     const allTasks = Object.values(useTaskStore.getState().tasks)
@@ -390,26 +440,8 @@ function ProjectsTab({
           label: 'Delete',
           variant: 'danger' as const,
           onClick: async () => {
-            try {
-              await deleteProject(project.id)
-              // Clean up tasks from memory (DB cascades but store doesn't)
-              const taskStore = useTaskStore.getState()
-              const remainingTasks: Record<string, import('../../../../shared/types').Task> = {}
-              for (const [id, t] of Object.entries(taskStore.tasks)) {
-                if (t.project_id !== project.id) remainingTasks[id] = t
-              }
-              useTaskStore.setState({ tasks: remainingTasks })
-              if (selectedProjectId === project.id) {
-                const remaining = projects.filter((p) => p.id !== project.id)
-                if (remaining.length > 0) onProjectChange(remaining[0].id)
-              }
-              addToast({ message: `Deleted "${project.name}"` })
-            } catch (err) {
-              addToast({
-                message: err instanceof Error ? err.message : 'Failed to delete project',
-                variant: 'danger'
-              })
-            }
+            await doDeleteProject(project)
+            addToast({ message: `Deleted "${project.name}"` })
           }
         },
         {
@@ -502,7 +534,7 @@ function ProjectsTab({
                   project={p}
                   isSelected={p.id === selectedProjectId}
                   onClick={() => onProjectChange(p.id)}
-                  onDelete={p.is_default === 1 ? undefined : () => handleDeleteProject(p)}
+                  onDelete={p.is_default === 1 ? undefined : (e) => handleDeleteProject(p, e)}
                 />
               ))}
             </div>
@@ -581,7 +613,7 @@ function SortableProjectRow({
   project: Project
   isSelected: boolean
   onClick: () => void
-  onDelete?: () => void
+  onDelete?: (e: React.MouseEvent) => void
 }): React.JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id
@@ -615,7 +647,7 @@ function SortableProjectRow({
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onDelete()
+            onDelete(e)
           }}
           className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
           title="Delete project"

@@ -10,6 +10,7 @@ import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelStore, useLabelsByProject } from '../stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import { useToast } from './Toast'
+import { shouldForceDelete } from '../utils/shiftDelete'
 import {
   StatusRow,
   PrioritySubmenu,
@@ -107,9 +108,14 @@ export function ContextMenu(): React.JSX.Element | null {
     handleAction(() => updateTask(task.id, update))
   }
 
-  const handleDelete = (): void => {
+  const { deleteTask } = useTaskStore()
+  const handleDelete = (e: React.MouseEvent): void => {
     handleAction(() => {
-      setPendingDeleteTask(task.id)
+      if (shouldForceDelete(e)) {
+        deleteTask(task.id)
+      } else {
+        setPendingDeleteTask(task.id)
+      }
     })
   }
 

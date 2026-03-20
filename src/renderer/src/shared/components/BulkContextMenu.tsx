@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore } from '../stores/taskStore'
+import { shouldForceDelete } from '../utils/shiftDelete'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
 import { useLabelStore } from '../stores/labelStore'
@@ -101,9 +102,16 @@ export function BulkContextMenu(): React.JSX.Element | null {
     handleAction(() => bulkUpdateTasks(bulkTaskIds, update))
   }
 
-  const handleDelete = (): void => {
+  const { deleteTask, clearSelection } = useTaskStore()
+  const handleDelete = (e: React.MouseEvent): void => {
     handleAction(() => {
-      setPendingBulkDeleteTasks(bulkTaskIds)
+      if (shouldForceDelete(e)) {
+        const ids = [...bulkTaskIds]
+        clearSelection()
+        for (const id of ids) deleteTask(id)
+      } else {
+        setPendingBulkDeleteTasks(bulkTaskIds)
+      }
     })
   }
 
