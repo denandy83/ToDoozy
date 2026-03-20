@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -372,6 +372,27 @@ export function AppLayout(): React.JSX.Element {
     return ''
   }, [currentView, selectedProject])
 
+  const [editingProjectName, setEditingProjectName] = useState(false)
+  const [projectNameValue, setProjectNameValue] = useState('')
+  const projectNameRef = useRef<HTMLInputElement>(null)
+  const { updateProject } = useProjectStore()
+
+  const handleStartEditProjectName = useCallback(() => {
+    if (currentView === 'project' && selectedProject) {
+      setProjectNameValue(selectedProject.name)
+      setEditingProjectName(true)
+      setTimeout(() => projectNameRef.current?.focus(), 0)
+    }
+  }, [currentView, selectedProject])
+
+  const handleSaveProjectName = useCallback(() => {
+    const trimmed = projectNameValue.trim()
+    if (trimmed && selectedProject && trimmed !== selectedProject.name) {
+      updateProject(selectedProject.id, { name: trimmed })
+    }
+    setEditingProjectName(false)
+  }, [projectNameValue, selectedProject, updateProject])
+
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
@@ -412,9 +433,27 @@ export function AppLayout(): React.JSX.Element {
                 style={{ backgroundColor: selectedProject.color }}
               />
             )}
-            <h1 className="text-3xl font-light tracking-[0.15em] uppercase text-foreground">
-              {viewTitle}
-            </h1>
+            {editingProjectName && currentView === 'project' ? (
+              <input
+                ref={projectNameRef}
+                type="text"
+                value={projectNameValue}
+                onChange={(e) => setProjectNameValue(e.target.value)}
+                onBlur={handleSaveProjectName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveProjectName()
+                  if (e.key === 'Escape') { e.stopPropagation(); setEditingProjectName(false) }
+                }}
+                className="text-3xl font-light tracking-[0.15em] uppercase text-foreground bg-transparent focus:outline-none"
+              />
+            ) : (
+              <h1
+                className={`text-3xl font-light tracking-[0.15em] uppercase text-foreground ${currentView === 'project' ? 'cursor-pointer' : ''}`}
+                onDoubleClick={handleStartEditProjectName}
+              >
+                {viewTitle}
+              </h1>
+            )}
 
             {/* Layout toggle - only on views that support kanban */}
             {(currentView === 'my-day' || currentView === 'project') && (
