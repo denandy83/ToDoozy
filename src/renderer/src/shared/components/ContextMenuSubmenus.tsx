@@ -21,6 +21,34 @@ export function SubmenuContainer({ children, openLeft }: SubmenuContainerProps):
   )
 }
 
+// --- Status Flyout ---
+
+interface StatusSubmenuProps {
+  task: Task
+  statuses: Status[]
+  openLeft: boolean
+  onStatusChange: (statusId: string) => void
+}
+
+export function StatusSubmenu({ task, statuses, openLeft, onStatusChange }: StatusSubmenuProps): React.JSX.Element {
+  const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
+  return (
+    <SubmenuContainer openLeft={openLeft}>
+      {sorted.map((status) => (
+        <button
+          key={status.id}
+          onClick={() => onStatusChange(status.id)}
+          className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+        >
+          <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+          <span className="flex-1">{status.name}</span>
+          {task.status_id === status.id && <Check size={14} className="text-accent" />}
+        </button>
+      ))}
+    </SubmenuContainer>
+  )
+}
+
 // --- Priority Flyout ---
 
 interface PrioritySubmenuProps {

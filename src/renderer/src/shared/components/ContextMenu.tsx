@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
-  Signal, Repeat, Tag, Clock, Focus
+  CircleDot, Signal, Repeat, Tag, Clock, Focus
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
@@ -12,7 +12,7 @@ import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import { useToast } from './Toast'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import {
-  StatusRow,
+  StatusSubmenu,
   PrioritySubmenu,
   RecurrenceSubmenu,
   LabelsSubmenu,
@@ -20,7 +20,7 @@ import {
   FocusSubmenu
 } from './ContextMenuSubmenus'
 
-type SubmenuId = 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | null
+type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | null
 
 export function ContextMenu(): React.JSX.Element | null {
   const { isOpen, position, taskId, close } = useContextMenuStore()
@@ -126,10 +126,6 @@ export function ContextMenu(): React.JSX.Element | null {
       role="menu"
       aria-label="Task context menu"
     >
-      {/* Status row */}
-      <StatusRow task={task} statuses={statuses} onStatusChange={handleStatusChange} />
-      <Divider />
-
       {/* Pin/Unpin My Day */}
       <MenuItem
         icon={isInMyDay ? <SunMedium size={14} /> : <Sun size={14} />}
@@ -149,6 +145,9 @@ export function ContextMenu(): React.JSX.Element | null {
       <Divider />
 
       {/* Flyout submenus */}
+      <FlyoutItem id="status" icon={<CircleDot size={14} />} label="Status" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
+        <StatusSubmenu task={task} statuses={statuses} openLeft={openLeft} onStatusChange={handleStatusChange} />
+      </FlyoutItem>
       <FlyoutItem id="priority" icon={<Signal size={14} />} label="Priority" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <PrioritySubmenu task={task} openLeft={openLeft} onPriorityChange={(p) => handleAction(() => updateTask(task.id, { priority: p }))} />
       </FlyoutItem>

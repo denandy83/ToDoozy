@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, Signal, Tag, Clock, Clipboard, Trash2
+  ChevronRight, Sun, CircleDot, Signal, Tag, Clock, Clipboard, Trash2
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore } from '../stores/taskStore'
@@ -11,14 +11,14 @@ import { useLabelsByProject } from '../stores/labelStore'
 import { useLabelStore } from '../stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import {
+  StatusSubmenu,
   PrioritySubmenu,
   LabelsSubmenu,
   SnoozeSubmenu
 } from './ContextMenuSubmenus'
 import { useToast } from './Toast'
-import type { Status } from '../../../../shared/types'
 
-type SubmenuId = 'priority' | 'labels' | 'snooze' | null
+type SubmenuId = 'status' | 'priority' | 'labels' | 'snooze' | null
 
 export function BulkContextMenu(): React.JSX.Element | null {
   const { isOpen, isBulk, position, bulkTaskIds, close } = useContextMenuStore()
@@ -134,10 +134,6 @@ export function BulkContextMenu(): React.JSX.Element | null {
       </div>
       <Divider />
 
-      {/* Status row */}
-      <BulkStatusRow statuses={sortedStatuses} onStatusChange={handleStatusChange} />
-      <Divider />
-
       {/* My Day toggle */}
       <MenuItem
         icon={<Sun size={14} />}
@@ -147,6 +143,9 @@ export function BulkContextMenu(): React.JSX.Element | null {
       <Divider />
 
       {/* Flyout submenus */}
+      <FlyoutItem id="status" icon={<CircleDot size={14} />} label="Status" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
+        <StatusSubmenu task={{ status_id: '' } as never} statuses={sortedStatuses} openLeft={openLeft} onStatusChange={handleStatusChange} />
+      </FlyoutItem>
       <FlyoutItem id="priority" icon={<Signal size={14} />} label="Priority" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <PrioritySubmenu task={pseudoTask as never} openLeft={openLeft} onPriorityChange={(p) => handleAction(() => bulkUpdateTasks(bulkTaskIds, { priority: p }))} />
       </FlyoutItem>
@@ -227,28 +226,6 @@ function MenuItem({ icon, label, onClick }: MenuItemProps): React.JSX.Element {
       {icon}
       <span>{label}</span>
     </button>
-  )
-}
-
-interface BulkStatusRowProps {
-  statuses: Status[]
-  onStatusChange: (statusId: string) => void
-}
-
-function BulkStatusRow({ statuses, onStatusChange }: BulkStatusRowProps): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-1 px-2 py-1.5">
-      {statuses.map((status) => (
-        <button
-          key={status.id}
-          onClick={() => onStatusChange(status.id)}
-          className="rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6"
-          title={status.name}
-        >
-          {status.name}
-        </button>
-      ))}
-    </div>
   )
 }
 

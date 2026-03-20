@@ -53,6 +53,38 @@ function App(): React.JSX.Element {
     return unsub
   }, [currentProjectId, currentUser, hydrateAllForProject, hydrateMyDay])
 
+  // Auto-archive: periodically check for done tasks past the threshold
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const checkAutoArchive = async (): Promise<void> => {
+      const settings = useSettingsStore.getState().settings
+      if (settings['auto_archive_enabled'] !== 'true') return
+
+      const value = parseInt(settings['auto_archive_value'] ?? '3', 10)
+      const unit = settings['auto_archive_unit'] ?? 'days'
+      if (!value || value <= 0) return
+
+      const thresholdMs = unit === 'hours' ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000
+      const now = Date.now()
+      const allTasks = useTaskStore.getState().tasks
+      const { updateTask: doUpdate } = useTaskStore.getState()
+
+      for (const task of Object.values(allTasks)) {
+        if (task.is_archived === 1 || !task.completed_date) continue
+        const completedAt = new Date(task.completed_date).getTime()
+        if (now - completedAt >= thresholdMs) {
+          await doUpdate(task.id, { is_archived: 1 })
+        }
+      }
+    }
+
+    // Check on mount and every 5 minutes
+    checkAutoArchive()
+    const interval = setInterval(checkAutoArchive, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [isAuthenticated])
+
   if (loading) {
     return <SplashScreen />
   }
