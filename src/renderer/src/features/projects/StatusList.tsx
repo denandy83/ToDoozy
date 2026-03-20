@@ -281,6 +281,16 @@ export function StatusList({
         </button>
       </div>
 
+      {addingNew && (
+        <StatusEditRow
+          initialName=""
+          initialColor="#888888"
+          initialIsDone={false}
+          onSave={handleAddStatus}
+          onCancel={() => setAddingNew(false)}
+        />
+      )}
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -355,17 +365,6 @@ export function StatusList({
           ) : null}
         </DragOverlay>
       </DndContext>
-
-      {addingNew && (
-        <StatusEditRow
-          initialName=""
-          initialColor="#888888"
-          initialIsDone={false}
-          onSave={handleAddStatus}
-          onCancel={() => setAddingNew(false)}
-        />
-      )}
-
     </div>
   )
 }
