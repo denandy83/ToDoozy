@@ -469,6 +469,7 @@ export function TaskRow({
           onAddLabel={onAddLabel}
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
+          project={project}
         />
       )}
     </>
@@ -512,6 +513,7 @@ interface SubtaskListProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  project?: Project
 }
 
 function SubtaskList({
@@ -528,7 +530,8 @@ function SubtaskList({
   onToggleExpanded,
   onAddLabel,
   onRemoveLabel,
-  onCreateLabel
+  onCreateLabel,
+  project
 }: SubtaskListProps): React.JSX.Element {
   const subtasks = useSubtasks(parentId)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -603,6 +606,7 @@ function SubtaskList({
           onAddLabel={onAddLabel}
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
+          project={project}
         />
       ))}
       {isPending && (
