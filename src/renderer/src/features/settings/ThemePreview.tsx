@@ -27,10 +27,11 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
     >
       {/* Mock sidebar */}
       <div
-        className="flex w-32 flex-col gap-2 p-3"
+        className="flex w-32 flex-col gap-0.5 p-3"
         style={{ backgroundColor: surface, borderRight: `1px solid ${config.border}` }}
       >
-        <div className="flex items-center gap-1.5 px-1.5 py-1">
+        {/* Logo */}
+        <div className="flex items-center gap-1.5 px-1.5 py-1 mb-1">
           <div
             className="h-4 w-4 rounded"
             style={{ backgroundColor: config.accent + '26' }}
@@ -41,30 +42,38 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
           </div>
           <span style={{ color: config.fg, fontSize: '9px', fontWeight: 700 }}>ToDoozy</span>
         </div>
-        <div className="mt-1 px-1">
-          <span style={{ color: config.muted, fontSize: '7px', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
-            Views
-          </span>
+
+        {/* My Day - active */}
+        <div
+          className="flex items-center gap-1.5 rounded px-1.5 py-1"
+          style={{ backgroundColor: config.accent + '1f', borderLeft: `2px solid ${config.accent}` }}
+        >
+          <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.accent }} />
+          <span style={{ color: config.fg, fontSize: '9px' }}>My Day</span>
         </div>
-        {['My Day', 'Backlog', 'Archive'].map((item, i) => (
+
+        {/* Projects header */}
+        <div className="flex items-center gap-1.5 px-1.5 py-1 mt-0.5">
+          <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.muted + '40' }} />
+          <span style={{ color: config.fgMuted, fontSize: '9px' }}>Projects</span>
+        </div>
+
+        {/* Project items - indented */}
+        {['Personal', 'Work'].map((item) => (
           <div
             key={item}
-            className="flex items-center gap-1.5 rounded px-1.5 py-1"
-            style={
-              i === 0
-                ? { backgroundColor: config.accent + '1f', borderLeft: `2px solid ${config.accent}` }
-                : undefined
-            }
+            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 ml-3"
           >
-            <div
-              className="h-2.5 w-2.5 rounded-sm"
-              style={{ backgroundColor: i === 0 ? config.accent : config.muted + '40' }}
-            />
-            <span style={{ color: i === 0 ? config.fg : config.fgSecondary, fontSize: '9px' }}>
-              {item}
-            </span>
+            <div className="h-2 w-2 rounded-full" style={{ backgroundColor: item === 'Personal' ? config.accent : '#f59e0b' }} />
+            <span style={{ color: config.fgSecondary, fontSize: '8px' }}>{item}</span>
           </div>
         ))}
+
+        {/* Archive */}
+        <div className="flex items-center gap-1.5 rounded px-1.5 py-1 mt-0.5">
+          <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.muted + '40' }} />
+          <span style={{ color: config.fgSecondary, fontSize: '9px' }}>Archive</span>
+        </div>
       </div>
 
       {/* Mock main area */}
@@ -87,42 +96,51 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
           </span>
         </div>
 
+        {/* Status section header */}
+        <div className="px-3 pt-2 pb-1">
+          <span style={{ color: '#888888', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+            Not Started
+          </span>
+        </div>
+
         {/* Mock task list */}
-        <div className="flex flex-col gap-1.5 p-3">
+        <div className="flex flex-col gap-1 px-3">
           {[
-            { title: 'Design system review', priority: config.accent, done: false },
-            { title: 'Update documentation', priority: config.muted, done: false },
-            { title: 'Prepare presentation', priority: '#f59e0b', done: false },
-            { title: 'Fix login bug', priority: '#ef4444', done: true }
+            { title: 'Design system review', priority: config.accent, done: false, project: config.accent },
+            { title: 'Update documentation', priority: config.muted, done: false, project: '#f59e0b' },
+            { title: 'Prepare presentation', priority: '#f59e0b', done: false, project: config.accent }
           ].map((task) => (
             <div
               key={task.title}
-              className="flex items-center gap-2 rounded px-2 py-1.5"
+              className="flex items-center gap-1.5 rounded px-2 py-1"
               style={{ backgroundColor: surface }}
             >
               <div
                 className="h-2.5 w-2.5 rounded-full border"
-                style={{
-                  borderColor: task.done ? config.accent : config.border,
-                  backgroundColor: task.done ? config.accent : 'transparent'
-                }}
+                style={{ borderColor: config.border, backgroundColor: 'transparent' }}
               />
-              <div
-                className="h-[2px] w-0.5 rounded-full"
-                style={{ backgroundColor: task.priority }}
-              />
-              <span
-                style={{
-                  color: task.done ? config.fgMuted : config.fg,
-                  fontSize: '9px',
-                  fontWeight: 300,
-                  textDecoration: task.done ? 'line-through' : 'none'
-                }}
-              >
-                {task.title}
-              </span>
+              <div className="flex h-3 w-3 items-center justify-center rounded-full" style={{ backgroundColor: task.project }}>
+                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>P</span>
+              </div>
+              <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300 }}>{task.title}</span>
             </div>
           ))}
+        </div>
+
+        {/* Done section */}
+        <div className="px-3 pt-2 pb-1">
+          <span style={{ color: '#22c55e', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+            Done
+          </span>
+        </div>
+        <div className="flex flex-col gap-1 px-3">
+          <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
+            <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
+            <div className="flex h-3 w-3 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
+              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>P</span>
+            </div>
+            <span style={{ color: config.fgMuted, fontSize: '8px', fontWeight: 300, textDecoration: 'line-through' }}>Fix login bug</span>
+          </div>
         </div>
       </div>
     </div>
