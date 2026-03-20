@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { LogOut, Pencil } from 'lucide-react'
+import { LogOut, Pencil, Trash2 } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -334,7 +334,7 @@ interface ProjectsTabProps {
   statuses: import('../../../../shared/types').Status[]
   onProjectChange: (id: string) => void
   onClose: () => void
-  addToast: (toast: { message: string; variant?: 'default' | 'danger'; action?: { label: string; onClick: () => void } }) => void
+  addToast: ReturnType<typeof useToast>['addToast']
 }
 
 function ProjectsTab({
@@ -350,6 +350,44 @@ function ProjectsTab({
   const [nameValue, setNameValue] = useState(selectedProject?.name ?? '')
   const nameInputRef = useRef<HTMLInputElement>(null)
   const updateProject = useProjectStore((s) => s.updateProject)
+  const deleteProject = useProjectStore((s) => s.deleteProject)
+
+  const handleDeleteProject = useCallback((project: Project) => {
+    if (project.is_default === 1) {
+      addToast({ message: 'Cannot delete the default project', variant: 'danger' })
+      return
+    }
+    addToast({
+      message: `Delete "${project.name}" and all its tasks?`,
+      persistent: true,
+      actions: [
+        {
+          label: 'Delete',
+          variant: 'danger' as const,
+          onClick: async () => {
+            try {
+              await deleteProject(project.id)
+              if (selectedProjectId === project.id) {
+                const remaining = projects.filter((p) => p.id !== project.id)
+                if (remaining.length > 0) onProjectChange(remaining[0].id)
+              }
+              addToast({ message: `Deleted "${project.name}"` })
+            } catch (err) {
+              addToast({
+                message: err instanceof Error ? err.message : 'Failed to delete project',
+                variant: 'danger'
+              })
+            }
+          }
+        },
+        {
+          label: 'Cancel',
+          variant: 'muted' as const,
+          onClick: () => {}
+        }
+      ]
+    })
+  }, [addToast, deleteProject, projects, selectedProjectId, onProjectChange])
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => a.sidebar_order - b.sidebar_order),
@@ -432,6 +470,7 @@ function ProjectsTab({
                   project={p}
                   isSelected={p.id === selectedProjectId}
                   onClick={() => onProjectChange(p.id)}
+                  onDelete={p.is_default === 1 ? undefined : () => handleDeleteProject(p)}
                 />
               ))}
             </div>
@@ -504,11 +543,13 @@ function ProjectsTab({
 function SortableProjectRow({
   project,
   isSelected,
-  onClick
+  onClick,
+  onDelete
 }: {
   project: Project
   isSelected: boolean
   onClick: () => void
+  onDelete?: () => void
 }): React.JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id
@@ -526,7 +567,7 @@ function SortableProjectRow({
       style={style}
       {...attributes}
       {...listeners}
-      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors cursor-pointer ${
+      className={`group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors cursor-pointer ${
         isSelected ? 'bg-accent/12 border border-accent/15' : 'border border-transparent hover:bg-foreground/6'
       }`}
       onClick={onClick}
@@ -538,6 +579,19 @@ function SortableProjectRow({
       <span className="flex-1 truncate text-sm font-light text-foreground">
         {project.name}
       </span>
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
+          title="Delete project"
+          aria-label="Delete project"
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
     </div>
   )
 }
