@@ -6,7 +6,7 @@ import type { Task, Label, Status } from '../../../../shared/types'
 
 const MAX_RESULTS = 12
 
-interface ParsedQuery {
+export interface ParsedQuery {
   textTerms: string[]
   priorityFilters: string[]
   labelFilters: string[]
@@ -15,7 +15,7 @@ interface ParsedQuery {
   hasFilters: string[]
 }
 
-const PRIORITY_NAME_TO_VALUE: Record<string, number> = {
+export const PRIORITY_NAME_TO_VALUE: Record<string, number> = {
   none: 0,
   low: 1,
   normal: 2,
@@ -24,7 +24,7 @@ const PRIORITY_NAME_TO_VALUE: Record<string, number> = {
   urgent: 4
 }
 
-function parseQuery(query: string): ParsedQuery {
+export function parseQuery(query: string): ParsedQuery {
   const result: ParsedQuery = {
     textTerms: [],
     priorityFilters: [],
@@ -78,7 +78,7 @@ function parseQuery(query: string): ParsedQuery {
   return result
 }
 
-function matchesPriority(task: Task, filters: string[]): boolean {
+export function matchesPriority(task: Task, filters: string[]): boolean {
   for (const filter of filters) {
     // Exact match
     const numericValue = PRIORITY_NAME_TO_VALUE[filter]
@@ -94,7 +94,7 @@ function matchesPriority(task: Task, filters: string[]): boolean {
   return false
 }
 
-function matchesLabel(
+export function matchesLabel(
   taskLabels: Label[],
   filters: string[]
 ): boolean {
@@ -104,7 +104,7 @@ function matchesLabel(
   return false
 }
 
-function matchesStatus(
+export function matchesStatus(
   task: Task,
   filters: string[],
   statuses: Record<string, Status>
@@ -118,7 +118,7 @@ function matchesStatus(
   return false
 }
 
-function matchesDue(task: Task, filters: string[]): boolean {
+export function matchesDue(task: Task, filters: string[]): boolean {
   for (const filter of filters) {
     if ('overdue'.startsWith(filter)) {
       if (!task.due_date) continue
@@ -142,7 +142,7 @@ function matchesDue(task: Task, filters: string[]): boolean {
   return false
 }
 
-function matchesHas(
+export function matchesHas(
   task: Task,
   filters: string[],
   allTasks: Record<string, Task>
