@@ -99,14 +99,13 @@ export function ToastContainer(): React.JSX.Element {
       const persistentToast = toasts.find((t) => t.persistent)
       if (!persistentToast) return
       const actions = persistentToast.actions ?? (persistentToast.action ? [persistentToast.action] : [])
+      // Block all keyboard input while persistent toast is visible
+      e.preventDefault()
+      e.stopPropagation()
       if (e.key === 'Enter' && actions.length > 0) {
-        e.preventDefault()
-        e.stopPropagation()
         actions[0].onClick()
         globalState?.removeToast(persistentToast.id)
       } else if (e.key === 'Escape' && actions.length > 0) {
-        e.preventDefault()
-        e.stopPropagation()
         const cancelAction = actions[actions.length - 1]
         cancelAction.onClick()
         globalState?.removeToast(persistentToast.id)
