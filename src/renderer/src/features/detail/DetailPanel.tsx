@@ -252,7 +252,7 @@ function DetailPanelContent({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border px-4 py-1.5">
         <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Task Details
         </span>
