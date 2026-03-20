@@ -822,38 +822,41 @@ const PROJECT_COLORS = [
 ]
 
 function ProjectColorPicker({ project }: { project: Project }): React.JSX.Element {
-  const [color, setColor] = useState(project.color)
+  const [open, setOpen] = useState(false)
   const updateProject = useProjectStore((s) => s.updateProject)
+  const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setColor(project.color)
-  }, [project.id, project.color])
-
-  const handleColorChange = (c: string): void => {
-    setColor(c)
-    updateProject(project.id, { color: c })
-  }
+    if (!open) return
+    const handleClick = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
 
   return (
-    <div>
-      <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-        Color
-      </label>
-      <div className="flex gap-2 pl-1.5">
-        {PROJECT_COLORS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => handleColorChange(c)}
-            className={`h-8 w-8 rounded-full transition-transform ${
-              color === c
-                ? 'scale-110 ring-2 ring-foreground/30 ring-offset-2 ring-offset-surface'
-                : ''
-            }`}
-            style={{ backgroundColor: c }}
-          />
-        ))}
-      </div>
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        onClick={() => setOpen(!open)}
+        className="h-6 w-6 rounded-full ring-2 ring-transparent transition-all hover:ring-foreground/20"
+        style={{ backgroundColor: project.color }}
+        title="Change color"
+      />
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 flex gap-1.5 rounded-lg border border-border bg-surface p-2 shadow-lg">
+          {PROJECT_COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={() => { updateProject(project.id, { color: c }); setOpen(false) }}
+              className={`h-5 w-5 rounded-full transition-transform ${
+                project.color === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-surface' : ''
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
