@@ -356,9 +356,9 @@ export function TaskRow({
 
         {project ? (
           <ProjectIndicator project={project} />
-        ) : task.is_in_my_day === 1 ? (
-          <MyDayIndicator />
-        ) : null}
+        ) : (
+          <MyDayIndicator visible={task.is_in_my_day === 1} />
+        )}
 
         <StatusButton
           currentStatusId={statusIdOverride ?? task.status_id}
@@ -674,13 +674,13 @@ function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element 
   )
 }
 
-function MyDayIndicator(): React.JSX.Element {
+function MyDayIndicator({ visible }: { visible: boolean }): React.JSX.Element {
   return (
     <div
-      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-accent/15"
-      title="In My Day"
+      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${visible ? 'bg-accent/15' : ''}`}
+      title={visible ? 'In My Day' : undefined}
     >
-      <Sun size={10} className="text-accent" />
+      {visible && <Sun size={10} className="text-accent" />}
     </div>
   )
 }
