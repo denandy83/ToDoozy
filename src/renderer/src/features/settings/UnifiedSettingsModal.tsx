@@ -10,6 +10,7 @@ import { StatusList } from '../projects/StatusList'
 import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsContent'
 import { PrioritySettingsContent } from './PrioritySettingsContent'
 import { LabelSettingsContent } from './LabelSettingsContent'
+import { ShortcutRecorder } from './ShortcutRecorder'
 import type { Project } from '../../../../shared/types'
 
 type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels'
@@ -257,6 +258,7 @@ function GeneralSettings(): React.JSX.Element {
           </button>
         </div>
       </div>
+      <ShortcutRecorder />
     </div>
   )
 }

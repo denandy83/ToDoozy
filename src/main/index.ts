@@ -1,15 +1,27 @@
 import { config } from 'dotenv'
 import { join } from 'path'
-import { app, shell, BrowserWindow } from 'electron'
+import { existsSync } from 'fs'
+import { app, shell, BrowserWindow, globalShortcut } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDatabase, closeDatabase } from './database'
+import { initDatabase, closeDatabase, getDatabase } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
+import { showQuickAddWindow } from './quick-add'
+import { SettingsRepository } from './repositories/SettingsRepository'
+import { DEFAULT_QUICK_ADD_SHORTCUT } from '../shared/shortcut-utils'
 
 // Load .env from project root (2 levels up from out/main)
 config({ path: join(__dirname, '../../.env') })
 
+let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+let currentShortcut: string | null = null
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
+
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -24,7 +36,19 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow?.show()
+  })
+
+  // macOS: hide window instead of closing (keep app alive for global shortcut)
+  mainWindow.on('close', (e) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -39,6 +63,54 @@ function createWindow(): void {
   }
 }
 
+function hasAuthSession(): boolean {
+  const tokenPath = join(app.getPath('userData'), '.auth-session')
+  return existsSync(tokenPath)
+}
+
+export function registerQuickAddShortcut(accelerator?: string): { success: boolean; error?: string } {
+  // Unregister the current shortcut if one is set
+  if (currentShortcut) {
+    globalShortcut.unregister(currentShortcut)
+    currentShortcut = null
+  }
+
+  const shortcut = accelerator ?? DEFAULT_QUICK_ADD_SHORTCUT
+
+  try {
+    const registered = globalShortcut.register(shortcut, () => {
+      if (!hasAuthSession()) return
+      showQuickAddWindow()
+    })
+
+    if (registered) {
+      currentShortcut = shortcut
+      return { success: true }
+    }
+    return {
+      success: false,
+      error: `Shortcut "${shortcut}" is already in use by another application. Would you like to override it?`
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to register shortcut'
+    }
+  }
+}
+
+function loadAndRegisterShortcut(): void {
+  try {
+    const db = getDatabase()
+    const settingsRepo = new SettingsRepository(db)
+    const savedShortcut = settingsRepo.get('quick_add_shortcut')
+    registerQuickAddShortcut(savedShortcut ?? undefined)
+  } catch (err) {
+    console.error('Failed to load quick-add shortcut setting:', err)
+    registerQuickAddShortcut()
+  }
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.todoozy')
 
@@ -50,10 +122,21 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  loadAndRegisterShortcut()
 
+  // macOS: re-show main window when dock icon is clicked
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+    } else {
+      createWindow()
+    }
   })
+})
+
+// macOS: set quitting flag before quit so the close handler lets the window close
+app.on('before-quit', () => {
+  isQuitting = true
 })
 
 app.on('window-all-closed', () => {
@@ -63,5 +146,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
   closeDatabase()
 })

@@ -4,6 +4,9 @@ import { join } from 'path'
 import { app } from 'electron'
 import { getDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
+import { hideQuickAddWindow } from './quick-add'
+import { registerQuickAddShortcut } from './index'
+import { getReservedShortcutName } from '../shared/shortcut-utils'
 
 let repos: Repositories | null = null
 
@@ -452,4 +455,41 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('themes:getConfig', (_e, id: string) => {
     return getRepos().themes.getConfig(id) ?? null
   })
+
+  // ── Quick Add ─────────────────────────────────────────────────────
+  ipcMain.handle('quickadd:hide', () => {
+    hideQuickAddWindow()
+  })
+
+  ipcMain.handle('quickadd:notifyTaskCreated', (event) => {
+    // Broadcast tasks-changed to all windows except the sender
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && win.webContents !== event.sender) {
+        win.webContents.send('tasks-changed')
+      }
+    }
+  })
+
+  ipcMain.handle(
+    'quickadd:updateShortcut',
+    (_e, accelerator: string): { success: boolean; error?: string; reservedBy?: string } => {
+      // Check for reserved macOS shortcuts
+      const reservedBy = getReservedShortcutName(accelerator)
+      if (reservedBy) {
+        return {
+          success: false,
+          error: `This shortcut is reserved by macOS (${reservedBy}) and can't be used.`,
+          reservedBy
+        }
+      }
+
+      // Try to register the new shortcut
+      const result = registerQuickAddShortcut(accelerator)
+      if (result.success) {
+        // Persist to settings
+        getRepos().settings.set('quick_add_shortcut', accelerator)
+      }
+      return result
+    }
+  )
 }

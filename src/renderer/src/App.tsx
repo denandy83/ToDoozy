@@ -42,6 +42,15 @@ function App(): React.JSX.Element {
     }
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
+  // Listen for tasks-changed from other windows (e.g. quick-add)
+  useEffect(() => {
+    if (!currentProjectId || !currentUser) return
+    const unsub = window.api.onTasksChanged(() => {
+      hydrateAllForProject(currentProjectId, currentUser.id)
+    })
+    return unsub
+  }, [currentProjectId, currentUser, hydrateAllForProject])
+
   if (loading) {
     return <SplashScreen />
   }

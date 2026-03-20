@@ -105,6 +105,25 @@ const api: TodoozyAPI = {
     clearSession: () => ipcRenderer.invoke('auth:clearSession'),
     getSupabaseConfig: () => ipcRenderer.invoke('auth:getSupabaseConfig'),
     openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url)
+  },
+
+  quickadd: {
+    hide: () => ipcRenderer.invoke('quickadd:hide'),
+    notifyTaskCreated: () => ipcRenderer.invoke('quickadd:notifyTaskCreated'),
+    updateShortcut: (accelerator) => ipcRenderer.invoke('quickadd:updateShortcut', accelerator),
+    onFocus: (callback) => {
+      ipcRenderer.on('quickadd:focus', callback)
+      return () => {
+        ipcRenderer.removeListener('quickadd:focus', callback)
+      }
+    }
+  },
+
+  onTasksChanged: (callback) => {
+    ipcRenderer.on('tasks-changed', callback)
+    return () => {
+      ipcRenderer.removeListener('tasks-changed', callback)
+    }
   }
 }
 

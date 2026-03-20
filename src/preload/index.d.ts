@@ -132,6 +132,19 @@ export interface AuthAPI {
   openOAuthWindow(url: string): Promise<string | null>
 }
 
+export interface ShortcutUpdateResult {
+  success: boolean
+  error?: string
+  reservedBy?: string
+}
+
+export interface QuickAddAPI {
+  hide(): Promise<void>
+  notifyTaskCreated(): Promise<void>
+  updateShortcut(accelerator: string): Promise<ShortcutUpdateResult>
+  onFocus(callback: () => void): () => void
+}
+
 export interface TodoozyAPI {
   tasks: TasksAPI
   labels: LabelsAPI
@@ -142,6 +155,8 @@ export interface TodoozyAPI {
   settings: SettingsAPI
   themes: ThemesAPI
   auth: AuthAPI
+  quickadd: QuickAddAPI
+  onTasksChanged(callback: () => void): () => void
 }
 
 declare global {
