@@ -143,7 +143,7 @@ export function TemplatesView(): React.JSX.Element {
 
 function LayoutTemplateIcon(): React.JSX.Element {
   return (
-    <div className="flex h-5 w-5 items-center justify-center rounded bg-muted/15">
+    <div className="flex h-5 w-5 items-center justify-center rounded bg-muted/12">
       <div className="grid h-3 w-3 grid-cols-2 gap-0.5">
         <div className="rounded-sm bg-muted/40" />
         <div className="rounded-sm bg-muted/40" />

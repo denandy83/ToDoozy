@@ -79,7 +79,7 @@ export function DetailRecurrence({
           onClick={() => handlePresetClick(opt.value)}
           className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
             !showCustom && recurrenceRule === opt.value
-              ? 'bg-accent text-white'
+              ? 'bg-accent text-accent-fg'
               : 'text-muted hover:bg-foreground/6'
           }`}
         >
@@ -90,7 +90,7 @@ export function DetailRecurrence({
         onClick={handleCustomClick}
         className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
           showCustom || (!isPreset(recurrenceRule) && recurrenceRule !== null)
-            ? 'bg-accent text-white'
+            ? 'bg-accent text-accent-fg'
             : 'text-muted hover:bg-foreground/6'
         }`}
       >

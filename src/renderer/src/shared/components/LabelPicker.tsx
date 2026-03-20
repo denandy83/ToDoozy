@@ -89,7 +89,7 @@ export function LabelPicker({
             />
             <button
               onClick={handleCreateLabel}
-              className="flex-1 rounded bg-accent px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-accent/80"
+              className="flex-1 rounded bg-accent px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80"
             >
               Create
             </button>

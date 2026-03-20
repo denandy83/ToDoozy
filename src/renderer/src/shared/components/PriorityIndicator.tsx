@@ -58,7 +58,7 @@ function PriorityButton({ level, isActive, onSelect }: PriorityButtonProps): Rea
       onKeyDown={handleKeyDown}
       className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
         isActive
-          ? 'text-white'
+          ? 'text-accent-fg'
           : 'text-muted hover:bg-foreground/6'
       }`}
       style={isActive ? { backgroundColor: level.color } : undefined}

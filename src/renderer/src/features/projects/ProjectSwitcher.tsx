@@ -39,13 +39,13 @@ export function ProjectSwitcher({
     <div ref={dropdownRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-foreground/6"
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-foreground/6 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       >
         <div
           className="flex h-6 w-6 items-center justify-center rounded"
           style={{ backgroundColor: currentProject?.color ?? '#888' }}
         >
-          <Folder size={14} className="text-white" />
+          <Folder size={14} className="text-accent-fg" />
         </div>
         <span className="flex-1 truncate text-sm font-light text-foreground">
           {currentProject?.name ?? 'Select Project'}
@@ -76,7 +76,7 @@ export function ProjectSwitcher({
                   className="flex h-5 w-5 items-center justify-center rounded"
                   style={{ backgroundColor: project.color }}
                 >
-                  <Folder size={12} className="text-white" />
+                  <Folder size={12} className="text-accent-fg" />
                 </div>
                 <span className="flex-1 truncate text-sm font-light">{project.name}</span>
                 <button

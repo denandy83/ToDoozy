@@ -146,7 +146,7 @@ export function DetailDescription({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder="Add a description... (Markdown supported, Cmd+V to paste images)"
-            className="min-h-[80px] w-full resize-none rounded border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:outline-none focus:border-accent"
+            className="min-h-[80px] w-full resize-none rounded border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:outline-none focus:border-accent focus-visible:ring-1 focus-visible:ring-accent"
           />
           {imageCount > 0 && (
             <p className="text-[9px] font-bold uppercase tracking-wider text-muted">

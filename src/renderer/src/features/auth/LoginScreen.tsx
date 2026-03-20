@@ -114,7 +114,7 @@ export function LoginScreen(): React.JSX.Element {
           <button
             type="submit"
             disabled={loading || !isFormValid}
-            className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-white transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-40"
+            className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
           >
             {loading ? (
               <span className="inline-flex items-center gap-2">

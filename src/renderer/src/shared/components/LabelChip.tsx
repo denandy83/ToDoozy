@@ -48,7 +48,7 @@ export function LabelChip({ name, color, onRemove, onClick }: LabelChipProps): R
       {onRemove && (
         <button
           onClick={handleRemove}
-          className="ml-0.5 rounded-full p-0 hover:bg-white/20 focus:outline-none"
+          className="ml-0.5 rounded-full p-0 hover:bg-accent-fg/20 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           aria-label={`Remove ${name}`}
         >
           <X size={10} />

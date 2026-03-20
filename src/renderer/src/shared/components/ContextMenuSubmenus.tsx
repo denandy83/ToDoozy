@@ -226,7 +226,7 @@ export function StatusRow({ task, statuses, onStatusChange }: StatusRowProps): R
           onClick={() => onStatusChange(status.id)}
           className={`rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
             task.status_id === status.id
-              ? 'text-white'
+              ? 'text-accent-fg'
               : 'text-muted hover:bg-foreground/6'
           }`}
           style={task.status_id === status.id ? { backgroundColor: status.color } : undefined}

@@ -122,11 +122,11 @@ function ToggleRow({ label, description, checked, onChange }: ToggleRowProps): R
         aria-checked={checked}
         onClick={onChange}
         className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-accent' : 'bg-foreground/20'
+          checked ? 'bg-accent' : 'bg-foreground/15'
         }`}
       >
         <span
-          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform motion-safe:duration-150 ${
+          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-accent-fg transition-transform motion-safe:duration-150 ${
             checked ? 'translate-x-4' : 'translate-x-0'
           }`}
         />

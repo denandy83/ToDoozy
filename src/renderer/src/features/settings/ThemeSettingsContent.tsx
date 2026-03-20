@@ -463,7 +463,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
             <button
               onClick={() => { handleSaveAs(); setIsNaming(false) }}
               disabled={!customName.trim()}
-              className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Create
             </button>
@@ -550,7 +550,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       <button
         onClick={handleApply}
         disabled={!configEdited}
-        className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         Apply Theme
       </button>

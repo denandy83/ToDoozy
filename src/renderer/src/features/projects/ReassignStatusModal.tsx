@@ -83,7 +83,7 @@ export function ReassignStatusModal({
           <button
             onClick={handleReassign}
             disabled={loading || !targetId}
-            className="rounded-lg bg-danger px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/80 disabled:opacity-50"
+            className="rounded-lg bg-danger px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-danger/80 disabled:opacity-50"
           >
             {loading ? 'Deleting...' : 'Reassign & Delete'}
           </button>

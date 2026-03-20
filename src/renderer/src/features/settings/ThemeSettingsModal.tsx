@@ -263,7 +263,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
         <button
           onClick={handleApply}
           disabled={!hasChanges}
-          className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply Theme
         </button>

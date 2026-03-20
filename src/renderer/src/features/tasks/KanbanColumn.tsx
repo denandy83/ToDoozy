@@ -60,7 +60,7 @@ export function KanbanColumn({
       <div
         ref={setNodeRef}
         className={`flex flex-1 flex-col gap-2 overflow-y-auto rounded-lg p-2 transition-colors motion-safe:duration-150 ${
-          isOver ? 'bg-accent/8' : ''
+          isOver ? 'bg-accent/10' : ''
         }`}
       >
         <SortableContext items={taskIds}>

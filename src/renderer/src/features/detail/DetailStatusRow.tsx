@@ -73,7 +73,7 @@ function StatusChip({ status, isActive, onSelect }: StatusChipProps): React.JSX.
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
-        isActive ? 'text-white' : 'text-muted hover:bg-foreground/6'
+        isActive ? 'text-accent-fg' : 'text-muted hover:bg-foreground/6'
       }`}
       style={isActive ? { backgroundColor: status.color } : undefined}
       role="radio"

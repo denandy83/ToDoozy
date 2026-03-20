@@ -187,7 +187,7 @@ export function LabelSettingsContent(): React.JSX.Element {
         {showAddInput ? (
           <div
             ref={addRowRef}
-            className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-accent/30 bg-accent/5 px-2 py-1.5"
+            className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-accent/30 bg-accent/6 px-2 py-1.5"
             onBlur={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node)) {
                 if (!newName.trim()) { setShowAddInput(false); setNewName('') }

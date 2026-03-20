@@ -68,7 +68,7 @@ export function CommandPaletteResult({
       {/* Priority badge */}
       {task.priority > 0 && (
         <span
-          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white"
+          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent-fg"
           style={{ backgroundColor: priorityColor }}
         >
           {priorityLabel}
