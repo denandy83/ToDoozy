@@ -85,7 +85,7 @@ export function LabelPicker({
         handleCreateLabel()
       }
     },
-    [newLabelMode, handleCreateLabel, onClose]
+    [newLabelMode, handleCreateLabel, onClose, filteredLabels, highlightedIndex, onToggleLabel]
   )
 
   return (
