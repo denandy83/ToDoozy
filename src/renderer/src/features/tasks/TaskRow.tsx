@@ -269,11 +269,18 @@ export function TaskRow({
     [task.id, taskLabels, onAddLabel, onRemoveLabel]
   )
 
+  const { createLabel: createLabelInStore } = useLabelStore()
   const handlePickerCreateLabel = useCallback(
-    (name: string, color: string) => {
-      onCreateLabel(name, color)
+    async (name: string, color: string) => {
+      const label = await createLabelInStore({
+        id: crypto.randomUUID(),
+        project_id: task.project_id,
+        name,
+        color
+      })
+      onAddLabel(task.id, label.id)
     },
-    [onCreateLabel]
+    [createLabelInStore, onAddLabel, task.id, task.project_id]
   )
 
   const assignedLabelIds = new Set(taskLabels.map((l) => l.id))
