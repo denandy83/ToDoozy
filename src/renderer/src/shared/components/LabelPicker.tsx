@@ -20,11 +20,14 @@ export function LabelPicker({
   const [newLabelMode, setNewLabelMode] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState('#6366f1')
+  const [searchQuery, setSearchQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (newLabelMode) nameInputRef.current?.focus()
+    else searchInputRef.current?.focus()
   }, [newLabelMode])
 
   useEffect(() => {
@@ -97,8 +100,18 @@ export function LabelPicker({
         </div>
       ) : (
         <>
+          <div className="px-2 pb-1 pt-1">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search labels..."
+              className="w-full rounded border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
+            />
+          </div>
           <div className="max-h-48 overflow-y-auto">
-            {allLabels.map((label) => {
+            {allLabels.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase())).map((label) => {
               const isAssigned = assignedLabelIds.has(label.id)
               return (
                 <button
