@@ -36,7 +36,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
-  const { updateTask, duplicateTask, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
+  const { updateTask, deleteTask, duplicateTask, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
 
   // Viewport clamp positioning
@@ -108,7 +108,6 @@ export function ContextMenu(): React.JSX.Element | null {
     handleAction(() => updateTask(task.id, update))
   }
 
-  const { deleteTask } = useTaskStore()
   const handleDelete = (e: React.MouseEvent): void => {
     handleAction(() => {
       if (shouldForceDelete(e)) {
