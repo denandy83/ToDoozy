@@ -622,78 +622,65 @@ function ProjectsTab({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Sidebar order */}
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-            Sidebar Order
-          </p>
-          <button
-            onClick={() => setAddingProject(true)}
-            className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/10"
-          >
-            <Plus size={12} />
-            Add
-          </button>
-        </div>
-        {addingProject && (
-          <div className="mb-2 flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
-            <input
-              ref={newProjectInputRef}
-              type="text"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddProject()
-                if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false) }
-              }}
-              placeholder="Project name"
-              className="rounded border border-border bg-surface px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
-            />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
-                {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setNewProjectColor(c)}
-                    className={`h-5 w-5 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setAddingProject(false)} className="rounded p-1.5 text-muted transition-colors hover:bg-foreground/6">
-                  <X size={14} />
-                </button>
-                <button onClick={handleAddProject} disabled={!newProjectName.trim()} className="rounded p-1.5 text-accent transition-colors hover:bg-accent/10 disabled:opacity-50">
-                  <Check size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-0.5">
-              {sortedProjects.map((p) => (
-                <SortableProjectRow
-                  key={p.id}
-                  project={p}
-                  isSelected={p.id === selectedProjectId}
-                  onClick={() => onProjectChange(p.id)}
-                  onDelete={p.is_default === 1 ? undefined : (e) => handleDeleteProject(p, e)}
+      {/* Header: Project title + Add */}
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+          Project
+        </p>
+        <button
+          onClick={() => setAddingProject(true)}
+          className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/10"
+        >
+          <Plus size={12} />
+          Add
+        </button>
+      </div>
+
+      {/* Add project form */}
+      {addingProject && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
+          <input
+            ref={newProjectInputRef}
+            type="text"
+            value={newProjectName}
+            onChange={(e) => setNewProjectName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddProject()
+              if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false) }
+            }}
+            placeholder="Project name"
+            className="rounded border border-border bg-surface px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
+              {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setNewProjectColor(c)}
+                  className={`h-5 w-5 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
+                  style={{ backgroundColor: c }}
                 />
               ))}
             </div>
-          </SortableContext>
-        </DndContext>
-      </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setAddingProject(false)} className="rounded p-1.5 text-muted transition-colors hover:bg-foreground/6">
+                <X size={14} />
+              </button>
+              <button onClick={handleAddProject} disabled={!newProjectName.trim()} className="rounded p-1.5 text-accent transition-colors hover:bg-accent/10 disabled:opacity-50">
+                <Check size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Project selector + rename */}
+      {/* Project selector: color dot + dropdown + pencil */}
       <div className="flex items-center gap-3">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Project</span>
+        {selectedProject && (
+          <ProjectColorPicker project={selectedProject} />
+        )}
         {editingName ? (
           <input
             ref={nameInputRef}
@@ -703,7 +690,7 @@ function ProjectsTab({
             onBlur={handleSaveName}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSaveName()
-              if (e.key === 'Escape') { setEditingName(false); setNameValue(selectedProject?.name ?? '') }
+              if (e.key === 'Escape') { e.stopPropagation(); setEditingName(false); setNameValue(selectedProject?.name ?? '') }
             }}
             className="flex-1 rounded-lg border border-accent bg-background px-3 py-1.5 text-sm text-foreground outline-none"
           />
@@ -732,14 +719,34 @@ function ProjectsTab({
       {/* Selected project settings */}
       {selectedProject && selectedProjectId && (
         <div className="flex flex-col gap-6">
-          {/* Color */}
-          <ProjectColorPicker project={selectedProject} />
 
           {/* Statuses */}
           <StatusList
             projectId={selectedProjectId}
             statuses={statuses}
           />
+
+          {/* Sidebar order */}
+          <div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+              Sidebar Order
+            </p>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
+                <div className="flex flex-col gap-0.5">
+                  {sortedProjects.map((p) => (
+                    <SortableProjectRow
+                      key={p.id}
+                      project={p}
+                      isSelected={p.id === selectedProjectId}
+                      onClick={() => onProjectChange(p.id)}
+                      onDelete={p.is_default === 1 ? undefined : (e) => handleDeleteProject(p, e)}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
 
           {/* Delete — always last */}
           <ProjectDeleteSection
