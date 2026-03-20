@@ -18,6 +18,9 @@ import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settin
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
+import { useProjectStore } from '../../shared/stores/projectStore'
+import { useStatusStore } from '../../shared/stores/statusStore'
+import { useAuthStore } from '../../shared/stores/authStore'
 import type { ThemeConfig } from '../../../../shared/types'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
@@ -28,7 +31,7 @@ interface SidebarProps {
   projectCounts: Record<string, number>
   projects: Project[]
   onSettings: () => void
-  onNewProject: () => void
+  onNewProject?: () => void
   collapsed: boolean
   pinned: boolean
   isDragging?: boolean
@@ -65,7 +68,6 @@ export function Sidebar({
   projectCounts,
   projects,
   onSettings,
-  onNewProject,
   collapsed,
   pinned,
   isDragging,
@@ -83,6 +85,34 @@ export function Sidebar({
   const sidebarRef = useRef<HTMLElement>(null)
   const isDarkMode = currentTheme?.mode === 'dark'
   const [projectsExpanded, setProjectsExpanded] = useState(false)
+  const [addingProject, setAddingProject] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const addProjectRef = useRef<HTMLInputElement>(null)
+  const createProject = useProjectStore((s) => s.createProject)
+  const createStatus = useStatusStore((s) => s.createStatus)
+  const currentUser = useAuthStore((s) => s.currentUser)
+
+  const handleCreateProject = useCallback(async () => {
+    const name = newProjectName.trim()
+    if (!name || !currentUser) return
+    const id = crypto.randomUUID()
+    const maxOrder = projects.reduce((max, p) => Math.max(max, p.sidebar_order ?? 0, projects.length - 1), 0)
+    const project = await createProject({
+      id, name, owner_id: currentUser.id, color: '#6366f1', icon: 'folder', is_default: 0, sidebar_order: maxOrder + 1
+    })
+    await window.api.projects.addMember(id, currentUser.id, 'owner', currentUser.id)
+    for (const s of [
+      { name: 'Not Started', color: '#888888', icon: 'circle', order_index: 0, is_default: 1, is_done: 0 },
+      { name: 'In Progress', color: '#f59e0b', icon: 'clock', order_index: 1, is_default: 0, is_done: 0 },
+      { name: 'Done', color: '#22c55e', icon: 'check-circle', order_index: 2, is_default: 0, is_done: 1 }
+    ]) {
+      await createStatus({ id: crypto.randomUUID(), project_id: id, ...s })
+    }
+    useLabelStore.getState().clearLabelFilters()
+    setSelectedProject(project.id)
+    setAddingProject(false)
+    setNewProjectName('')
+  }, [newProjectName, currentUser, projects, createProject, createStatus, setSelectedProject])
 
   // Auto-expand projects when the selected project is beyond the visible top 5
   useEffect(() => {
@@ -195,7 +225,7 @@ export function Sidebar({
               <FolderOpen size={16} className="text-muted" />
               <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Projects</span>
               <button
-                onClick={onNewProject}
+                onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
                 className="rounded p-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
                 title="New project"
                 aria-label="New project"
@@ -210,6 +240,27 @@ export function Sidebar({
           )}
           {!collapsed && (
             <div className="flex flex-col gap-0.5 pl-4">
+              {addingProject && (
+                <input
+                  ref={addProjectRef}
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newProjectName.trim()) {
+                      handleCreateProject()
+                    }
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      setAddingProject(false)
+                      setNewProjectName('')
+                    }
+                  }}
+                  onBlur={() => { setAddingProject(false); setNewProjectName('') }}
+                  placeholder="Project name..."
+                  className="rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-[13px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
+                />
+              )}
               {visibleProjects.map((project) => (
                 <ProjectNavItem
                   key={project.id}
