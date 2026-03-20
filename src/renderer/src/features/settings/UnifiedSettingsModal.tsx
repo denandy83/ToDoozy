@@ -4,6 +4,7 @@ import { Modal } from '../../shared/components/Modal'
 import { useProjectStore, selectAllProjects, useStatusStore } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import { useToast } from '../../shared/components/Toast'
 import { StatusList } from '../projects/StatusList'
 import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsContent'
@@ -220,14 +221,42 @@ export function UnifiedSettingsModal({
 }
 
 function GeneralSettings(): React.JSX.Element {
+  const addPosition = useSetting('new_task_position') ?? 'top'
+  const { setSetting } = useSettingsStore()
+
   return (
     <div className="flex flex-col gap-6">
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
         General
       </p>
-      <p className="text-sm font-light text-fg-secondary">
-        App-wide settings will be added here — sidebar behavior, app icon, hotkeys, and more.
-      </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">New task position</p>
+          <p className="text-[10px] text-muted">Where new tasks appear in their status group</p>
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setSetting('new_task_position', 'top')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              addPosition === 'top'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            Top
+          </button>
+          <button
+            onClick={() => setSetting('new_task_position', 'bottom')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              addPosition === 'bottom'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            Bottom
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

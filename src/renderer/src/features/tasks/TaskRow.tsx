@@ -171,7 +171,7 @@ export function TaskRow({
       if (selectedTaskIds.has(task.id) && selectedTaskIds.size > 1) {
         openBulkContextMenu([...selectedTaskIds], e.clientX, e.clientY)
       } else {
-        useTaskStore.getState().selectTask(task.id)
+        useTaskStore.getState().selectTask(task.id, { fromContextMenu: true })
         openContextMenu(task.id, e.clientX, e.clientY)
       }
     },

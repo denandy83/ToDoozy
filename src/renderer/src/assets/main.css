@@ -30,6 +30,10 @@ body {
   transition: background-color 300ms, color 300ms, border-color 300ms;
 }
 
+*:focus {
+  outline: none;
+}
+
 /* react-datepicker theme overrides */
 .datepicker-wrapper {
   width: 10rem;

@@ -38,6 +38,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const layoutMode = useViewStore(selectLayoutMode)
+  const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -145,17 +146,20 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
 
-      const maxOrder = tasks.reduce((max, t) => Math.max(max, t.order_index), -1)
+      const statusTasks = tasks.filter((t) => t.status_id === defaultStatus.id && t.parent_id === null)
+      const orderIndex = newTaskPosition === 'bottom'
+        ? statusTasks.reduce((max, t) => Math.max(max, t.order_index), -1) + 1
+        : statusTasks.reduce((min, t) => Math.min(min, t.order_index), 0) - 1
       await createTask({
         id: crypto.randomUUID(),
         project_id: projectId,
         owner_id: currentUser.id,
         title,
         status_id: defaultStatus.id,
-        order_index: maxOrder + 1
+        order_index: orderIndex
       })
     },
-    [currentUser, statuses, tasks, projectId, createTask]
+    [currentUser, statuses, tasks, projectId, createTask, newTaskPosition]
   )
 
   const handleStatusChange = useCallback(

@@ -36,6 +36,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const layoutMode = useViewStore(selectLayoutMode)
+  const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -130,18 +131,21 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
 
-      const maxOrder = myDayTasks.reduce((max, t) => Math.max(max, t.order_index), -1)
+      const statusTasks = myDayTasks.filter((t) => t.status_id === defaultStatus.id && t.parent_id === null)
+      const orderIndex = newTaskPosition === 'bottom'
+        ? statusTasks.reduce((max, t) => Math.max(max, t.order_index), -1) + 1
+        : statusTasks.reduce((min, t) => Math.min(min, t.order_index), 0) - 1
       await createTask({
         id: crypto.randomUUID(),
         project_id: currentProject.id,
         owner_id: currentUser.id,
         title,
         status_id: defaultStatus.id,
-        order_index: maxOrder + 1,
+        order_index: orderIndex,
         is_in_my_day: 1
       })
     },
-    [currentUser, currentProject, statuses, myDayTasks, createTask]
+    [currentUser, currentProject, statuses, myDayTasks, createTask, newTaskPosition]
   )
 
   const handleStatusChange = useCallback(

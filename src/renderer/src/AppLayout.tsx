@@ -260,8 +260,9 @@ export function AppLayout(): React.JSX.Element {
 
   const viewTitle = VIEW_TITLES[currentView]
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
+  const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
-  const hasDetailPanel = selectedTaskIds.size === 1
+  const hasDetailPanel = showDetailPanel && selectedTaskIds.size === 1
   const isSidePanel = detailPanelPosition === 'side'
 
   return (

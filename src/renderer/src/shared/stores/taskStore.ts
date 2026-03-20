@@ -15,6 +15,7 @@ interface TaskState {
   expandedTaskIds: Set<string>
   selectedTaskIds: Set<string>
   lastSelectedTaskId: string | null
+  showDetailPanel: boolean
   pendingSubtaskParentId: string | null
   pendingDeleteTaskId: string | null
   pendingBulkDeleteTaskIds: string[] | null
@@ -40,7 +41,7 @@ interface TaskActions {
   hydrateTaskLabels(taskId: string): Promise<void>
   hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
-  selectTask(id: string): void
+  selectTask(id: string, options?: { fromContextMenu?: boolean }): void
   toggleTaskInSelection(id: string): void
   selectTaskRange(ids: string[]): void
   selectAllTasks(ids: string[]): void
@@ -66,6 +67,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   expandedTaskIds: new Set<string>(),
   selectedTaskIds: new Set<string>(),
   lastSelectedTaskId: null,
+  showDetailPanel: false,
   pendingSubtaskParentId: null,
   pendingDeleteTaskId: null,
   pendingBulkDeleteTaskIds: null,
@@ -358,14 +360,15 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   setCurrentTask(id: string | null): void {
     if (id === null) {
-      set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null })
+      set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null, showDetailPanel: false })
     } else {
-      set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
+      set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: true })
     }
   },
 
-  selectTask(id: string): void {
-    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
+  selectTask(id: string, options?: { fromContextMenu?: boolean }): void {
+    const keepPanel = options?.fromContextMenu ? get().showDetailPanel : true
+    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: keepPanel })
   },
 
   toggleTaskInSelection(id: string): void {
@@ -394,7 +397,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   clearSelection(): void {
-    set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null })
+    set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null, showDetailPanel: false })
   },
 
   async bulkUpdateTasks(ids: string[], input: UpdateTaskInput): Promise<void> {
