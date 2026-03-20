@@ -118,24 +118,25 @@ export function LabelSettingsContent(): React.JSX.Element {
   }, [])
 
   const handleDelete = useCallback((id: string) => {
-    // Count tasks that have this label assigned
+    const label = sortedLabels.find((l) => l.id === id)
+    const name = label?.name ?? 'label'
     const assignedCount = Object.values(taskLabels).filter(
       (labels) => labels.some((l) => l.id === id)
     ).length
 
-    if (assignedCount > 0) {
-      addToast({
-        message: `This label is assigned to ${assignedCount} task${assignedCount === 1 ? '' : 's'}. Remove it?`,
-        persistent: true,
-        actions: [
-          { label: 'Remove', variant: 'danger', onClick: () => deleteLabel(id) },
-          { label: 'Cancel', variant: 'muted', onClick: () => {} }
-        ]
-      })
-    } else {
-      deleteLabel(id)
-    }
-  }, [deleteLabel, taskLabels, addToast])
+    const message = assignedCount > 0
+      ? `Delete "${name}"? It's assigned to ${assignedCount} task${assignedCount === 1 ? '' : 's'}.`
+      : `Delete "${name}"?`
+
+    addToast({
+      message,
+      persistent: true,
+      actions: [
+        { label: 'Delete', variant: 'danger', onClick: () => deleteLabel(id) },
+        { label: 'Cancel', variant: 'muted', onClick: () => {} }
+      ]
+    })
+  }, [deleteLabel, taskLabels, addToast, sortedLabels])
 
   return (
     <div className="flex flex-col gap-6">

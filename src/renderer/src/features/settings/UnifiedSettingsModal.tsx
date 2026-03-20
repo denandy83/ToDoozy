@@ -392,6 +392,13 @@ function ProjectsTab({
           onClick: async () => {
             try {
               await deleteProject(project.id)
+              // Clean up tasks from memory (DB cascades but store doesn't)
+              const taskStore = useTaskStore.getState()
+              const remainingTasks: Record<string, import('../../../../shared/types').Task> = {}
+              for (const [id, t] of Object.entries(taskStore.tasks)) {
+                if (t.project_id !== project.id) remainingTasks[id] = t
+              }
+              useTaskStore.setState({ tasks: remainingTasks })
               if (selectedProjectId === project.id) {
                 const remaining = projects.filter((p) => p.id !== project.id)
                 if (remaining.length > 0) onProjectChange(remaining[0].id)
