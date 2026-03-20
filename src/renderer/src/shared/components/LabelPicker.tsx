@@ -78,6 +78,7 @@ export function LabelPicker({
       if (e.key === 'Enter' && !newLabelMode && filteredLabels.length > 0) {
         e.preventDefault()
         onToggleLabel(filteredLabels[highlightedIndex].id)
+        setSearchQuery('')
         return
       }
       if (e.key === 'Enter' && newLabelMode) {
