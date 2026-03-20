@@ -264,8 +264,8 @@ export function getNextAutoColor(existingLabels: Label[]): string {
 export function removeOperatorText(text: string, startIndex: number, endIndex: number): string {
   const before = text.slice(0, startIndex)
   const after = text.slice(endIndex)
-  // Clean up double spaces
-  return (before + after).replace(/  +/g, ' ').trim()
+  // Clean up double spaces but preserve leading/trailing single spaces
+  return (before + after).replace(/  +/g, ' ')
 }
 
 function formatIso(d: Date): string {
