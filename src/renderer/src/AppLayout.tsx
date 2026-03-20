@@ -189,9 +189,9 @@ export function AppLayout(): React.JSX.Element {
       if (viewId === 'my-day') {
         await updateTask(taskId, { is_in_my_day: 1 })
         addToast({ message: 'Added to My Day' })
-      } else if (viewId.startsWith('nav-project-')) {
+      } else if (viewId.startsWith('project-')) {
         // Dropped on a project nav item — move to that project
-        const targetProjectId = viewId.replace('nav-project-', '')
+        const targetProjectId = viewId.replace('project-', '')
         const task = tasks[taskId]
         if (task && task.project_id !== targetProjectId) {
           // Find default status in target project
