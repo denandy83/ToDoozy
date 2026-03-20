@@ -1,6 +1,6 @@
 import { useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
 import { Plus, Calendar, X } from 'lucide-react'
-import type { Label } from '../../../../shared/types'
+import type { Label, Project } from '../../../../shared/types'
 import { useSmartInput } from '../../shared/hooks/useSmartInput'
 import { InputSuggestionPopup, type SuggestionData, type InputSuggestionPopupProps } from '../../shared/components/InputSuggestionPopup'
 import { LabelChip } from '../../shared/components/LabelChip'
@@ -9,6 +9,7 @@ import {
   filterLabels,
   filterPriorities,
   filterDates,
+  filterProjects,
   getNextAutoColor
 } from '../../shared/hooks/smartInputParser'
 import { useLabelStore } from '../../shared/stores'
@@ -27,6 +28,8 @@ interface AddTaskInputProps {
   disabled?: boolean
   labels?: Label[]
   projectId?: string
+  projects?: Project[]
+  onProjectChange?: (projectId: string) => void
   projectSelector?: React.ReactNode
 }
 
@@ -35,7 +38,7 @@ export interface AddTaskInputHandle {
 }
 
 export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
-  function AddTaskInput({ viewName, onSubmit, disabled, labels = [], projectId, projectSelector }, ref) {
+  function AddTaskInput({ viewName, onSubmit, disabled, labels = [], projectId, projects = [], onProjectChange, projectSelector }, ref) {
     const inputRef = useRef<HTMLInputElement>(null)
     const smart = useSmartInput(inputRef)
     const dateFormat = useDateFormat()
@@ -120,9 +123,12 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
           smart.selectPriority(data.option.value)
         } else if (data.type === 'date') {
           smart.selectDate(data.option.date)
+        } else if (data.type === 'project') {
+          onProjectChange?.(data.project.id)
+          smart.selectProject(data.project)
         }
       },
-      [smart, projectId]
+      [smart, projectId, onProjectChange]
     )
 
     const popupItems = useMemo(() => {
@@ -173,8 +179,17 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
         }))
       }
 
+      if (smart.popupState.type === '/' && projects.length > 0) {
+        return filterProjects(projects, smart.popupState.query).map((p) => ({
+          id: `project-${p.id}`,
+          label: p.name,
+          color: p.color,
+          data: { type: 'project' as const, project: p }
+        }))
+      }
+
       return []
-    }, [smart.popupState, labels])
+    }, [smart.popupState, labels, projects])
 
     return (
       <div>

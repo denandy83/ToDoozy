@@ -554,6 +554,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         onSubmit={handleAddTask}
         labels={addTaskLabels}
         projectId={addTaskProjectId}
+        projects={allProjects}
+        onProjectChange={setAddTaskProjectId}
         projectSelector={
           <MyDayProjectSelector
             projects={allProjects}
