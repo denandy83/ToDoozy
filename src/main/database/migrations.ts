@@ -163,4 +163,12 @@ const migration_3: Migration = (db) => {
   labels.forEach((l, i) => stmt.run(i, l.id))
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3]
+const migration_4: Migration = (db) => {
+  db.exec(`ALTER TABLE projects ADD COLUMN sidebar_order INTEGER NOT NULL DEFAULT 0`)
+  // Seed initial order based on created_at
+  const projects = db.prepare('SELECT id FROM projects ORDER BY created_at ASC').all() as Array<{ id: string }>
+  const stmt = db.prepare('UPDATE projects SET sidebar_order = ? WHERE id = ?')
+  projects.forEach((p, i) => stmt.run(i, p.id))
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4]

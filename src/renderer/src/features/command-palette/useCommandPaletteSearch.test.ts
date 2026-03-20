@@ -91,9 +91,10 @@ describe('parseQuery', () => {
     expect(result.dueFilters).toEqual(['today'])
   })
 
-  it('parses legacy due: operator', () => {
+  it('treats due: as plain text since d: replaced it', () => {
     const result = parseQuery('due:today')
-    expect(result.dueFilters).toEqual(['today'])
+    expect(result.dueFilters).toEqual([])
+    expect(result.textTerms).toEqual(['due:today'])
   })
 
   it('parses has operator', () => {

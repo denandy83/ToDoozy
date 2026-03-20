@@ -7,7 +7,7 @@ import {
   useSensors
 } from '@dnd-kit/core'
 import { LayoutList, Columns3 } from 'lucide-react'
-import { ProjectSwitcher, NewProjectModal } from './features/projects'
+import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { KanbanCard } from './features/tasks/KanbanCard'
@@ -18,10 +18,11 @@ import { MyDayView } from './features/views/MyDayView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
-import { useProjectStore, selectCurrentProject } from './shared/stores'
+import { useProjectStore, selectAllProjects } from './shared/stores'
 import { useStatusesByProject } from './shared/stores'
 import { useTaskStore } from './shared/stores'
-import { useViewStore, selectLayoutMode } from './shared/stores/viewStore'
+import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './shared/stores/viewStore'
+import { useSettingsStore } from './shared/stores/settingsStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
 import { useToast } from './shared/components/Toast'
@@ -33,60 +34,100 @@ import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
 import type { Task } from '../../shared/types'
 
-const VIEW_TITLES: Record<ViewId, string> = {
-  'my-day': 'My Day',
-  backlog: 'Backlog',
-  archive: 'Archive',
-  templates: 'Templates'
-}
-
-const VIEW_SHORTCUTS: ViewId[] = ['my-day', 'backlog', 'archive', 'templates']
-
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Apply current theme CSS variables
   useThemeApplicator()
-  const currentProject = useProjectStore(selectCurrentProject)
+  const allProjects = useProjectStore(selectAllProjects)
+  const sortedProjects = useMemo(
+    () => [...allProjects].sort((a, b) => a.sidebar_order - b.sidebar_order),
+    [allProjects]
+  )
   const allTasks = useTaskStore((s) => s.tasks)
   const { updateTask, reorderTasks } = useTaskStore()
   const currentView = useViewStore((s) => s.currentView)
+  const selectedProjectId = useViewStore(selectSelectedProjectId)
+  const setSelectedProject = useViewStore((s) => s.setSelectedProject)
   const rawSetView = useViewStore((s) => s.setView)
   const layoutMode = useViewStore(selectLayoutMode)
   const toggleLayoutMode = useViewStore((s) => s.toggleLayoutMode)
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
+  const { setSetting, getSetting } = useSettingsStore()
+
+  // Selected project for the project view
+  const selectedProject = selectedProjectId
+    ? allProjects.find((p) => p.id === selectedProjectId) ?? null
+    : null
+
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject)
+
+  // Auto-select first project if none selected and we have projects
+  useEffect(() => {
+    if (sortedProjects.length > 0 && !selectedProjectId) {
+      const defaultProject = sortedProjects.find((p) => p.is_default === 1) ?? sortedProjects[0]
+      if (defaultProject) {
+        useViewStore.setState({ selectedProjectId: defaultProject.id })
+      }
+    }
+  }, [sortedProjects, selectedProjectId])
+
+  // Sync projectStore.currentProjectId with viewStore.selectedProjectId
+  useEffect(() => {
+    if (selectedProjectId) {
+      setCurrentProject(selectedProjectId)
+    }
+  }, [selectedProjectId, setCurrentProject])
+
+  // Per-project layout memory: restore layout when switching projects
+  useEffect(() => {
+    if (currentView === 'project' && selectedProjectId) {
+      const saved = getSetting(`project_layout_${selectedProjectId}`)
+      const mode = saved === 'kanban' ? 'kanban' : 'list'
+      useViewStore.setState({ layoutMode: mode })
+    }
+  }, [currentView, selectedProjectId, getSetting])
 
   // Auto-clear label filters and selection on view switch, reset kanban for non-supported views
   const setView = useCallback(
     (view: ViewId) => {
       clearLabelFilters()
       useTaskStore.getState().clearSelection()
-      if (view !== 'my-day' && view !== 'backlog') {
+      if (view !== 'my-day' && view !== 'project') {
         useViewStore.setState({ layoutMode: 'list' })
       }
       rawSetView(view)
     },
     [clearLabelFilters, rawSetView]
   )
+
+  const handleToggleLayoutMode = useCallback(() => {
+    toggleLayoutMode()
+    // Persist per-project layout
+    if (currentView === 'project' && selectedProjectId) {
+      const newMode = useViewStore.getState().layoutMode
+      setSetting(`project_layout_${selectedProjectId}`, newMode)
+    }
+  }, [toggleLayoutMode, currentView, selectedProjectId, setSetting])
+
   const sidebarPinned = useViewStore((s) => s.sidebarPinned)
   const toggleSidebarPinned = useViewStore((s) => s.toggleSidebarPinned)
   const setSidebarExpanded = useViewStore((s) => s.setSidebarExpanded)
   const sidebarExpanded = useViewStore((s) => s.sidebarExpanded)
   const { addToast } = useToast()
 
-  const projectId = currentProject?.id ?? ''
+  const projectId = selectedProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)
 
   const collapsed = !sidebarExpanded
 
-  // DnD sensors — keyboard drag replaced by custom move mode (Enter + arrows)
+  // DnD sensors
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { delay: 200, tolerance: 5 }
   })
   const sensors = useSensors(pointerSensor)
 
-  // DnD helpers
   const tasks = useTaskStore((s) => s.tasks)
 
   const getTasksForParent = useCallback(
@@ -147,10 +188,14 @@ export function AppLayout(): React.JSX.Element {
       if (viewId === 'my-day') {
         await updateTask(taskId, { is_in_my_day: 1 })
         addToast({ message: 'Added to My Day' })
-      } else if (viewId === 'backlog') {
+      } else if (viewId.startsWith('nav-project-')) {
+        // Dropped on a project nav item — move to that project
+        const targetProjectId = viewId.replace('nav-project-', '')
         await updateTask(taskId, { is_in_my_day: 0 })
+        // Could also change project_id if needed
         addToast({ message: 'Removed from My Day' })
-      } else if (viewId === 'archive') {
+        void targetProjectId
+      } else if (viewId === 'archive' || viewId === 'nav-archive') {
         await updateTask(taskId, { is_archived: 1 })
         addToast({ message: 'Archived' })
       }
@@ -167,10 +212,6 @@ export function AppLayout(): React.JSX.Element {
       onStatusChange: handleDndStatusChange,
       getTasksForParent
     })
-
-  const handleProjectSettings = useCallback(() => {
-    setSettingsOpen(true)
-  }, [])
 
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true)
@@ -200,24 +241,77 @@ export function AppLayout(): React.JSX.Element {
           t.parent_id === null &&
           (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
       ).length,
-      backlog: taskList.filter(
-        (t) => t.is_archived === 0 && t.is_template === 0 && t.parent_id === null
-      ).length,
       archive: taskList.filter((t) => t.is_archived === 1 && t.parent_id === null).length,
       templates: taskList.filter((t) => t.is_template === 1 && t.parent_id === null).length
     }
   }, [allTasks])
 
-  // Global keyboard shortcuts: Cmd+1-4, Cmd+[, Cmd+]
+  // Per-project task counts
+  const projectCounts = useMemo(() => {
+    const taskList = Object.values(allTasks)
+    const counts: Record<string, number> = {}
+    for (const project of allProjects) {
+      counts[project.id] = taskList.filter(
+        (t) =>
+          t.project_id === project.id &&
+          t.is_archived === 0 &&
+          t.is_template === 0 &&
+          t.parent_id === null
+      ).length
+    }
+    return counts
+  }, [allTasks, allProjects])
+
+  // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
+      // Tab/Shift+Tab cycles projects when in project view
+      if (e.key === 'Tab' && currentView === 'project' && sortedProjects.length > 1) {
+        const target = e.target as HTMLElement
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+        e.preventDefault()
+        const currentIdx = sortedProjects.findIndex((p) => p.id === selectedProjectId)
+        if (e.shiftKey) {
+          const prevIdx = (currentIdx - 1 + sortedProjects.length) % sortedProjects.length
+          setSelectedProject(sortedProjects[prevIdx].id)
+        } else {
+          const nextIdx = (currentIdx + 1) % sortedProjects.length
+          setSelectedProject(sortedProjects[nextIdx].id)
+        }
+        return
+      }
+
       if (!e.metaKey && !e.ctrlKey) return
 
-      // Cmd+1 through Cmd+4
-      const num = parseInt(e.key, 10)
-      if (num >= 1 && num <= 4) {
+      // Cmd+1 = My Day
+      if (e.key === '1') {
         e.preventDefault()
-        setView(VIEW_SHORTCUTS[num - 1])
+        setView('my-day')
+        return
+      }
+
+      // Cmd+2 = Project view (topmost project)
+      if (e.key === '2') {
+        e.preventDefault()
+        if (sortedProjects.length > 0) {
+          clearLabelFilters()
+          useTaskStore.getState().clearSelection()
+          setSelectedProject(sortedProjects[0].id)
+        }
+        return
+      }
+
+      // Cmd+3 = Archive
+      if (e.key === '3') {
+        e.preventDefault()
+        setView('archive')
+        return
+      }
+
+      // Cmd+4 = Templates
+      if (e.key === '4') {
+        e.preventDefault()
+        setView('templates')
         return
       }
 
@@ -228,12 +322,12 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+L = toggle kanban/list (only on my-day and backlog)
+      // Cmd+L = toggle kanban/list (only on my-day and project)
       if (e.key === 'l') {
         const view = useViewStore.getState().currentView
-        if (view === 'my-day' || view === 'backlog') {
+        if (view === 'my-day' || view === 'project') {
           e.preventDefault()
-          toggleLayoutMode()
+          handleToggleLayoutMode()
         }
         return
       }
@@ -241,24 +335,28 @@ export function AppLayout(): React.JSX.Element {
       // Cmd+[ = prev view, Cmd+] = next view
       if (e.key === '[') {
         e.preventDefault()
-        const idx = VIEW_SHORTCUTS.indexOf(currentView)
-        const prev = VIEW_SHORTCUTS[(idx - 1 + VIEW_SHORTCUTS.length) % VIEW_SHORTCUTS.length]
-        setView(prev)
+        useViewStore.getState().prevView()
         return
       }
       if (e.key === ']') {
         e.preventDefault()
-        const idx = VIEW_SHORTCUTS.indexOf(currentView)
-        const next = VIEW_SHORTCUTS[(idx + 1) % VIEW_SHORTCUTS.length]
-        setView(next)
+        useViewStore.getState().nextView()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentView, setView, toggleLayoutMode])
+  }, [currentView, selectedProjectId, sortedProjects, setView, setSelectedProject, clearLabelFilters, handleToggleLayoutMode])
 
-  const viewTitle = VIEW_TITLES[currentView]
+  // Dynamic view title
+  const viewTitle = useMemo(() => {
+    if (currentView === 'my-day') return 'My Day'
+    if (currentView === 'project' && selectedProject) return selectedProject.name
+    if (currentView === 'archive') return 'Archive'
+    if (currentView === 'templates') return 'Templates'
+    return ''
+  }, [currentView, selectedProject])
+
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
@@ -277,7 +375,9 @@ export function AppLayout(): React.JSX.Element {
       <div className="flex h-screen w-screen bg-background text-foreground">
         {/* Sidebar */}
         <Sidebar
-          counts={viewCounts}
+          viewCounts={viewCounts}
+          projectCounts={projectCounts}
+          projects={sortedProjects}
           onSettings={handleOpenSettings}
           collapsed={collapsed}
           pinned={sidebarPinned}
@@ -290,27 +390,21 @@ export function AppLayout(): React.JSX.Element {
         {/* Main content area */}
         <main className="flex flex-1 flex-col overflow-hidden">
           <header className="flex items-center gap-3 border-b border-border px-6 py-4">
+            {currentView === 'project' && selectedProject && (
+              <div
+                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: selectedProject.color }}
+              />
+            )}
             <h1 className="text-3xl font-light tracking-[0.15em] uppercase text-foreground">
               {viewTitle}
             </h1>
-            {currentView === 'backlog' && currentProject && (
-              <div className="flex items-center gap-2">
-                <div
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: currentProject.color }}
-                />
-                <ProjectSwitcher
-                  onNewProject={() => setNewProjectOpen(true)}
-                  onProjectSettings={() => handleProjectSettings()}
-                />
-              </div>
-            )}
 
             {/* Layout toggle - only on views that support kanban */}
-            {(currentView === 'my-day' || currentView === 'backlog') && (
+            {(currentView === 'my-day' || currentView === 'project') && (
               <div className="ml-auto flex items-center">
                 <button
-                  onClick={toggleLayoutMode}
+                  onClick={handleToggleLayoutMode}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
                   title={`Switch to ${layoutMode === 'list' ? 'kanban' : 'list'} view (Cmd+L)`}
                   aria-label={`Switch to ${layoutMode === 'list' ? 'kanban' : 'list'} view`}
@@ -333,14 +427,14 @@ export function AppLayout(): React.JSX.Element {
             {/* View content */}
             <div className="flex flex-1 flex-col overflow-hidden">
               {currentView === 'my-day' && <MyDayView dropIndicator={dragState.dropIndicator} />}
-              {currentView === 'backlog' && currentProject && (
+              {currentView === 'project' && selectedProject && (
                 <TaskListView
-                  projectId={currentProject.id}
-                  projectName={currentProject.name}
+                  projectId={selectedProject.id}
+                  projectName={selectedProject.name}
                   dropIndicator={dragState.dropIndicator}
                 />
               )}
-              {currentView === 'backlog' && !currentProject && (
+              {currentView === 'project' && !selectedProject && (
                 <div className="flex flex-1 items-center justify-center">
                   <p className="text-sm font-light text-muted">No project selected.</p>
                 </div>
@@ -359,7 +453,7 @@ export function AppLayout(): React.JSX.Element {
         <UnifiedSettingsModal
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          projectId={currentProject?.id ?? null}
+          projectId={selectedProject?.id ?? null}
         />
 
         {/* Toast notifications */}

@@ -67,6 +67,10 @@ export class ProjectRepository {
       sets.push('icon = ?')
       values.push(input.icon)
     }
+    if (input.sidebar_order !== undefined) {
+      sets.push('sidebar_order = ?')
+      values.push(String(input.sidebar_order))
+    }
 
     values.push(id)
     this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)
@@ -111,8 +115,19 @@ export class ProjectRepository {
         `SELECT p.* FROM projects p
          INNER JOIN project_members pm ON pm.project_id = p.id
          WHERE pm.user_id = ?
-         ORDER BY p.created_at ASC`
+         ORDER BY p.sidebar_order ASC, p.created_at ASC`
       )
       .all(userId) as Project[]
+  }
+
+  updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): void {
+    const stmt = this.db.prepare('UPDATE projects SET sidebar_order = ?, updated_at = ? WHERE id = ?')
+    const now = new Date().toISOString()
+    const transaction = this.db.transaction(() => {
+      for (const u of updates) {
+        stmt.run(u.sidebar_order, now, u.id)
+      }
+    })
+    transaction()
   }
 }

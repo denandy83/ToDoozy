@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { LogOut, Pencil } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { LogOut, Pencil, GripVertical } from 'lucide-react'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Modal } from '../../shared/components/Modal'
 import { useProjectStore, selectAllProjects, useStatusStore } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
@@ -287,6 +290,54 @@ function ProjectsTab({
   const nameInputRef = useRef<HTMLInputElement>(null)
   const updateProject = useProjectStore((s) => s.updateProject)
 
+  const sortedProjects = useMemo(
+    () => [...projects].sort((a, b) => a.sidebar_order - b.sidebar_order),
+    [projects]
+  )
+  const projectIds = useMemo(() => sortedProjects.map((p) => p.id), [sortedProjects])
+
+  const pointerSensor = useSensor(PointerSensor, {
+    activationConstraint: { distance: 5 }
+  })
+  const sensors = useSensors(pointerSensor)
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+
+      const oldIndex = sortedProjects.findIndex((p) => p.id === active.id)
+      const newIndex = sortedProjects.findIndex((p) => p.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return
+
+      const reordered = [...sortedProjects]
+      const [moved] = reordered.splice(oldIndex, 1)
+      reordered.splice(newIndex, 0, moved)
+
+      const updates = reordered.map((p, i) => ({ id: p.id, sidebar_order: i }))
+      await window.api.projects.updateSidebarOrder(updates)
+
+      // Refresh projects from DB
+      const userId = useProjectStore.getState().currentProjectId
+      if (userId) {
+        // Re-hydrate to pick up new sidebar_order values
+        // Use a simple approach: update local state directly
+        for (const u of updates) {
+          const proj = useProjectStore.getState().projects[u.id]
+          if (proj) {
+            useProjectStore.setState((state) => ({
+              projects: {
+                ...state.projects,
+                [u.id]: { ...proj, sidebar_order: u.sidebar_order }
+              }
+            }))
+          }
+        }
+      }
+    },
+    [sortedProjects]
+  )
+
   useEffect(() => {
     setNameValue(selectedProject?.name ?? '')
     setEditingName(false)
@@ -306,6 +357,27 @@ function ProjectsTab({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Sidebar order */}
+      <div>
+        <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+          Sidebar Order
+        </p>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-0.5">
+              {sortedProjects.map((p) => (
+                <SortableProjectRow
+                  key={p.id}
+                  project={p}
+                  isSelected={p.id === selectedProjectId}
+                  onClick={() => onProjectChange(p.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </div>
+
       {/* Project selector + rename */}
       <div className="flex items-center gap-3">
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Project</span>
@@ -328,7 +400,7 @@ function ProjectsTab({
             onChange={(e) => onProjectChange(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
           >
-            {projects.map((p) => (
+            {sortedProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>
@@ -365,6 +437,52 @@ function ProjectsTab({
           />
         </div>
       )}
+    </div>
+  )
+}
+
+function SortableProjectRow({
+  project,
+  isSelected,
+  onClick
+}: {
+  project: Project
+  isSelected: boolean
+  onClick: () => void
+}): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.id
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors cursor-pointer ${
+        isSelected ? 'bg-accent/12 border border-accent/15' : 'border border-transparent hover:bg-foreground/6'
+      }`}
+      onClick={onClick}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab text-muted/40 hover:text-muted active:cursor-grabbing"
+      >
+        <GripVertical size={12} />
+      </div>
+      <div
+        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+        style={{ backgroundColor: project.color }}
+      />
+      <span className="flex-1 truncate text-sm font-light text-foreground">
+        {project.name}
+      </span>
     </div>
   )
 }

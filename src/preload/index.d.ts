@@ -69,6 +69,7 @@ export interface ProjectsAPI {
   removeMember(projectId: string, userId: string): Promise<boolean>
   getMembers(projectId: string): Promise<ProjectMember[]>
   getProjectsForUser(userId: string): Promise<Project[]>
+  updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>
 }
 
 export interface StatusesAPI {

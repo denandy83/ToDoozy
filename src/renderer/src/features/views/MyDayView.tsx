@@ -1,12 +1,12 @@
-import { useCallback, useMemo, useRef, useEffect } from 'react'
+import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore } from '../../shared/stores'
-import { useStatusesByProject } from '../../shared/stores'
-import { useProjectStore, selectCurrentProject } from '../../shared/stores'
+import { useStatusStore } from '../../shared/stores'
+import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import {
   useLabelStore,
-  useLabelsByProject,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
   selectFilterMode
@@ -18,7 +18,7 @@ import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
-import type { Task } from '../../../../shared/types'
+import type { Task, Status, Label, Project } from '../../../../shared/types'
 import type { DropIndicator } from '../tasks/useDragAndDrop'
 
 interface MyDayViewProps {
@@ -26,9 +26,7 @@ interface MyDayViewProps {
 }
 
 export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element {
-  const currentProject = useProjectStore(selectCurrentProject)
-  const projectId = currentProject?.id ?? ''
-  const statuses = useStatusesByProject(projectId)
+  const allProjects = useProjectStore(selectAllProjects)
   const currentUser = useAuthStore((s) => s.currentUser)
   const { createTask, updateTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
     useTaskStore()
@@ -36,13 +34,28 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
+  const allStatuses = useStatusStore((s) => s.statuses)
   const layoutMode = useViewStore(selectLayoutMode)
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Project selector for add-task input
+  const defaultProject = useMemo(
+    () => allProjects.find((p) => p.is_default === 1) ?? allProjects[0],
+    [allProjects]
+  )
+  const [addTaskProjectId, setAddTaskProjectId] = useState<string>('')
+
+  useEffect(() => {
+    if (defaultProject && !addTaskProjectId) {
+      setAddTaskProjectId(defaultProject.id)
+    }
+  }, [defaultProject, addTaskProjectId])
+
+  const addTaskProject = allProjects.find((p) => p.id === addTaskProjectId) ?? defaultProject
+
   // Label state
-  const allLabels = useLabelsByProject(projectId)
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
@@ -50,12 +63,29 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
 
-  // Hydrate all task labels for this project
-  useEffect(() => {
-    if (projectId) hydrateAllTaskLabels(projectId)
-  }, [projectId, hydrateAllTaskLabels])
+  // Hydrate task labels for all projects that have my-day tasks
+  const myDayProjectIds = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0]
+    const ids = new Set<string>()
+    for (const t of Object.values(allTasks)) {
+      if (
+        t.is_archived === 0 &&
+        t.is_template === 0 &&
+        (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
+      ) {
+        ids.add(t.project_id)
+      }
+    }
+    return [...ids]
+  }, [allTasks])
 
-  // My Day: is_in_my_day OR due today
+  useEffect(() => {
+    for (const pid of myDayProjectIds) {
+      hydrateAllTaskLabels(pid)
+    }
+  }, [myDayProjectIds, hydrateAllTaskLabels])
+
+  // My Day tasks
   const myDayTasks = useMemo(() => {
     const today = new Date().toISOString().split('T')[0]
     return Object.values(allTasks).filter(
@@ -66,6 +96,33 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     )
   }, [allTasks])
 
+  // Aggregate labels from ALL projects with My Day tasks
+  const allLabelsAcrossProjects = useMemo(() => {
+    const labelStore = useLabelStore.getState()
+    const labels: Label[] = []
+    const seen = new Set<string>()
+    for (const pid of myDayProjectIds) {
+      const projectLabels = Object.values(labelStore.labels).filter(
+        (l) => l.project_id === pid
+      )
+      for (const l of projectLabels) {
+        if (!seen.has(l.id)) {
+          seen.add(l.id)
+          labels.push(l)
+        }
+      }
+    }
+    return labels
+  }, [myDayProjectIds])
+
+  // Labels for the add-task input (current add-task project)
+  const addTaskLabels = useMemo(() => {
+    const labelStore = useLabelStore.getState()
+    return Object.values(labelStore.labels)
+      .filter((l) => l.project_id === addTaskProjectId)
+      .sort((a, b) => a.order_index - b.order_index)
+  }, [addTaskProjectId])
+
   // Labels in use within My Day tasks
   const labelsInUse = useMemo(() => {
     const usedLabelIds = new Set<string>()
@@ -75,8 +132,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         for (const l of labels) usedLabelIds.add(l.id)
       }
     }
-    return allLabels.filter((l) => usedLabelIds.has(l.id))
-  }, [myDayTasks, taskLabels, allLabels])
+    return allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
+  }, [myDayTasks, taskLabels, allLabelsAcrossProjects])
 
   // Filter tasks
   const filteredMyDayTasks = useMemo(() => {
@@ -115,22 +172,62 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     [priorityAutoSort]
   )
 
+  // Group tasks by project, then by status within each project
+  const projectGroups = useMemo(() => {
+    const groups: Array<{
+      project: Project
+      statuses: Status[]
+      tasks: Task[]
+    }> = []
+
+    // Get unique project IDs from filtered tasks
+    const projectIds = [...new Set(filteredMyDayTasks.map((t) => t.project_id))]
+
+    // Sort projects by sidebar_order
+    const sortedProjectIds = projectIds.sort((a, b) => {
+      const pa = allProjects.find((p) => p.id === a)
+      const pb = allProjects.find((p) => p.id === b)
+      return (pa?.sidebar_order ?? 0) - (pb?.sidebar_order ?? 0)
+    })
+
+    for (const pid of sortedProjectIds) {
+      const project = allProjects.find((p) => p.id === pid)
+      if (!project) continue
+
+      const projectStatuses = Object.values(allStatuses)
+        .filter((s) => s.project_id === pid)
+        .sort((a, b) => a.order_index - b.order_index)
+
+      const projectTasks = filteredMyDayTasks.filter((t) => t.project_id === pid)
+
+      groups.push({ project, statuses: projectStatuses, tasks: projectTasks })
+    }
+
+    return groups
+  }, [filteredMyDayTasks, allProjects, allStatuses])
+
+  // Flat task list for keyboard navigation
   const flatTasks = useMemo(() => {
     const result: Task[] = []
-    const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
-    for (const status of sorted) {
-      const statusTasks = filteredMyDayTasks
-        .filter((t) => t.status_id === status.id)
-        .sort(prioritySortFn)
-      result.push(...statusTasks)
+    for (const group of projectGroups) {
+      const sortedStatuses = [...group.statuses].sort((a, b) => a.order_index - b.order_index)
+      for (const status of sortedStatuses) {
+        const statusTasks = group.tasks
+          .filter((t) => t.status_id === status.id)
+          .sort(prioritySortFn)
+        result.push(...statusTasks)
+      }
     }
     return result
-  }, [filteredMyDayTasks, statuses, prioritySortFn])
+  }, [projectGroups, prioritySortFn])
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
-      if (!currentUser || !currentProject) return
-      const defaultStatus = statuses.find((s) => s.is_default === 1)
+      if (!currentUser || !addTaskProject) return
+      const projectStatuses = Object.values(allStatuses)
+        .filter((s) => s.project_id === addTaskProject.id)
+        .sort((a, b) => a.order_index - b.order_index)
+      const defaultStatus = projectStatuses.find((s) => s.is_default === 1) ?? projectStatuses[0]
       if (!defaultStatus) return
 
       const statusTasks = myDayTasks.filter((t) => t.status_id === defaultStatus.id && t.parent_id === null)
@@ -140,7 +237,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       const taskId = crypto.randomUUID()
       await createTask({
         id: taskId,
-        project_id: currentProject.id,
+        project_id: addTaskProject.id,
         owner_id: currentUser.id,
         title: data.title,
         status_id: defaultStatus.id,
@@ -153,12 +250,12 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         await addLabel(taskId, label.id)
       }
     },
-    [currentUser, currentProject, statuses, myDayTasks, createTask, addLabel, newTaskPosition]
+    [currentUser, addTaskProject, allStatuses, myDayTasks, createTask, addLabel, newTaskPosition]
   )
 
   const handleStatusChange = useCallback(
     async (taskId: string, newStatusId: string) => {
-      const newStatus = statuses.find((s) => s.id === newStatusId)
+      const newStatus = Object.values(allStatuses).find((s) => s.id === newStatusId)
       const update: { status_id: string; completed_date?: string | null } = {
         status_id: newStatusId
       }
@@ -169,7 +266,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       }
       await updateTask(taskId, update)
     },
-    [statuses, updateTask]
+    [allStatuses, updateTask]
   )
 
   const handleTitleChange = useCallback(
@@ -224,15 +321,15 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   const handleCreateLabel = useCallback(
     async (name: string, color: string) => {
-      if (!currentProject) return
+      if (!addTaskProject) return
       await createLabelInStore({
         id: crypto.randomUUID(),
-        project_id: currentProject.id,
+        project_id: addTaskProject.id,
         name,
         color
       })
     },
-    [createLabelInStore, currentProject]
+    [createLabelInStore, addTaskProject]
   )
 
   // Keyboard navigation
@@ -300,10 +397,12 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
             e.preventDefault()
             const task = allTasks[currentTaskId]
             if (task) {
-              const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
-              const idx = sorted.findIndex((s) => s.id === task.status_id)
-              const nextIdx = (idx + 1) % sorted.length
-              handleStatusChange(currentTaskId, sorted[nextIdx].id)
+              const taskStatuses = Object.values(allStatuses)
+                .filter((s) => s.project_id === task.project_id)
+                .sort((a, b) => a.order_index - b.order_index)
+              const idx = taskStatuses.findIndex((s) => s.id === task.status_id)
+              const nextIdx = (idx + 1) % taskStatuses.length
+              handleStatusChange(currentTaskId, taskStatuses[nextIdx].id)
             }
           }
           break
@@ -350,27 +449,42 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     selectAllTasks,
     clearSelection,
     allTasks,
-    statuses,
+    allStatuses,
     handleStatusChange,
     handleDeleteTask,
     copySelectedTasks
   ])
 
-  const sortedStatuses = useMemo(
-    () => [...statuses].sort((a, b) => a.order_index - b.order_index),
-    [statuses]
-  )
+  // For kanban view, use all statuses from the first project group (or merged)
+  const kanbanStatuses = useMemo(() => {
+    if (projectGroups.length === 0) return []
+    // Use statuses from the first project for kanban layout
+    return projectGroups[0].statuses
+  }, [projectGroups])
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <AddTaskInput ref={addInputRef} viewName="My Day" onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
+      <AddTaskInput
+        ref={addInputRef}
+        viewName="My Day"
+        onSubmit={handleAddTask}
+        labels={addTaskLabels}
+        projectId={addTaskProjectId}
+        projectSelector={
+          <MyDayProjectSelector
+            projects={allProjects}
+            selectedProjectId={addTaskProjectId}
+            onSelect={setAddTaskProjectId}
+          />
+        }
+      />
 
       <LabelFilterBar labels={labelsInUse} />
 
       {layoutMode === 'kanban' ? (
         <KanbanView
           tasks={filteredMyDayTasks}
-          statuses={statuses}
+          statuses={kanbanStatuses}
           selectedTaskIds={selectedTaskIds}
           taskFilterOpacity={taskFilterOpacity}
           dropIndicator={dropIndicator}
@@ -380,28 +494,54 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         />
       ) : (
         <div className="flex-1 overflow-y-auto" role="grid" aria-label="My Day tasks">
-          {sortedStatuses.map((status) => {
-            const statusTasks = filteredMyDayTasks
-              .filter((t) => t.status_id === status.id)
-              .sort(prioritySortFn)
+          {projectGroups.map((group) => {
+            const sortedStatuses = [...group.statuses].sort(
+              (a, b) => a.order_index - b.order_index
+            )
+            const groupLabels = allLabelsAcrossProjects.filter(
+              (l) => l.project_id === group.project.id
+            )
+
             return (
-              <StatusSection
-                key={status.id}
-                status={status}
-                tasks={statusTasks}
-                allStatuses={statuses}
-                allLabels={allLabels}
-                selectedTaskIds={selectedTaskIds}
-                taskFilterOpacity={taskFilterOpacity}
-                dropIndicator={dropIndicator}
-                onSelectTask={handleSelectTask}
-                onStatusChange={handleStatusChange}
-                onTitleChange={handleTitleChange}
-                onDeleteTask={handleDeleteTask}
-                onAddLabel={handleAddLabel}
-                onRemoveLabel={handleRemoveLabel}
-                onCreateLabel={handleCreateLabel}
-              />
+              <div key={group.project.id}>
+                {/* Project header */}
+                {projectGroups.length > 1 && (
+                  <div className="flex items-center gap-2 px-6 pt-4 pb-1">
+                    <div
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: group.project.color }}
+                    />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+                      {group.project.name}
+                    </span>
+                  </div>
+                )}
+
+                {sortedStatuses.map((status) => {
+                  const statusTasks = group.tasks
+                    .filter((t) => t.status_id === status.id)
+                    .sort(prioritySortFn)
+                  return (
+                    <StatusSection
+                      key={status.id}
+                      status={status}
+                      tasks={statusTasks}
+                      allStatuses={group.statuses}
+                      allLabels={groupLabels}
+                      selectedTaskIds={selectedTaskIds}
+                      taskFilterOpacity={taskFilterOpacity}
+                      dropIndicator={dropIndicator}
+                      onSelectTask={handleSelectTask}
+                      onStatusChange={handleStatusChange}
+                      onTitleChange={handleTitleChange}
+                      onDeleteTask={handleDeleteTask}
+                      onAddLabel={handleAddLabel}
+                      onRemoveLabel={handleRemoveLabel}
+                      onCreateLabel={handleCreateLabel}
+                    />
+                  )
+                })}
+              </div>
             )
           })}
 
@@ -415,6 +555,86 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
               </p>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface MyDayProjectSelectorProps {
+  projects: Project[]
+  selectedProjectId: string
+  onSelect: (projectId: string) => void
+}
+
+function MyDayProjectSelector({
+  projects,
+  selectedProjectId,
+  onSelect
+}: MyDayProjectSelectorProps): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = projects.find((p) => p.id === selectedProjectId)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClick = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClick)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClick)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0 pl-4 pr-1 py-2.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-foreground/6"
+        title="Select project for new task"
+      >
+        <div
+          className="h-2 w-2 rounded-full"
+          style={{ backgroundColor: selected?.color ?? '#888' }}
+        />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted max-w-[80px] truncate">
+          {selected?.name ?? 'Project'}
+        </span>
+        <ChevronDown size={10} className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-4 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100">
+          <div className="max-h-48 overflow-y-auto py-1">
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  onSelect(p.id)
+                  setOpen(false)
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-foreground/6 ${
+                  p.id === selectedProjectId ? 'bg-accent/12' : ''
+                }`}
+              >
+                <div
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: p.color }}
+                />
+                <span className="text-[11px] font-light text-foreground truncate">
+                  {p.name}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

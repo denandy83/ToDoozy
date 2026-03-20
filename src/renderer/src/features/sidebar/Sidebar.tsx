@@ -1,14 +1,16 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { useDroppable } from '@dnd-kit/core'
 import {
   Sun,
   Moon,
   Archive,
   LayoutTemplate,
   ListTodo,
-  Inbox,
   PanelLeftClose,
   PanelLeft,
-  Settings
+  Settings,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
@@ -16,10 +18,13 @@ import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
 import type { ThemeConfig } from '../../../../shared/types'
+import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 
 interface SidebarProps {
-  counts: Record<ViewId, number>
+  viewCounts: { 'my-day': number; archive: number; templates: number }
+  projectCounts: Record<string, number>
+  projects: Project[]
   onSettings: () => void
   collapsed: boolean
   pinned: boolean
@@ -29,21 +34,33 @@ interface SidebarProps {
   onMouseLeave: () => void
 }
 
-const VIEW_ITEMS: Array<{
+const TOP_VIEW_ITEMS: Array<{
   id: ViewId
   label: string
   icon: typeof Sun
   shortcut: string
   droppableId: string
 }> = [
-  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' },
-  { id: 'backlog', label: 'Backlog', icon: Inbox, shortcut: '⌘2', droppableId: 'nav-backlog' },
+  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' }
+]
+
+const BOTTOM_VIEW_ITEMS: Array<{
+  id: ViewId
+  label: string
+  icon: typeof Sun
+  shortcut: string
+  droppableId: string
+}> = [
   { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘3', droppableId: 'nav-archive' },
   { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘4', droppableId: 'nav-templates' }
 ]
 
+const MAX_VISIBLE_PROJECTS = 5
+
 export function Sidebar({
-  counts,
+  viewCounts,
+  projectCounts,
+  projects,
   onSettings,
   collapsed,
   pinned,
@@ -53,17 +70,19 @@ export function Sidebar({
   onMouseLeave
 }: SidebarProps): React.JSX.Element {
   const currentView = useViewStore((s) => s.currentView)
+  const selectedProjectId = useViewStore((s) => s.selectedProjectId)
   const setView = useViewStore((s) => s.setView)
+  const setSelectedProject = useViewStore((s) => s.setSelectedProject)
   const currentTheme = useSettingsStore(selectCurrentTheme)
   const themes = useSettingsStore((s) => s.themes)
   const { setSetting, setCurrentTheme } = useSettingsStore()
   const sidebarRef = useRef<HTMLElement>(null)
   const isDarkMode = currentTheme?.mode === 'dark'
+  const [projectsExpanded, setProjectsExpanded] = useState(false)
 
   const handleToggleDayNight = useCallback(async () => {
     if (!currentTheme) return
     const newMode = isDarkMode ? 'light' : 'dark'
-    // Find matching theme in opposite mode
     const currentName = currentTheme.name.replace(/ (Dark|Light)$/, '')
     const match = Object.values(themes).find((t) => {
       const name = t.name.replace(/ (Dark|Light)$/, '')
@@ -92,6 +111,20 @@ export function Sidebar({
     },
     [setView, clearLabelFilters]
   )
+
+  const handleProjectClick = useCallback(
+    (projectId: string) => {
+      clearLabelFilters()
+      setSelectedProject(projectId)
+    },
+    [setSelectedProject, clearLabelFilters]
+  )
+
+  const sortedProjects = projects
+  const visibleProjects = projectsExpanded
+    ? sortedProjects
+    : sortedProjects.slice(0, MAX_VISIBLE_PROJECTS)
+  const hasMoreProjects = sortedProjects.length > MAX_VISIBLE_PROJECTS
 
   return (
     <aside
@@ -124,19 +157,79 @@ export function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className={`flex-1 ${collapsed ? 'p-1.5' : 'p-3'}`}>
+      <nav className={`flex-1 overflow-y-auto ${collapsed ? 'p-1.5' : 'p-3'}`}>
+        {/* Views section */}
         {!collapsed && (
           <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
             Views
           </p>
         )}
         <div className="flex flex-col gap-0.5" role="tablist" aria-label="Views">
-          {VIEW_ITEMS.map((item) => (
+          {TOP_VIEW_ITEMS.map((item) => (
             <NavItem
               key={item.id}
               icon={item.icon}
               label={item.label}
-              count={counts[item.id]}
+              count={viewCounts[item.id as keyof typeof viewCounts] ?? 0}
+              active={currentView === item.id}
+              collapsed={collapsed}
+              onClick={() => handleViewClick(item.id)}
+              shortcutHint={item.shortcut}
+              droppableId={isDragging ? item.droppableId : undefined}
+            />
+          ))}
+        </div>
+
+        {/* Projects section */}
+        {!collapsed && (
+          <p className="mb-2 mt-4 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+            Projects
+          </p>
+        )}
+        {collapsed && <div className="my-2 border-t border-border" />}
+        <div className="flex flex-col gap-0.5">
+          {visibleProjects.map((project, index) => (
+            <ProjectNavItem
+              key={project.id}
+              project={project}
+              count={projectCounts[project.id] ?? 0}
+              active={currentView === 'project' && selectedProjectId === project.id}
+              collapsed={collapsed}
+              onClick={() => handleProjectClick(project.id)}
+              shortcutHint={index === 0 ? '⌘2' : undefined}
+              isDragging={isDragging}
+            />
+          ))}
+          {!collapsed && hasMoreProjects && (
+            <button
+              onClick={() => setProjectsExpanded(!projectsExpanded)}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
+            >
+              {projectsExpanded ? (
+                <>
+                  <ChevronUp size={12} />
+                  Less
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={12} />
+                  More
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Archive & Templates */}
+        {!collapsed && <div className="my-2 border-t border-border" />}
+        {collapsed && <div className="my-2 border-t border-border" />}
+        <div className="flex flex-col gap-0.5">
+          {BOTTOM_VIEW_ITEMS.map((item) => (
+            <NavItem
+              key={item.id}
+              icon={item.icon}
+              label={item.label}
+              count={viewCounts[item.id as keyof typeof viewCounts] ?? 0}
               active={currentView === item.id}
               collapsed={collapsed}
               onClick={() => handleViewClick(item.id)}
@@ -171,5 +264,78 @@ export function Sidebar({
         </button>
       </div>
     </aside>
+  )
+}
+
+interface ProjectNavItemProps {
+  project: Project
+  count: number
+  active: boolean
+  collapsed: boolean
+  onClick: () => void
+  shortcutHint?: string
+  isDragging?: boolean
+}
+
+function ProjectNavItem({
+  project,
+  count,
+  active,
+  collapsed,
+  onClick,
+  shortcutHint,
+  isDragging
+}: ProjectNavItemProps): React.JSX.Element {
+  const droppableId = isDragging ? `nav-project-${project.id}` : undefined
+  const { isOver, setNodeRef } = useDroppable({
+    id: droppableId ?? `nav-project-${project.id}`,
+    disabled: !droppableId
+  })
+
+  return (
+    <button
+      ref={droppableId ? setNodeRef : undefined}
+      onClick={onClick}
+      title={collapsed ? `${project.name}${shortcutHint ? ` (${shortcutHint})` : ''}` : undefined}
+      className={`group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
+        active
+          ? 'bg-accent/12 text-foreground border border-accent/15'
+          : 'border border-transparent text-muted hover:bg-foreground/6 hover:border-border/50'
+      } ${collapsed ? 'justify-center px-0' : ''} ${
+        isOver ? 'bg-accent/15 border-accent/30 scale-[1.02]' : ''
+      }`}
+      role="tab"
+      aria-selected={active}
+    >
+      <div
+        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+        style={{ backgroundColor: project.color }}
+      />
+      {!collapsed && (
+        <>
+          <span className="flex-1 truncate text-[13px] font-light tracking-tight">
+            {project.name}
+          </span>
+          {count > 0 && (
+            <span
+              className={`text-[10px] font-bold tabular-nums ${
+                active ? 'text-accent' : 'text-muted/60'
+              }`}
+            >
+              {count}
+            </span>
+          )}
+        </>
+      )}
+      {collapsed && count > 0 && (
+        <span
+          className={`absolute bottom-0.5 right-0.5 text-[8px] font-bold tabular-nums leading-none ${
+            active ? 'text-accent' : 'text-muted/60'
+          }`}
+        >
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
+    </button>
   )
 }

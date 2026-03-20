@@ -18,6 +18,7 @@ export interface Project {
   icon: string
   owner_id: string
   is_default: number
+  sidebar_order: number
   created_at: string
   updated_at: string
 }
@@ -148,6 +149,7 @@ export interface UpdateProjectInput {
   description?: string | null
   color?: string
   icon?: string
+  sidebar_order?: number
 }
 
 export interface CreateStatusInput {

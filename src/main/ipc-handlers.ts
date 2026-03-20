@@ -292,6 +292,13 @@ export function registerIpcHandlers(): void {
     return getRepos().projects.getProjectsForUser(userId)
   })
 
+  ipcMain.handle(
+    'projects:updateSidebarOrder',
+    (_e, updates: Array<{ id: string; sidebar_order: number }>) => {
+      return getRepos().projects.updateSidebarOrder(updates)
+    }
+  )
+
   // ── Statuses ───────────────────────────────────────────────────────
   ipcMain.handle('statuses:findById', (_e, id: string) => {
     return getRepos().statuses.findById(id) ?? null

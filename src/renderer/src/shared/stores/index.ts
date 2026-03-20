@@ -25,6 +25,7 @@ export { useViewStore } from './viewStore'
 export type { ViewStore, ViewId, DetailPanelPosition } from './viewStore'
 export {
   selectCurrentView,
+  selectSelectedProjectId,
   selectSidebarPinned,
   selectSidebarExpanded,
   selectSidebarWidth,

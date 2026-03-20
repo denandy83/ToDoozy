@@ -65,7 +65,6 @@ export function parseQuery(query: string): ParsedQuery {
         result.statusFilters.push(value)
         break
       case 'd':
-      case 'due':
         result.dueFilters.push(value)
         break
       case 'has':

@@ -41,3 +41,24 @@ Started: Fri Mar 20 12:30:44 CET 2026
 - Cmd+C falls through to default browser behavior when no tasks selected or input is focused
 - Kanban view: Cmd+C works via event bubbling from parent container handler
 - Pre-existing test failures: better-sqlite3 native module version mismatch (NODE_MODULE_VERSION 145 vs 141)
+
+## Story #23: Replace Backlog with per-project sidebar navigation
+
+### Changes Made
+- **Database**: Added migration_4 to add `sidebar_order` column to projects table
+- **Types**: Added `sidebar_order` to `Project` and `UpdateProjectInput` interfaces
+- **ViewStore**: Changed `ViewId` from `'backlog'` to `'project'`, added `selectedProjectId` and `setSelectedProject()`
+- **Sidebar**: Replaced single Backlog nav item with PROJECTS section showing top 5 projects with More/Less expand, color dots, task counts
+- **AppLayout**: Removed ProjectSwitcher, use selectedProjectId from viewStore, dynamic view title from project name, per-project layout memory (list/kanban persisted to settings table)
+- **Keyboard shortcuts**: Cmd+2 = first project, Tab/Shift+Tab cycles projects in project view, Cmd+3 = Archive, Cmd+4 = Templates
+- **MyDayView**: Groups tasks by project first then by status, project headers with color dots, aggregates labels from all projects with My Day tasks, inline project selector dropdown for add-task input
+- **Settings > Projects**: Added drag-and-drop reorder using @dnd-kit with sidebar_order persistence
+- **ProjectRepository**: Added `updateSidebarOrder()` batch method, ordered by `sidebar_order` ASC
+- **IPC/Preload**: Added `projects:updateSidebarOrder` handler and typed bridge method
+- **Removed**: ProjectSwitcher component and Backlog view entirely
+- **Command palette**: Removed legacy `due:` operator (only `d:` recognized now)
+
+### Decisions
+- Kept `currentProjectId` in projectStore synced with `selectedProjectId` from viewStore for backward compatibility with existing components (ArchiveView, TemplatesView, LabelSettingsContent, ContextMenu, etc.)
+- Default view changed from 'backlog' to 'my-day' since Backlog no longer exists
+- Project groups in My Day only show project headers when multiple projects have My Day tasks

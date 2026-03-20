@@ -25,6 +25,7 @@ interface AddTaskInputProps {
   disabled?: boolean
   labels?: Label[]
   projectId?: string
+  projectSelector?: React.ReactNode
 }
 
 export interface AddTaskInputHandle {
@@ -32,7 +33,7 @@ export interface AddTaskInputHandle {
 }
 
 export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
-  function AddTaskInput({ viewName, onSubmit, disabled, labels = [], projectId }, ref) {
+  function AddTaskInput({ viewName, onSubmit, disabled, labels = [], projectId, projectSelector }, ref) {
     const inputRef = useRef<HTMLInputElement>(null)
     const smart = useSmartInput(inputRef)
 
@@ -173,6 +174,7 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
     return (
       <div className="border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
+          {projectSelector}
           <Plus size={14} className="flex-shrink-0 text-muted" />
           <input
             ref={inputRef}

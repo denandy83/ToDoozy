@@ -102,7 +102,7 @@
         "Cmd+1 = My Day, Cmd+2 = Projects, Cmd+3 = Archive, Cmd+4 = Templates",
         "Database migration adds sidebar_order to projects table"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }
