@@ -1,132 +1,31 @@
 {
   "project": "ToDoozy",
-  "branch": "main",
+  "branchName": "ralph/bulk-task-selection",
   "stories": [
     {
-      "id": "1",
-      "title": "Scaffold Electron + React + TypeScript project",
-      "description": "Use electron-vite to scaffold the project. Install all dependencies: better-sqlite3, @dnd-kit/core, @dnd-kit/sortable, lucide-react, tailwindcss, @tailwindcss/vite, zustand, @modelcontextprotocol/sdk, @supabase/supabase-js. Set up TypeScript strict mode, Tailwind CSS 4, and ESLint. Copy ToDoozy.png to resources/icon.png.",
-      "spec_section": "§3 Tech Stack, §2 Branding",
-      "passes": true
-    },
-    {
-      "id": "2",
-      "title": "Database layer with versioned migrations",
-      "description": "Create SQLite database with schema_version table and numbered migration functions. Implement all tables from §4 Data Model: users, projects, project_members, statuses, tasks, labels, task_labels, themes, settings, activity_log. Enable PRAGMA foreign_keys. Seed default data (3 statuses, default themes, default settings).",
-      "spec_section": "§4 Data Model",
-      "passes": true
-    },
-    {
-      "id": "3",
-      "title": "Repository pattern",
-      "description": "Create typed repository classes: TaskRepository, LabelRepository, StatusRepository, SettingsRepository, ThemeRepository, ActivityLogRepository, ProjectRepository, UserRepository. Each has a local SQLite implementation. No raw SQL outside repositories.",
-      "spec_section": "§36 Architecture - Database Layer",
-      "passes": true
-    },
-    {
-      "id": "4",
-      "title": "IPC layer and preload bridge",
-      "description": "Set up typed preload bridge via electron contextBridge. Every repository method maps to an IPC handler. Type declarations in index.d.ts must match the actual preload API. Use TASK_UPDATABLE_COLUMNS whitelist for update queries.",
-      "spec_section": "§36 Architecture - IPC Layer",
-      "passes": true
-    },
-    {
-      "id": "5",
-      "title": "Zustand stores",
-      "description": "Create Zustand stores: taskStore, labelStore, statusStore, settingsStore, projectStore, authStore. Zero prop-drilling. Components subscribe to store slices.",
-      "spec_section": "§36 Architecture - State Management",
-      "passes": true
-    },
-    {
-      "id": "6",
-      "title": "Supabase Auth - Login screen",
-      "description": "Implement login screen with email/password and Google OAuth via Supabase Auth. Store session token in Electron safeStorage. Auto-login on launch if valid token exists. Create default Personal project on first login. Graceful offline fallback.",
-      "spec_section": "§31 Authentication",
-      "passes": true
-    },
-    {
-      "id": "7",
-      "title": "Projects and configurable statuses",
-      "description": "Default Personal project auto-created on first login. Project switcher dropdown in sidebar header. Project settings (name, color, icon). Status CRUD in project settings - 3 defaults seeded (Not Started, In Progress, Done). Deleting a status requires reassigning tasks.",
-      "spec_section": "§32 Projects, §4.4 Statuses Table",
-      "passes": true
-    },
-    {
-      "id": "8",
-      "title": "Task CRUD with basic list view",
-      "description": "Create, list, update, delete tasks (project-scoped, status-scoped). Add-task input at top of list. Tasks grouped by status sections. Status cycling on click. Completed_date auto-set on done status. is_archived flag separate from status.",
-      "spec_section": "§6 Task Interactions",
-      "passes": true
-    },
-    {
-      "id": "9",
-      "title": "Views and sidebar navigation",
-      "description": "Implement sidebar (collapsible 56px-600px, pinnable, hover-expand). Views: My Day (cross-project, is_in_my_day OR due today), Backlog (project-scoped), Archive (is_archived), Templates (is_template). Nav items with count badges. Keyboard: Cmd+1-4.",
-      "spec_section": "§5 Views & Navigation",
-      "passes": true
-    },
-    {
-      "id": "10",
-      "title": "Detail Panel - Task editor",
-      "description": "Resizable panel (bottom/side toggleable). Fields: title (autosave 1s), status buttons (dynamic from project statuses), priority buttons, labels section, due date picker with optional time, recurrence (None/Daily/Weekly/Monthly/Custom), snooze presets, markdown description with image paste, activity log timeline. Escape closes.",
-      "spec_section": "§7 Detail Panel",
-      "passes": true
-    },
-    {
-      "id": "11",
-      "title": "Subtasks and hierarchy",
-      "description": "Parent/child via parent_id. Expand/collapse chevron. Progress bar (done/total). Subtask count badge. Sortable within parent. Cascade delete. Drag-and-drop: above (reorder), inside (make subtask), below (reorder).",
-      "spec_section": "§6.3 Subtasks & Hierarchy",
-      "passes": true
-    },
-    {
-      "id": "12",
-      "title": "Drag and drop",
-      "description": "@dnd-kit with PointerSensor (8px) and KeyboardSensor. Drop intent by Y-position (top 20%=above, middle 60%=inside, bottom 20%=below). Batch SQLite transactions for reordering. Visual indicators. Ghost card overlay. Cross-view drag onto sidebar nav items.",
-      "spec_section": "§6.4 Drag & Drop",
-      "passes": true
-    },
-    {
-      "id": "13",
-      "title": "Theme system",
-      "description": "8-color palette as CSS custom properties. 12 built-in themes (6 dark, 6 light). Settings > Themes: mode toggle, preset dropdown, color pickers, live UI preview, create/apply/save. Apply button required to persist.",
-      "spec_section": "§14 Theme System",
-      "passes": true
-    },
-    {
-      "id": "14",
-      "title": "Labels with filtering",
-      "description": "Label CRUD (project-scoped). Assignment via detail panel +Add, task row inline + button (portal popup with New label), context menu flyout. Label filter bar at top of views. Hide/blur filter modes. Click label chip to filter, click again to clear. Auto-clear on view switch.",
-      "spec_section": "§10 Labels",
-      "passes": true
-    },
-    {
-      "id": "15",
-      "title": "Priority system with visualizations",
-      "description": "5 levels with configurable colors. Toggleable effects: color bar (1.5px), badges (icons+labels), background tint (3%/6%), font weight, auto-sort. Each toggle has live preview in Settings > Priorities.",
-      "spec_section": "§9 Priority System",
-      "passes": true
-    },
-    {
-      "id": "16",
-      "title": "Kanban toggle",
-      "description": "Cmd+L toggles list/kanban on My Day and Backlog. Columns generated dynamically from project statuses. Drag between columns changes status_id. Task cards show priority, labels, due date, assignee avatar. All interactions (click, right-click, hover preview).",
-      "spec_section": "§5.6 Kanban Toggle",
-      "passes": true
-    },
-    {
-      "id": "17",
-      "title": "Context menu with flyout submenus",
-      "description": "Compact w-52 menu. Status row (dynamic from project statuses). Flyout submenus on hover (150ms delay): Priority, Recurrence, Labels, Snooze, Focus. Pin/unpin My Day, Add Subtask, Duplicate, Delete. Smart viewport positioning. Submenus open left/right based on space.",
-      "spec_section": "§16 Context Menu",
-      "passes": true
-    },
-    {
-      "id": "18",
-      "title": "Command palette with search operators",
-      "description": "Cmd+K modal. Substring match by default. Operators: p:high, l:work, s:done, due:today, has:subtasks. Combinable. Results show priority dot, badge, title, labels, status, due date. Click to select. Max 12 results. Escape closes.",
-      "spec_section": "§17 Command Palette",
-      "passes": true
+      "id": "19",
+      "title": "Bulk task selection and context menu",
+      "description": "Multi-select tasks in list and kanban views with standard OS selection patterns. Click selects one task and deselects others. Cmd+Click toggles individual tasks in/out of selection. Shift+Click selects a range between last selected and clicked task (works across status sections in list view, within-column only in kanban). Cmd+A selects all visible tasks. Escape clears selection. Selection clears on view switch.\n\nWhen multiple tasks are selected (selectedTaskIds.size > 1), the detail panel closes. Right-clicking a selected task shows a bulk context menu with a 'N tasks selected' header. Right-clicking an unselected task clears the selection and shows the normal single-task context menu.\n\nBulk context menu actions (same order as single-task menu, same names, minus inapplicable items): status row, Add/Remove My Day, Priority flyout, Labels flyout, Snooze flyout, Delete (red, bottom). Bulk delete shows persistent confirmation toast with Delete/Archive/Cancel, same as single-task delete.\n\nSelected tasks use the same visual style as single selection: bg-accent/12 border-l-2 border-accent/15. Drag-and-drop remains single-task only — dragging a selected task does not move other selected tasks.\n\nStore changes: replace currentTaskId with selectedTaskIds: Set<string> and add lastSelectedTaskId for Shift+Click range calculation. Add bulk action methods to taskStore.\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Click selects one task, deselects all others",
+        "Cmd+Click toggles a task in/out of selection without affecting others",
+        "Shift+Click selects a contiguous range from last selected task to clicked task, across status sections in list view",
+        "Cmd+A selects all visible tasks in the current view",
+        "Escape clears the entire selection",
+        "Selection clears when switching views",
+        "Detail panel closes when more than one task is selected",
+        "Right-clicking a selected task (when multiple selected) shows bulk context menu with 'N tasks selected' header",
+        "Right-clicking an unselected task clears selection, selects that task, shows normal single-task context menu",
+        "Bulk context menu includes: status row, Add/Remove My Day, Priority, Labels, Snooze, Delete",
+        "Bulk delete shows persistent toast with Delete/Archive/Cancel options",
+        "All bulk actions apply to every selected task",
+        "Multi-select works in both list view and kanban view",
+        "Shift+Click in kanban only selects within a column",
+        "Selected tasks use same visual style as single selection",
+        "Dragging a task does not move other selected tasks"
+      ],
+      "passes": false
     }
   ]
 }
