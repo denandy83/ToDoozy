@@ -1,4 +1,4 @@
-import type { Label } from '../../../../shared/types'
+import type { Label, Project } from '../../../../shared/types'
 
 export const LABEL_AUTO_COLORS = [
   '#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899',
@@ -29,7 +29,7 @@ export interface DateOption {
   formatted: string // dd/mm/yyyy
 }
 
-export type OperatorType = '@' | 'p:' | 'd:'
+export type OperatorType = '@' | 'p:' | 'd:' | '/'
 
 export interface ActiveOperator {
   type: OperatorType
@@ -60,6 +60,17 @@ export function detectOperator(
         if (suppressedPositions.has(i)) return null
         return {
           type: '@',
+          query: textUpToCursor.slice(i + 1),
+          startIndex: i,
+          endIndex: cursorPos
+        }
+      }
+    }
+    if (textUpToCursor[i] === '/') {
+      if (i === 0 || textUpToCursor[i - 1] === ' ') {
+        if (suppressedPositions.has(i)) return null
+        return {
+          type: '/',
           query: textUpToCursor.slice(i + 1),
           startIndex: i,
           endIndex: cursorPos
@@ -290,4 +301,13 @@ function formatDateDisplay(d: Date): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}`
+}
+
+/**
+ * Filter projects by substring match on name.
+ */
+export function filterProjects(projects: Project[], query: string): Project[] {
+  const q = query.toLowerCase()
+  if (!q) return projects.slice(0, 5)
+  return projects.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 5)
 }

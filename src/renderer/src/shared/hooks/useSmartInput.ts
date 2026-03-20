@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { Label } from '../../../../shared/types'
+import type { Label, Project } from '../../../../shared/types'
 import {
   detectOperator,
   removeOperatorText,
@@ -19,6 +19,7 @@ export interface SmartInputState {
   attachedLabels: Label[]
   selectedPriority: number | null
   selectedDate: string | null
+  selectedProject: Project | null
   popupState: PopupState | null
 }
 
@@ -32,6 +33,8 @@ export interface SmartInputActions {
   removePriority: () => void
   selectDate: (isoDate: string) => void
   removeDate: () => void
+  selectProject: (project: Project) => void
+  removeProject: () => void
   dismissPopup: () => void
   removeLastChip: () => void
   reset: () => void
@@ -45,6 +48,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
   const [attachedLabels, setAttachedLabels] = useState<Label[]>([])
   const [selectedPriority, setSelectedPriority] = useState<number | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [popupState, setPopupState] = useState<PopupState | null>(null)
   const suppressedPositionsRef = useRef<Set<number>>(new Set())
   const inputValueRef = useRef('')
@@ -155,6 +159,25 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setSelectedDate(null)
   }, [])
 
+  const selectProject = useCallback((project: Project) => {
+    if (!popupState?.operator) return
+    justSelectedRef.current = true
+    setSelectedProject(project)
+    const newValue = removeOperatorText(
+      inputValueRef.current,
+      popupState.operator.startIndex,
+      popupState.operator.endIndex
+    )
+    setInputValueRaw(newValue)
+    inputValueRef.current = newValue
+    setPopupState(null)
+    suppressedPositionsRef.current = new Set()
+  }, [popupState])
+
+  const removeProject = useCallback(() => {
+    setSelectedProject(null)
+  }, [])
+
   const dismissPopup = useCallback(() => {
     if (popupState?.operator) {
       suppressedPositionsRef.current = new Set([
@@ -179,6 +202,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setAttachedLabels([])
     setSelectedPriority(null)
     setSelectedDate(null)
+    setSelectedProject(null)
     setPopupState(null)
     suppressedPositionsRef.current = new Set()
   }, [])
@@ -192,6 +216,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     attachedLabels,
     selectedPriority,
     selectedDate,
+    selectedProject,
     popupState,
     setInputValue,
     handleInputChange,
@@ -202,6 +227,8 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     removePriority,
     selectDate,
     removeDate,
+    selectProject,
+    removeProject,
     dismissPopup,
     removeLastChip,
     reset,

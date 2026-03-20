@@ -11,6 +11,7 @@ import {
   filterLabels,
   filterPriorities,
   filterDates,
+  filterProjects,
   getNextAutoColor
 } from './shared/hooks/smartInputParser'
 
@@ -221,6 +222,17 @@ export default function QuickAddApp(): React.JSX.Element {
         smart.selectPriority(data.option.value)
       } else if (data.type === 'date') {
         smart.selectDate(data.option.date)
+      } else if (data.type === 'project') {
+        // Just switch the dropdown, no chip
+        setSelectedProjectId(data.project.id)
+        // Remove the /text from input
+        if (smart.popupState?.operator) {
+          const newValue =
+            smart.inputValue.slice(0, smart.popupState.operator.startIndex) +
+            smart.inputValue.slice(smart.popupState.operator.endIndex)
+          smart.setInputValue(newValue.replace(/  +/g, ' '))
+        }
+        smart.dismissPopup()
       }
     },
     [smart, targetProjectId]
@@ -272,8 +284,17 @@ export default function QuickAddApp(): React.JSX.Element {
       }))
     }
 
+    if (smart.popupState.type === '/') {
+      return filterProjects(projects, smart.popupState.query).map((p) => ({
+        id: `project-${p.id}`,
+        label: p.name,
+        color: p.color,
+        data: { type: 'project' as const, project: p }
+      }))
+    }
+
     return []
-  }, [smart.popupState, projectLabels])
+  }, [smart.popupState, projectLabels, projects])
 
   const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null
 
