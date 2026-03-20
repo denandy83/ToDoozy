@@ -21,6 +21,7 @@ export function LabelPicker({
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState('#6366f1')
   const [searchQuery, setSearchQuery] = useState('')
+  const [highlightedIndex, setHighlightedIndex] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -49,6 +50,13 @@ export function LabelPicker({
     setNewLabelMode(false)
   }, [newLabelName, newLabelColor, onCreateLabel])
 
+  const filteredLabels = allLabels.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase()))
+
+  // Reset highlighted index when search changes
+  useEffect(() => {
+    setHighlightedIndex(0)
+  }, [searchQuery])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -58,6 +66,19 @@ export function LabelPicker({
         } else {
           onClose()
         }
+      }
+      if (e.key === 'ArrowDown' && !newLabelMode) {
+        e.preventDefault()
+        setHighlightedIndex((prev) => Math.min(prev + 1, filteredLabels.length - 1))
+      }
+      if (e.key === 'ArrowUp' && !newLabelMode) {
+        e.preventDefault()
+        setHighlightedIndex((prev) => Math.max(prev - 1, 0))
+      }
+      if (e.key === 'Enter' && !newLabelMode && filteredLabels.length > 0) {
+        e.preventDefault()
+        onToggleLabel(filteredLabels[highlightedIndex].id)
+        return
       }
       if (e.key === 'Enter' && newLabelMode) {
         e.preventDefault()
@@ -111,13 +132,13 @@ export function LabelPicker({
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {allLabels.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase())).map((label) => {
+            {filteredLabels.map((label, index) => {
               const isAssigned = assignedLabelIds.has(label.id)
               return (
                 <button
                   key={label.id}
                   onClick={() => onToggleLabel(label.id)}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6"
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${index === highlightedIndex ? 'bg-foreground/6' : ''}`}
                 >
                   <span
                     className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
