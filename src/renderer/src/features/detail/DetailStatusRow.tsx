@@ -17,7 +17,10 @@ export function DetailStatusRow({
   onStatusChange,
   onToggleArchive
 }: DetailStatusRowProps): React.JSX.Element {
-  const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
+  const defaultStatuses = statuses.filter((s) => s.is_default === 1)
+  const middleStatuses = statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index)
+  const doneStatuses = statuses.filter((s) => s.is_done === 1)
+  const sorted = [...defaultStatuses, ...middleStatuses, ...doneStatuses]
 
   return (
     <div className="flex flex-wrap items-center gap-1">
