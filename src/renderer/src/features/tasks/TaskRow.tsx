@@ -354,17 +354,17 @@ export function TaskRow({
           />
         </button>
 
-        <StatusButton
-          currentStatusId={statusIdOverride ?? task.status_id}
-          statuses={statuses}
-          onStatusChange={handleStatusChange}
-        />
-
         {project ? (
           <ProjectIndicator project={project} />
         ) : task.is_in_my_day === 1 ? (
           <MyDayIndicator />
         ) : null}
+
+        <StatusButton
+          currentStatusId={statusIdOverride ?? task.status_id}
+          statuses={statuses}
+          onStatusChange={handleStatusChange}
+        />
 
         {isEditing ? (
           <input
