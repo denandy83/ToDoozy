@@ -14,7 +14,7 @@ import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
-import { AddTaskInput, type AddTaskInputHandle } from '../tasks/AddTaskInput'
+import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
 import type { Task } from '../../../../shared/types'
@@ -126,7 +126,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [filteredMyDayTasks, statuses, prioritySortFn])
 
   const handleAddTask = useCallback(
-    async (title: string) => {
+    async (data: SmartTaskData) => {
       if (!currentUser || !currentProject) return
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
@@ -135,17 +135,23 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       const orderIndex = newTaskPosition === 'bottom'
         ? statusTasks.reduce((max, t) => Math.max(max, t.order_index), -1) + 1
         : statusTasks.reduce((min, t) => Math.min(min, t.order_index), 0) - 1
+      const taskId = crypto.randomUUID()
       await createTask({
-        id: crypto.randomUUID(),
+        id: taskId,
         project_id: currentProject.id,
         owner_id: currentUser.id,
-        title,
+        title: data.title,
         status_id: defaultStatus.id,
         order_index: orderIndex,
-        is_in_my_day: 1
+        is_in_my_day: 1,
+        priority: data.priority,
+        due_date: data.dueDate
       })
+      for (const label of data.labels) {
+        await addLabel(taskId, label.id)
+      }
     },
-    [currentUser, currentProject, statuses, myDayTasks, createTask, newTaskPosition]
+    [currentUser, currentProject, statuses, myDayTasks, createTask, addLabel, newTaskPosition]
   )
 
   const handleStatusChange = useCallback(
@@ -345,7 +351,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <AddTaskInput ref={addInputRef} viewName="My Day" onSubmit={handleAddTask} />
+      <AddTaskInput ref={addInputRef} viewName="My Day" onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
 
       <LabelFilterBar labels={labelsInUse} />
 

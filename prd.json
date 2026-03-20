@@ -58,7 +58,7 @@
         "Chips below input are removable (click x or Backspace when input is empty removes last chip)",
         "Command palette uses d: instead of due: for date filtering"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "22",

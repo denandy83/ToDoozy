@@ -13,7 +13,7 @@ import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
-import { AddTaskInput, type AddTaskInputHandle } from './AddTaskInput'
+import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
@@ -141,7 +141,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   }, [filteredTasks, statuses, expandedTaskIds, prioritySortFn])
 
   const handleAddTask = useCallback(
-    async (title: string) => {
+    async (data: SmartTaskData) => {
       if (!currentUser) return
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
@@ -150,16 +150,23 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const orderIndex = newTaskPosition === 'bottom'
         ? statusTasks.reduce((max, t) => Math.max(max, t.order_index), -1) + 1
         : statusTasks.reduce((min, t) => Math.min(min, t.order_index), 0) - 1
+      const taskId = crypto.randomUUID()
       await createTask({
-        id: crypto.randomUUID(),
+        id: taskId,
         project_id: projectId,
         owner_id: currentUser.id,
-        title,
+        title: data.title,
         status_id: defaultStatus.id,
-        order_index: orderIndex
+        order_index: orderIndex,
+        priority: data.priority,
+        due_date: data.dueDate
       })
+      // Assign labels
+      for (const label of data.labels) {
+        await addLabel(taskId, label.id)
+      }
     },
-    [currentUser, statuses, tasks, projectId, createTask, newTaskPosition]
+    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition]
   )
 
   const handleStatusChange = useCallback(
@@ -478,7 +485,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} />
+      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
 
       <LabelFilterBar labels={labelsInUse} />
 

@@ -86,7 +86,12 @@ describe('parseQuery', () => {
     expect(result.statusFilters).toEqual(['todo'])
   })
 
-  it('parses due operator', () => {
+  it('parses d: operator', () => {
+    const result = parseQuery('d:today')
+    expect(result.dueFilters).toEqual(['today'])
+  })
+
+  it('parses legacy due: operator', () => {
     const result = parseQuery('due:today')
     expect(result.dueFilters).toEqual(['today'])
   })

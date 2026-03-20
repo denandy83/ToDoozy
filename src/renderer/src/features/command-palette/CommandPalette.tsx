@@ -91,7 +91,7 @@ export function CommandPalette(): React.JSX.Element | null {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tasks... (p:high l:work s:done due:today has:subtasks)"
+            placeholder="Search tasks... (p:high l:work s:done d:today has:subtasks)"
             className="flex-1 bg-transparent text-sm font-light text-foreground placeholder:text-muted focus:outline-none"
             aria-label="Search tasks"
             autoComplete="off"
@@ -130,7 +130,7 @@ export function CommandPalette(): React.JSX.Element | null {
               <OperatorHint prefix="p:" example="high" />
               <OperatorHint prefix="l:" example="work" />
               <OperatorHint prefix="s:" example="done" />
-              <OperatorHint prefix="due:" example="today" />
+              <OperatorHint prefix="d:" example="today" />
               <OperatorHint prefix="has:" example="subtasks" />
             </div>
           </div>

@@ -17,3 +17,16 @@ Started: Fri Mar 20 12:30:44 CET 2026
 - Decision: used same renderer entry with query parameter routing instead of separate HTML entry — simpler, avoids vite config changes
 - Decision: quick-add window uses `type: 'panel'` on macOS for proper overlay behavior
 - Decision: auth guard checks .auth-session file existence in main process
+
+## Story #21: Smart input parsing with @label, p:priority, and d:date syntax
+- Created `src/renderer/src/shared/hooks/smartInputParser.ts` — operator detection, label/priority/date filtering, auto-color assignment, text removal utilities
+- Created `src/renderer/src/shared/hooks/useSmartInput.ts` — React hook managing smart input state (attached labels, priority, date, popup state, suppressed positions)
+- Created `src/renderer/src/shared/components/InputSuggestionPopup.tsx` — portal-based popup with arrow nav, Enter/Tab select, Escape dismiss, themed styling
+- Rewrote `AddTaskInput.tsx` to integrate useSmartInput — now shows chip area below input for labels (LabelChip), priority (PriorityBadge), and date
+- Updated `TaskListView.tsx` and `MyDayView.tsx` to use new SmartTaskData interface — tasks now created with priority, due_date, and labels in one flow
+- Integrated smart parsing into `QuickAddApp.tsx` — loads project labels dynamically, supports all three operators
+- Updated command palette to support `d:` operator alongside legacy `due:` prefix
+- 32 new tests for smartInputParser (detectOperator, filterLabels, filterPriorities, filterDates, getNextAutoColor, removeOperatorText)
+- Decision: popup uses document.body portal with z-[9999] positioned via getBoundingClientRect
+- Decision: label-create resolves async but popup closes immediately for responsive UX
+- Decision: suppressed positions tracked per operator instance to allow Escape-then-retype behavior

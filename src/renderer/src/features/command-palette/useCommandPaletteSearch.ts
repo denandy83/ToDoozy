@@ -64,6 +64,7 @@ export function parseQuery(query: string): ParsedQuery {
       case 'status':
         result.statusFilters.push(value)
         break
+      case 'd':
       case 'due':
         result.dueFilters.push(value)
         break
