@@ -1,17 +1,27 @@
 import { useCallback, useState } from 'react'
 import ReactDatePicker, { registerLocale } from 'react-datepicker'
 import { enGB } from 'date-fns/locale/en-GB'
+import { enUS } from 'date-fns/locale/en-US'
 import { parse, isValid } from 'date-fns'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Clock, X } from 'lucide-react'
+import { useDateFormat, type DateFormatType } from '../utils/dateFormat'
 
 registerLocale('en-GB', enGB)
+registerLocale('en-US', enUS)
 
-function maskDateInput(val: string): string {
+const FORMAT_CONFIG: Record<DateFormatType, { dateFnsFormat: string; locale: string; maskSlashPositions: number[]; separator: string }> = {
+  'dd/mm/yyyy': { dateFnsFormat: 'dd/MM/yyyy', locale: 'en-GB', maskSlashPositions: [2, 4], separator: '/' },
+  'mm/dd/yyyy': { dateFnsFormat: 'MM/dd/yyyy', locale: 'en-US', maskSlashPositions: [2, 4], separator: '/' },
+  'yyyy/mm/dd': { dateFnsFormat: 'yyyy/MM/dd', locale: 'en-GB', maskSlashPositions: [4, 6], separator: '/' }
+}
+
+function maskDateInput(val: string, fmt: DateFormatType = 'dd/mm/yyyy'): string {
+  const config = FORMAT_CONFIG[fmt]
   const digits = val.replace(/[^0-9]/g, '')
   let masked = ''
   for (let i = 0; i < digits.length && i < 8; i++) {
-    if (i === 2 || i === 4) masked += '/'
+    if (config.maskSlashPositions.includes(i)) masked += config.separator
     masked += digits[i]
   }
   return masked
@@ -54,6 +64,8 @@ function formatIso(date: Date, includeTime: boolean): string | null {
 }
 
 export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Element {
+  const dateFormat = useDateFormat()
+  const fmtConfig = FORMAT_CONFIG[dateFormat]
   const hasTime = value ? value.includes('T') : false
   const [showTime, setShowTime] = useState(hasTime)
   const dateObj = toDate(value)
@@ -88,20 +100,20 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       const raw = target.value
 
       // Apply mask: auto-insert slashes as user types
-      const masked = maskDateInput(raw)
+      const masked = maskDateInput(raw, dateFormat)
       if (masked !== raw) {
         target.value = masked
       }
 
-      // Only parse when we have a complete date string (dd/MM/yyyy = 10 chars)
+      // Only parse when we have a complete date string (10 chars)
       if (masked.length === 10) {
-        const parsed = parse(masked, 'dd/MM/yyyy', new Date())
+        const parsed = parse(masked, fmtConfig.dateFnsFormat, new Date())
         if (isValid(parsed)) {
           handleDateChange(parsed)
         }
       }
     },
-    [handleDateChange]
+    [handleDateChange, dateFormat, fmtConfig]
   )
 
   const handleTimeChange = useCallback(
@@ -187,9 +199,9 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
           selected={dateObj}
           onChange={handleDateChange}
           onChangeRaw={handleChangeRaw}
-          dateFormat="dd/MM/yyyy"
-          locale="en-GB"
-          placeholderText="DD/MM/YYYY"
+          dateFormat={fmtConfig.dateFnsFormat}
+          locale={fmtConfig.locale}
+          placeholderText={dateFormat.toUpperCase()}
           isClearable={false}
           className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted/50 focus:outline-none"
           calendarClassName="todoozy-calendar"

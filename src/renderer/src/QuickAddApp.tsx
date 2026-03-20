@@ -6,6 +6,7 @@ import { useSmartInput } from './shared/hooks/useSmartInput'
 import { InputSuggestionPopup, type SuggestionData, type InputSuggestionPopupProps } from './shared/components/InputSuggestionPopup'
 import { LabelChip } from './shared/components/LabelChip'
 import { PriorityBadge } from './shared/components/PriorityBadge'
+import { formatDate } from './shared/utils/dateFormat'
 import {
   filterLabels,
   filterPriorities,
@@ -21,6 +22,7 @@ export default function QuickAddApp(): React.JSX.Element {
   const [addToMyDay, setAddToMyDay] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [newTaskPosition, setNewTaskPosition] = useState<string>('top')
+  const [dateFormat, setDateFormat] = useState<string>('dd/mm/yyyy')
   const [ready, setReady] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const smart = useSmartInput(inputRef)
@@ -65,6 +67,7 @@ export default function QuickAddApp(): React.JSX.Element {
         }
         setNewTaskPosition(settingsMap['new_task_position'] ?? 'top')
         setAddToMyDay((settingsMap['quickadd_default_myday'] ?? 'true') === 'true')
+        setDateFormat(settingsMap['date_format'] ?? 'dd/mm/yyyy')
 
         // Set default project from settings, fallback to is_default project
         const quickAddProject = settingsMap['quickadd_default_project']
@@ -98,6 +101,7 @@ export default function QuickAddApp(): React.JSX.Element {
         for (const s of allSettings) map[s.key] = s.value
         setNewTaskPosition(map['new_task_position'] ?? 'top')
         setAddToMyDay((map['quickadd_default_myday'] ?? 'true') === 'true')
+        setDateFormat(map['date_format'] ?? 'dd/mm/yyyy')
         const quickAddProject = map['quickadd_default_project']
         const defaultProj = projects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? projects[0]
         if (defaultProj) setSelectedProjectId(defaultProj.id)
@@ -259,7 +263,7 @@ export default function QuickAddApp(): React.JSX.Element {
     }
 
     if (smart.popupState.type === 'd:') {
-      return filterDates(smart.popupState.query).map((d) => ({
+      return filterDates(smart.popupState.query, dateFormat).map((d) => ({
         id: `date-${d.date}`,
         label: d.label,
         icon: 'calendar' as const,
@@ -318,7 +322,7 @@ export default function QuickAddApp(): React.JSX.Element {
               {smart.selectedDate && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
                   <Calendar size={10} />
-                  {smart.selectedDate.split('-').reverse().join('/')}
+                  {formatDate(smart.selectedDate)}
                   <button
                     onClick={smart.removeDate}
                     className="ml-0.5 rounded-full p-0 hover:text-foreground"

@@ -130,7 +130,6 @@ export function UnifiedSettingsModal({
         })
         return
       }
-      // Revert preview even if just browsing
       themeRef.current?.revert()
     }
     setActiveTab('general')
@@ -228,6 +227,7 @@ function GeneralSettings(): React.JSX.Element {
   const addPosition = useSetting('new_task_position') ?? 'top'
   const { setSetting } = useSettingsStore()
   const projects = useProjectStore(selectAllProjects)
+  const dateFormat = useSetting('date_format') ?? 'dd/mm/yyyy'
   const quickAddDefaultProject = useSetting('quickadd_default_project') ?? ''
   const myDayDefaultProject = useSetting('myday_default_project') ?? ''
 
@@ -263,6 +263,21 @@ function GeneralSettings(): React.JSX.Element {
             Bottom
           </button>
         </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Date format</p>
+          <p className="text-[10px] text-muted">How dates are displayed throughout the app</p>
+        </div>
+        <select
+          value={dateFormat}
+          onChange={(e) => setSetting('date_format', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          <option value="dd/mm/yyyy">DD/MM/YYYY</option>
+          <option value="mm/dd/yyyy">MM/DD/YYYY</option>
+          <option value="yyyy/mm/dd">YYYY/MM/DD</option>
+        </select>
       </div>
       <div className="flex items-center justify-between">
         <div>

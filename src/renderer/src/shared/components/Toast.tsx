@@ -102,7 +102,7 @@ export function ToastContainer(): React.JSX.Element {
           onClick={handleOverlayClick}
         />
       )}
-      <div className={`fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col gap-2 ${shaking ? 'modal-shake' : ''}`}>
+      <div className={`fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 flex-col gap-2 ${shaking && hasPersistent ? 'modal-shake' : ''}`}>
         {toasts.map((toast) => (
           <div
             key={toast.id}

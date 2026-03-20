@@ -31,7 +31,10 @@ export function StatusEditRow({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === 'Escape') onCancel()
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      onCancel()
+    }
   }
 
   return (

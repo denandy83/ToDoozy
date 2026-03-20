@@ -155,7 +155,8 @@ export function filterPriorities(query: string): PriorityOption[] {
 /**
  * Generate date options filtered by prefix match.
  */
-export function filterDates(query: string): DateOption[] {
+export function filterDates(query: string, dateFormat?: string): DateOption[] {
+  const fmt = dateFormat ?? 'dd/mm/yyyy'
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -185,22 +186,37 @@ export function filterDates(query: string): DateOption[] {
 
   const q = query.toLowerCase()
 
-  // Check for explicit dd/mm/yyyy pattern
-  const explicitMatch = query.match(/^(\d{1,2})(?:\/(\d{1,2})(?:\/(\d{4}))?)?$/)
+  // Check for explicit date pattern based on format setting
   const results: DateOption[] = []
+  const parts = query.replace(/-/g, '/').split('/')
 
-  if (explicitMatch && explicitMatch[3]) {
-    const day = parseInt(explicitMatch[1], 10)
-    const month = parseInt(explicitMatch[2], 10)
-    const year = parseInt(explicitMatch[3], 10)
+  let parsedDate: Date | null = null
+  if (fmt === 'dd/mm/yyyy' && parts.length === 3 && parts[2].length === 4) {
+    const day = parseInt(parts[0], 10)
+    const month = parseInt(parts[1], 10)
+    const year = parseInt(parts[2], 10)
     const d = new Date(year, month - 1, day)
-    if (d.getDate() === day && d.getMonth() === month - 1 && d.getFullYear() === year) {
-      results.push({
-        label: formatDateDisplay(d),
-        date: formatIso(d),
-        formatted: formatDdMmYyyy(d)
-      })
-    }
+    if (d.getDate() === day && d.getMonth() === month - 1 && d.getFullYear() === year) parsedDate = d
+  } else if (fmt === 'mm/dd/yyyy' && parts.length === 3 && parts[2].length === 4) {
+    const month = parseInt(parts[0], 10)
+    const day = parseInt(parts[1], 10)
+    const year = parseInt(parts[2], 10)
+    const d = new Date(year, month - 1, day)
+    if (d.getDate() === day && d.getMonth() === month - 1 && d.getFullYear() === year) parsedDate = d
+  } else if (fmt === 'yyyy/mm/dd' && parts.length === 3 && parts[0].length === 4) {
+    const year = parseInt(parts[0], 10)
+    const month = parseInt(parts[1], 10)
+    const day = parseInt(parts[2], 10)
+    const d = new Date(year, month - 1, day)
+    if (d.getDate() === day && d.getMonth() === month - 1 && d.getFullYear() === year) parsedDate = d
+  }
+
+  if (parsedDate) {
+    results.push({
+      label: formatDateDisplay(parsedDate),
+      date: formatIso(parsedDate),
+      formatted: formatUserDate(parsedDate, fmt)
+    })
   }
 
   // Filter presets by prefix
@@ -210,7 +226,7 @@ export function filterDates(query: string): DateOption[] {
       results.push({
         label: preset.name.charAt(0).toUpperCase() + preset.name.slice(1),
         date: formatIso(d),
-        formatted: formatDdMmYyyy(d)
+        formatted: formatUserDate(d, fmt)
       })
     }
   } else {
@@ -220,7 +236,7 @@ export function filterDates(query: string): DateOption[] {
         results.push({
           label: preset.name.charAt(0).toUpperCase() + preset.name.slice(1),
           date: formatIso(d),
-          formatted: formatDdMmYyyy(d)
+          formatted: formatUserDate(d, fmt)
         })
       }
     }
@@ -259,11 +275,15 @@ function formatIso(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-function formatDdMmYyyy(d: Date): string {
+function formatUserDate(d: Date, fmt: string): string {
   const day = String(d.getDate()).padStart(2, '0')
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const y = d.getFullYear()
-  return `${day}/${m}/${y}`
+  switch (fmt) {
+    case 'mm/dd/yyyy': return `${m}/${day}/${y}`
+    case 'yyyy/mm/dd': return `${y}/${m}/${day}`
+    default: return `${day}/${m}/${y}`
+  }
 }
 
 function formatDateDisplay(d: Date): string {

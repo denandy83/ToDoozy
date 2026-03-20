@@ -11,6 +11,7 @@ import { useTaskStore, useTaskLabelsHook, useChildCount } from '../../shared/sto
 import { useLabelStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label } from '../../../../shared/types'
+import { formatDate } from '../../shared/utils/dateFormat'
 
 interface KanbanCardProps {
   task: Task
@@ -122,12 +123,7 @@ export function KanbanCard({
     [task, statuses, onStatusChange, onDeleteTask]
   )
 
-  const dueDateStr = task.due_date
-    ? new Date(task.due_date).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric'
-      })
-    : null
+  const dueDateStr = task.due_date ? formatDate(task.due_date) : null
 
   return (
     <div
