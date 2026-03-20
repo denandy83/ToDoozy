@@ -190,6 +190,19 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         set((state) => ({
           tasks: { ...state.tasks, [task.id]: task }
         }))
+
+        // When adding a subtask to My Day, also add its parent
+        if (input.is_in_my_day === 1 && task.parent_id) {
+          const parent = get().tasks[task.parent_id]
+          if (parent && parent.is_in_my_day !== 1) {
+            const updatedParent = await window.api.tasks.update(parent.id, { is_in_my_day: 1 })
+            if (updatedParent) {
+              set((state) => ({
+                tasks: { ...state.tasks, [updatedParent.id]: updatedParent }
+              }))
+            }
+          }
+        }
       }
       return task
     } catch (err) {
