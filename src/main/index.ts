@@ -6,6 +6,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
 import { showQuickAddWindow } from './quick-add'
+import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
 import { DEFAULT_QUICK_ADD_SHORTCUT } from '../shared/shortcut-utils'
 
@@ -122,6 +123,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  createTray()
   loadAndRegisterShortcut()
 
   // macOS: re-show main window when dock icon is clicked
@@ -147,5 +149,6 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  destroyTray()
   closeDatabase()
 })

@@ -121,6 +121,24 @@ const api: TodoozyAPI = {
     }
   },
 
+  tray: {
+    setUserId: (userId) => ipcRenderer.invoke('tray:setUserId', userId),
+    refresh: () => ipcRenderer.invoke('tray:refresh'),
+    onNavigateToTask: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, taskId: string): void => callback(taskId)
+      ipcRenderer.on('tray:navigate-to-task', handler)
+      return () => {
+        ipcRenderer.removeListener('tray:navigate-to-task', handler)
+      }
+    },
+    onNavigateToMyDay: (callback) => {
+      ipcRenderer.on('tray:navigate-to-myday', callback)
+      return () => {
+        ipcRenderer.removeListener('tray:navigate-to-myday', callback)
+      }
+    }
+  },
+
   onTasksChanged: (callback) => {
     ipcRenderer.on('tasks-changed', callback)
     return () => {

@@ -26,10 +26,11 @@ function App(): React.JSX.Element {
     hydrateThemes()
   }, [hydrateSettings, hydrateThemes])
 
-  // Hydrate projects when authenticated
+  // Hydrate projects when authenticated + set tray user ID
   useEffect(() => {
     if (isAuthenticated && currentUser) {
       hydrateProjects(currentUser.id)
+      window.api.tray.setUserId(currentUser.id)
     }
   }, [isAuthenticated, currentUser, hydrateProjects])
 
@@ -52,6 +53,14 @@ function App(): React.JSX.Element {
     })
     return unsub
   }, [currentProjectId, currentUser, hydrateAllForProject, hydrateMyDay])
+
+  // Refresh tray badge when tasks change
+  useEffect(() => {
+    const unsub = useTaskStore.subscribe(() => {
+      window.api.tray.refresh()
+    })
+    return unsub
+  }, [])
 
   // Auto-archive: periodically check for done tasks past the threshold
   useEffect(() => {

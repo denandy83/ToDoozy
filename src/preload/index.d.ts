@@ -146,6 +146,13 @@ export interface QuickAddAPI {
   onFocus(callback: () => void): () => void
 }
 
+export interface TrayAPI {
+  setUserId(userId: string): Promise<void>
+  refresh(): Promise<void>
+  onNavigateToTask(callback: (taskId: string) => void): () => void
+  onNavigateToMyDay(callback: () => void): () => void
+}
+
 export interface TodoozyAPI {
   tasks: TasksAPI
   labels: LabelsAPI
@@ -157,6 +164,7 @@ export interface TodoozyAPI {
   themes: ThemesAPI
   auth: AuthAPI
   quickadd: QuickAddAPI
+  tray: TrayAPI
   onTasksChanged(callback: () => void): () => void
 }
 

@@ -7,6 +7,7 @@ import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut } from './index'
 import { getReservedShortcutName } from '../shared/shortcut-utils'
+import { setTrayUserId, refreshTray } from './tray'
 
 let repos: Repositories | null = null
 
@@ -499,4 +500,13 @@ export function registerIpcHandlers(): void {
       return result
     }
   )
+
+  // ── Tray ──────────────────────────────────────────────────────────
+  ipcMain.handle('tray:setUserId', (_e, userId: string) => {
+    setTrayUserId(userId)
+  })
+
+  ipcMain.handle('tray:refresh', () => {
+    refreshTray()
+  })
 }

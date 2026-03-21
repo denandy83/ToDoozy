@@ -90,6 +90,21 @@ export function AppLayout(): React.JSX.Element {
     }
   }, [currentView, selectedProjectId, getSetting])
 
+  // Listen for tray navigation events
+  useEffect(() => {
+    const unsubTask = window.api.tray.onNavigateToTask((taskId) => {
+      rawSetView('my-day')
+      useTaskStore.getState().selectTask(taskId)
+    })
+    const unsubMyDay = window.api.tray.onNavigateToMyDay(() => {
+      rawSetView('my-day')
+    })
+    return () => {
+      unsubTask()
+      unsubMyDay()
+    }
+  }, [rawSetView])
+
   // Auto-clear label filters and selection on view switch, reset kanban for non-supported views
   const setView = useCallback(
     (view: ViewId) => {

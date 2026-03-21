@@ -19,7 +19,7 @@
         "Cmd+Q fully quits the app",
         "Reopening from tray or dock icon restores the window"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "25",
