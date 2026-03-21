@@ -132,6 +132,10 @@ const api: TodoozyAPI = {
     }
   },
 
+  appToggle: {
+    updateShortcut: (accelerator) => ipcRenderer.invoke('app-toggle:updateShortcut', accelerator)
+  },
+
   mcp: {
     getInfo: () => ipcRenderer.invoke('mcp:getInfo')
   },

@@ -14,7 +14,7 @@ import { StatusList } from '../projects/StatusList'
 import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsContent'
 import { PrioritySettingsContent } from './PrioritySettingsContent'
 import { LabelSettingsContent } from './LabelSettingsContent'
-import { ShortcutRecorder } from './ShortcutRecorder'
+import { ShortcutRecorder, AppToggleShortcutRecorder } from './ShortcutRecorder'
 import { McpSettingsContent } from './McpSettingsContent'
 import type { Project } from '../../../../shared/types'
 
@@ -373,6 +373,7 @@ function GeneralSettings(): React.JSX.Element {
       </div>
       <AutoArchiveSetting />
       <ShortcutRecorder />
+      <AppToggleShortcutRecorder />
     </div>
   )
 }

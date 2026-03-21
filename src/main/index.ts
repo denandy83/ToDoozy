@@ -8,7 +8,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { showQuickAddWindow } from './quick-add'
 import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
-import { DEFAULT_QUICK_ADD_SHORTCUT } from '../shared/shortcut-utils'
+import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
 
 // Load .env from project root (2 levels up from out/main)
 config({ path: join(__dirname, '../../.env') })
@@ -16,6 +16,7 @@ config({ path: join(__dirname, '../../.env') })
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let currentShortcut: string | null = null
+let currentAppToggleShortcut: string | null = null
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
@@ -112,6 +113,56 @@ function loadAndRegisterShortcut(): void {
   }
 }
 
+export function registerAppToggleShortcut(accelerator?: string): { success: boolean; error?: string } {
+  if (currentAppToggleShortcut) {
+    globalShortcut.unregister(currentAppToggleShortcut)
+    currentAppToggleShortcut = null
+  }
+
+  const shortcut = accelerator ?? DEFAULT_APP_TOGGLE_SHORTCUT
+
+  try {
+    const registered = globalShortcut.register(shortcut, () => {
+      if (!hasAuthSession()) return
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isFocused()) {
+          mainWindow.hide()
+        } else {
+          mainWindow.show()
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.focus()
+        }
+      }
+    })
+
+    if (registered) {
+      currentAppToggleShortcut = shortcut
+      return { success: true }
+    }
+    return {
+      success: false,
+      error: `Shortcut "${shortcut}" is already in use by another application.`
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to register shortcut'
+    }
+  }
+}
+
+function loadAndRegisterAppToggleShortcut(): void {
+  try {
+    const db = getDatabase()
+    const settingsRepo = new SettingsRepository(db)
+    const savedShortcut = settingsRepo.get('app_toggle_shortcut')
+    registerAppToggleShortcut(savedShortcut ?? undefined)
+  } catch (err) {
+    console.error('Failed to load app-toggle shortcut setting:', err)
+    registerAppToggleShortcut()
+  }
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.todoozy')
 
@@ -125,6 +176,7 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   loadAndRegisterShortcut()
+  loadAndRegisterAppToggleShortcut()
 
   // macOS: re-show main window when dock icon is clicked
   app.on('activate', () => {

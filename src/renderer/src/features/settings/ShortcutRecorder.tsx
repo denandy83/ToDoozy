@@ -3,6 +3,7 @@ import { Keyboard } from 'lucide-react'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import {
   DEFAULT_QUICK_ADD_SHORTCUT,
+  DEFAULT_APP_TOGGLE_SHORTCUT,
   keyEventToAccelerator,
   getReservedShortcutName
 } from '../../../../shared/shortcut-utils'
@@ -18,9 +19,23 @@ function formatAccelerator(accelerator: string): string {
     .replace(/\+/g, ' ')
 }
 
-export function ShortcutRecorder(): React.JSX.Element {
-  const savedShortcut = useSetting('quick_add_shortcut')
-  const currentShortcut = savedShortcut ?? DEFAULT_QUICK_ADD_SHORTCUT
+interface ShortcutRecorderBaseProps {
+  settingKey: string
+  defaultShortcut: string
+  label: string
+  description: string
+  onUpdateShortcut: (accelerator: string) => Promise<{ success: boolean; error?: string; reservedBy?: string }>
+}
+
+function ShortcutRecorderBase({
+  settingKey,
+  defaultShortcut,
+  label,
+  description,
+  onUpdateShortcut
+}: ShortcutRecorderBaseProps): React.JSX.Element {
+  const savedShortcut = useSetting(settingKey)
+  const currentShortcut = savedShortcut ?? defaultShortcut
   const { setSetting } = useSettingsStore()
   const [recording, setRecording] = useState(false)
   const [heldModifiers, setHeldModifiers] = useState('')
@@ -50,7 +65,6 @@ export function ShortcutRecorder(): React.JSX.Element {
       e.preventDefault()
       e.stopPropagation()
 
-      // Escape cancels recording
       if (e.key === 'Escape') {
         setRecording(false)
         setHeldModifiers('')
@@ -59,13 +73,11 @@ export function ShortcutRecorder(): React.JSX.Element {
         return
       }
 
-      // Update held modifiers display
       setHeldModifiers(getModifierDisplay(e))
 
       const accelerator = keyEventToAccelerator(e)
       if (!accelerator) return
 
-      // Check reserved — show warning but keep recording
       const reservedBy = getReservedShortcutName(accelerator)
       if (reservedBy) {
         setError(`This shortcut is reserved by macOS (${reservedBy}) and can't be used.`)
@@ -74,7 +86,6 @@ export function ShortcutRecorder(): React.JSX.Element {
       }
 
       setError(null)
-      // Store the accelerator — it will be committed on keyup
       pendingAcceleratorRef.current = accelerator
       setHeldModifiers(formatAccelerator(accelerator))
     }
@@ -83,7 +94,6 @@ export function ShortcutRecorder(): React.JSX.Element {
       if (!recordingRef.current) return
       e.preventDefault()
 
-      // If we have a pending accelerator and all keys are released, commit it
       if (pendingAcceleratorRef.current) {
         setPendingAccelerator(pendingAcceleratorRef.current)
         pendingAcceleratorRef.current = null
@@ -102,15 +112,14 @@ export function ShortcutRecorder(): React.JSX.Element {
     }
   }, [])
 
-  // Auto-save when a pending accelerator is set
   useEffect(() => {
     if (!pendingAccelerator) return
 
     async function save(): Promise<void> {
       try {
-        const result = await window.api.quickadd.updateShortcut(pendingAccelerator!)
+        const result = await onUpdateShortcut(pendingAccelerator!)
         if (result.success) {
-          await setSetting('quick_add_shortcut', pendingAccelerator!)
+          await setSetting(settingKey, pendingAccelerator!)
           setError(null)
           setSuccess(true)
           setTimeout(() => setSuccess(false), 2000)
@@ -123,14 +132,14 @@ export function ShortcutRecorder(): React.JSX.Element {
       setPendingAccelerator(null)
     }
     save()
-  }, [pendingAccelerator, setSetting])
+  }, [pendingAccelerator, setSetting, settingKey, onUpdateShortcut])
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-light text-foreground">Quick-add shortcut</p>
-          <p className="text-[10px] text-muted">Global shortcut to open quick-add from anywhere. Click inside to change.</p>
+          <p className="text-sm font-light text-foreground">{label}</p>
+          <p className="text-[10px] text-muted">{description}</p>
         </div>
         <button
           onClick={() => {
@@ -153,5 +162,29 @@ export function ShortcutRecorder(): React.JSX.Element {
       {error && <p className="text-[10px] font-medium text-danger">{error}</p>}
       {success && <p className="text-[10px] font-medium text-success">Shortcut updated</p>}
     </div>
+  )
+}
+
+export function ShortcutRecorder(): React.JSX.Element {
+  return (
+    <ShortcutRecorderBase
+      settingKey="quick_add_shortcut"
+      defaultShortcut={DEFAULT_QUICK_ADD_SHORTCUT}
+      label="Quick-add shortcut"
+      description="Global shortcut to open quick-add from anywhere. Click inside to change."
+      onUpdateShortcut={(accelerator) => window.api.quickadd.updateShortcut(accelerator)}
+    />
+  )
+}
+
+export function AppToggleShortcutRecorder(): React.JSX.Element {
+  return (
+    <ShortcutRecorderBase
+      settingKey="app_toggle_shortcut"
+      defaultShortcut={DEFAULT_APP_TOGGLE_SHORTCUT}
+      label="Show/hide app"
+      description="Global shortcut to toggle the main window from anywhere. Click inside to change."
+      onUpdateShortcut={(accelerator) => window.api.appToggle.updateShortcut(accelerator)}
+    />
   )
 }

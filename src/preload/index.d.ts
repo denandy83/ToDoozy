@@ -160,6 +160,10 @@ export interface QuickAddAPI {
   onFocus(callback: () => void): () => void
 }
 
+export interface AppToggleAPI {
+  updateShortcut(accelerator: string): Promise<ShortcutUpdateResult>
+}
+
 export interface McpAPI {
   getInfo(): Promise<{ serverPath: string; configJson: string }>
 }
@@ -183,6 +187,7 @@ export interface TodoozyAPI {
   projectTemplates: ProjectTemplatesAPI
   auth: AuthAPI
   quickadd: QuickAddAPI
+  appToggle: AppToggleAPI
   tray: TrayAPI
   mcp: McpAPI
   onTasksChanged(callback: () => void): () => void

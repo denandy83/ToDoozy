@@ -43,6 +43,7 @@ export function getReservedShortcutName(accelerator: string): string | null {
 }
 
 export const DEFAULT_QUICK_ADD_SHORTCUT = 'CommandOrControl+Shift+Space'
+export const DEFAULT_APP_TOGGLE_SHORTCUT = 'CommandOrControl+Shift+B'
 
 /**
  * Convert a KeyboardEvent into an Electron accelerator string.

@@ -71,3 +71,13 @@ Started: Sat Mar 21 11:11:37 CET 2026
 - Added comprehensive Tiptap CSS styles to main.css
 - Typecheck: zero errors
 - Tests: 254 pass, 3 pre-existing failures unchanged
+
+## Story #28 — Global App Toggle Shortcut (2026-03-21)
+- Added DEFAULT_APP_TOGGLE_SHORTCUT (Cmd+Shift+B) to shortcut-utils.ts
+- Added registerAppToggleShortcut() mirroring quick-add pattern in main/index.ts
+- Added app-toggle:updateShortcut IPC handler with same reserved shortcut validation
+- Exposed appToggle.updateShortcut on preload bridge
+- Refactored ShortcutRecorder into generic ShortcutRecorderBase with props for reuse
+- Added AppToggleShortcutRecorder to Settings > General
+- Toggle behavior: focused → hide to tray; not focused → show/restore/focus
+- Auth check: shortcut only works with active auth session

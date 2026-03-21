@@ -5,7 +5,7 @@ import { app } from 'electron'
 import { getDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
-import { registerQuickAddShortcut } from './index'
+import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
 import { getReservedShortcutName } from '../shared/shortcut-utils'
 import { setTrayUserId, refreshTray } from './tray'
 
@@ -535,6 +535,26 @@ export function registerIpcHandlers(): void {
       if (result.success) {
         // Persist to settings
         getRepos().settings.set('quick_add_shortcut', accelerator)
+      }
+      return result
+    }
+  )
+
+  ipcMain.handle(
+    'app-toggle:updateShortcut',
+    (_e, accelerator: string): { success: boolean; error?: string; reservedBy?: string } => {
+      const reservedBy = getReservedShortcutName(accelerator)
+      if (reservedBy) {
+        return {
+          success: false,
+          error: `This shortcut is reserved by macOS (${reservedBy}) and can't be used.`,
+          reservedBy
+        }
+      }
+
+      const result = registerAppToggleShortcut(accelerator)
+      if (result.success) {
+        getRepos().settings.set('app_toggle_shortcut', accelerator)
       }
       return result
     }

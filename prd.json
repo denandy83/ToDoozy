@@ -90,6 +90,53 @@
         "Escape blurs the editor"
       ],
       "passes": true
+    },
+    {
+      "id": "28",
+      "title": "Global App Toggle Shortcut",
+      "description": "Add a global keyboard shortcut (default Cmd+Shift+B) that toggles the main ToDoozy window from anywhere in macOS. Mirrors the existing quick-add shortcut pattern exactly.\n\n**Behavior:**\n- App running but not focused → bring main window to front (unminimize if needed, switch to its Space/desktop)\n- App focused → minimize to system tray\n- App not running → launch it (only works when installed, not testable in dev)\n\n**Implementation (mirror quick-add shortcut pattern):**\n- `src/shared/shortcut-utils.ts` — add `DEFAULT_APP_TOGGLE_SHORTCUT = 'CommandOrControl+Shift+B'`\n- `src/main/index.ts` — add `registerAppToggleShortcut()` and `loadAndRegisterAppToggleShortcut()` alongside existing quick-add equivalents. Callback checks `hasAuthSession()`, then: if main window is focused → hide to tray; otherwise → show, restore, focus, move to active Space.\n- `src/main/ipc-handlers.ts` — add `app-toggle:updateShortcut` handler (same validation as `quickadd:updateShortcut`)\n- `src/preload/index.ts` + `index.d.ts` — expose `appToggle.updateShortcut(accelerator)` on the bridge\n- Settings > General — add a second `ShortcutRecorder` for 'Show/Hide App' using setting key `app_toggle_shortcut`\n- Persist via SettingsRepository with key `app_toggle_shortcut`\n- Unregister on `will-quit` (already covered by `globalShortcut.unregisterAll()`)\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Pressing Cmd+Shift+B (default) when app is not focused brings the main window to the front",
+        "Pressing Cmd+Shift+B when app is focused minimizes it to the system tray",
+        "If the main window is minimized, the shortcut restores and focuses it",
+        "If the main window is on another desktop/Space, the shortcut switches to that Space",
+        "Works when the app is in the system tray only (no visible window)",
+        "The shortcut is configurable in Settings > General via a ShortcutRecorder component",
+        "Reserved macOS shortcuts are rejected (same validation as quick-add)",
+        "The configured shortcut persists across app restarts",
+        "Changing the shortcut immediately unregisters the old one and registers the new one",
+        "The shortcut only works when the user has an active auth session"
+      ],
+      "passes": true
+    },
+    {
+      "id": "29",
+      "title": "Pomodoro Timer",
+      "description": "Add a per-task Pomodoro timer system that minimizes the app to tray and shows a live countdown in the macOS menu bar.\n\n**Timer Presets:**\n- Default presets: 10 min, 25 min, 50 min\n- Custom presets configurable in Settings > Timer (add/remove with name + duration)\n- One timer can run at a time — starting a new one stops the current\n\n**Starting a timer:**\n- **Play button** appears on hover after the last character of the task title (or after truncation point) in all views (My Day, Projects, tray menu). Subtle monochrome icon consistent with existing hover action patterns. Left-click opens a popup.\n- **Popup:** Uses existing popup patterns (portal to document.body, z-[9999], surface bg, border, shadow, motion-safe:animate-in fade-in zoom-in duration-100, positioned via getBoundingClientRect). If repetition mode is enabled in settings, shows the default repetition count with the number selected/editable for quick override. Enter confirms. If repetition mode is off, starts the default timer immediately.\n- **Context menu:** Right-click a task shows a 'Start Timer' flyout submenu listing all configured timer presets. Not shown when multiple tasks are selected.\n- **Tray menu:** Play button appears on hover over tasks in the tray left-click menu, same behavior.\n- Starting a timer auto-moves the task to the first in-progress status (via findProjectStatusForBucket) if it was in a 'not started' state.\n\n**Active timer — tray behavior:**\n- App minimizes to tray when timer starts.\n- Menu bar shows countdown text next to the tray icon (e.g., '18:32').\n- If in repetition mode, shows a small indicator like '3/5' alongside the countdown.\n- Tray menu during active timer shows ONLY the countdown and controls — no My Day tasks, no quick add.\n- Hovering over the countdown in the tray menu reveals Pause/Resume and Stop controls.\n\n**Timer completion:**\n- Sound notification (configurable on/off in settings).\n- System notification (configurable on/off in settings). Clicking the system notification opens the app and navigates to that task.\n- Break timer auto-starts after work timer finishes. Default 5 min, configurable in settings.\n- After break finishes: sound notification only (no system notification), tray returns to normal.\n- Break auto-start behavior configurable in settings.\n\n**Repetition/session mode:**\n- Configurable in Settings: on/off toggle, default repetition count.\n- When enabled, runs work-break cycles for N repetitions (e.g., 5x 20min work + 5min break).\n- After all repetitions complete, tray returns to normal state.\n- Perpetual mode option: runs indefinitely until manually stopped.\n- Stop-after-X-repetitions option.\n\n**Activity log:**\n- Logs 'Completed 25 min focus session' with timestamp on the task's activity log after each work timer completes.\n\n**Timer state:**\n- Timer is lost if the app is quit mid-timer (no persistence across restarts).\n\n**Settings > Timer:**\n- Default timer duration (dropdown of configured presets)\n- Custom timer presets (add/remove, each with a name and duration in minutes)\n- Default break duration (default: 5 min)\n- Repetition mode on/off\n- Default repetition count\n- Perpetual mode on/off\n- Sound notification on/off\n- System notification on/off\n\n**Visual consistency:**\n- All UI elements (play button, popup, tray controls, settings section) follow existing app patterns: typography scale, monochrome-first design, hover/selection styles, shared components. Play button matches existing hover action patterns. Popup uses same portal/animation/styling as InputSuggestionPopup, LabelPicker, etc. Settings section matches existing settings tab patterns.\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Play button appears on hover after task title in all views (My Day, Projects, tray menu)",
+        "Left-clicking play opens popup; if repetition mode on, shows editable rep count; if off, starts timer immediately",
+        "Right-click context menu has 'Start Timer' flyout with all configured presets (not shown for multi-select)",
+        "Starting a timer minimizes app to tray and shows countdown text in menu bar",
+        "Countdown shows 'MM:SS' format with optional 'N/N' repetition indicator",
+        "Hovering tray countdown reveals Pause/Resume and Stop controls",
+        "Tray menu during timer shows only countdown and controls",
+        "Timer completion plays sound notification (if enabled in settings)",
+        "Timer completion shows system notification (if enabled); clicking it opens the task",
+        "Break timer auto-starts after work timer; duration configurable in settings",
+        "Repetition mode cycles work-break for N reps then stops",
+        "Perpetual mode runs until manually stopped",
+        "Starting a timer auto-moves task to first in-progress status if not started",
+        "Activity log records completed focus sessions with duration and timestamp",
+        "Timer state is not persisted across app restarts",
+        "Settings > Timer section with all configuration options (presets, break duration, repetition, notifications)",
+        "Only one timer can run at a time",
+        "Default presets: 10 min, 25 min, 50 min; custom presets addable in settings",
+        "All visuals follow existing app patterns (typography, colors, shared components, popup styling)"
+      ],
+      "passes": false
     }
   ]
 }
