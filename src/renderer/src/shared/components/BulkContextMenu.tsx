@@ -29,7 +29,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const [openLeft, setOpenLeft] = useState(false)
 
   const tasks = useTaskStore((s) => s.tasks)
-  const { bulkUpdateTasks, setPendingBulkDeleteTasks } = useTaskStore()
+  const { bulkUpdateTasks, setPendingBulkDeleteTasks, deleteTask, clearSelection } = useTaskStore()
   const { addToast } = useToast()
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
@@ -102,7 +102,6 @@ export function BulkContextMenu(): React.JSX.Element | null {
     handleAction(() => bulkUpdateTasks(bulkTaskIds, update))
   }
 
-  const { deleteTask, clearSelection } = useTaskStore()
   const handleDelete = (e: React.MouseEvent): void => {
     handleAction(() => {
       if (shouldForceDelete(e)) {
