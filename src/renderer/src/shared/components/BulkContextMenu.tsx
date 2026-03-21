@@ -9,7 +9,6 @@ import { shouldForceDelete } from '../utils/shiftDelete'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
 import { useLabelStore } from '../stores/labelStore'
-import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import {
   StatusSubmenu,
   PrioritySubmenu,
@@ -31,8 +30,8 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const tasks = useTaskStore((s) => s.tasks)
   const { bulkUpdateTasks, setPendingBulkDeleteTasks, deleteTask, clearSelection } = useTaskStore()
   const { addToast } = useToast()
-  const currentProject = useProjectStore(selectCurrentProject)
-  const projectId = currentProject?.id ?? ''
+  const firstTask = bulkTaskIds.length > 0 ? tasks[bulkTaskIds[0]] : null
+  const projectId = firstTask?.project_id ?? ''
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
 

@@ -8,7 +8,6 @@ import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelStore, useLabelsByProject } from '../stores/labelStore'
-import { useProjectStore, selectCurrentProject } from '../stores/projectStore'
 import { useToast } from './Toast'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import {
@@ -31,8 +30,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const [openLeft, setOpenLeft] = useState(false)
 
   const task = useTaskStore((s) => (taskId ? s.tasks[taskId] : null))
-  const currentProject = useProjectStore(selectCurrentProject)
-  const projectId = currentProject?.id ?? ''
+  const projectId = task?.project_id ?? ''
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
