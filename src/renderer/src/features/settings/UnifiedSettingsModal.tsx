@@ -15,9 +15,10 @@ import { ThemeSettingsContent, type ThemeSettingsHandle } from './ThemeSettingsC
 import { PrioritySettingsContent } from './PrioritySettingsContent'
 import { LabelSettingsContent } from './LabelSettingsContent'
 import { ShortcutRecorder } from './ShortcutRecorder'
+import { McpSettingsContent } from './McpSettingsContent'
 import type { Project } from '../../../../shared/types'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -153,7 +154,8 @@ export function UnifiedSettingsModal({
     { key: 'projects', label: 'Projects' },
     { key: 'themes', label: 'Themes' },
     { key: 'priorities', label: 'Priorities' },
-    { key: 'labels', label: 'Labels' }
+    { key: 'labels', label: 'Labels' },
+    { key: 'mcp', label: 'MCP' }
   ]
 
   return (
@@ -217,6 +219,9 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'labels' && (
             <LabelSettingsContent />
+          )}
+          {activeTab === 'mcp' && (
+            <McpSettingsContent />
           )}
         </div>
       </div>

@@ -64,7 +64,7 @@
         "Server path is displayed in settings",
         "MCP server reads from the same SQLite database as the Electron app"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "27",

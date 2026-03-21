@@ -160,6 +160,10 @@ export interface QuickAddAPI {
   onFocus(callback: () => void): () => void
 }
 
+export interface McpAPI {
+  getInfo(): Promise<{ serverPath: string; configJson: string }>
+}
+
 export interface TrayAPI {
   setUserId(userId: string): Promise<void>
   refresh(): Promise<void>
@@ -180,6 +184,7 @@ export interface TodoozyAPI {
   auth: AuthAPI
   quickadd: QuickAddAPI
   tray: TrayAPI
+  mcp: McpAPI
   onTasksChanged(callback: () => void): () => void
 }
 

@@ -132,6 +132,10 @@ const api: TodoozyAPI = {
     }
   },
 
+  mcp: {
+    getInfo: () => ipcRenderer.invoke('mcp:getInfo')
+  },
+
   tray: {
     setUserId: (userId) => ipcRenderer.invoke('tray:setUserId', userId),
     refresh: () => ipcRenderer.invoke('tray:refresh'),

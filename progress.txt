@@ -38,3 +38,16 @@ Started: Sat Mar 21 11:11:37 CET 2026
 - Templates are now global (loaded via `findAllTemplates` across all projects)
 - Typecheck: zero errors
 - Tests: same 5 pass / 4 fail as before (pre-existing better-sqlite3 issue)
+
+## Story #26: MCP Server for AI Integration
+- Created standalone MCP server at `src/main/mcp-server.ts` using @modelcontextprotocol/sdk with stdio transport
+- 35 MCP tools implemented: all task CRUD, metadata setters, My Day, subtasks, projects, labels, statuses, search, templates
+- MCP server talks directly to the same SQLite database (`~/Library/Application Support/todoozy/todoozy.db`)
+- Added `TaskRepository.search()` method with dynamic SQL filters (project, status, priority, label, due date, keyword)
+- Updated `electron.vite.config.ts` for multi-entry build (outputs both `index.js` and `mcp-server.js`)
+- Added MCP settings tab to UnifiedSettingsModal with enable/disable toggle, server path display, and Copy Config button
+- Added IPC handler `mcp:getInfo` and preload bridge for MCP settings
+- 7 new tests for TaskRepository.search() — all pass
+- Typecheck: zero errors
+- Tests: 254 pass, 3 pre-existing failures (shortcut-utils, smartInputParser)
+- Decision: `electron-vite rebuild-native` was already broken before changes (pre-existing env issue)

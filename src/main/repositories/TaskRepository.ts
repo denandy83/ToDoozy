@@ -3,6 +3,18 @@ import type Database from 'better-sqlite3'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 
+export interface TaskSearchFilters {
+  project_id?: string
+  status_id?: string
+  priority?: number
+  label_id?: string
+  due_before?: string
+  due_after?: string
+  keyword?: string
+  is_archived?: number
+  owner_id?: string
+}
+
 export class TaskRepository {
   constructor(private db: Database.Database) {}
 
@@ -231,6 +243,66 @@ export class TaskRepository {
       // Recursive subtasks
       this.copySubtasksAsTemplate(subtask.id, subtaskId, projectId, defaultStatusId)
     }
+  }
+
+  search(filters: TaskSearchFilters): Task[] {
+    let sql = 'SELECT DISTINCT t.* FROM tasks t'
+    const conditions: string[] = ['t.is_template = 0']
+    const params: (string | number)[] = []
+
+    if (filters.label_id) {
+      sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
+      conditions.push('tl.label_id = ?')
+      params.push(filters.label_id)
+    }
+
+    if (filters.project_id) {
+      conditions.push('t.project_id = ?')
+      params.push(filters.project_id)
+    }
+
+    if (filters.status_id) {
+      conditions.push('t.status_id = ?')
+      params.push(filters.status_id)
+    }
+
+    if (filters.priority !== undefined) {
+      conditions.push('t.priority = ?')
+      params.push(filters.priority)
+    }
+
+    if (filters.due_before) {
+      conditions.push('t.due_date IS NOT NULL AND t.due_date <= ?')
+      params.push(filters.due_before)
+    }
+
+    if (filters.due_after) {
+      conditions.push('t.due_date IS NOT NULL AND t.due_date >= ?')
+      params.push(filters.due_after)
+    }
+
+    if (filters.keyword) {
+      conditions.push('(t.title LIKE ? OR t.description LIKE ?)')
+      const kw = `%${filters.keyword}%`
+      params.push(kw, kw)
+    }
+
+    if (filters.is_archived !== undefined) {
+      conditions.push('t.is_archived = ?')
+      params.push(filters.is_archived)
+    } else {
+      conditions.push('t.is_archived = 0')
+    }
+
+    if (filters.owner_id) {
+      conditions.push('t.owner_id = ?')
+      params.push(filters.owner_id)
+    }
+
+    sql += ' WHERE ' + conditions.join(' AND ')
+    sql += ' ORDER BY t.order_index ASC'
+
+    return this.db.prepare(sql).all(...params) as Task[]
   }
 
   duplicate(id: string, newId: string): Task | undefined {

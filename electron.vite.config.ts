@@ -8,7 +8,11 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        external: ['better-sqlite3']
+        external: ['better-sqlite3'],
+        input: {
+          index: resolve('src/main/index.ts'),
+          'mcp-server': resolve('src/main/mcp-server.ts')
+        }
       }
     }
   },

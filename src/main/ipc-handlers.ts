@@ -540,6 +540,26 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ── MCP ───────────────────────────────────────────────────────────
+  ipcMain.handle('mcp:getInfo', () => {
+    const serverPath = join(app.getPath('exe'), '..', '..', 'Resources', 'app', 'out', 'main', 'mcp-server.js')
+    // In development, use the project directory
+    const devServerPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
+    const actualPath = existsSync(devServerPath) ? devServerPath : serverPath
+    const config = {
+      mcpServers: {
+        todoozy: {
+          command: 'node',
+          args: [actualPath]
+        }
+      }
+    }
+    return {
+      serverPath: actualPath,
+      configJson: JSON.stringify(config, null, 2)
+    }
+  })
+
   // ── Tray ──────────────────────────────────────────────────────────
   ipcMain.handle('tray:setUserId', (_e, userId: string) => {
     setTrayUserId(userId)

@@ -387,6 +387,95 @@ describe('TaskRepository', () => {
     expect(count.total).toBe(2)
     expect(count.done).toBe(1)
   })
+
+  describe('search', () => {
+    it('returns all non-archived, non-template tasks with no filters', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Active', status_id: statusId })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Archived', status_id: statusId, is_archived: 1 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Template', status_id: statusId, is_template: 1 })
+      const results = repo.search({})
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('Active')
+    })
+
+    it('filters by project_id', () => {
+      const otherProjectId = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare(
+        'INSERT INTO projects (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+      ).run(otherProjectId, 'Other', userId, now, now)
+      const otherStatusId = randomUUID()
+      db.prepare(
+        'INSERT INTO statuses (id, project_id, name, order_index, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(otherStatusId, otherProjectId, 'Default', 0, 1, now, now)
+
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'A', status_id: statusId })
+      repo.create({ id: randomUUID(), project_id: otherProjectId, owner_id: userId, title: 'B', status_id: otherStatusId })
+
+      const results = repo.search({ project_id: projectId })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('A')
+    })
+
+    it('filters by priority', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Low', status_id: statusId, priority: 1 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'High', status_id: statusId, priority: 3 })
+
+      const results = repo.search({ priority: 3 })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('High')
+    })
+
+    it('filters by keyword in title and description', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Buy groceries', status_id: statusId })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Read book', status_id: statusId, description: 'Buy a new bookshelf too' })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Exercise', status_id: statusId })
+
+      const results = repo.search({ keyword: 'buy' })
+      expect(results).toHaveLength(2)
+    })
+
+    it('filters by label_id', () => {
+      const labelId = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare(
+        'INSERT INTO labels (id, project_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(labelId, projectId, 'Bug', '#ff0000', now, now)
+
+      const taskWithLabel = randomUUID()
+      repo.create({ id: taskWithLabel, project_id: projectId, owner_id: userId, title: 'Labeled', status_id: statusId })
+      repo.addLabel(taskWithLabel, labelId)
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'No label', status_id: statusId })
+
+      const results = repo.search({ label_id: labelId })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('Labeled')
+    })
+
+    it('filters by due date range', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Past', status_id: statusId, due_date: '2025-01-01T00:00:00Z' })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Future', status_id: statusId, due_date: '2030-06-15T00:00:00Z' })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'No date', status_id: statusId })
+
+      const before = repo.search({ due_before: '2026-01-01T00:00:00Z' })
+      expect(before).toHaveLength(1)
+      expect(before[0].title).toBe('Past')
+
+      const after = repo.search({ due_after: '2026-01-01T00:00:00Z' })
+      expect(after).toHaveLength(1)
+      expect(after[0].title).toBe('Future')
+    })
+
+    it('combines multiple filters with AND', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'High Buy', status_id: statusId, priority: 3 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Low Buy', status_id: statusId, priority: 1 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'High Sell', status_id: statusId, priority: 3 })
+
+      const results = repo.search({ priority: 3, keyword: 'buy' })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('High Buy')
+    })
+  })
 })
 
 describe('LabelRepository', () => {
