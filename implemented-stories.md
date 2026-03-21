@@ -143,3 +143,35 @@
 - **Spec Section:** §17 Command Palette
 - **Passes:** true
 - **Implemented:** 2026-03-20
+
+---
+
+### #20 — Global quick-add window with customizable shortcut
+- **Description:** Frameless floating window triggered by global macOS keyboard shortcut (Cmd+Shift+Space) for adding tasks from anywhere.
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-03-21
+
+---
+
+### #21 — Smart input parsing with @label, p:priority, and d:date syntax
+- **Description:** Inline smart parsing in all task creation inputs with popup suggestions for labels, priorities, and dates.
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-03-21
+
+---
+
+### #22 — Copy task titles to clipboard
+- **Description:** Cmd+C copies selected task titles to clipboard. Single task as plain text, multiple as bulleted markdown list. Available in context menus.
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-03-21
+
+---
+
+### #23 — Replace Backlog with per-project sidebar navigation
+- **Description:** Removed Backlog view, added per-project sidebar navigation with PROJECTS section, per-project layout memory, My Day grouped by project, drag-reorder in settings.
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-03-21
