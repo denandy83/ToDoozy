@@ -19,7 +19,9 @@ const api: TodoozyAPI = {
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
-    duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId)
+    duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId),
+    findAllTemplates: () => ipcRenderer.invoke('tasks:findAllTemplates'),
+    saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId)
   },
 
   labels: {
@@ -99,6 +101,15 @@ const api: TodoozyAPI = {
     update: (id, input) => ipcRenderer.invoke('themes:update', id, input),
     delete: (id) => ipcRenderer.invoke('themes:delete', id),
     getConfig: (id) => ipcRenderer.invoke('themes:getConfig', id)
+  },
+
+  projectTemplates: {
+    findById: (id) => ipcRenderer.invoke('projectTemplates:findById', id),
+    findByOwnerId: (ownerId) => ipcRenderer.invoke('projectTemplates:findByOwnerId', ownerId),
+    findAll: () => ipcRenderer.invoke('projectTemplates:findAll'),
+    create: (input) => ipcRenderer.invoke('projectTemplates:create', input),
+    update: (id, input) => ipcRenderer.invoke('projectTemplates:update', id, input),
+    delete: (id) => ipcRenderer.invoke('projectTemplates:delete', id)
   },
 
   auth: {

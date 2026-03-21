@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
-  CircleDot, Signal, Repeat, Tag, Clock, Focus
+  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
@@ -34,7 +34,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
-  const { updateTask, deleteTask, duplicateTask, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
+  const { updateTask, deleteTask, duplicateTask, saveTaskAsTemplate, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
 
   // Viewport clamp positioning
@@ -182,6 +182,17 @@ export function ContextMenu(): React.JSX.Element | null {
       </FlyoutItem>
       <Divider />
 
+      {/* Save as Template */}
+      <MenuItem
+        icon={<LayoutTemplate size={14} />}
+        label="Save as Template"
+        onClick={() =>
+          handleAction(async () => {
+            await saveTaskAsTemplate(task.id, crypto.randomUUID())
+            addToast({ message: 'Saved as template' })
+          })
+        }
+      />
       {/* Duplicate */}
       <MenuItem
         icon={<Copy size={14} />}

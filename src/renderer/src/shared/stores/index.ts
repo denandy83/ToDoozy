@@ -76,3 +76,7 @@ export { selectCurrentUser, selectIsAuthenticated, selectUserId } from './authSt
 
 export { useContextMenuStore } from './contextMenuStore'
 export type { ContextMenuStore } from './contextMenuStore'
+
+export { useTemplateStore } from './templateStore'
+export type { TemplateStore } from './templateStore'
+export { selectAllProjectTemplates } from './templateStore'

@@ -151,6 +151,88 @@ export class TaskRepository {
       .all(taskId) as TaskLabel[]
   }
 
+  findAllTemplates(): Task[] {
+    return this.db
+      .prepare('SELECT * FROM tasks WHERE is_template = 1 ORDER BY created_at ASC')
+      .all() as Task[]
+  }
+
+  saveAsTemplate(id: string, newId: string): Task | undefined {
+    const original = this.findById(id)
+    if (!original) return undefined
+
+    const defaultStatusStmt = this.db.prepare(
+      'SELECT id FROM statuses WHERE project_id = ? AND is_default = 1 LIMIT 1'
+    )
+    const defaultStatus = defaultStatusStmt.get(original.project_id) as { id: string } | undefined
+    const statusId = defaultStatus?.id ?? original.status_id
+
+    const saveTx = this.db.transaction(() => {
+      const template = this.create({
+        id: newId,
+        project_id: original.project_id,
+        owner_id: original.owner_id,
+        title: original.title,
+        status_id: statusId,
+        description: original.description,
+        priority: original.priority,
+        is_template: 1,
+        is_in_my_day: 0,
+        is_archived: 0,
+        recurrence_rule: original.recurrence_rule,
+        order_index: 0
+        // Strips: due_date, completed_date, snooze (no snooze field — just omit due_date)
+      })
+
+      // Copy labels
+      const labels = this.getLabels(id)
+      for (const label of labels) {
+        this.addLabel(template.id, label.label_id)
+      }
+
+      // Recursively copy subtasks (stripping dates, resetting status)
+      this.copySubtasksAsTemplate(id, template.id, original.project_id, statusId)
+
+      return template
+    })
+
+    return saveTx()
+  }
+
+  private copySubtasksAsTemplate(
+    originalParentId: string,
+    newParentId: string,
+    projectId: string,
+    defaultStatusId: string
+  ): void {
+    const subtasks = this.findSubtasks(originalParentId)
+    for (const subtask of subtasks) {
+      const subtaskId = randomUUID()
+      this.create({
+        id: subtaskId,
+        project_id: projectId,
+        owner_id: subtask.owner_id,
+        title: subtask.title,
+        status_id: defaultStatusId,
+        description: subtask.description,
+        priority: subtask.priority,
+        parent_id: newParentId,
+        order_index: subtask.order_index,
+        is_template: 1,
+        is_in_my_day: 0,
+        is_archived: 0,
+        recurrence_rule: subtask.recurrence_rule
+      })
+      // Copy subtask labels
+      const labels = this.getLabels(subtask.id)
+      for (const label of labels) {
+        this.addLabel(subtaskId, label.label_id)
+      }
+      // Recursive subtasks
+      this.copySubtasksAsTemplate(subtask.id, subtaskId, projectId, defaultStatusId)
+    }
+  }
+
   duplicate(id: string, newId: string): Task | undefined {
     const original = this.findById(id)
     if (!original) return undefined

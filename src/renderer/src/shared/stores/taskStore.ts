@@ -34,6 +34,7 @@ interface TaskActions {
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
   deleteTask(id: string): Promise<boolean>
   duplicateTask(id: string, newId: string): Promise<Task | null>
+  saveTaskAsTemplate(id: string, newId: string): Promise<Task | null>
   reorderTasks(taskIds: string[]): Promise<void>
   createSubtask(parentId: string, input: CreateTaskInput): Promise<Task>
   addLabel(taskId: string, labelId: string): Promise<void>
@@ -127,9 +128,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateTemplates(projectId: string): Promise<void> {
+  async hydrateTemplates(_projectId: string): Promise<void> {
     try {
-      const tasks = await window.api.tasks.findTemplates(projectId)
+      const tasks = await window.api.tasks.findAllTemplates()
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of tasks) {
@@ -152,7 +153,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const [myDay, archived, templates, ...projectTasks] = await Promise.all([
         window.api.tasks.findMyDay(userId),
         window.api.tasks.findArchived(projectId),
-        window.api.tasks.findTemplates(projectId),
+        window.api.tasks.findAllTemplates(),
         ...projectTaskPromises
       ])
       const taskMap: Record<string, Task> = {}
@@ -286,6 +287,28 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to duplicate task'
+      set({ error: message })
+      throw err
+    }
+  },
+
+  async saveTaskAsTemplate(id: string, newId: string): Promise<Task | null> {
+    try {
+      const template = await window.api.tasks.saveAsTemplate(id, newId)
+      if (template) {
+        // Re-hydrate templates globally
+        const allTemplates = await window.api.tasks.findAllTemplates()
+        set((state) => {
+          const updated = { ...state.tasks }
+          for (const t of allTemplates) {
+            updated[t.id] = t
+          }
+          return { tasks: updated }
+        })
+      }
+      return template
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save as template'
       set({ error: message })
       throw err
     }

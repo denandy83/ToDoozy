@@ -6,7 +6,7 @@ import {
   useSensor,
   useSensors
 } from '@dnd-kit/core'
-import { LayoutList, Columns3 } from 'lucide-react'
+import { LayoutList, Columns3, LayoutTemplate } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -26,6 +26,8 @@ import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './share
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
+import { useTemplateStore } from './shared/stores/templateStore'
+import { useAuthStore } from './shared/stores/authStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
@@ -399,6 +401,8 @@ export function AppLayout(): React.JSX.Element {
   const [projectNameValue, setProjectNameValue] = useState('')
   const projectNameRef = useRef<HTMLInputElement>(null)
   const { updateProject } = useProjectStore()
+  const { createProjectTemplate } = useTemplateStore()
+  const currentUser = useAuthStore((s) => s.currentUser)
 
   const handleStartEditProjectName = useCallback(() => {
     if (currentView === 'project' && selectedProject) {
@@ -415,6 +419,67 @@ export function AppLayout(): React.JSX.Element {
     }
     setEditingProjectName(false)
   }, [projectNameValue, selectedProject, updateProject])
+
+  const handleSaveProjectAsTemplate = useCallback(async () => {
+    if (!selectedProject || !currentUser) return
+    const projStatuses = statuses
+    const projLabels = useLabelStore.getState().labels
+    const labelsForProject = Object.values(projLabels).filter(
+      (l) => l.project_id === selectedProject.id
+    )
+    const tasksForProject = Object.values(allTasks).filter(
+      (t) =>
+        t.project_id === selectedProject.id &&
+        t.is_archived === 0 &&
+        t.is_template === 0 &&
+        t.parent_id === null
+    )
+
+    const buildTaskTree = (task: Task): import('../../shared/types').ProjectTemplateTask => {
+      const taskLabelNames = (useTaskStore.getState().taskLabels[task.id] ?? []).map((l) => l.name)
+      const subtasks = Object.values(allTasks)
+        .filter((t) => t.parent_id === task.id)
+        .sort((a, b) => a.order_index - b.order_index)
+        .map(buildTaskTree)
+      return {
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        recurrence_rule: task.recurrence_rule,
+        order_index: task.order_index,
+        labels: taskLabelNames,
+        subtasks
+      }
+    }
+
+    const data: import('../../shared/types').ProjectTemplateData = {
+      statuses: projStatuses.map((s) => ({
+        name: s.name,
+        color: s.color,
+        icon: s.icon,
+        order_index: s.order_index,
+        is_done: s.is_done,
+        is_default: s.is_default
+      })),
+      labels: labelsForProject.map((l) => ({
+        name: l.name,
+        color: l.color,
+        order_index: l.order_index
+      })),
+      tasks: tasksForProject
+        .sort((a, b) => a.order_index - b.order_index)
+        .map(buildTaskTree)
+    }
+
+    await createProjectTemplate({
+      id: crypto.randomUUID(),
+      name: selectedProject.name,
+      color: selectedProject.color,
+      owner_id: currentUser.id,
+      data: JSON.stringify(data)
+    })
+    addToast({ message: 'Saved as project template' })
+  }, [selectedProject, currentUser, statuses, allTasks, createProjectTemplate, addToast])
 
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
@@ -478,9 +543,19 @@ export function AppLayout(): React.JSX.Element {
               </h1>
             )}
 
-            {/* Layout toggle - only on views that support kanban */}
+            {/* Layout toggle and project template button */}
             {(currentView === 'my-day' || currentView === 'project') && (
-              <div className="ml-auto flex items-center">
+              <div className="ml-auto flex items-center gap-2">
+                {currentView === 'project' && selectedProject && (
+                  <button
+                    onClick={handleSaveProjectAsTemplate}
+                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                    title="Save as Project Template"
+                    aria-label="Save as Project Template"
+                  >
+                    <LayoutTemplate size={16} />
+                  </button>
+                )}
                 <button
                   onClick={handleToggleLayoutMode}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"

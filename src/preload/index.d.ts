@@ -24,7 +24,10 @@ import type {
   Theme,
   ThemeConfig,
   CreateThemeInput,
-  UpdateThemeInput
+  UpdateThemeInput,
+  ProjectTemplate,
+  CreateProjectTemplateInput,
+  UpdateProjectTemplateInput
 } from '../shared/types'
 
 export interface TasksAPI {
@@ -44,6 +47,8 @@ export interface TasksAPI {
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   getLabels(taskId: string): Promise<TaskLabel[]>
   duplicate(id: string, newId: string): Promise<Task | null>
+  findAllTemplates(): Promise<Task[]>
+  saveAsTemplate(id: string, newId: string): Promise<Task | null>
 }
 
 export interface LabelsAPI {
@@ -120,6 +125,15 @@ export interface ThemesAPI {
   getConfig(id: string): Promise<ThemeConfig | null>
 }
 
+export interface ProjectTemplatesAPI {
+  findById(id: string): Promise<ProjectTemplate | null>
+  findByOwnerId(ownerId: string): Promise<ProjectTemplate[]>
+  findAll(): Promise<ProjectTemplate[]>
+  create(input: CreateProjectTemplateInput): Promise<ProjectTemplate>
+  update(id: string, input: UpdateProjectTemplateInput): Promise<ProjectTemplate | null>
+  delete(id: string): Promise<boolean>
+}
+
 export interface SupabaseConfig {
   url: string
   anonKey: string
@@ -162,6 +176,7 @@ export interface TodoozyAPI {
   activityLog: ActivityLogAPI
   settings: SettingsAPI
   themes: ThemesAPI
+  projectTemplates: ProjectTemplatesAPI
   auth: AuthAPI
   quickadd: QuickAddAPI
   tray: TrayAPI

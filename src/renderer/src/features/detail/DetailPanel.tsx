@@ -250,12 +250,13 @@ function DetailPanelContent({
   onCreateLabel
 }: DetailPanelContentProps): React.JSX.Element {
   const project = useProjectStore((s) => task.project_id ? s.projects[task.project_id] : undefined)
+  const isTemplate = task.is_template === 1
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex h-[36px] items-center justify-between border-b border-border px-4">
         <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-          Task Details
+          {isTemplate ? 'Template' : 'Task Details'}
         </span>
         <div className="flex items-center gap-3">
           {project && (
@@ -333,21 +334,27 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     return () => observer.disconnect()
   }, [position])
 
+  const isTemplate = task.is_template === 1
+
   const sections: React.ReactNode[] = [
     <DetailTitle key="title" title={task.title} onTitleChange={props.onTitleChange} />,
-    <Section key="status" label="Status">
-      <DetailStatusRow currentStatusId={task.status_id} statuses={statuses} isArchived={task.is_archived === 1} onStatusChange={props.onStatusChange} onToggleArchive={props.onToggleArchive} />
-    </Section>,
+    !isTemplate ? (
+      <Section key="status" label="Status">
+        <DetailStatusRow currentStatusId={task.status_id} statuses={statuses} isArchived={task.is_archived === 1} onStatusChange={props.onStatusChange} onToggleArchive={props.onToggleArchive} />
+      </Section>
+    ) : null,
     <Section key="priority" label="Priority">
       <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
     </Section>,
     <Section key="labels" label="Labels">
       <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} />
     </Section>,
-    <Section key="due" label="Due Date">
-      <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
-    </Section>,
-    task.completed_date ? (
+    !isTemplate ? (
+      <Section key="due" label="Due Date">
+        <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
+      </Section>
+    ) : null,
+    !isTemplate && task.completed_date ? (
       <Section key="completed" label="Completed">
         <span className="text-sm font-light text-success">{formatDate(task.completed_date)}</span>
       </Section>
@@ -355,12 +362,14 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     <Section key="recurrence" label="Recurrence">
       <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
     </Section>,
-    <Section key="snooze" label="Snooze">
-      <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
-    </Section>,
+    !isTemplate ? (
+      <Section key="snooze" label="Snooze">
+        <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
+      </Section>
+    ) : null,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
     <DetailDescription key="desc" description={task.description} onDescriptionChange={props.onDescriptionChange} />,
-    <DetailActivityLog key="activity" taskId={task.id} />
+    !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
 
   if (position !== 'bottom' || colCount <= 1) {

@@ -1,50 +1,65 @@
-import { useMemo, useRef, useEffect, useCallback } from 'react'
-import { Copy } from 'lucide-react'
+import { useMemo, useRef, useEffect, useCallback, useState } from 'react'
+import { Copy, Trash2, Pencil, Search, Rocket } from 'lucide-react'
 import { useTaskStore } from '../../shared/stores'
-import { useDefaultStatus } from '../../shared/stores'
-import { useProjectStore, selectCurrentProject } from '../../shared/stores'
+import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import { useTemplateStore, selectAllProjectTemplates } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
-import type { Task } from '../../../../shared/types'
+import { UseTemplateModal } from '../templates/UseTemplateModal'
+import { DeployProjectTemplateWizard } from '../templates/DeployProjectTemplateWizard'
+import type { Task, ProjectTemplate } from '../../../../shared/types'
 
 export function TemplatesView(): React.JSX.Element {
-  const currentProject = useProjectStore(selectCurrentProject)
-  const projectId = currentProject?.id ?? ''
-  const defaultStatus = useDefaultStatus(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
   const allTasks = useTaskStore((s) => s.tasks)
-  const { createTask, setCurrentTask } = useTaskStore()
+  const { deleteTask, setCurrentTask } = useTaskStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
+  const allProjects = useProjectStore(selectAllProjects)
+  const projectTemplates = useTemplateStore(selectAllProjectTemplates)
+  const { deleteProjectTemplate } = useTemplateStore()
   const { addToast } = useToast()
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const templateTasks = useMemo(
+  const [searchQuery, setSearchQuery] = useState('')
+  const [useTemplateTask, setUseTemplateTask] = useState<Task | null>(null)
+  const [deployTemplate, setDeployTemplate] = useState<ProjectTemplate | null>(null)
+
+  const taskTemplates = useMemo(
     () =>
       Object.values(allTasks)
-        .filter((t) => t.is_template === 1)
+        .filter((t) => t.is_template === 1 && t.parent_id === null)
         .sort((a, b) => a.order_index - b.order_index),
     [allTasks]
   )
 
-  const handleUseTemplate = useCallback(
-    async (template: Task) => {
-      if (!currentUser || !defaultStatus) return
+  const filteredTaskTemplates = useMemo(() => {
+    if (!searchQuery) return taskTemplates
+    const q = searchQuery.toLowerCase()
+    return taskTemplates.filter(
+      (t) => t.title.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)
+    )
+  }, [taskTemplates, searchQuery])
 
-      await createTask({
-        id: crypto.randomUUID(),
-        project_id: template.project_id,
-        owner_id: currentUser.id,
-        title: template.title,
-        status_id: defaultStatus.id,
-        priority: template.priority,
-        description: template.description,
-        order_index: 0,
-        is_in_my_day: 0,
-        is_template: 0
-      })
-      addToast({ message: `Created task from "${template.title}"` })
+  const filteredProjectTemplates = useMemo(() => {
+    if (!searchQuery) return projectTemplates
+    const q = searchQuery.toLowerCase()
+    return projectTemplates.filter((t) => t.name.toLowerCase().includes(q))
+  }, [projectTemplates, searchQuery])
+
+  const handleDeleteTaskTemplate = useCallback(
+    async (template: Task) => {
+      await deleteTask(template.id)
+      addToast({ message: 'Template deleted' })
     },
-    [currentUser, defaultStatus, createTask, addToast]
+    [deleteTask, addToast]
+  )
+
+  const handleDeleteProjectTemplate = useCallback(
+    async (template: ProjectTemplate) => {
+      await deleteProjectTemplate(template.id)
+      addToast({ message: 'Project template deleted' })
+    },
+    [deleteProjectTemplate, addToast]
   )
 
   // Keyboard navigation
@@ -55,14 +70,14 @@ export function TemplatesView(): React.JSX.Element {
     const handleKeyDown = (e: KeyboardEvent): void => {
       const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
       const currentIndex = currentTaskId
-        ? templateTasks.findIndex((t) => t.id === currentTaskId)
+        ? filteredTaskTemplates.findIndex((t) => t.id === currentTaskId)
         : -1
 
       switch (e.key) {
         case 'ArrowDown': {
           e.preventDefault()
-          const nextIndex = Math.min(currentIndex + 1, templateTasks.length - 1)
-          if (templateTasks[nextIndex]) setCurrentTask(templateTasks[nextIndex].id)
+          const nextIndex = Math.min(currentIndex + 1, filteredTaskTemplates.length - 1)
+          if (filteredTaskTemplates[nextIndex]) setCurrentTask(filteredTaskTemplates[nextIndex].id)
           break
         }
         case 'ArrowUp': {
@@ -70,7 +85,7 @@ export function TemplatesView(): React.JSX.Element {
           if (currentIndex <= 0) {
             setCurrentTask(null)
           } else {
-            setCurrentTask(templateTasks[currentIndex - 1].id)
+            setCurrentTask(filteredTaskTemplates[currentIndex - 1].id)
           }
           break
         }
@@ -78,7 +93,7 @@ export function TemplatesView(): React.JSX.Element {
           if (currentTaskId) {
             e.preventDefault()
             const task = allTasks[currentTaskId]
-            if (task) handleUseTemplate(task)
+            if (task) setUseTemplateTask(task)
           }
           break
         }
@@ -87,56 +102,231 @@ export function TemplatesView(): React.JSX.Element {
 
     container.addEventListener('keydown', handleKeyDown)
     return () => container.removeEventListener('keydown', handleKeyDown)
-  }, [selectedTaskIds, templateTasks, setCurrentTask, allTasks, handleUseTemplate])
+  }, [selectedTaskIds, filteredTaskTemplates, setCurrentTask, allTasks])
+
+  const noResults =
+    filteredTaskTemplates.length === 0 && filteredProjectTemplates.length === 0
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <div className="flex-1 overflow-y-auto">
-        {templateTasks.map((task) => (
-          <div
-            key={task.id}
-            onClick={() => setCurrentTask(task.id)}
-            className={`group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors ${
-              selectedTaskIds.has(task.id)
-                ? 'bg-accent/12 border-l-2 border-l-accent/15'
-                : 'hover:bg-foreground/6'
-            }`}
-            role="row"
-          >
-            <LayoutTemplateIcon />
-            <div className="flex flex-1 flex-col gap-0.5">
-              <span className="text-[15px] font-light tracking-tight text-foreground">
-                {task.title}
-              </span>
-              {task.description && (
-                <span className="text-[11px] font-light text-muted/60 line-clamp-1">
-                  {task.description}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleUseTemplate(task)
-              }}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent opacity-0 transition-opacity hover:bg-accent/10 group-hover:opacity-100"
-            >
-              <Copy size={12} />
-              Use Template
-            </button>
-          </div>
-        ))}
+      {/* Search bar */}
+      <div className="flex items-center gap-2 border-b border-border px-6 py-2">
+        <Search size={14} className="text-muted" />
+        <input
+          type="text"
+          placeholder="Search templates..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="flex-1 bg-transparent text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none"
+        />
+      </div>
 
-        {templateTasks.length === 0 && (
+      <div className="flex-1 overflow-y-auto">
+        {/* Task Templates Section */}
+        {filteredTaskTemplates.length > 0 && (
+          <div>
+            <div className="px-6 pb-1 pt-4">
+              <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+                Task Templates
+              </span>
+            </div>
+            {filteredTaskTemplates.map((task) => (
+              <TaskTemplateRow
+                key={task.id}
+                task={task}
+                isSelected={selectedTaskIds.has(task.id)}
+                onSelect={() => setCurrentTask(task.id)}
+                onUse={() => setUseTemplateTask(task)}
+                onEdit={() => setCurrentTask(task.id)}
+                onDelete={() => handleDeleteTaskTemplate(task)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Project Templates Section */}
+        {filteredProjectTemplates.length > 0 && (
+          <div>
+            <div className="px-6 pb-1 pt-4">
+              <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+                Project Templates
+              </span>
+            </div>
+            {filteredProjectTemplates.map((template) => (
+              <ProjectTemplateRow
+                key={template.id}
+                template={template}
+                onDeploy={() => setDeployTemplate(template)}
+                onDelete={() => handleDeleteProjectTemplate(template)}
+              />
+            ))}
+          </div>
+        )}
+
+        {noResults && (
           <div className="flex flex-1 items-center justify-center py-20">
             <div className="text-center">
-              <p className="text-sm font-light text-muted/60">No templates yet.</p>
+              <p className="text-sm font-light text-muted/60">
+                {searchQuery ? 'No templates match your search.' : 'No templates yet.'}
+              </p>
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                Mark tasks as templates to reuse them
+                {searchQuery
+                  ? 'Try a different search term'
+                  : 'Right-click a task to save as template'}
               </p>
             </div>
           </div>
         )}
+      </div>
+
+      {/* Use Template Modal */}
+      {useTemplateTask && currentUser && (
+        <UseTemplateModal
+          template={useTemplateTask}
+          projects={allProjects}
+          currentUser={currentUser}
+          onClose={() => setUseTemplateTask(null)}
+        />
+      )}
+
+      {/* Deploy Project Template Wizard */}
+      {deployTemplate && currentUser && (
+        <DeployProjectTemplateWizard
+          template={deployTemplate}
+          currentUser={currentUser}
+          onClose={() => setDeployTemplate(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// --- Task Template Row ---
+
+interface TaskTemplateRowProps {
+  task: Task
+  isSelected: boolean
+  onSelect: () => void
+  onUse: () => void
+  onEdit: () => void
+  onDelete: () => void
+}
+
+function TaskTemplateRow({
+  task,
+  isSelected,
+  onSelect,
+  onUse,
+  onEdit,
+  onDelete
+}: TaskTemplateRowProps): React.JSX.Element {
+  return (
+    <div
+      onClick={onSelect}
+      className={`group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors ${
+        isSelected
+          ? 'bg-accent/12 border-l-2 border-l-accent/15'
+          : 'hover:bg-foreground/6'
+      }`}
+      role="row"
+    >
+      <LayoutTemplateIcon />
+      <div className="flex flex-1 flex-col gap-0.5">
+        <span className="text-[15px] font-light tracking-tight text-foreground">
+          {task.title}
+        </span>
+        {task.description && (
+          <span className="line-clamp-1 text-[11px] font-light text-muted/60">
+            {task.description}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onUse()
+          }}
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10"
+          title="Use Template"
+        >
+          <Copy size={12} />
+          Use
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit()
+          }}
+          className="rounded p-1.5 text-muted hover:bg-foreground/6 hover:text-foreground"
+          title="Edit Template"
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
+          title="Delete Template"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// --- Project Template Row ---
+
+interface ProjectTemplateRowProps {
+  template: ProjectTemplate
+  onDeploy: () => void
+  onDelete: () => void
+}
+
+function ProjectTemplateRow({
+  template,
+  onDeploy,
+  onDelete
+}: ProjectTemplateRowProps): React.JSX.Element {
+  return (
+    <div
+      className="group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors hover:bg-foreground/6"
+      role="row"
+    >
+      <div
+        className="h-3 w-3 flex-shrink-0 rounded-full"
+        style={{ backgroundColor: template.color }}
+      />
+      <div className="flex flex-1 flex-col gap-0.5">
+        <span className="text-[15px] font-light tracking-tight text-foreground">
+          {template.name}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDeploy()
+          }}
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10"
+          title="Deploy Project"
+        >
+          <Rocket size={12} />
+          Deploy
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
+          title="Delete Template"
+        >
+          <Trash2 size={12} />
+        </button>
       </div>
     </div>
   )

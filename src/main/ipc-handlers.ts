@@ -200,6 +200,14 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.duplicate(id, newId) ?? null
   })
 
+  ipcMain.handle('tasks:findAllTemplates', () => {
+    return getRepos().tasks.findAllTemplates()
+  })
+
+  ipcMain.handle('tasks:saveAsTemplate', (_e, id: string, newId: string) => {
+    return getRepos().tasks.saveAsTemplate(id, newId) ?? null
+  })
+
   // ── Labels ─────────────────────────────────────────────────────────
   ipcMain.handle('labels:findById', (_e, id: string) => {
     return getRepos().labels.findById(id) ?? null
@@ -462,6 +470,37 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('themes:getConfig', (_e, id: string) => {
     return getRepos().themes.getConfig(id) ?? null
+  })
+
+  // ── Project Templates ────────────────────────────────────────────
+  ipcMain.handle('projectTemplates:findById', (_e, id: string) => {
+    return getRepos().projectTemplates.findById(id) ?? null
+  })
+
+  ipcMain.handle('projectTemplates:findByOwnerId', (_e, ownerId: string) => {
+    return getRepos().projectTemplates.findByOwnerId(ownerId)
+  })
+
+  ipcMain.handle('projectTemplates:findAll', () => {
+    return getRepos().projectTemplates.findAll()
+  })
+
+  ipcMain.handle(
+    'projectTemplates:create',
+    (_e, input: Parameters<Repositories['projectTemplates']['create']>[0]) => {
+      return getRepos().projectTemplates.create(input)
+    }
+  )
+
+  ipcMain.handle(
+    'projectTemplates:update',
+    (_e, id: string, input: Parameters<Repositories['projectTemplates']['update']>[1]) => {
+      return getRepos().projectTemplates.update(id, input) ?? null
+    }
+  )
+
+  ipcMain.handle('projectTemplates:delete', (_e, id: string) => {
+    return getRepos().projectTemplates.delete(id)
   })
 
   // ── Quick Add ─────────────────────────────────────────────────────

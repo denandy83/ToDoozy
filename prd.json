@@ -41,7 +41,7 @@
         "Project templates can be viewed, edited, deployed, and deleted",
         "Task templates can be used, edited, and deleted"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "26",

@@ -171,4 +171,19 @@ const migration_4: Migration = (db) => {
   projects.forEach((p, i) => stmt.run(i, p.id))
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4]
+const migration_5: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE project_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT DEFAULT '#888888',
+      owner_id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY(owner_id) REFERENCES users(id)
+    )
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5]

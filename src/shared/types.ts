@@ -248,3 +248,56 @@ export interface CreateActivityLogInput {
   old_value?: string | null
   new_value?: string | null
 }
+
+// ── Project Templates ─────────────────────────────────────────────────
+
+export interface ProjectTemplate {
+  id: string
+  name: string
+  color: string
+  owner_id: string
+  data: string // JSON string of ProjectTemplateData
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectTemplateData {
+  statuses: Array<{
+    name: string
+    color: string
+    icon: string
+    order_index: number
+    is_done: number
+    is_default: number
+  }>
+  labels: Array<{
+    name: string
+    color: string
+    order_index: number
+  }>
+  tasks: ProjectTemplateTask[]
+}
+
+export interface ProjectTemplateTask {
+  title: string
+  description: string | null
+  priority: number
+  recurrence_rule: string | null
+  order_index: number
+  labels: string[] // label names for mapping
+  subtasks: ProjectTemplateTask[]
+}
+
+export interface CreateProjectTemplateInput {
+  id: string
+  name: string
+  color: string
+  owner_id: string
+  data: string
+}
+
+export interface UpdateProjectTemplateInput {
+  name?: string
+  color?: string
+  data?: string
+}

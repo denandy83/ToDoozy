@@ -5,6 +5,7 @@ import { useStatusStore } from './shared/stores/statusStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import { useTaskStore } from './shared/stores/taskStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
+import { useTemplateStore } from './shared/stores/templateStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 
@@ -15,6 +16,7 @@ function App(): React.JSX.Element {
   const { hydrateLabels } = useLabelStore()
   const { hydrateAllForProject } = useTaskStore()
   const { hydrateSettings, hydrateThemes } = useSettingsStore()
+  const { hydrateProjectTemplates } = useTemplateStore()
 
   useEffect(() => {
     initAuth()
@@ -30,9 +32,10 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (isAuthenticated && currentUser) {
       hydrateProjects(currentUser.id)
+      hydrateProjectTemplates()
       window.api.tray.setUserId(currentUser.id)
     }
-  }, [isAuthenticated, currentUser, hydrateProjects])
+  }, [isAuthenticated, currentUser, hydrateProjects, hydrateProjectTemplates])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {

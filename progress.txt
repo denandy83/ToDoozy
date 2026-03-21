@@ -14,3 +14,27 @@ Started: Sat Mar 21 11:11:37 CET 2026
 - Clicking a task in tray navigates to My Day and selects that task
 - 15 unit tests for tray-utils, all passing
 - Pre-existing test failures: better-sqlite3 node version mismatch (54 repo tests), 3 parser/shortcut tests — not introduced by this story
+
+## Story #25: Task Templates & Project Templates
+- Added migration_5: `project_templates` table (id, name, color, owner_id, data JSON, timestamps)
+- Created `ProjectTemplateRepository` with CRUD (findById, findByOwnerId, findAll, create, update, delete)
+- Added `saveAsTemplate` to TaskRepository: copies task + subtasks + labels as template, strips dates/snooze/completion, resets statuses to default
+- Added `findAllTemplates` to TaskRepository: global (cross-project) template query
+- Types: `ProjectTemplate`, `ProjectTemplateData`, `ProjectTemplateTask`, create/update inputs
+- IPC handlers: `tasks:findAllTemplates`, `tasks:saveAsTemplate`, full `projectTemplates:*` CRUD
+- Preload bridge: `TasksAPI.findAllTemplates/saveAsTemplate`, `ProjectTemplatesAPI` interface
+- Created `useTemplateStore` Zustand store for project template state, hydrated on auth
+- Context menu: "Save as Template" option (LayoutTemplate icon) before Duplicate
+- Project header: LayoutTemplate icon button next to project name for "Save as Project Template"
+- TemplatesView: two sections (Task Templates, Project Templates) with search bar filtering both
+- Task template actions: Use (with project picker modal), Edit (opens detail panel), Delete
+- Project template actions: Deploy (wizard), Delete
+- UseTemplateModal: project picker with color dots, creates task+subtasks in target project, auto-creates missing labels
+- DeployProjectTemplateWizard: 5-step wizard (Name & Color → Statuses → Labels → Tasks → Review & Create)
+  - Each step is editable (add/remove/rename statuses, labels, tasks)
+  - Creates real project with all statuses, labels, tasks, memberships
+  - Navigates to new project after creation
+- Detail panel: shows "Template" header when editing templates; hides due date, snooze, status, completed date, activity log for templates
+- Templates are now global (loaded via `findAllTemplates` across all projects)
+- Typecheck: zero errors
+- Tests: same 5 pass / 4 fail as before (pre-existing better-sqlite3 issue)

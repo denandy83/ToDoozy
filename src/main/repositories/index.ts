@@ -7,6 +7,7 @@ import { LabelRepository } from './LabelRepository'
 import { ThemeRepository } from './ThemeRepository'
 import { SettingsRepository } from './SettingsRepository'
 import { ActivityLogRepository } from './ActivityLogRepository'
+import { ProjectTemplateRepository } from './ProjectTemplateRepository'
 
 export interface Repositories {
   users: UserRepository
@@ -17,6 +18,7 @@ export interface Repositories {
   themes: ThemeRepository
   settings: SettingsRepository
   activityLog: ActivityLogRepository
+  projectTemplates: ProjectTemplateRepository
 }
 
 export function createRepositories(db: Database.Database): Repositories {
@@ -28,7 +30,8 @@ export function createRepositories(db: Database.Database): Repositories {
     labels: new LabelRepository(db),
     themes: new ThemeRepository(db),
     settings: new SettingsRepository(db),
-    activityLog: new ActivityLogRepository(db)
+    activityLog: new ActivityLogRepository(db),
+    projectTemplates: new ProjectTemplateRepository(db)
   }
 }
 
@@ -40,5 +43,6 @@ export {
   LabelRepository,
   ThemeRepository,
   SettingsRepository,
-  ActivityLogRepository
+  ActivityLogRepository,
+  ProjectTemplateRepository
 }
