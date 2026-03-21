@@ -9,7 +9,6 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
 import { EditorToolbar } from './EditorToolbar'
 import { BubbleToolbar } from './BubbleToolbar'
-import { SlashCommandMenu } from './SlashCommandMenu'
 import { LinkPopover } from './LinkPopover'
 
 interface TiptapEditorProps {
@@ -17,9 +16,15 @@ interface TiptapEditorProps {
   onChange: (content: string | null) => void
 }
 
+export function normalizeUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
 export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JSX.Element {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [slashMenu, setSlashMenu] = useState<{ top: number; left: number } | null>(null)
   const [linkPopover, setLinkPopover] = useState<{
     top: number
     left: number
@@ -84,14 +89,16 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
             if (from !== to) {
               const url = prompt('Enter URL:')
               if (url) {
-                ed.chain().focus().setLink({ href: url }).run()
+                ed.chain().focus().setLink({ href: normalizeUrl(url) }).run()
               }
             }
           }
           return true
         }
-        // Escape blurs the editor
+        // Escape blurs the editor without closing the detail panel
         if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
           editor?.commands.blur()
           return true
         }
@@ -112,13 +119,21 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
         const linkEl = target.closest('a.tiptap-link')
         if (linkEl && editor) {
           event.preventDefault()
-          const rect = linkEl.getBoundingClientRect()
-          setLinkPopover({
-            top: rect.bottom + 4,
-            left: rect.left,
-            url: linkEl.getAttribute('href') ?? '',
-            text: linkEl.textContent ?? ''
-          })
+          const href = linkEl.getAttribute('href') ?? ''
+          if (event.metaKey || event.ctrlKey) {
+            // Cmd+Click: show edit popover
+            const rect = linkEl.getBoundingClientRect()
+            setLinkPopover({
+              top: rect.bottom + 4,
+              left: rect.left,
+              url: href,
+              text: linkEl.textContent ?? ''
+            })
+          } else {
+            // Click: open URL in browser
+            const url = href.match(/^https?:\/\//) ? href : `https://${href}`
+            window.open(url, '_blank')
+          }
           return true
         }
         setLinkPopover(null)
@@ -133,16 +148,6 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
         onChange(md || null)
       }, 1000)
 
-      // Check for slash command
-      const { from } = ed.state.selection
-      const textBefore = ed.state.doc.textBetween(Math.max(0, from - 1), from)
-      if (textBefore === '/') {
-        // Get cursor position for menu
-        const coords = ed.view.coordsAtPos(from)
-        setSlashMenu({ top: coords.bottom + 4, left: coords.left })
-      } else {
-        setSlashMenu(null)
-      }
     }
   })
 
@@ -190,6 +195,48 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
     return () => el.removeEventListener('paste', handlePaste)
   }, [editor])
 
+  // Show link popover on hover
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!editor) return
+    const el = editor.view.dom
+
+    const handleMouseOver = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement
+      const linkEl = target.closest('a.tiptap-link')
+      if (linkEl) {
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+        hoverTimerRef.current = setTimeout(() => {
+          const rect = linkEl.getBoundingClientRect()
+          setLinkPopover({
+            top: rect.bottom + 4,
+            left: rect.left,
+            url: linkEl.getAttribute('href') ?? '',
+            text: linkEl.textContent ?? ''
+          })
+        }, 1000)
+      }
+    }
+
+    const handleMouseOut = (e: MouseEvent): void => {
+      const target = e.relatedTarget as HTMLElement | null
+      if (!target?.closest('a.tiptap-link')) {
+        if (hoverTimerRef.current) {
+          clearTimeout(hoverTimerRef.current)
+          hoverTimerRef.current = null
+        }
+      }
+    }
+
+    el.addEventListener('mouseover', handleMouseOver)
+    el.addEventListener('mouseout', handleMouseOut)
+    return () => {
+      el.removeEventListener('mouseover', handleMouseOver)
+      el.removeEventListener('mouseout', handleMouseOut)
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    }
+  }, [editor])
+
   const handleBlur = useCallback(() => {
     if (!editor) return
     if (debounceRef.current) {
@@ -217,14 +264,6 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
         </div>
         <BubbleToolbar editor={editor} />
       </div>
-
-      {slashMenu && (
-        <SlashCommandMenu
-          editor={editor}
-          position={slashMenu}
-          onClose={() => setSlashMenu(null)}
-        />
-      )}
 
       {linkPopover && (
         <LinkPopover

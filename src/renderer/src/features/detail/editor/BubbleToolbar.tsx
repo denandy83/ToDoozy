@@ -2,6 +2,7 @@ import { useCallback, useState, useRef, useEffect } from 'react'
 import type { Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import { Bold, Italic, Strikethrough, Code, Link } from 'lucide-react'
+import { normalizeUrl } from './TiptapEditor'
 
 interface BubbleToolbarProps {
   editor: Editor
@@ -30,7 +31,7 @@ export function BubbleToolbar({ editor }: BubbleToolbarProps): React.JSX.Element
 
   const handleSubmitLink = useCallback(() => {
     if (linkUrl) {
-      editor.chain().focus().setLink({ href: linkUrl }).run()
+      editor.chain().focus().setLink({ href: normalizeUrl(linkUrl) }).run()
     } else {
       editor.chain().focus().unsetLink().run()
     }

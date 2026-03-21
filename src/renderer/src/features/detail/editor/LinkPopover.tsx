@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Editor } from '@tiptap/react'
 import { ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { normalizeUrl } from './TiptapEditor'
 
 interface LinkPopoverProps {
   editor: Editor
@@ -56,10 +57,10 @@ export function LinkPopover({
       .chain()
       .focus()
       .extendMarkRange('link')
-      .setLink({ href: editUrl })
+      .setLink({ href: normalizeUrl(editUrl) })
       .command(({ tr, dispatch }) => {
         if (dispatch && editText !== text) {
-          const linkMark = editor.schema.marks.link.create({ href: editUrl })
+          const linkMark = editor.schema.marks.link.create({ href: normalizeUrl(editUrl) })
           tr.replaceRangeWith(
             from,
             to,
@@ -126,14 +127,12 @@ export function LinkPopover({
           <div className="truncate text-sm font-light text-foreground">{text}</div>
           <div className="flex items-center gap-1 truncate text-[10px] text-muted">
             <ExternalLink size={10} />
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => window.open(url, '_blank')}
               className="truncate text-accent hover:underline"
             >
               {url}
-            </a>
+            </button>
           </div>
           <div className="flex items-center gap-1 border-t border-border pt-2">
             <button

@@ -175,3 +175,12 @@
 - **Spec Section:** N/A
 - **Passes:** true
 - **Implemented:** 2026-03-21
+
+---
+
+### #24 — macOS Tray Icon
+- **Description:** Persistent macOS system tray icon with task badge, left-click menu showing My Day tasks, right-click context menu, and window-close-to-tray behavior.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Monochrome template icon in menu bar, badge count, left-click menu with tasks, right-click menu, close-to-tray behavior, dock icon reopen.
+- **Passes:** true
+- **Implemented:** 2026-03-21

@@ -26,16 +26,18 @@ import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './share
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import type { ViewId } from './shared/stores/viewStore'
-import { useTemplateStore } from './shared/stores/templateStore'
 import { useAuthStore } from './shared/stores/authStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
 import { BulkContextMenu } from './shared/components/BulkContextMenu'
 import { ConfirmDeleteModal } from './shared/components/ConfirmDeleteModal'
+import { TimerOverlay } from './shared/components/TimerOverlay'
 import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
-import type { Task } from '../../shared/types'
+import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
+import type { Task, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
+import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -270,9 +272,11 @@ export function AppLayout(): React.JSX.Element {
   }, [sidebarPinned, setSidebarExpanded])
 
   // View task counts
+  const projectTemplates = useTemplateStore(selectAllProjectTemplates)
   const viewCounts = useMemo(() => {
     const taskList = Object.values(allTasks)
     const today = new Date().toISOString().split('T')[0]
+    const taskTemplateCount = taskList.filter((t) => t.is_template === 1 && t.parent_id === null).length
     return {
       'my-day': taskList.filter(
         (t) =>
@@ -282,9 +286,9 @@ export function AppLayout(): React.JSX.Element {
           (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
       ).length,
       archive: taskList.filter((t) => t.is_archived === 1 && t.parent_id === null).length,
-      templates: taskList.filter((t) => t.is_template === 1 && t.parent_id === null).length
+      templates: taskTemplateCount + projectTemplates.length
     }
-  }, [allTasks])
+  }, [allTasks, projectTemplates])
 
   // Per-project task counts
   const projectCounts = useMemo(() => {
@@ -403,7 +407,6 @@ export function AppLayout(): React.JSX.Element {
   const [projectNameValue, setProjectNameValue] = useState('')
   const projectNameRef = useRef<HTMLInputElement>(null)
   const { updateProject } = useProjectStore()
-  const { createProjectTemplate } = useTemplateStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 
   const handleStartEditProjectName = useCallback(() => {
@@ -422,7 +425,9 @@ export function AppLayout(): React.JSX.Element {
     setEditingProjectName(false)
   }, [projectNameValue, selectedProject, updateProject])
 
-  const handleSaveProjectAsTemplate = useCallback(async () => {
+  const [saveTemplateWizard, setSaveTemplateWizard] = useState<ProjectTemplate | null>(null)
+
+  const handleSaveProjectAsTemplate = useCallback(() => {
     if (!selectedProject || !currentUser) return
     const projStatuses = statuses
     const projLabels = useLabelStore.getState().labels
@@ -454,7 +459,7 @@ export function AppLayout(): React.JSX.Element {
       }
     }
 
-    const data: import('../../shared/types').ProjectTemplateData = {
+    const data: ProjectTemplateData = {
       statuses: projStatuses.map((s) => ({
         name: s.name,
         color: s.color,
@@ -473,15 +478,16 @@ export function AppLayout(): React.JSX.Element {
         .map(buildTaskTree)
     }
 
-    await createProjectTemplate({
+    setSaveTemplateWizard({
       id: crypto.randomUUID(),
-      name: selectedProject.name,
+      name: `${selectedProject.name} Template`,
       color: selectedProject.color,
       owner_id: currentUser.id,
-      data: JSON.stringify(data)
+      data: JSON.stringify(data),
+      created_at: '',
+      updated_at: ''
     })
-    addToast({ message: 'Saved as project template' })
-  }, [selectedProject, currentUser, statuses, allTasks, createProjectTemplate, addToast])
+  }, [selectedProject, currentUser, statuses, allTasks])
 
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
@@ -545,19 +551,20 @@ export function AppLayout(): React.JSX.Element {
               </h1>
             )}
 
-            {/* Layout toggle and project template button */}
+            {currentView === 'project' && selectedProject && (
+              <button
+                onClick={handleSaveProjectAsTemplate}
+                className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                title="Save as Project Template"
+                aria-label="Save as Project Template"
+              >
+                <LayoutTemplate size={16} />
+              </button>
+            )}
+
+            {/* Layout toggle */}
             {(currentView === 'my-day' || currentView === 'project') && (
               <div className="ml-auto flex items-center gap-2">
-                {currentView === 'project' && selectedProject && (
-                  <button
-                    onClick={handleSaveProjectAsTemplate}
-                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-                    title="Save as Project Template"
-                    aria-label="Save as Project Template"
-                  >
-                    <LayoutTemplate size={16} />
-                  </button>
-                )}
                 <button
                   onClick={handleToggleLayoutMode}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
@@ -618,11 +625,24 @@ export function AppLayout(): React.JSX.Element {
         <ContextMenu />
         <BulkContextMenu />
 
+        {/* Timer overlay */}
+        <TimerOverlay />
+
         {/* Delete confirmation */}
         <ConfirmDeleteModal />
 
         {/* Command palette */}
         <CommandPalette />
+
+        {/* Save project template wizard */}
+        {saveTemplateWizard && currentUser && (
+          <DeployProjectTemplateWizard
+            template={saveTemplateWizard}
+            currentUser={currentUser}
+            onClose={() => setSaveTemplateWizard(null)}
+            mode="save"
+          />
+        )}
       </div>
 
       {/* Drag overlay - ghost card */}

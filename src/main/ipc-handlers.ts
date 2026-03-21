@@ -568,11 +568,18 @@ export function registerIpcHandlers(): void {
     // In development, use the project directory
     const devServerPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
     const actualPath = existsSync(devServerPath) ? devServerPath : serverPath
+
+    // Use the real Electron binary with ELECTRON_RUN_AS_NODE=1 so better-sqlite3 native module matches
+    // In dev, resolve via require('electron') which points to the actual binary, not the cli.js wrapper
+    const devElectronBin = join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
+    const actualElectron = existsSync(devElectronBin) ? devElectronBin : app.getPath('exe')
+
     const config = {
       mcpServers: {
-        todoozy: {
-          command: 'node',
-          args: [actualPath]
+        ToDoozy: {
+          command: actualElectron,
+          args: [actualPath],
+          env: { ELECTRON_RUN_AS_NODE: '1' }
         }
       }
     }

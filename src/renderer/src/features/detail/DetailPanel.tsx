@@ -259,7 +259,7 @@ function DetailPanelContent({
           {isTemplate ? 'Template' : 'Task Details'}
         </span>
         <div className="flex items-center gap-3">
-          {project && (
+          {project && !isTemplate && (
             <div className="flex items-center gap-1.5">
               <div
                 className="h-2 w-2 flex-shrink-0 rounded-full"

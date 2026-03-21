@@ -1,0 +1,95 @@
+{
+  "project": "ToDoozy",
+  "branchName": "ralph/features-24-25-26-27",
+  "stories": [
+    {
+      "id": "24",
+      "title": "macOS Tray Icon",
+      "description": "Add a persistent macOS system tray (menu bar) icon for ToDoozy that provides quick access to the app and today's tasks.\n\n**Tray Icon:**\n- Monochrome template image (iconTemplate.png / iconTemplate@2x.png, white-on-transparent, 16x16 / 32x32) so macOS automatically adapts to light/dark menu bar. Generate this from the existing app icon (resources/icon.png) — create a simplified monochrome silhouette version.\n- Badge shows the total count of non-done (open + in-progress) My Day tasks. No badge when count is 0.\n- Tray icon is always visible while the app is running.\n\n**Left-click menu:**\n- 'Quick Add Task' at the top — triggers the same action as the quick-add keyboard shortcut (floating quick-add overlay, independent of main window).\n- Up to 6 My Day tasks, split into two groups:\n  - **In Progress** (top 3): sorted by the same ordering as the My Day view\n  - **Open** (top 3): sorted by the same ordering as the My Day view\n  - If either group has fewer than 3, the list is just shorter (the other group does NOT expand to fill).\n- Each task shows: title + status indicator (the bucket/circle icon representing open vs in-progress). Done tasks excluded.\n- If there are more non-done tasks beyond the 6 shown, show 'View all in My Day...' at the bottom which opens/focuses the main window on My Day.\n- Clicking a task opens/focuses the main window and navigates to that task.\n\n**Right-click context menu:**\n- Open ToDoozy (shows/focuses main window)\n- Add Task (triggers floating quick-add overlay)\n- Quit ToDoozy (fully quits the app)\n\n**Window close behavior:**\n- Closing the window (red X) hides it to tray instead of quitting. The app continues running.\n- Cmd+Q fully quits the app (standard macOS convention).\n- Clicking dock icon re-opens the main window (app.on('activate')).\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Monochrome template icon appears in macOS menu bar on app launch",
+        "Badge displays count of non-done My Day tasks; updates in real-time as tasks change",
+        "Left-click shows menu with 'Quick Add Task' and up to 6 tasks (top 3 in-progress, then top 3 open), respecting My Day sort order",
+        "If more non-done tasks exist beyond the 6, 'View all in My Day...' appears at bottom",
+        "Clicking 'Quick Add Task' triggers floating quick-add overlay without showing main window",
+        "Clicking a task focuses main window and navigates to that task",
+        "Right-click context menu: Open, Add Task, Quit",
+        "Closing main window hides to tray; app stays running",
+        "Cmd+Q fully quits the app",
+        "Reopening from tray or dock icon restores the window"
+      ],
+      "passes": false
+    },
+    {
+      "id": "25",
+      "title": "Task Templates & Project Templates",
+      "description": "Add a complete template system to ToDoozy with two template types: Task Templates and Project Templates.\n\n**Task Templates:**\n- Created via right-click context menu → 'Save as Template' on any task.\n- Saves: title, description, priority, labels, recurrence, subtasks (full tree). Strips: due dates, snooze, completed dates. All statuses reset to default (Not Started).\n- Templates are global — usable across any project.\n- Templates view (Cmd+4) shows task templates in a flat, searchable list matching app styling.\n- Actions on a task template: Use Template, Edit, Delete.\n- **Use Template:** Shows a project picker dropdown (same style as My Day add-task project selector — color dot + project name). Creates the parent task + all subtasks in the target project. Labels that don't exist in the target project are auto-created. Opens the newly created task in the detail panel. Toast: 'Task created from template.'\n- **Edit:** Opens the template in the detail panel. Same fields as a regular task but due date, snooze, completed date, and status changes are disabled/hidden. Edits save to the template, not a live task.\n\n**Project Templates:**\n- Created via a 'Save as Project Template' button/icon next to the project name in the project view header.\n- Saves everything the project has: name, color, statuses, labels, tasks with full subtask tree, descriptions, priorities, recurrence. Strips: due dates, completed dates, snooze. All task statuses reset to default.\n- Project templates appear in the Templates view under a 'Project Templates' section, below Task Templates. Flat, searchable list.\n- Actions: View, Edit, Deploy, Delete.\n- **Deploy:** Opens a multi-step wizard modal:\n  - Step 1: Name & Color (pre-filled from template, editable)\n  - Step 2: Statuses (pre-filled, add/remove/rename)\n  - Step 3: Labels (pre-filled, add/remove/edit)\n  - Step 4: Tasks (tree view of tasks/subtasks, add/remove/edit)\n  - Step 5: Review & Create\n  - 'Create Project' finalizes and creates the real project. 'Cancel' discards.\n  - After creation, navigates to the new project.\n- **Edit:** Same wizard flow but for modifying the template itself. Fields that don't apply (due dates, completion dates, snooze) are disabled.\n\n**Templates View Structure:**\n- Two sections: 'Task Templates' and 'Project Templates' with section headers (text-[10px] font-bold uppercase tracking-[0.3em]).\n- Flat searchable list within each section.\n- Search input at top filters both sections.\n- Same styling as other views in the app.\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Right-click any task → 'Save as Template' creates a task template with title, description, priority, labels, recurrence, and subtasks; statuses reset, no due dates/snooze",
+        "Task templates are global (usable in any project)",
+        "Templates view shows Task Templates and Project Templates sections, both searchable",
+        "'Use Template' on a task template shows project picker, creates task + subtasks in target project, auto-creates missing labels, opens created task in detail panel",
+        "Editing a task template opens detail panel with due date, snooze, status, and completed date fields disabled",
+        "'Save as Project Template' button exists next to project name in project view header",
+        "Project template saves all project data (statuses, labels, tasks/subtasks, priorities, recurrence) with dates/snooze/completion stripped and statuses reset",
+        "'Deploy' opens a multi-step wizard (Name & Color → Statuses → Labels → Tasks → Review → Create Project)",
+        "Wizard fields are pre-filled from template and editable",
+        "'Create Project' in wizard creates the real project and navigates to it",
+        "'Cancel' in wizard discards without creating anything",
+        "Project templates can be viewed, edited, deployed, and deleted",
+        "Task templates can be used, edited, and deleted"
+      ],
+      "passes": false
+    },
+    {
+      "id": "26",
+      "title": "MCP Server for AI Integration",
+      "description": "Add a Model Context Protocol (MCP) server to ToDoozy so AI assistants (Claude Code, Claude Desktop, etc.) can programmatically manage tasks, projects, labels, and more.\n\n**Architecture:**\n- Standalone Node.js script using @modelcontextprotocol/sdk (already a dependency), communicating via stdio transport.\n- Talks directly to the same SQLite database the Electron app uses.\n- Runs independently of Electron — AI client launches it as a subprocess.\n\n**MCP Tools exposed:**\n- **Tasks:** create, list, get, update, delete, complete, reopen, set_priority, set_due_date, set_description, set_recurrence, add_to_my_day, remove_from_my_day, snooze, archive, unarchive, duplicate, save_as_template\n- **Subtasks:** create, list\n- **Projects:** list, get, create, update, delete\n- **Labels:** list, create, assign_to_task, remove_from_task\n- **Statuses:** list (per project)\n- **Search:** search tasks with filters (status, priority, label, due date, project, keyword)\n- **My Day:** list today's tasks\n- **Templates:** list, use_task_template, deploy_project_template\n\n**Settings UI (Settings > MCP):**\n- Toggle to enable/disable the MCP server\n- 'Copy MCP Config' button — copies the JSON config snippet for pasting into Claude Desktop / Claude Code settings\n- Shows the path to the MCP server script\n- Status indicator showing if the server script is available\n\n**Security:** stdio transport is inherently local (AI client spawns it as a subprocess), so no API key needed. The security boundary is the user's OS permissions.\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "MCP server script exists and can be launched via stdio by an AI client",
+        "All task CRUD operations exposed as MCP tools (create, list, get, update, delete, complete, reopen)",
+        "Task metadata tools work: set_priority, set_due_date, set_description, set_recurrence, snooze, archive/unarchive, duplicate, save_as_template, add/remove from My Day",
+        "Subtask tools: create and list subtasks under a parent",
+        "Project tools: list, get, create, update, delete",
+        "Label tools: list, create, assign_to_task, remove_from_task",
+        "Status tools: list statuses per project",
+        "Search tool filters by status, priority, label, due date, project, and keyword",
+        "My Day tool lists today's tasks",
+        "Template tools: list templates, use task template, deploy project template",
+        "Settings > MCP section with enable/disable toggle",
+        "'Copy MCP Config' button copies valid JSON config for Claude Desktop / Claude Code",
+        "Server path is displayed in settings",
+        "MCP server reads from the same SQLite database as the Electron app"
+      ],
+      "passes": false
+    },
+    {
+      "id": "27",
+      "title": "Rich Text Editor with Tiptap",
+      "description": "Replace the current markdown textarea + preview split in DetailDescription.tsx with a Tiptap WYSIWYG editor that stores markdown in the database. No data migration needed — existing markdown descriptions render correctly in Tiptap.\n\n**Dependencies:**\n- @tiptap/react, @tiptap/starter-kit, @tiptap/extension-link, @tiptap/extension-image, @tiptap/extension-task-list, @tiptap/extension-task-item, @tiptap/extension-placeholder, tiptap-markdown\n\n**Editor:**\n- Replaces the edit/preview toggle with a single WYSIWYG surface\n- Stores markdown in the DB via tiptap-markdown (serialize on save, parse on load)\n- 1-second autosave debounce (matches existing behavior)\n- Placeholder: 'Add a description...'\n- Escape blurs the editor\n\n**Toolbar — Fixed (above editor):**\n- Block-level controls: Heading 1/2/3 dropdown, Bullet List, Numbered List, Checklist, Code Block, Horizontal Rule, Image, Attach File\n\n**Toolbar — Floating bubble (on text selection):**\n- Inline controls: Bold, Italic, Strikethrough, Inline Code, Link\n\n**Link editing:**\n- Cmd+K when editor is focused inserts/edits a link (does NOT open command palette)\n- Cmd+K when editor is NOT focused opens command palette as usual\n- Clicking an existing link shows a popover with: display text, URL, Edit button, Remove button\n- Auto-link detection: pasting a URL auto-converts to a clickable link\n\n**Slash commands:**\n- Type / to open a menu with: Heading 1, Heading 2, Heading 3, Bullet List, Numbered List, Checklist, Code Block, Image, Attach File, Horizontal Rule\n- Arrow keys navigate, Enter selects, Escape dismisses\n\n**Image support:**\n- Cmd+V paste images as base64 (same as current, 10MB limit)\n- Image insert via slash command or toolbar button\n- Images render inline in the editor\n\n**Attach File:**\n- Button in toolbar and slash command menu\n- Greyed out with tooltip 'Configure cloud storage in Settings to attach files' until cloud storage is configured\n- Cloud storage configuration is a separate future story\n\n**Code blocks:**\n- Monospace font, no syntax highlighting\n- Enter inside code block continues the block, Cmd+Enter exits\n\n**Checklist:**\n- Interactive checkboxes (clickable in the editor)\n- Stored as - [ ] / - [x] in markdown\n\n**Keyboard shortcuts:**\n- Cmd+B: Bold, Cmd+I: Italic, Cmd+Shift+S: Strikethrough, Cmd+E: Inline code\n- Cmd+K: Insert/edit link (when editor focused)\n- Cmd+Shift+7: Numbered list, Cmd+Shift+8: Bullet list, Cmd+Shift+9: Checklist\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Tiptap WYSIWYG editor replaces the textarea + preview toggle in DetailDescription",
+        "Existing markdown descriptions render correctly without migration",
+        "Description is stored as markdown in the database",
+        "Fixed toolbar shows block-level controls (headings, lists, checklist, code block, HR, image, attach file)",
+        "Floating bubble toolbar appears on text selection with inline controls (bold, italic, strikethrough, code, link)",
+        "Slash command menu opens on / with all block types",
+        "Cmd+K inserts/edits link when editor is focused, opens command palette otherwise",
+        "Clicking a link shows edit popover with display text, URL, Edit, and Remove",
+        "Pasting URLs auto-converts to clickable links",
+        "Image paste works (base64, 10MB limit)",
+        "Attach File button is greyed out with tooltip when cloud storage is not configured",
+        "Checklist items are interactive (clickable checkboxes)",
+        "Code blocks render in monospace without syntax highlighting",
+        "1-second autosave debounce",
+        "All standard keyboard shortcuts work (Cmd+B, Cmd+I, etc.)",
+        "Escape blurs the editor"
+      ],
+      "passes": false
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useCallback, useState } from 'react'
-import { Copy, Trash2, Pencil, Search, Rocket } from 'lucide-react'
+import { Copy, Trash2, Pencil, Search, Rocket, ChevronRight } from 'lucide-react'
 import { useTaskStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
@@ -23,6 +23,7 @@ export function TemplatesView(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [useTemplateTask, setUseTemplateTask] = useState<Task | null>(null)
   const [deployTemplate, setDeployTemplate] = useState<ProjectTemplate | null>(null)
+  const [editTemplate, setEditTemplate] = useState<ProjectTemplate | null>(null)
 
   const taskTemplates = useMemo(
     () =>
@@ -134,8 +135,10 @@ export function TemplatesView(): React.JSX.Element {
               <TaskTemplateRow
                 key={task.id}
                 task={task}
+                subtasks={Object.values(allTasks).filter((t) => t.parent_id === task.id).sort((a, b) => a.order_index - b.order_index)}
                 isSelected={selectedTaskIds.has(task.id)}
                 onSelect={() => setCurrentTask(task.id)}
+                onSelectSubtask={(id) => setCurrentTask(id)}
                 onUse={() => setUseTemplateTask(task)}
                 onEdit={() => setCurrentTask(task.id)}
                 onDelete={() => handleDeleteTaskTemplate(task)}
@@ -157,6 +160,7 @@ export function TemplatesView(): React.JSX.Element {
                 key={template.id}
                 template={template}
                 onDeploy={() => setDeployTemplate(template)}
+                onEdit={() => setEditTemplate(template)}
                 onDelete={() => handleDeleteProjectTemplate(template)}
               />
             ))}
@@ -197,6 +201,16 @@ export function TemplatesView(): React.JSX.Element {
           onClose={() => setDeployTemplate(null)}
         />
       )}
+
+      {/* Edit Project Template Wizard */}
+      {editTemplate && currentUser && (
+        <DeployProjectTemplateWizard
+          template={editTemplate}
+          currentUser={currentUser}
+          onClose={() => setEditTemplate(null)}
+          mode="save"
+        />
+      )}
     </div>
   )
 }
@@ -205,8 +219,10 @@ export function TemplatesView(): React.JSX.Element {
 
 interface TaskTemplateRowProps {
   task: Task
+  subtasks: Task[]
   isSelected: boolean
   onSelect: () => void
+  onSelectSubtask: (taskId: string) => void
   onUse: () => void
   onEdit: () => void
   onDelete: () => void
@@ -214,66 +230,107 @@ interface TaskTemplateRowProps {
 
 function TaskTemplateRow({
   task,
+  subtasks,
   isSelected,
   onSelect,
+  onSelectSubtask,
   onUse,
   onEdit,
   onDelete
 }: TaskTemplateRowProps): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const hasChildren = subtasks.length > 0
+
   return (
-    <div
-      onClick={onSelect}
-      className={`group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors ${
-        isSelected
-          ? 'bg-accent/12 border-l-2 border-l-accent/15'
-          : 'hover:bg-foreground/6'
-      }`}
-      role="row"
-    >
-      <LayoutTemplateIcon />
-      <div className="flex flex-1 flex-col gap-0.5">
-        <span className="text-[15px] font-light tracking-tight text-foreground">
-          {task.title}
-        </span>
-        {task.description && (
-          <span className="line-clamp-1 text-[11px] font-light text-muted/60">
-            {task.description}
-          </span>
+    <div>
+      <div
+        onClick={onSelect}
+        className={`group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors ${
+          isSelected
+            ? 'bg-accent/12 border-l-2 border-l-accent/15'
+            : 'hover:bg-foreground/6'
+        }`}
+        role="row"
+      >
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded((prev) => !prev)
+            }}
+            className="flex-shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/6"
+          >
+            <ChevronRight
+              size={14}
+              className={`transition-transform motion-safe:duration-150 ${expanded ? 'rotate-90' : ''}`}
+            />
+          </button>
+        ) : (
+          <LayoutTemplateIcon />
         )}
+        <div className="flex flex-1 flex-col gap-0.5">
+          <span className="text-[15px] font-light tracking-tight text-foreground">
+            {task.title}
+          </span>
+          {task.description && (
+            <span className="line-clamp-1 text-[11px] font-light text-muted/60">
+              {task.description}
+            </span>
+          )}
+          {hasChildren && !expanded && (
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted/40">
+              {subtasks.length} subtask{subtasks.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onUse()
+            }}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10"
+            title="Use Template"
+          >
+            <Copy size={12} />
+            Use
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onEdit()
+            }}
+            className="rounded p-1.5 text-muted hover:bg-foreground/6 hover:text-foreground"
+            title="Edit Template"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
+            title="Delete Template"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <button
+      {expanded && subtasks.map((sub) => (
+        <div
+          key={sub.id}
           onClick={(e) => {
             e.stopPropagation()
-            onUse()
+            onSelectSubtask(sub.id)
           }}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10"
-          title="Use Template"
+          className="flex cursor-pointer items-center gap-3 border-b border-border/30 py-2 pl-14 pr-6 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
         >
-          <Copy size={12} />
-          Use
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit()
-          }}
-          className="rounded p-1.5 text-muted hover:bg-foreground/6 hover:text-foreground"
-          title="Edit Template"
-        >
-          <Pencil size={12} />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
-          title="Delete Template"
-        >
-          <Trash2 size={12} />
-        </button>
-      </div>
+          <span className="text-[13px] font-light tracking-tight">
+            {sub.title}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -283,14 +340,30 @@ function TaskTemplateRow({
 interface ProjectTemplateRowProps {
   template: ProjectTemplate
   onDeploy: () => void
+  onEdit: () => void
   onDelete: () => void
+}
+
+function countTemplateTasks(tasks: { subtasks: { subtasks: unknown[] }[] }[]): number {
+  let count = tasks.length
+  for (const t of tasks) count += countTemplateTasks(t.subtasks as typeof tasks)
+  return count
 }
 
 function ProjectTemplateRow({
   template,
   onDeploy,
+  onEdit,
   onDelete
 }: ProjectTemplateRowProps): React.JSX.Element {
+  const data = useMemo(() => {
+    try { return JSON.parse(template.data) as { statuses: unknown[]; labels: unknown[]; tasks: { subtasks: { subtasks: unknown[] }[] }[] } }
+    catch { return { statuses: [], labels: [], tasks: [] } }
+  }, [template.data])
+
+  const taskCount = useMemo(() => countTemplateTasks(data.tasks), [data.tasks])
+  const createdDate = template.created_at ? new Date(template.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+
   return (
     <div
       className="group flex items-center gap-3 border-b border-border/50 px-6 py-3 transition-colors hover:bg-foreground/6"
@@ -304,6 +377,9 @@ function ProjectTemplateRow({
         <span className="text-[15px] font-light tracking-tight text-foreground">
           {template.name}
         </span>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted/50">
+          {data.statuses.length} statuses · {data.labels.length} labels · {taskCount} tasks{createdDate ? ` · ${createdDate}` : ''}
+        </span>
       </div>
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <button
@@ -316,6 +392,16 @@ function ProjectTemplateRow({
         >
           <Rocket size={12} />
           Deploy
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit()
+          }}
+          className="rounded p-1.5 text-muted hover:bg-foreground/6 hover:text-foreground"
+          title="Edit Template"
+        >
+          <Pencil size={12} />
         </button>
         <button
           onClick={(e) => {

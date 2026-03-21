@@ -1,0 +1,64 @@
+# Ralph Progress Log
+Started: Fri Mar 20 12:30:44 CET 2026
+---
+
+## Story #20: Global quick-add window with customizable shortcut
+- Created `src/main/quick-add.ts` — frameless, always-on-top BrowserWindow for quick-add
+- Created `src/shared/shortcut-utils.ts` — reserved macOS shortcuts map, keyEventToAccelerator, validation
+- Modified `src/main/index.ts` — macOS lifecycle (hide-on-close, dock activate, before-quit), global shortcut registration, auth guard
+- Modified `src/main/ipc-handlers.ts` — quickadd:hide, quickadd:notifyTaskCreated (broadcasts to other windows), quickadd:updateShortcut (validates, registers, saves)
+- Updated preload bridge with QuickAddAPI (hide, notifyTaskCreated, updateShortcut, onFocus) and onTasksChanged listener
+- Created `src/renderer/src/QuickAddApp.tsx` — auto-focused input, destination dropdown (My Day + all projects), theme application, Enter submits + closes, Escape closes
+- Modified `src/renderer/src/main.tsx` — routes to QuickAddApp when ?window=quickadd query param present
+- Modified `src/renderer/src/App.tsx` — listens for tasks-changed IPC to silently refresh task store
+- Created `src/renderer/src/features/settings/ShortcutRecorder.tsx` — Record button captures keydown, validates against reserved shortcuts, calls updateShortcut IPC
+- Added ShortcutRecorder to GeneralSettings in UnifiedSettingsModal
+- 14 new tests for shortcut-utils (reserved detection, keyEventToAccelerator, default shortcut)
+- Decision: used same renderer entry with query parameter routing instead of separate HTML entry — simpler, avoids vite config changes
+- Decision: quick-add window uses `type: 'panel'` on macOS for proper overlay behavior
+- Decision: auth guard checks .auth-session file existence in main process
+
+## Story #21: Smart input parsing with @label, p:priority, and d:date syntax
+- Created `src/renderer/src/shared/hooks/smartInputParser.ts` — operator detection, label/priority/date filtering, auto-color assignment, text removal utilities
+- Created `src/renderer/src/shared/hooks/useSmartInput.ts` — React hook managing smart input state (attached labels, priority, date, popup state, suppressed positions)
+- Created `src/renderer/src/shared/components/InputSuggestionPopup.tsx` — portal-based popup with arrow nav, Enter/Tab select, Escape dismiss, themed styling
+- Rewrote `AddTaskInput.tsx` to integrate useSmartInput — now shows chip area below input for labels (LabelChip), priority (PriorityBadge), and date
+- Updated `TaskListView.tsx` and `MyDayView.tsx` to use new SmartTaskData interface — tasks now created with priority, due_date, and labels in one flow
+- Integrated smart parsing into `QuickAddApp.tsx` — loads project labels dynamically, supports all three operators
+- Updated command palette to support `d:` operator alongside legacy `due:` prefix
+- 32 new tests for smartInputParser (detectOperator, filterLabels, filterPriorities, filterDates, getNextAutoColor, removeOperatorText)
+- Decision: popup uses document.body portal with z-[9999] positioned via getBoundingClientRect
+- Decision: label-create resolves async but popup closes immediately for responsive UX
+- Decision: suppressed positions tracked per operator instance to allow Escape-then-retype behavior
+
+## Story #22 — Copy task titles to clipboard
+- Added `useCopyTasks` hook (shared/hooks/useCopyTasks.ts) with clipboard logic + toast feedback
+- Added Cmd+C keyboard handler to TaskListView and MyDayView (works in both list and kanban modes)
+- Added "Copy" menu item to single-task ContextMenu (after Duplicate, before Delete) with Clipboard icon
+- Added "Copy" menu item to BulkContextMenu (after Snooze, before Delete) with Clipboard icon
+- Single task: copies title as plain text. Multiple tasks: copies as bulleted markdown list
+- Toast: "Copied" for single, "Copied N tasks" for multiple
+- Cmd+C falls through to default browser behavior when no tasks selected or input is focused
+- Kanban view: Cmd+C works via event bubbling from parent container handler
+- Pre-existing test failures: better-sqlite3 native module version mismatch (NODE_MODULE_VERSION 145 vs 141)
+
+## Story #23: Replace Backlog with per-project sidebar navigation
+
+### Changes Made
+- **Database**: Added migration_4 to add `sidebar_order` column to projects table
+- **Types**: Added `sidebar_order` to `Project` and `UpdateProjectInput` interfaces
+- **ViewStore**: Changed `ViewId` from `'backlog'` to `'project'`, added `selectedProjectId` and `setSelectedProject()`
+- **Sidebar**: Replaced single Backlog nav item with PROJECTS section showing top 5 projects with More/Less expand, color dots, task counts
+- **AppLayout**: Removed ProjectSwitcher, use selectedProjectId from viewStore, dynamic view title from project name, per-project layout memory (list/kanban persisted to settings table)
+- **Keyboard shortcuts**: Cmd+2 = first project, Tab/Shift+Tab cycles projects in project view, Cmd+3 = Archive, Cmd+4 = Templates
+- **MyDayView**: Groups tasks by project first then by status, project headers with color dots, aggregates labels from all projects with My Day tasks, inline project selector dropdown for add-task input
+- **Settings > Projects**: Added drag-and-drop reorder using @dnd-kit with sidebar_order persistence
+- **ProjectRepository**: Added `updateSidebarOrder()` batch method, ordered by `sidebar_order` ASC
+- **IPC/Preload**: Added `projects:updateSidebarOrder` handler and typed bridge method
+- **Removed**: ProjectSwitcher component and Backlog view entirely
+- **Command palette**: Removed legacy `due:` operator (only `d:` recognized now)
+
+### Decisions
+- Kept `currentProjectId` in projectStore synced with `selectedProjectId` from viewStore for backward compatibility with existing components (ArchiveView, TemplatesView, LabelSettingsContent, ContextMenu, etc.)
+- Default view changed from 'backlog' to 'my-day' since Backlog no longer exists
+- Project groups in My Day only show project headers when multiple projects have My Day tasks

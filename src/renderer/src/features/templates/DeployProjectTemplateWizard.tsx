@@ -5,6 +5,7 @@ import { useProjectStore } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useTaskStore } from '../../shared/stores'
+import { useTemplateStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useToast } from '../../shared/components/Toast'
 import type {
@@ -18,6 +19,7 @@ interface DeployWizardProps {
   template: ProjectTemplate
   currentUser: User
   onClose: () => void
+  mode?: 'deploy' | 'save'
 }
 
 type WizardStep = 'name' | 'statuses' | 'labels' | 'tasks' | 'review'
@@ -48,7 +50,8 @@ interface WizardLabel {
 export function DeployProjectTemplateWizard({
   template,
   currentUser,
-  onClose
+  onClose,
+  mode = 'deploy'
 }: DeployWizardProps): React.JSX.Element {
   const data: ProjectTemplateData = JSON.parse(template.data)
 
@@ -61,6 +64,7 @@ export function DeployProjectTemplateWizard({
   const [creating, setCreating] = useState(false)
 
   const { createProject } = useProjectStore()
+  const { createProjectTemplate, updateProjectTemplate } = useTemplateStore()
   const { addToast } = useToast()
 
   useEffect(() => {
@@ -187,6 +191,35 @@ export function DeployProjectTemplateWizard({
     }
   }, [creating, projectName, projectColor, statuses, labels, tasks, currentUser, createProject, addToast, onClose])
 
+  const handleSaveTemplate = useCallback(async () => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const templateData: ProjectTemplateData = { statuses, labels, tasks }
+      const dataStr = JSON.stringify(templateData)
+      if (template.id && template.created_at) {
+        // Update existing template
+        await updateProjectTemplate(template.id, { name: projectName, color: projectColor, data: dataStr })
+      } else {
+        // Create new template
+        await createProjectTemplate({
+          id: template.id || crypto.randomUUID(),
+          name: projectName,
+          color: projectColor,
+          owner_id: currentUser.id,
+          data: dataStr
+        })
+      }
+      addToast({ message: 'Project template saved' })
+      onClose()
+    } catch (err) {
+      console.error('Failed to save project template:', err)
+      addToast({ message: 'Failed to save template', variant: 'danger' })
+    } finally {
+      setCreating(false)
+    }
+  }, [creating, projectName, projectColor, statuses, labels, tasks, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose])
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -217,7 +250,7 @@ export function DeployProjectTemplateWizard({
         </div>
 
         {/* Step content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="h-[400px] overflow-y-auto p-6">
           {step === 'name' && (
             <StepNameColor
               name={projectName}
@@ -264,11 +297,11 @@ export function DeployProjectTemplateWizard({
             )}
             {isLast ? (
               <button
-                onClick={handleCreate}
+                onClick={mode === 'save' ? handleSaveTemplate : handleCreate}
                 disabled={creating || !projectName.trim()}
                 className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40"
               >
-                {creating ? 'Creating...' : 'Create Project'}
+                {creating ? (mode === 'save' ? 'Saving...' : 'Creating...') : (mode === 'save' ? 'Save Template' : 'Create Project')}
               </button>
             ) : (
               <button
@@ -356,9 +389,19 @@ function StepStatuses({ statuses, onChange }: StepStatusesProps): React.JSX.Elem
     onChange(updated)
   }
 
+  // Canonical order: default first, middle by order_index, done last
+  const sortedIndices = statuses
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => {
+      const aGroup = a.s.is_default === 1 ? 0 : a.s.is_done === 1 ? 2 : 1
+      const bGroup = b.s.is_default === 1 ? 0 : b.s.is_done === 1 ? 2 : 1
+      if (aGroup !== bGroup) return aGroup - bGroup
+      return a.s.order_index - b.s.order_index
+    })
+
   return (
     <div className="flex flex-col gap-3">
-      {statuses.map((s, i) => (
+      {sortedIndices.map(({ s, i }) => (
         <div key={i} className="flex items-center gap-2">
           <input
             type="color"
@@ -375,7 +418,7 @@ function StepStatuses({ statuses, onChange }: StepStatusesProps): React.JSX.Elem
           <span className="text-[9px] font-bold uppercase tracking-wider text-muted/60">
             {s.is_default === 1 ? 'Default' : s.is_done === 1 ? 'Done' : ''}
           </span>
-          {statuses.length > 1 && (
+          {s.is_default !== 1 && s.is_done !== 1 && statuses.filter((st) => st.is_default !== 1 && st.is_done !== 1).length > 1 && (
             <button
               onClick={() => handleRemove(i)}
               className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger"

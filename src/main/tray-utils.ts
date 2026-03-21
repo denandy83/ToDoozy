@@ -23,7 +23,7 @@ export function truncateTitle(title: string, maxLength = 40): string {
 export function classifyMyDayTasks(
   tasks: Task[],
   getStatus: (statusId: string) => Status | undefined
-): { tasks: TrayTask[]; totalNonDone: number } {
+): { tasks: TrayTask[]; totalNonDone: number; inProgressCount: number; openCount: number } {
   const inProgress: Task[] = []
   const open: Task[] = []
 
@@ -53,5 +53,5 @@ export function classifyMyDayTasks(
     }))
   ]
 
-  return { tasks: trayTasks, totalNonDone }
+  return { tasks: trayTasks, totalNonDone, inProgressCount: inProgress.length, openCount: open.length }
 }

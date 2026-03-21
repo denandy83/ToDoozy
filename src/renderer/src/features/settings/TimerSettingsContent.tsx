@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { Plus, X, Check } from 'lucide-react'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
+import { useToast } from '../../shared/components/Toast'
 import { DEFAULT_TIMER_PRESETS, type TimerPreset } from '../../shared/stores/timerStore'
 
 function useTimerPresets(): TimerPreset[] {
@@ -55,13 +56,7 @@ export function TimerSettingsContent(): React.JSX.Element {
 
   // Add preset form
   const [adding, setAdding] = useState(false)
-  const [newName, setNewName] = useState('')
   const [newMinutes, setNewMinutes] = useState('')
-  const nameRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (adding) nameRef.current?.focus()
-  }, [adding])
 
   const savePresets = useCallback(
     (updated: TimerPreset[]) => {
@@ -70,21 +65,25 @@ export function TimerSettingsContent(): React.JSX.Element {
     [setSetting]
   )
 
-  const handleAddPreset = useCallback(() => {
-    const name = newName.trim()
+  const { addToast } = useToast()
+
+  const handleAddPreset = (): void => {
     const mins = parseInt(newMinutes, 10)
-    if (!name || isNaN(mins) || mins < 1) return
+    if (isNaN(mins) || mins < 1) return
+    if (presets.some((p) => p.minutes === mins)) {
+      addToast({ message: `A ${mins} minute preset already exists`, variant: 'danger' })
+      return
+    }
 
     const preset: TimerPreset = {
       id: `preset-custom-${crypto.randomUUID().slice(0, 8)}`,
-      name,
+      name: `${mins} min`,
       minutes: mins
     }
-    savePresets([...presets, preset])
-    setNewName('')
+    savePresets([preset, ...presets])
     setNewMinutes('')
     setAdding(false)
-  }, [newName, newMinutes, presets, savePresets])
+  }
 
   const handleRemovePreset = useCallback(
     (id: string) => {
@@ -111,6 +110,43 @@ export function TimerSettingsContent(): React.JSX.Element {
           </button>
         </div>
         <div className="flex flex-col gap-1">
+          {adding && (
+            <div
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); handleAddPreset() }
+                if (e.key === 'Escape') { e.stopPropagation(); setAdding(false) }
+              }}
+            >
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={newMinutes}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, '')
+                  if (v === '' || (parseInt(v, 10) >= 1 && parseInt(v, 10) <= 999)) setNewMinutes(v)
+                }}
+                autoFocus
+                className="w-12 bg-transparent text-sm font-light text-foreground focus:outline-none"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
+              <button
+                type="button"
+                onClick={handleAddPreset}
+                className="rounded p-1 text-accent transition-colors hover:bg-accent/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdding(false)}
+                className="rounded p-1 text-danger transition-colors hover:bg-danger/10"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
           {presets.map((preset) => (
             <div
               key={preset.id}
@@ -131,45 +167,6 @@ export function TimerSettingsContent(): React.JSX.Element {
               </button>
             </div>
           ))}
-          {adding && (
-            <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5">
-              <input
-                ref={nameRef}
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddPreset()
-                  if (e.key === 'Escape') { e.stopPropagation(); setAdding(false) }
-                }}
-                placeholder="Name"
-                className="flex-1 bg-transparent text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none"
-              />
-              <input
-                type="number"
-                min={1}
-                max={999}
-                value={newMinutes}
-                onChange={(e) => setNewMinutes(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddPreset()
-                  if (e.key === 'Escape') { e.stopPropagation(); setAdding(false) }
-                }}
-                placeholder="Min"
-                className="w-16 bg-transparent text-center text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <button onClick={() => setAdding(false)} className="rounded p-1 text-muted hover:bg-foreground/6">
-                <X size={12} />
-              </button>
-              <button
-                onClick={handleAddPreset}
-                disabled={!newName.trim() || !newMinutes || parseInt(newMinutes, 10) < 1}
-                className="rounded p-1 text-accent hover:bg-accent/10 disabled:opacity-50"
-              >
-                <Check size={12} />
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -227,21 +224,23 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_repetition_enabled" defaultValue="false" />
       </div>
 
-      {/* Default reps */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Default repetitions</p>
-          <p className="text-[10px] text-muted">Number of work-break cycles</p>
+      {/* Default reps — only visible when repetition mode is on */}
+      {(useSetting('timer_repetition_enabled') ?? 'false') === 'true' && (
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-light text-foreground">Default repetitions</p>
+            <p className="text-[10px] text-muted">Number of work-break cycles</p>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={defaultReps}
+            onChange={(e) => setSetting('timer_default_reps', e.target.value)}
+            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
         </div>
-        <input
-          type="number"
-          min={1}
-          max={99}
-          value={defaultReps}
-          onChange={(e) => setSetting('timer_default_reps', e.target.value)}
-          className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-        />
-      </div>
+      )}
 
       {/* Perpetual mode */}
       <div className="flex items-center justify-between">

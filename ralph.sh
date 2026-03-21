@@ -122,7 +122,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     if [[ -f "$ITER_LOG" ]]; then
       OUTPUT=$(tail -1 "$ITER_LOG" | jq -r '.result // .message // empty' 2>/dev/null || echo "")
       # Also check all result lines for completion signal
-      if grep -q "COMPLETE" "$ITER_LOG" 2>/dev/null; then
+      if grep -q "<promise>COMPLETE</promise>" "$ITER_LOG" 2>/dev/null; then
         OUTPUT="<promise>COMPLETE</promise>"
       fi
       rm -f "$ITER_LOG"

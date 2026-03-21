@@ -5,6 +5,7 @@ import { useCommandPaletteStore } from '../../shared/stores/commandPaletteStore'
 import { useCommandPaletteSearch } from './useCommandPaletteSearch'
 import { CommandPaletteResult } from './CommandPaletteResult'
 import { useTaskStore } from '../../shared/stores/taskStore'
+import { useViewStore } from '../../shared/stores/viewStore'
 
 export function CommandPalette(): React.JSX.Element | null {
   const { isOpen, query, selectedIndex, close, setQuery, setSelectedIndex } =
@@ -12,7 +13,10 @@ export function CommandPalette(): React.JSX.Element | null {
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const results = useCommandPaletteSearch(query)
+  const allTasks = useTaskStore((s) => s.tasks)
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask)
+  const selectTask = useTaskStore((s) => s.selectTask)
+  const setSelectedProject = useViewStore((s) => s.setSelectedProject)
 
   // Focus input when opened
   useEffect(() => {
@@ -30,10 +34,17 @@ export function CommandPalette(): React.JSX.Element | null {
 
   const handleSelect = useCallback(
     (taskId: string) => {
-      setCurrentTask(taskId)
+      const task = allTasks[taskId]
+      if (task) {
+        // Navigate to the task's project
+        setSelectedProject(task.project_id)
+        // Select and open the task
+        selectTask(taskId)
+        setCurrentTask(taskId)
+      }
       close()
     },
-    [setCurrentTask, close]
+    [allTasks, setSelectedProject, selectTask, setCurrentTask, close]
   )
 
   const handleKeyDown = useCallback(

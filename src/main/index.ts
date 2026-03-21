@@ -178,6 +178,30 @@ app.whenReady().then(() => {
   loadAndRegisterShortcut()
   loadAndRegisterAppToggleShortcut()
 
+  // Poll for external database changes (e.g., MCP server writing tasks)
+  // fs.watch is unreliable on macOS for WAL files, so we poll the modified time instead
+  const dbPath = join(app.getPath('userData'), 'todoozy.db-wal')
+  let lastMtime = 0
+  try {
+    const { statSync } = require('fs') as typeof import('fs')
+    lastMtime = statSync(dbPath).mtimeMs
+  } catch { /* WAL file may not exist yet */ }
+
+  setInterval(() => {
+    try {
+      const { statSync } = require('fs') as typeof import('fs')
+      const mtime = statSync(dbPath).mtimeMs
+      if (mtime > lastMtime) {
+        lastMtime = mtime
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('tasks-changed')
+          }
+        }
+      }
+    } catch { /* ignore if file doesn't exist */ }
+  }, 1000)
+
   // macOS: re-show main window when dock icon is clicked
   app.on('activate', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {

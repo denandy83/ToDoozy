@@ -47,16 +47,19 @@ function App(): React.JSX.Element {
     }
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
-  // Listen for tasks-changed from other windows (e.g. quick-add)
+  // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)
   useEffect(() => {
     if (!currentProjectId || !currentUser) return
     const unsub = window.api.onTasksChanged(() => {
+      hydrateProjects(currentUser.id)
+      hydrateStatuses(currentProjectId)
+      hydrateLabels(currentProjectId)
       hydrateAllForProject(currentProjectId, currentUser.id)
       hydrateMyDay(currentUser.id)
     })
     return unsub
-  }, [currentProjectId, currentUser, hydrateAllForProject, hydrateMyDay])
+  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateMyDay])
 
   // Refresh tray badge when tasks change
   useEffect(() => {

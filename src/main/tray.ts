@@ -9,12 +9,13 @@ import type { Status } from '../shared/types'
 import type { TimerTrayState } from '../preload/index.d'
 import { classifyMyDayTasks, truncateTitle, type TrayTask } from './tray-utils'
 
+
 let tray: Tray | null = null
 let currentUserId: string | null = null
 let timerState: TimerTrayState | null = null
 
-function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number } {
-  if (!currentUserId) return { tasks: [], totalNonDone: 0 }
+function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number; inProgressCount: number; openCount: number } {
+  if (!currentUserId) return { tasks: [], totalNonDone: 0, inProgressCount: 0, openCount: 0 }
 
   const db = getDatabase()
   const taskRepo = new TaskRepository(db)
@@ -69,18 +70,6 @@ function buildTimerMenu(): Menu {
   if (!timerState) return buildLeftClickMenu()
 
   const menuItems: Electron.MenuItemConstructorOptions[] = []
-  const timeStr = formatTimerDisplay(timerState.remainingSeconds)
-  const phaseLabel = timerState.phase === 'break' ? 'Break' : 'Focus'
-  const repLabel = timerState.isPerpetual
-    ? `Rep ${timerState.currentRep}`
-    : timerState.totalReps > 1
-      ? `${timerState.currentRep}/${timerState.totalReps}`
-      : ''
-
-  menuItems.push({
-    label: `${phaseLabel}: ${timeStr}${repLabel ? `  ${repLabel}` : ''}`,
-    enabled: false
-  })
 
   menuItems.push({
     label: truncateTitle(timerState.taskTitle),
@@ -110,7 +99,7 @@ function buildTimerMenu(): Menu {
 }
 
 function buildLeftClickMenu(): Menu {
-  const { tasks, totalNonDone } = getMyDayTrayData()
+  const { tasks, totalNonDone, inProgressCount, openCount } = getMyDayTrayData()
   const menuItems: Electron.MenuItemConstructorOptions[] = []
 
   menuItems.push({
@@ -133,7 +122,7 @@ function buildLeftClickMenu(): Menu {
 
     if (inProgressTasks.length > 0) {
       menuItems.push({
-        label: 'In Progress',
+        label: `In Progress (${inProgressTasks.length}/${inProgressCount})`,
         enabled: false
       })
       for (const task of inProgressTasks) {
@@ -149,7 +138,7 @@ function buildLeftClickMenu(): Menu {
         menuItems.push({ type: 'separator' })
       }
       menuItems.push({
-        label: 'Open',
+        label: `Not Started (${openTasks.length}/${openCount})`,
         enabled: false
       })
       for (const task of openTasks) {
@@ -226,17 +215,18 @@ export function updateTrayBadge(): void {
   if (!tray) return
 
   if (timerState) {
-    // Show countdown in menu bar
+    // Show countdown in menu bar with phase indicator
     const timeStr = formatTimerDisplay(timerState.remainingSeconds)
+    const phaseIcon = timerState.phase === 'break' ? '☕' : '⏱'
     const repStr = timerState.isPerpetual
       ? ` ${timerState.currentRep}`
       : timerState.totalReps > 1
         ? ` ${timerState.currentRep}/${timerState.totalReps}`
         : ''
-    tray.setTitle(`${timeStr}${repStr}`)
+    tray.setTitle(`${phaseIcon} ${timeStr}${repStr}`)
   } else {
     const { totalNonDone } = getMyDayTrayData()
-    tray.setTitle(totalNonDone > 0 ? String(totalNonDone) : '')
+    tray.setTitle(totalNonDone > 0 ? `[${totalNonDone}]` : '')
   }
 }
 
