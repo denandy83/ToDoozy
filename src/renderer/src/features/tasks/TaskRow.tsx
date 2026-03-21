@@ -14,6 +14,7 @@ import { useAuthStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label, Project } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { TimerPlayButton } from '../../shared/components/TimerPlayButton'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskRowProps {
@@ -391,6 +392,11 @@ export function TaskRow({
           >
             {task.title}
           </span>
+        )}
+
+        {/* Timer play button */}
+        {!isDone && (
+          <TimerPlayButton taskId={task.id} taskTitle={task.title} projectId={task.project_id} />
         )}
 
         {/* Subtask count badge + progress */}

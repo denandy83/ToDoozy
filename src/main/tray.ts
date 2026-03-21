@@ -1,4 +1,4 @@
-import { Tray, Menu, nativeImage, app } from 'electron'
+import { Tray, Menu, nativeImage, app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { getDatabase } from './database'
 import { TaskRepository } from './repositories/TaskRepository'
@@ -6,10 +6,12 @@ import { StatusRepository } from './repositories/StatusRepository'
 import { showQuickAddWindow } from './quick-add'
 import { getMainWindow } from './index'
 import type { Status } from '../shared/types'
+import type { TimerTrayState } from '../preload/index.d'
 import { classifyMyDayTasks, truncateTitle, type TrayTask } from './tray-utils'
 
 let tray: Tray | null = null
 let currentUserId: string | null = null
+let timerState: TimerTrayState | null = null
 
 function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number } {
   if (!currentUserId) return { tasks: [], totalNonDone: 0 }
@@ -47,6 +49,64 @@ function navigateToTask(taskId: string): void {
     mainWindow.focus()
     mainWindow.webContents.send('tray:navigate-to-task', taskId)
   }
+}
+
+function formatTimerDisplay(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function sendToRenderer(channel: string): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel)
+    }
+  }
+}
+
+function buildTimerMenu(): Menu {
+  if (!timerState) return buildLeftClickMenu()
+
+  const menuItems: Electron.MenuItemConstructorOptions[] = []
+  const timeStr = formatTimerDisplay(timerState.remainingSeconds)
+  const phaseLabel = timerState.phase === 'break' ? 'Break' : 'Focus'
+  const repLabel = timerState.isPerpetual
+    ? `Rep ${timerState.currentRep}`
+    : timerState.totalReps > 1
+      ? `${timerState.currentRep}/${timerState.totalReps}`
+      : ''
+
+  menuItems.push({
+    label: `${phaseLabel}: ${timeStr}${repLabel ? `  ${repLabel}` : ''}`,
+    enabled: false
+  })
+
+  menuItems.push({
+    label: truncateTitle(timerState.taskTitle),
+    enabled: false
+  })
+
+  menuItems.push({ type: 'separator' })
+
+  if (timerState.isPaused) {
+    menuItems.push({
+      label: 'Resume',
+      click: (): void => { sendToRenderer('timer:resume') }
+    })
+  } else {
+    menuItems.push({
+      label: 'Pause',
+      click: (): void => { sendToRenderer('timer:pause') }
+    })
+  }
+
+  menuItems.push({
+    label: 'Stop',
+    click: (): void => { sendToRenderer('timer:stop') }
+  })
+
+  return Menu.buildFromTemplate(menuItems)
 }
 
 function buildLeftClickMenu(): Menu {
@@ -149,7 +209,7 @@ export function createTray(): void {
 
   tray.on('click', () => {
     if (!tray) return
-    const menu = buildLeftClickMenu()
+    const menu = timerState ? buildTimerMenu() : buildLeftClickMenu()
     tray.popUpContextMenu(menu)
   })
 
@@ -164,8 +224,20 @@ export function createTray(): void {
 
 export function updateTrayBadge(): void {
   if (!tray) return
-  const { totalNonDone } = getMyDayTrayData()
-  tray.setTitle(totalNonDone > 0 ? String(totalNonDone) : '')
+
+  if (timerState) {
+    // Show countdown in menu bar
+    const timeStr = formatTimerDisplay(timerState.remainingSeconds)
+    const repStr = timerState.isPerpetual
+      ? ` ${timerState.currentRep}`
+      : timerState.totalReps > 1
+        ? ` ${timerState.currentRep}/${timerState.totalReps}`
+        : ''
+    tray.setTitle(`${timeStr}${repStr}`)
+  } else {
+    const { totalNonDone } = getMyDayTrayData()
+    tray.setTitle(totalNonDone > 0 ? String(totalNonDone) : '')
+  }
 }
 
 export function setTrayUserId(userId: string): void {
@@ -174,6 +246,16 @@ export function setTrayUserId(userId: string): void {
 }
 
 export function refreshTray(): void {
+  updateTrayBadge()
+}
+
+export function setTimerState(state: TimerTrayState): void {
+  timerState = state
+  updateTrayBadge()
+}
+
+export function clearTimerState(): void {
+  timerState = null
   updateTrayBadge()
 }
 

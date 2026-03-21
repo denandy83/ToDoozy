@@ -168,6 +168,26 @@ export interface McpAPI {
   getInfo(): Promise<{ serverPath: string; configJson: string }>
 }
 
+export interface TimerTrayState {
+  remainingSeconds: number
+  isPaused: boolean
+  phase: 'work' | 'break'
+  currentRep: number
+  totalReps: number
+  isPerpetual: boolean
+  taskTitle: string
+}
+
+export interface TimerAPI {
+  updateTimer(state: TimerTrayState): Promise<void>
+  clearTimer(): Promise<void>
+  minimizeToTray(): Promise<void>
+  navigateToTask(taskId: string): Promise<void>
+  onPause(callback: () => void): () => void
+  onResume(callback: () => void): () => void
+  onStop(callback: () => void): () => void
+}
+
 export interface TrayAPI {
   setUserId(userId: string): Promise<void>
   refresh(): Promise<void>
@@ -190,6 +210,7 @@ export interface TodoozyAPI {
   appToggle: AppToggleAPI
   tray: TrayAPI
   mcp: McpAPI
+  timer: TimerAPI
   onTasksChanged(callback: () => void): () => void
 }
 

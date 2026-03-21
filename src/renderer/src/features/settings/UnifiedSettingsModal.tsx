@@ -16,9 +16,10 @@ import { PrioritySettingsContent } from './PrioritySettingsContent'
 import { LabelSettingsContent } from './LabelSettingsContent'
 import { ShortcutRecorder, AppToggleShortcutRecorder } from './ShortcutRecorder'
 import { McpSettingsContent } from './McpSettingsContent'
+import { TimerSettingsContent } from './TimerSettingsContent'
 import type { Project } from '../../../../shared/types'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -155,7 +156,8 @@ export function UnifiedSettingsModal({
     { key: 'themes', label: 'Themes' },
     { key: 'priorities', label: 'Priorities' },
     { key: 'labels', label: 'Labels' },
-    { key: 'mcp', label: 'MCP' }
+    { key: 'mcp', label: 'MCP' },
+    { key: 'timer', label: 'Timer' }
   ]
 
   return (
@@ -222,6 +224,9 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'mcp' && (
             <McpSettingsContent />
+          )}
+          {activeTab === 'timer' && (
+            <TimerSettingsContent />
           )}
         </div>
       </div>

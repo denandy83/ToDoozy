@@ -7,7 +7,9 @@ import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
 import { getReservedShortcutName } from '../shared/shortcut-utils'
-import { setTrayUserId, refreshTray } from './tray'
+import { setTrayUserId, refreshTray, setTimerState, clearTimerState } from './tray'
+import { getMainWindow } from './index'
+import type { TimerTrayState } from '../preload/index.d'
 
 let repos: Repositories | null = null
 
@@ -587,5 +589,30 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('tray:refresh', () => {
     refreshTray()
+  })
+
+  // ── Timer ──────────────────────────────────────────────────────────
+  ipcMain.handle('timer:updateTimer', (_e, state: TimerTrayState) => {
+    setTimerState(state)
+  })
+
+  ipcMain.handle('timer:clearTimer', () => {
+    clearTimerState()
+  })
+
+  ipcMain.handle('timer:minimizeToTray', () => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed()) {
+      win.hide()
+    }
+  })
+
+  ipcMain.handle('timer:navigateToTask', (_e, taskId: string) => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed()) {
+      win.show()
+      win.focus()
+      win.webContents.send('tray:navigate-to-task', taskId)
+    }
   })
 }

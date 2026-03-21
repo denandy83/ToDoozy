@@ -136,7 +136,7 @@
         "Default presets: 10 min, 25 min, 50 min; custom presets addable in settings",
         "All visuals follow existing app patterns (typography, colors, shared components, popup styling)"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

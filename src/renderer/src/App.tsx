@@ -6,6 +6,7 @@ import { useLabelStore } from './shared/stores/labelStore'
 import { useTaskStore } from './shared/stores/taskStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useTemplateStore } from './shared/stores/templateStore'
+import { useTimerStore } from './shared/stores/timerStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 
@@ -63,6 +64,24 @@ function App(): React.JSX.Element {
       window.api.tray.refresh()
     })
     return unsub
+  }, [])
+
+  // Listen for timer controls from tray
+  useEffect(() => {
+    const unsubPause = window.api.timer.onPause(() => {
+      useTimerStore.getState().pause()
+    })
+    const unsubResume = window.api.timer.onResume(() => {
+      useTimerStore.getState().resume()
+    })
+    const unsubStop = window.api.timer.onStop(() => {
+      useTimerStore.getState().stop()
+    })
+    return () => {
+      unsubPause()
+      unsubResume()
+      unsubStop()
+    }
   }, [])
 
   // Auto-archive: periodically check for done tasks past the threshold

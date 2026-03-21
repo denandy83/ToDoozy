@@ -140,6 +140,25 @@ const api: TodoozyAPI = {
     getInfo: () => ipcRenderer.invoke('mcp:getInfo')
   },
 
+  timer: {
+    updateTimer: (state) => ipcRenderer.invoke('timer:updateTimer', state),
+    clearTimer: () => ipcRenderer.invoke('timer:clearTimer'),
+    minimizeToTray: () => ipcRenderer.invoke('timer:minimizeToTray'),
+    navigateToTask: (taskId) => ipcRenderer.invoke('timer:navigateToTask', taskId),
+    onPause: (callback) => {
+      ipcRenderer.on('timer:pause', callback)
+      return () => { ipcRenderer.removeListener('timer:pause', callback) }
+    },
+    onResume: (callback) => {
+      ipcRenderer.on('timer:resume', callback)
+      return () => { ipcRenderer.removeListener('timer:resume', callback) }
+    },
+    onStop: (callback) => {
+      ipcRenderer.on('timer:stop', callback)
+      return () => { ipcRenderer.removeListener('timer:stop', callback) }
+    }
+  },
+
   tray: {
     setUserId: (userId) => ipcRenderer.invoke('tray:setUserId', userId),
     refresh: () => ipcRenderer.invoke('tray:refresh'),

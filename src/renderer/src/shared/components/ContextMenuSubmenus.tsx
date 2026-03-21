@@ -2,6 +2,11 @@ import { useState, useCallback } from 'react'
 import { Check } from 'lucide-react'
 import { PRIORITY_LEVELS } from './PriorityIndicator'
 import { LabelPicker } from './LabelPicker'
+import { useTimerStore } from '../stores/timerStore'
+import { useTimerSettings } from '../hooks/useTimerSettings'
+import { useAuthStore } from '../stores/authStore'
+import { useTaskStore } from '../stores/taskStore'
+import { useStatusesByProject } from '../stores/statusStore'
 import type { Task, Label, Status } from '../../../../shared/types'
 
 interface SubmenuContainerProps {
@@ -267,5 +272,78 @@ export function StatusRow({ task, statuses, onStatusChange }: StatusRowProps): R
         </button>
       ))}
     </div>
+  )
+}
+
+// --- Timer Flyout ---
+
+interface TimerSubmenuProps {
+  taskId: string
+  taskTitle: string
+  projectId: string
+  openLeft: boolean
+  onClose: () => void
+}
+
+export function TimerSubmenu({ taskId, taskTitle, projectId, openLeft, onClose }: TimerSubmenuProps): React.JSX.Element {
+  const settings = useTimerSettings()
+  const isRunning = useTimerStore((s) => s.isRunning)
+  const startTimer = useTimerStore((s) => s.startTimer)
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const { updateTask } = useTaskStore()
+  const task = useTaskStore((s) => s.tasks[taskId])
+  const statuses = useStatusesByProject(projectId)
+
+  const autoMoveToInProgress = useCallback(() => {
+    if (!task) return
+    const defaultStatus = statuses.find((s) => s.is_default === 1)
+    const isNotStarted = defaultStatus && task.status_id === defaultStatus.id
+    if (!isNotStarted) return
+    const inProgressStatus = statuses.find((s) => s.is_default === 0 && s.is_done === 0)
+    if (inProgressStatus) {
+      updateTask(task.id, { status_id: inProgressStatus.id })
+    }
+  }, [task, statuses, updateTask])
+
+  const handleStart = useCallback(
+    (minutes: number) => {
+      if (!currentUser || isRunning) return
+      autoMoveToInProgress()
+      startTimer({
+        taskId,
+        taskTitle,
+        minutes,
+        reps: settings.repetitionEnabled ? settings.defaultReps : 1,
+        isPerpetual: settings.perpetualMode,
+        breakMinutes: settings.breakMinutes,
+        soundEnabled: settings.soundEnabled,
+        notificationEnabled: settings.notificationEnabled,
+        autoBreak: settings.autoBreak,
+        userId: currentUser.id
+      })
+      onClose()
+    },
+    [taskId, taskTitle, settings, currentUser, isRunning, startTimer, autoMoveToInProgress, onClose]
+  )
+
+  return (
+    <SubmenuContainer openLeft={openLeft}>
+      {isRunning ? (
+        <div className="px-3 py-1.5 text-sm font-light text-muted">Timer already running</div>
+      ) : (
+        settings.presets.map((preset) => (
+          <button
+            key={preset.id}
+            onClick={() => handleStart(preset.minutes)}
+            className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+          >
+            <span>{preset.name}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+              {preset.minutes}m
+            </span>
+          </button>
+        ))
+      )}
+    </SubmenuContainer>
   )
 }

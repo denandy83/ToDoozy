@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
-  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate
+  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer
 } from 'lucide-react'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
@@ -16,10 +16,11 @@ import {
   RecurrenceSubmenu,
   LabelsSubmenu,
   SnoozeSubmenu,
-  FocusSubmenu
+  FocusSubmenu,
+  TimerSubmenu
 } from './ContextMenuSubmenus'
 
-type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | null
+type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | 'timer' | null
 
 export function ContextMenu(): React.JSX.Element | null {
   const { isOpen, position, taskId, close } = useContextMenuStore()
@@ -179,6 +180,9 @@ export function ContextMenu(): React.JSX.Element | null {
       </FlyoutItem>
       <FlyoutItem id="focus" icon={<Focus size={14} />} label="Focus" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <FocusSubmenu openLeft={openLeft} onFocus={(mins) => handleAction(() => { addToast({ message: `Focus: ${mins} min` }) })} />
+      </FlyoutItem>
+      <FlyoutItem id="timer" icon={<Timer size={14} />} label="Start Timer" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
+        <TimerSubmenu taskId={task.id} taskTitle={task.title} projectId={task.project_id} openLeft={openLeft} onClose={close} />
       </FlyoutItem>
       <Divider />
 

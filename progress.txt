@@ -81,3 +81,25 @@ Started: Sat Mar 21 11:11:37 CET 2026
 - Added AppToggleShortcutRecorder to Settings > General
 - Toggle behavior: focused → hide to tray; not focused → show/restore/focus
 - Auth check: shortcut only works with active auth session
+
+## Story #29: Pomodoro Timer
+- Created `src/renderer/src/shared/stores/timerStore.ts` — Zustand store managing all timer state (work/break phases, repetitions, perpetual mode)
+- Timer store tracks: isRunning, isPaused, phase (work/break), workSeconds/breakSeconds, currentRep/totalReps, perpetual mode, notification settings
+- Created `src/renderer/src/shared/hooks/useTimerSettings.ts` — reads timer config from settings store (presets, break duration, repetition, notifications)
+- Created `src/renderer/src/shared/components/TimerPlayButton.tsx` — play button + popup for starting timers on task hover
+- Play button appears after task title in TaskRow; when repetition mode off, starts default timer immediately; when on, shows popup for rep count
+- Added `TimerSubmenu` to context menu — right-click → Start Timer flyout with all configured presets
+- Added `TimerSettingsContent.tsx` — Settings > Timer tab with: presets CRUD, default timer, break duration, auto-break, repetition mode, perpetual mode, sound/notification toggles
+- Added Timer tab to UnifiedSettingsModal
+- Extended preload bridge with `TimerAPI`: updateTimer, clearTimer, minimizeToTray, navigateToTask, onPause/onResume/onStop
+- Added IPC handlers: timer:updateTimer, timer:clearTimer, timer:minimizeToTray, timer:navigateToTask
+- Updated tray.ts to support timer mode: shows countdown in menu bar, timer menu with Pause/Resume/Stop controls, hides normal My Day menu during timer
+- Timer completion: plays Web Audio API bell sound (configurable), shows system notification (clickable to navigate to task), logs focus session to activity log
+- Break timer auto-starts after work timer completes (configurable)
+- Repetition mode cycles work-break for N reps; perpetual mode runs until manually stopped
+- Auto-moves task to first in-progress status when timer starts (if task was in not-started state)
+- Wired up tray timer controls (pause/resume/stop) to renderer via IPC events in App.tsx
+- Default presets: 10 min, 25 min, 50 min; custom presets addable/removable in settings
+- Timer state is in-memory only (not persisted across app restarts)
+- Wrote 14 tests for timer store (formatTimeRemaining, DEFAULT_TIMER_PRESETS, store lifecycle)
+- All new and existing tests pass, zero typecheck errors
