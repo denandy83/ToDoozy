@@ -51,3 +51,23 @@ Started: Sat Mar 21 11:11:37 CET 2026
 - Typecheck: zero errors
 - Tests: 254 pass, 3 pre-existing failures (shortcut-utils, smartInputParser)
 - Decision: `electron-vite rebuild-native` was already broken before changes (pre-existing env issue)
+
+## Story #27: Rich Text Editor with Tiptap
+- Replaced textarea + markdown preview in DetailDescription.tsx with Tiptap WYSIWYG editor
+- Installed: @tiptap/react, @tiptap/starter-kit, @tiptap/extension-link, @tiptap/extension-image, @tiptap/extension-task-list, @tiptap/extension-task-item, @tiptap/extension-placeholder, tiptap-markdown
+- Created 4 editor components: TiptapEditor, EditorToolbar (fixed toolbar), BubbleToolbar (floating inline), SlashCommandMenu, LinkPopover
+- Fixed toolbar: heading dropdown (H1/H2/H3), bullet/numbered/checklist, code block, horizontal rule, image, attach file (greyed out)
+- Floating bubble menu on text selection: bold, italic, strikethrough, inline code, link
+- Slash commands: type / to open menu with all block types, arrow keys navigate, Enter selects, Escape dismisses
+- Link editing: Cmd+K inserts/edits link when editor focused, opens command palette otherwise; clicking link shows popover with edit/remove
+- Auto-link detection via tiptap link extension with autolink: true
+- Image paste: base64 encoding with 10MB limit
+- Checklist: interactive checkboxes stored as - [ ] / - [x] in markdown
+- Code blocks: monospace font, no syntax highlighting; Cmd+Enter exits
+- 1-second autosave debounce + flush on blur
+- Escape blurs the editor
+- Stores markdown in DB via tiptap-markdown (serialize on save, parse on load) — no migration needed
+- Updated AppLayout Cmd+K handler to skip when tiptap editor is focused
+- Added comprehensive Tiptap CSS styles to main.css
+- Typecheck: zero errors
+- Tests: 254 pass, 3 pre-existing failures unchanged

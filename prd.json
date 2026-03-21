@@ -89,7 +89,7 @@
         "All standard keyboard shortcuts work (Cmd+B, Cmd+I, etc.)",
         "Escape blurs the editor"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

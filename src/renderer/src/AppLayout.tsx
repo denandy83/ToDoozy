@@ -355,8 +355,10 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+K = open command palette
+      // Cmd+K = open command palette (unless inside Tiptap editor, where it inserts/edits a link)
       if (e.key === 'k') {
+        const active = document.activeElement
+        if (active?.closest('.tiptap-editor-content')) return
         e.preventDefault()
         useCommandPaletteStore.getState().open()
         return

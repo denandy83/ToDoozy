@@ -172,3 +172,150 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--color-foreground) 50%, transparent);
 }
+
+/* Tiptap editor styles */
+.tiptap-editor-content {
+  padding: 0.5rem 0.75rem;
+  min-height: 80px;
+  font-size: 0.875rem;
+  font-weight: 300;
+  color: var(--color-foreground);
+  outline: none;
+}
+
+.tiptap-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-muted);
+  opacity: 0.6;
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap-editor-content h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.tiptap-editor-content h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.tiptap-editor-content h3 {
+  font-size: 0.875rem;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.tiptap-editor-content ul,
+.tiptap-editor-content ol {
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.tiptap-editor-content ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor-content ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor-content li {
+  margin: 0.125rem 0;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+.tiptap-editor-content .tiptap-code-block {
+  background-color: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  border-radius: 0.375rem;
+  padding: 0.75rem 1rem;
+  margin: 0.25rem 0;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+}
+
+.tiptap-editor-content code:not(.tiptap-code-block code) {
+  background-color: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.tiptap-editor-content a.tiptap-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tiptap-editor-content a.tiptap-link:hover {
+  opacity: 0.8;
+}
+
+.tiptap-editor-content .tiptap-image {
+  max-width: 100%;
+  max-height: 12rem;
+  border-radius: 0.375rem;
+  margin: 0.25rem 0;
+}
+
+.tiptap-editor-content hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 0.75rem 0;
+}
+
+.tiptap-editor-content blockquote {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.75rem;
+  margin: 0.25rem 0;
+  color: var(--color-fg-secondary);
+}
+
+.tiptap-editor-content p {
+  margin: 0.125rem 0;
+}
+
+.tiptap-editor-content strong {
+  font-weight: 600;
+}
+
+/* Tippy.js styles for bubble menu */
+.tippy-box[data-theme~='tiptap'] {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.tippy-box[data-theme~='tiptap'] .tippy-arrow {
+  display: none;
+}
