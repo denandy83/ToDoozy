@@ -13,7 +13,7 @@ export function getDatabase(): Database.Database {
 }
 
 export function initDatabase(): Database.Database {
-  const dbPath = join(app.getPath('userData'), 'todoozy.db')
+  const dbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
 
   db = new Database(dbPath)
 

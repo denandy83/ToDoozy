@@ -37,7 +37,7 @@ function getDbPath(): string {
   )
 }
 
-const dbPath = getDbPath()
+const dbPath = process.env.TODOOZY_DEV_DB || getDbPath()
 if (!existsSync(dbPath)) {
   process.stderr.write(
     `ToDoozy database not found at ${dbPath}. Launch the ToDoozy app first to initialize it.\n`

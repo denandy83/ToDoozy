@@ -27,6 +27,15 @@ ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with E
 - Port: **5200**
 - In `electron.vite.config.ts`, set `server: { port: 5200 }` in the renderer config
 
+## Dev Database
+Never run migrations or destructive operations against the production database. Use dev DB copies:
+- `./dev-db.sh create feature` — Create a dev DB copy for feature work (ralph does this automatically)
+- `./dev-db.sh create bugfix` — Create a dev DB copy for bug fixes
+- `export TODOOZY_DEV_DB=$(./dev-db.sh create bugfix) && npm run dev` — Start dev server on a copy
+- Rolling limit: 5 copies per type, oldest auto-deleted
+- The `TODOOZY_DEV_DB` env var overrides the DB path in both the Electron app and MCP server
+- When starting a bug fix session, create a bugfix dev DB. Every 5 bugs, create a fresh one.
+
 ## Key Commands
 - `npm run dev` — Start development server
 - `npm run build` — Production build

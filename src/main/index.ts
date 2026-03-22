@@ -180,7 +180,8 @@ app.whenReady().then(() => {
 
   // Poll for external database changes (e.g., MCP server writing tasks)
   // fs.watch is unreliable on macOS for WAL files, so we poll the modified time instead
-  const dbPath = join(app.getPath('userData'), 'todoozy.db-wal')
+  const baseDbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
+  const dbPath = baseDbPath + '-wal'
   let lastMtime = 0
   try {
     const { statSync } = require('fs') as typeof import('fs')

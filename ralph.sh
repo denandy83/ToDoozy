@@ -79,6 +79,11 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
+# Create a dev database copy for this ralph run
+DEV_DB=$("$SCRIPT_DIR/dev-db.sh" create feature)
+export TODOOZY_DEV_DB="$DEV_DB"
+echo "Using dev database: $DEV_DB"
+
 LOG_FILE="$SCRIPT_DIR/ralph.log"
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 echo "Log file: $LOG_FILE"
