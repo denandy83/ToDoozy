@@ -39,7 +39,7 @@
         "TimerPlayButton and add-label button are focusable (tabIndex=0)",
         "Consistent focus-visible ring style across all focusable elements"
       ],
-      "passes": false,
+      "passes": true,
       "tested": false
     },
     {

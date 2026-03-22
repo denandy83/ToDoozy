@@ -41,6 +41,7 @@ export function NavItem({
       }`}
       role="tab"
       aria-selected={active}
+      tabIndex={-1}
     >
       <Icon size={16} className={active || isOver ? 'text-accent' : 'text-muted'} />
       {!collapsed && (

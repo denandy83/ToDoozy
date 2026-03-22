@@ -123,7 +123,7 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 disabled:opacity-30 disabled:cursor-not-allowed"
         title={isTimerRunning ? 'Timer already running' : 'Start timer'}
         aria-label="Start timer"
-        tabIndex={-1}
+        tabIndex={0}
       >
         <Play size={12} fill="currentColor" />
       </button>

@@ -59,6 +59,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     if (projectId) hydrateAllTaskLabels(projectId)
   }, [projectId, hydrateAllTaskLabels])
 
+  // Auto-focus first task (or add input if empty) when navigating to project
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      containerRef.current?.focus()
+    })
+  }, [projectId])
+
   // Labels actually in use (assigned to at least one non-archived task in this view)
   const labelsInUse = useMemo(() => {
     const usedLabelIds = new Set<string>()
@@ -416,25 +423,19 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           }
           break
         }
-        case 'Enter': {
-          e.preventDefault()
-          if (currentTaskId) {
-            setMovingTask(currentTaskId)
-          } else {
-            addInputRef.current?.focus()
-          }
-          break
-        }
+        case 'Enter':
         case ' ': {
           if (currentTaskId) {
             e.preventDefault()
-            const task = allTasks[currentTaskId]
-            if (task) {
-              const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
-              const idx = sorted.findIndex((s) => s.id === task.status_id)
-              const nextIdx = (idx + 1) % sorted.length
-              handleStatusChange(currentTaskId, sorted[nextIdx].id)
-            }
+            // Open detail panel and focus the title field
+            selectTask(currentTaskId)
+            requestAnimationFrame(() => {
+              const titleEl = document.querySelector<HTMLElement>('[data-detail-title]')
+              titleEl?.focus()
+            })
+          } else {
+            e.preventDefault()
+            addInputRef.current?.focus()
           }
           break
         }
@@ -470,6 +471,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
         case 'Tab': {
           e.preventDefault()
+          e.stopPropagation()
           if (e.shiftKey) {
             const prevIndex = Math.max(currentIndex - 1, 0)
             if (flatTasks[prevIndex]) setCurrentTask(flatTasks[prevIndex].id)
@@ -503,7 +505,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     setMovingTask,
     reorderTasks,
     prioritySortFn,
-    copySelectedTasks
+    copySelectedTasks,
+    selectTask
   ])
 
   const sortedStatuses = useMemo(() => {

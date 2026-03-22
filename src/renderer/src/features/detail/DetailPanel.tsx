@@ -43,14 +43,73 @@ export function DetailPanel(): React.JSX.Element | null {
     }
   }, [task?.id, hydrateTaskLabels]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Escape closes panel
+  // Save the element that had focus before the panel opened (for focus restoration)
+  const focusRestoreRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
+    if (task) {
+      focusRestoreRef.current = document.activeElement as HTMLElement | null
+    }
+  }, [task?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape closes panel and restores focus; Tab cycles through detail fields
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel || !task) return
+
     const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && task) {
+      if (e.key === 'Escape') {
         // Only close if no inner element has stopped propagation
         setCurrentTask(null)
+        const el = focusRestoreRef.current
+        if (el && typeof el.focus === 'function' && document.body.contains(el)) {
+          requestAnimationFrame(() => el.focus())
+        }
+        return
+      }
+
+      // Tab cycling through detail fields
+      if (e.key === 'Tab' && panel.contains(document.activeElement)) {
+        const fieldElements = Array.from(
+          panel.querySelectorAll<HTMLElement>('[data-detail-field]')
+        ).sort((a, b) => {
+          const ai = parseInt(a.dataset.detailField ?? '0', 10)
+          const bi = parseInt(b.dataset.detailField ?? '0', 10)
+          return ai - bi
+        })
+
+        if (fieldElements.length === 0) return
+
+        // Find which field currently has focus
+        const activeEl = document.activeElement as HTMLElement
+        let currentFieldIdx = -1
+        for (let i = 0; i < fieldElements.length; i++) {
+          if (fieldElements[i] === activeEl || fieldElements[i].contains(activeEl)) {
+            currentFieldIdx = i
+            break
+          }
+        }
+
+        const nextIdx = e.shiftKey
+          ? (currentFieldIdx <= 0 ? fieldElements.length - 1 : currentFieldIdx - 1)
+          : (currentFieldIdx >= fieldElements.length - 1 ? 0 : currentFieldIdx + 1)
+
+        const nextField = fieldElements[nextIdx]
+        if (nextField) {
+          e.preventDefault()
+          e.stopPropagation()
+          // Focus the first focusable element within the field, or the field itself
+          const focusable = nextField.querySelector<HTMLElement>(
+            'input, button, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+          )
+          if (focusable) {
+            focusable.focus()
+          } else if (nextField.matches('input')) {
+            nextField.focus()
+          }
+        }
       }
     }
+
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [task, setCurrentTask])
@@ -336,18 +395,18 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
   const sections: React.ReactNode[] = [
     <DetailTitle key="title" title={task.title} onTitleChange={props.onTitleChange} />,
     !isTemplate ? (
-      <Section key="status" label="Status">
+      <Section key="status" label="Status" fieldIndex={1}>
         <DetailStatusRow currentStatusId={task.status_id} statuses={statuses} isArchived={task.is_archived === 1} onStatusChange={props.onStatusChange} onToggleArchive={props.onToggleArchive} />
       </Section>
     ) : null,
-    <Section key="priority" label="Priority">
+    <Section key="priority" label="Priority" fieldIndex={2}>
       <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
     </Section>,
-    <Section key="labels" label="Labels">
+    <Section key="labels" label="Labels" fieldIndex={3}>
       <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} />
     </Section>,
     !isTemplate ? (
-      <Section key="due" label="Due Date">
+      <Section key="due" label="Due Date" fieldIndex={4}>
         <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
       </Section>
     ) : null,
@@ -365,7 +424,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       </Section>
     ) : null,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
-    <DetailDescription key="desc" description={task.description} onDescriptionChange={props.onDescriptionChange} />,
+    <div key="desc" data-detail-field="5"><DetailDescription description={task.description} onDescriptionChange={props.onDescriptionChange} /></div>,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
 
@@ -401,11 +460,12 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
 interface SectionProps {
   label: string
   children: React.ReactNode
+  fieldIndex?: number
 }
 
-function Section({ label, children }: SectionProps): React.JSX.Element {
+function Section({ label, children, fieldIndex }: SectionProps): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5" data-detail-field={fieldIndex}>
       <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{label}</span>
       {children}
     </div>

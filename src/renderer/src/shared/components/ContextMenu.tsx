@@ -4,6 +4,8 @@ import {
   ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
   CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer
 } from 'lucide-react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
+import { useFocusRestore } from '../hooks/useFocusRestore'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
@@ -30,6 +32,9 @@ export function ContextMenu(): React.JSX.Element | null {
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
+
+  useFocusRestore()
+  useFocusTrap(menuRef, isOpen)
 
   const task = useTaskStore((s) => (taskId ? s.tasks[taskId] : null))
   const projectId = task?.project_id ?? ''

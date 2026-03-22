@@ -23,3 +23,24 @@ Started: Sun Mar 22 10:02:36 CET 2026
 - Label settings shows ALL global labels (not just project-scoped) with usage counts
 - The `useCreateOrMatchLabel` hook centralizes the "create or match" logic to avoid duplication across 6+ components
 - Pre-existing test failures (shortcut-utils, smartInputParser) are unrelated; repository tests fail due to Node.js native module version mismatch (not our issue)
+
+## Story #31: Fix Tab Order and Focus Management
+
+### What was done:
+- Created `useFocusTrap` hook: traps Tab/Shift+Tab within a container, cycles between first and last focusable elements
+- Created `useFocusRestore` hook: saves active element on mount, restores on unmount
+- Applied focus trap + restore to: Modal, CommandPalette, ContextMenu, BulkContextMenu, LabelPicker, DeployProjectTemplateWizard
+- Sidebar: added `tabIndex={-1}` to aside, all nav items, buttons, and inputs — sidebar is now unreachable via Tab
+- Task list: Enter/Space now opens detail panel and focuses title (replaces old move-mode and status-cycle behavior)
+- Task list: Tab stopPropagation prevents AppLayout from intercepting Tab when inside task list
+- Task list: auto-focuses container when navigating to a project
+- Detail panel: Tab cycles through fields (title→status→priority→labels→due date→description) using `data-detail-field` attributes
+- Detail panel: Escape closes panel and restores focus to the previously focused element (task row)
+- TimerPlayButton: changed tabIndex from -1 to 0
+- Add-label button in TaskRow: changed tabIndex from -1 to 0, added focus-visible ring
+- Global CSS: added `*:focus-visible` style with accent ring for consistent keyboard focus indicator
+
+### Decisions:
+- Enter/Space in task list changed from move-mode/status-cycle to opening detail panel (per story requirements). Move mode is still accessible but needs a new trigger.
+- Used `data-detail-field` attributes instead of refs for Tab cycling — simpler, works across column layouts
+- Focus-visible ring uses CSS `box-shadow` instead of Tailwind ring utility to apply globally without class changes

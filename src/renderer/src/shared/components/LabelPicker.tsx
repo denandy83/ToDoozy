@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import type { Label } from '../../../../shared/types'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface LabelPickerProps {
   allLabels: Label[]
@@ -25,6 +26,8 @@ export function LabelPicker({
   const ref = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useFocusTrap(ref)
 
   useEffect(() => {
     if (newLabelMode) nameInputRef.current?.focus()

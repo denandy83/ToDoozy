@@ -62,6 +62,8 @@ export function DetailTitle({ title, onTitleChange }: DetailTitleProps): React.J
       className="w-full bg-transparent text-xl font-light tracking-tight text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       placeholder="Task title..."
       aria-label="Task title"
+      data-detail-title=""
+      data-detail-field="0"
     />
   )
 }

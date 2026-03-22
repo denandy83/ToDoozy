@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Search } from 'lucide-react'
+import { useFocusTrap } from '../../shared/hooks/useFocusTrap'
+import { useFocusRestore } from '../../shared/hooks/useFocusRestore'
 import { useCommandPaletteStore } from '../../shared/stores/commandPaletteStore'
 import { useCommandPaletteSearch } from './useCommandPaletteSearch'
 import { CommandPaletteResult } from './CommandPaletteResult'
@@ -12,7 +14,11 @@ export function CommandPalette(): React.JSX.Element | null {
     useCommandPaletteStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const results = useCommandPaletteSearch(query)
+
+  useFocusRestore()
+  useFocusTrap(containerRef, isOpen)
   const allTasks = useTaskStore((s) => s.tasks)
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask)
   const selectTask = useTaskStore((s) => s.selectTask)
@@ -98,6 +104,7 @@ export function CommandPalette(): React.JSX.Element | null {
       onClick={handleBackdropClick}
     >
       <div
+        ref={containerRef}
         className="w-full max-w-xl rounded-xl border border-border bg-surface shadow-2xl motion-safe:animate-in motion-safe:slide-in-from-top-2 motion-safe:duration-150"
         onKeyDown={handleKeyDown}
       >

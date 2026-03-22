@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import {
   ChevronRight, Sun, CircleDot, Signal, Tag, Clock, Clipboard, Trash2
 } from 'lucide-react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
+import { useFocusRestore } from '../hooks/useFocusRestore'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore } from '../stores/taskStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
@@ -26,6 +28,9 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
+
+  useFocusRestore()
+  useFocusTrap(menuRef, isOpen && isBulk)
 
   const tasks = useTaskStore((s) => s.tasks)
   const { bulkUpdateTasks, setPendingBulkDeleteTasks, deleteTask, clearSelection } = useTaskStore()

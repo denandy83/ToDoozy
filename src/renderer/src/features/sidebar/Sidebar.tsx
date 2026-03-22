@@ -176,6 +176,7 @@ export function Sidebar({
       ref={sidebarRef}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      tabIndex={-1}
       className={`flex flex-col border-r border-border bg-surface transition-[width] duration-200 ease-out ${
         collapsed ? 'w-14' : 'w-56'
       }`}
@@ -196,6 +197,7 @@ export function Sidebar({
           onClick={onTogglePin}
           className="rounded-md p-1.5 text-muted transition-colors hover:bg-foreground/6"
           title={pinned ? 'Collapse sidebar' : 'Pin sidebar'}
+          tabIndex={-1}
         >
           {pinned ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
         </button>
@@ -231,6 +233,7 @@ export function Sidebar({
                 className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
                 title="New project"
                 aria-label="New project"
+                tabIndex={-1}
               >
                 <Plus size={10} />
                 <span className="text-[8px] font-bold uppercase tracking-wider">Add</span>
@@ -250,6 +253,7 @@ export function Sidebar({
                     type="text"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
+                    tabIndex={-1}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && newProjectName.trim()) {
                         handleCreateProject()
@@ -292,6 +296,7 @@ export function Sidebar({
                 <button
                   onClick={() => setProjectsExpanded(!projectsExpanded)}
                   className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
+                  tabIndex={-1}
                 >
                   {projectsExpanded ? (
                     <>
@@ -352,6 +357,7 @@ export function Sidebar({
             collapsed ? 'justify-center' : ''
           }`}
           title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          tabIndex={-1}
         >
           {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
           {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>}
@@ -362,6 +368,7 @@ export function Sidebar({
             collapsed ? 'justify-center' : ''
           }`}
           title="Settings"
+          tabIndex={-1}
         >
           <Settings size={14} />
           {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>}
@@ -410,6 +417,7 @@ function ProjectNavItem({
       }`}
       role="tab"
       aria-selected={active}
+      tabIndex={-1}
     >
       <div
         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"

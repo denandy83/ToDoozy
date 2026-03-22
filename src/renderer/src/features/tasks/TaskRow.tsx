@@ -428,10 +428,10 @@ export function TaskRow({
         <button
           ref={addLabelBtnRef}
           onClick={handleOpenPicker}
-          className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6"
+          className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
           title="Add label"
           aria-label="Add label"
-          tabIndex={-1}
+          tabIndex={0}
         >
           <Plus size={14} />
         </button>

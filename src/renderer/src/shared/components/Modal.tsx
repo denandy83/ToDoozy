@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
+import { useFocusRestore } from '../hooks/useFocusRestore'
 
 interface ModalProps {
   open: boolean
@@ -12,6 +14,10 @@ interface ModalProps {
 
 export function Modal({ open, onClose, children, title, size = 'default', className }: ModalProps): React.JSX.Element | null {
   const backdropRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useFocusRestore()
+  useFocusTrap(contentRef, open)
 
   useEffect(() => {
     if (!open) return
@@ -39,7 +45,7 @@ export function Modal({ open, onClose, children, title, size = 'default', classN
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
       onClick={handleBackdropClick}
     >
-      <div className={`relative w-full rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200 ${
+      <div ref={contentRef} className={`relative w-full rounded-xl border border-border bg-surface p-10 shadow-2xl motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200 ${
         size === 'large' ? 'max-w-3xl overflow-hidden' : 'max-w-lg'
       } ${className ?? ''}`}>
         <button

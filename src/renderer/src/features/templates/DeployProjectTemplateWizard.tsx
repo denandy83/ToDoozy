@@ -1,6 +1,8 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, Trash2, ChevronRight, ChevronLeft } from 'lucide-react'
+import { useFocusTrap } from '../../shared/hooks/useFocusTrap'
+import { useFocusRestore } from '../../shared/hooks/useFocusRestore'
 import { useProjectStore } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
@@ -54,6 +56,10 @@ export function DeployProjectTemplateWizard({
   mode = 'deploy'
 }: DeployWizardProps): React.JSX.Element {
   const data: ProjectTemplateData = JSON.parse(template.data)
+  const wizardRef = useRef<HTMLDivElement>(null)
+
+  useFocusRestore()
+  useFocusTrap(wizardRef)
 
   const [step, setStep] = useState<WizardStep>('name')
   const [projectName, setProjectName] = useState(template.name)
@@ -226,6 +232,7 @@ export function DeployProjectTemplateWizard({
       onClick={onClose}
     >
       <div
+        ref={wizardRef}
         className="flex w-full max-w-lg flex-col rounded-xl border border-border bg-surface shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
         onClick={(e) => e.stopPropagation()}
         style={{ maxHeight: '80vh' }}
