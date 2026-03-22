@@ -17,6 +17,7 @@ export function CommandPalette(): React.JSX.Element | null {
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask)
   const selectTask = useTaskStore((s) => s.selectTask)
   const setSelectedProject = useViewStore((s) => s.setSelectedProject)
+  const setView = useViewStore((s) => s.setView)
 
   // Focus input when opened
   useEffect(() => {
@@ -36,15 +37,21 @@ export function CommandPalette(): React.JSX.Element | null {
     (taskId: string) => {
       const task = allTasks[taskId]
       if (task) {
-        // Navigate to the task's project
-        setSelectedProject(task.project_id)
+        if (task.is_archived === 1) {
+          // Navigate to archive view for archived tasks
+          setSelectedProject(task.project_id)
+          setView('archive')
+        } else {
+          // Navigate to the task's project
+          setSelectedProject(task.project_id)
+        }
         // Select and open the task
         selectTask(taskId)
         setCurrentTask(taskId)
       }
       close()
     },
-    [allTasks, setSelectedProject, selectTask, setCurrentTask, close]
+    [allTasks, setSelectedProject, setView, selectTask, setCurrentTask, close]
   )
 
   const handleKeyDown = useCallback(

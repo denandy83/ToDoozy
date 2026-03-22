@@ -124,6 +124,7 @@ export function StatusSection({
                 onCreateLabel={onCreateLabel}
                 project={projectMap?.[task.project_id]}
                 statusIdOverride={mapStatusId ? mapStatusId(task.status_id) : undefined}
+                mapStatusId={mapStatusId}
               />
               )
             })}

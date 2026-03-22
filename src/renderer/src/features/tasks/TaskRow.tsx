@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from 'react'
+import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Trash2, ChevronRight, Plus, Sun } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
@@ -11,6 +11,7 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
+import { useStatusStore } from '../../shared/stores'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Status, Label, Project } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
@@ -37,6 +38,7 @@ interface TaskRowProps {
   onCreateLabel: (name: string, color: string) => void
   project?: Project
   statusIdOverride?: string
+  mapStatusId?: (statusId: string) => string
 }
 
 export function TaskRow({
@@ -58,7 +60,8 @@ export function TaskRow({
   onRemoveLabel,
   onCreateLabel,
   project,
-  statusIdOverride
+  statusIdOverride,
+  mapStatusId
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -484,6 +487,7 @@ export function TaskRow({
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
           project={project}
+          mapStatusId={mapStatusId}
         />
       )}
     </>
@@ -528,6 +532,7 @@ interface SubtaskListProps {
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
   project?: Project
+  mapStatusId?: (statusId: string) => string
 }
 
 function SubtaskList({
@@ -545,7 +550,8 @@ function SubtaskList({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
-  project
+  project,
+  mapStatusId
 }: SubtaskListProps): React.JSX.Element {
   const subtasks = useSubtasks(parentId)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -564,11 +570,20 @@ function SubtaskList({
     }
   }, [isPending])
 
+  // Get real project statuses for subtask creation (bucket statuses don't work for DB writes)
+  const allStatusesFromStore = useStatusStore((s) => s.statuses)
+  const realProjectStatuses = useMemo(
+    () => Object.values(allStatusesFromStore).filter((s) => s.project_id === projectId),
+    [allStatusesFromStore, projectId]
+  )
+
   const handleAdd = useCallback(async () => {
     const trimmed = inputValue.trim()
     if (!trimmed || !currentUser) return
 
-    const defaultStatus = statuses.find((s) => s.is_default === 1)
+    // Use real project statuses, not bucket statuses
+    const resolvedStatuses = realProjectStatuses.length > 0 ? realProjectStatuses : statuses
+    const defaultStatus = resolvedStatuses.find((s) => s.is_default === 1)
     if (!defaultStatus) return
 
     const maxOrder = subtasks.reduce((max, t) => Math.max(max, t.order_index), -1)
@@ -582,7 +597,7 @@ function SubtaskList({
     })
     setInputValue('')
     inputRef.current?.focus()
-  }, [inputValue, currentUser, statuses, subtasks, createSubtask, parentId, projectId])
+  }, [inputValue, currentUser, realProjectStatuses, statuses, subtasks, createSubtask, parentId, projectId])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -621,6 +636,8 @@ function SubtaskList({
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
           project={project}
+          statusIdOverride={mapStatusId ? mapStatusId(child.status_id) : undefined}
+          mapStatusId={mapStatusId}
         />
       ))}
       {isPending && (

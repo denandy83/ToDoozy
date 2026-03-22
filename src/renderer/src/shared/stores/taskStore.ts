@@ -192,6 +192,20 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           tasks: { ...state.tasks, [task.id]: task }
         }))
 
+        // Cascade archive/unarchive to subtasks in store
+        if (input.is_archived !== undefined) {
+          const subtasks = await window.api.tasks.findSubtasks(id)
+          if (subtasks.length > 0) {
+            set((state) => {
+              const updated = { ...state.tasks }
+              for (const st of subtasks) {
+                updated[st.id] = st
+              }
+              return { tasks: updated }
+            })
+          }
+        }
+
         // When adding a subtask to My Day, also add its parent
         if (input.is_in_my_day === 1 && task.parent_id) {
           const parent = get().tasks[task.parent_id]

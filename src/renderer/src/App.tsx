@@ -49,6 +49,7 @@ function App(): React.JSX.Element {
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)
+  const hydrateAllTaskLabels = useTaskStore((s) => s.hydrateAllTaskLabels)
   useEffect(() => {
     if (!currentProjectId || !currentUser) return
     const unsub = window.api.onTasksChanged(() => {
@@ -56,10 +57,11 @@ function App(): React.JSX.Element {
       hydrateStatuses(currentProjectId)
       hydrateLabels(currentProjectId)
       hydrateAllForProject(currentProjectId, currentUser.id)
+      hydrateAllTaskLabels(currentProjectId)
       hydrateMyDay(currentUser.id)
     })
     return unsub
-  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateMyDay])
+  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateAllTaskLabels, hydrateMyDay])
 
   // Refresh tray badge when tasks change
   useEffect(() => {

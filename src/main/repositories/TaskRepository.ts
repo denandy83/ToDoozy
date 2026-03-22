@@ -125,6 +125,15 @@ export class TaskRepository {
 
     values.push(id)
     this.db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+
+    // Cascade archive/unarchive to subtasks
+    if (input.is_archived !== undefined) {
+      const subtasks = this.findSubtasks(id)
+      for (const subtask of subtasks) {
+        this.update(subtask.id, { is_archived: input.is_archived })
+      }
+    }
+
     return this.findById(id)
   }
 
