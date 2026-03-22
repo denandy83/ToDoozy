@@ -75,3 +75,16 @@ ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with E
 - Minimal, monochrome-first design. Color comes from themes and priority/label accents.
 - All animations respect `prefers-reduced-motion`.
 - Keyboard-first: every feature must be usable without a mouse.
+
+## Issue Tracking via ToDoozy MCP
+When you encounter a bug, improvement idea, or feature request that is NOT being fixed right now, create a task in the user's ToDoozy app via MCP tools. Use the Personal project (`1b8d1825-8f5f-48da-b1d3-1dd2e4554d85`) and assign the appropriate labels:
+- **Bug**: label `Todoozy` (`82cc13d9`) + label `bug` (`8a67ae36`)
+- **Improvement**: label `Todoozy` (`82cc13d9`) + label `improvement` (`a9bb75e0`)
+- **Feature**: label `Todoozy` (`82cc13d9`) + label `Feature` (`163f1cf0`)
+
+Task title should be clear and actionable. Description should include enough context to understand and reproduce the issue later. Do NOT silently skip issues — always log them.
+
+When tackling a bug/improvement/feature from the ToDoozy task list:
+- **Starting work**: Move the task to In Progress (`b85b1973-ebc9-469b-b44c-52c3b91d4197`)
+- **Implementation done (ralph passes)**: Move the task to Testing (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
+- **User confirms tested**: Move the task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)

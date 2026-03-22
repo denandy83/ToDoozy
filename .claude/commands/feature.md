@@ -57,12 +57,12 @@ Wait for confirmation. Apply any edits the user requests.
 
 ## Phase 3: Housekeeping — Archive Completed Stories
 
-Before writing the new story, check prd.json for any stories with `passes: true`.
+Before writing the new story, check prd.json for any stories with `passes: true` AND `tested: true`.
 
-If there are completed stories:
+If there are completed and tested stories:
 
 1. Read `implemented-stories.md` in the project root (create it if it doesn't exist)
-2. For each `passes: true` story, append it to `implemented-stories.md` in this format:
+2. For each `passes: true` AND `tested: true` story, append it to `implemented-stories.md` in this format:
 
 ```markdown
 ---
@@ -90,7 +90,8 @@ Add the new story to prd.json's `stories` array **on the current branch** (do NO
   "description": "<description from grill-me>\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
   "spec_section": "N/A",
   "acceptance_criteria": ["<from grill-me>"],
-  "passes": false
+  "passes": false,
+  "tested": false
 }
 ```
 
@@ -130,9 +131,26 @@ Wait for ralph to complete.
 
 ---
 
-## Phase 7: Push
+## Phase 7: Testing
 
-After ralph finishes, ask the user: "Ralph is done. Want me to push `ralph/<name>` to origin?"
+After ralph finishes, the stories have `passes: true` but `tested: false`. For each story that has a corresponding ToDoozy task, move it to Testing status (`26686d55-1cfb-4fcd-ad19-674436b2392f`) via MCP.
+
+Testing is done by the user:
+
+1. Tell the user: "Ralph is done. Let's test the implementation. Here are the acceptance criteria to verify:"
+2. For each story, list all acceptance criteria as a numbered checklist.
+3. Walk through each criterion with the user. Ask them to verify each one. If a criterion fails, use `/fix` to address it.
+4. Once the user confirms ALL acceptance criteria pass, update prd.json to set `tested: true` for the story.
+5. Move the corresponding ToDoozy task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`) via MCP.
+6. Only stories with BOTH `passes: true` AND `tested: true` can be archived to implemented-stories.md.
+
+Do NOT set `tested: true` until the user explicitly confirms all criteria are met.
+
+---
+
+## Phase 8: Push
+
+After testing is complete, ask the user: "All stories tested and verified. Want me to push `ralph/<name>` to origin?"
 
 - **Yes** — run `git push -u origin ralph/<name>`
 - **No** — tell the user the branch is local and ready for review
