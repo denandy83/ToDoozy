@@ -14,6 +14,7 @@ import { DetailRecurrence } from './DetailRecurrence'
 import { DetailSnooze } from './DetailSnooze'
 import { DetailDescription } from './DetailDescription'
 import { DetailActivityLog } from './DetailActivityLog'
+import { DetailAttachments } from './DetailAttachments'
 import { DetailSubtasks } from './DetailSubtasks'
 import { PriorityIndicator } from '../../shared/components/PriorityIndicator'
 import { DatePicker } from '../../shared/components/DatePicker'
@@ -425,6 +426,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     ) : null,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
     <div key="desc" data-detail-field="5"><DetailDescription description={task.description} onDescriptionChange={props.onDescriptionChange} /></div>,
+    !isTemplate ? <DetailAttachments key="attachments" taskId={task.id} /> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
 

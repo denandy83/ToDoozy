@@ -60,7 +60,7 @@
         "Task deletion cleans up all attachment files",
         "attachments table with proper schema and FK constraints"
       ],
-      "passes": false,
+      "passes": true,
       "tested": false
     }
   ]

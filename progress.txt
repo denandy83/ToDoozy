@@ -44,3 +44,28 @@ Started: Sun Mar 22 10:02:36 CET 2026
 - Enter/Space in task list changed from move-mode/status-cycle to opening detail panel (per story requirements). Move mode is still accessible but needs a new trigger.
 - Used `data-detail-field` attributes instead of refs for Tab cycling — simpler, works across column layouts
 - Focus-visible ring uses CSS `box-shadow` instead of Tailwind ring utility to apply globally without class changes
+
+## Story #32: iCloud Drive File Attachments
+**Completed:** 2026-03-22
+
+### What was done:
+- **Migration 7**: Created `attachments` table with FK to tasks (ON DELETE CASCADE), columns: id, task_id, filename, mime_type, size_bytes, local_path, icloud_path, timestamps
+- **AttachmentRepository**: Full CRUD — `findById()`, `findByTaskId()`, `create()`, `updateIcloudPath()`, `delete()`, `deleteByTaskId()`, `countByTaskId()`
+- **Types**: Added `Attachment` and `CreateAttachmentInput` interfaces in shared/types.ts
+- **IPC/Preload**: Added 6 attachment handlers + 8 file system handlers (iCloud detection, file copy, open, delete, dialog)
+- **Attachment Store** (Zustand): `hydrateAttachments()`, `checkIcloudStatus()`, `setIcloudEnabled()`, `addAttachment()`, `removeAttachment()`, `useAttachmentsByTaskId()` selector
+- **iCloud Settings**: New tab in UnifiedSettingsModal — toggle to enable/disable iCloud sync, shows storage location info, detects iCloud Drive availability
+- **DetailAttachments**: Attachment cards below description — horizontal row of rectangular cards with file type icon + truncated filename, hover X to remove, click to open in default app
+- **EditorToolbar**: Paperclip button enabled/disabled based on iCloud status (reads from attachment store)
+- **useAttachFiles hook**: Shared file picker logic — enforces 10 MB max per file, 10 attachments max per task, duplicate filename suffix, error toasts
+- **Task deletion cleanup**: Added file cleanup (local + iCloud dirs) on task delete in taskStore, fire-and-forget with error logging
+- **App.tsx**: Hydrates iCloud status on app startup
+- **Tests**: Added 10 AttachmentRepository tests (CRUD, cascade, counts, edge cases)
+
+### Decisions:
+- Used `getMimeType()` function in main process for MIME detection instead of adding a dependency — covers 30+ common file types
+- Toolbar paperclip shows as disabled with tooltip when iCloud is off; actual attachment management is via the Attachments section below description
+- File picker uses Electron's native `dialog.showOpenDialog` with multiSelections
+- Dual storage: files copied to both `~/.todoozy/attachments/<task-id>/` (local) and `~/Library/Mobile Documents/com~apple~CloudDocs/ToDoozy/<task-id>/` (iCloud)
+- Undo on attachment remove: re-creates the DB record (files remain on disk until confirmed)
+- Pre-existing test failures remain unchanged (native module mismatch, shortcut-utils, smartInputParser)

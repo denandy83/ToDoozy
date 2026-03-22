@@ -28,7 +28,9 @@ import type {
   UpdateThemeInput,
   ProjectTemplate,
   CreateProjectTemplateInput,
-  UpdateProjectTemplateInput
+  UpdateProjectTemplateInput,
+  Attachment,
+  CreateAttachmentInput
 } from '../shared/types'
 
 export interface TasksAPI {
@@ -142,6 +144,34 @@ export interface ProjectTemplatesAPI {
   delete(id: string): Promise<boolean>
 }
 
+export interface AttachmentsAPI {
+  findById(id: string): Promise<Attachment | null>
+  findByTaskId(taskId: string): Promise<Attachment[]>
+  create(input: CreateAttachmentInput): Promise<Attachment>
+  delete(id: string): Promise<boolean>
+  countByTaskId(taskId: string): Promise<number>
+  updateIcloudPath(id: string, icloudPath: string | null): Promise<Attachment | null>
+}
+
+export interface CopyFileResult {
+  localPath: string
+  icloudPath: string | null
+  filename: string
+  sizeBytes: number
+  mimeType: string
+}
+
+export interface FsAPI {
+  checkIcloudAvailable(): Promise<boolean>
+  getLocalAttachmentsDir(taskId: string): Promise<string>
+  getIcloudAttachmentsDir(taskId: string): Promise<string>
+  copyFileToAttachments(sourcePath: string, taskId: string, icloudEnabled: boolean): Promise<CopyFileResult>
+  openFile(filePath: string): Promise<void>
+  deleteAttachmentFiles(localPath: string, icloudPath: string | null): Promise<void>
+  deleteTaskAttachmentDirs(taskId: string): Promise<void>
+  showOpenDialog(): Promise<{ canceled: boolean; filePaths: string[] }>
+}
+
 export interface SupabaseConfig {
   url: string
   anonKey: string
@@ -213,6 +243,8 @@ export interface TodoozyAPI {
   settings: SettingsAPI
   themes: ThemesAPI
   projectTemplates: ProjectTemplatesAPI
+  attachments: AttachmentsAPI
+  fs: FsAPI
   auth: AuthAPI
   quickadd: QuickAddAPI
   appToggle: AppToggleAPI

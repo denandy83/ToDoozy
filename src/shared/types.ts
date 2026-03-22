@@ -259,6 +259,30 @@ export interface CreateActivityLogInput {
   new_value?: string | null
 }
 
+// ── Attachments ──────────────────────────────────────────────────────
+
+export interface Attachment {
+  id: string
+  task_id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  local_path: string
+  icloud_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateAttachmentInput {
+  id: string
+  task_id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  local_path: string
+  icloud_path?: string | null
+}
+
 // ── Project Templates ─────────────────────────────────────────────────
 
 export interface ProjectTemplate {

@@ -8,6 +8,7 @@ import { ThemeRepository } from './ThemeRepository'
 import { SettingsRepository } from './SettingsRepository'
 import { ActivityLogRepository } from './ActivityLogRepository'
 import { ProjectTemplateRepository } from './ProjectTemplateRepository'
+import { AttachmentRepository } from './AttachmentRepository'
 
 export interface Repositories {
   users: UserRepository
@@ -19,6 +20,7 @@ export interface Repositories {
   settings: SettingsRepository
   activityLog: ActivityLogRepository
   projectTemplates: ProjectTemplateRepository
+  attachments: AttachmentRepository
 }
 
 export function createRepositories(db: Database.Database): Repositories {
@@ -31,7 +33,8 @@ export function createRepositories(db: Database.Database): Repositories {
     themes: new ThemeRepository(db),
     settings: new SettingsRepository(db),
     activityLog: new ActivityLogRepository(db),
-    projectTemplates: new ProjectTemplateRepository(db)
+    projectTemplates: new ProjectTemplateRepository(db),
+    attachments: new AttachmentRepository(db)
   }
 }
 
@@ -44,5 +47,6 @@ export {
   ThemeRepository,
   SettingsRepository,
   ActivityLogRepository,
-  ProjectTemplateRepository
+  ProjectTemplateRepository,
+  AttachmentRepository
 }

@@ -84,3 +84,6 @@ export { selectAllProjectTemplates } from './templateStore'
 
 export { useTimerStore, formatTimeRemaining, DEFAULT_TIMER_PRESETS } from './timerStore'
 export type { TimerStore, TimerPreset, TimerPhase, StartTimerParams } from './timerStore'
+
+export { useAttachmentStore, useAttachmentsByTaskId } from './attachmentStore'
+export type { AttachmentStore } from './attachmentStore'

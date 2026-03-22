@@ -10,6 +10,7 @@ import { LabelRepository } from './LabelRepository'
 import { ThemeRepository } from './ThemeRepository'
 import { SettingsRepository } from './SettingsRepository'
 import { ActivityLogRepository } from './ActivityLogRepository'
+import { AttachmentRepository } from './AttachmentRepository'
 import { createRepositories } from './index'
 
 function createTestDb(): Database.Database {
@@ -56,6 +57,7 @@ describe('createRepositories', () => {
     expect(repos.themes).toBeInstanceOf(ThemeRepository)
     expect(repos.settings).toBeInstanceOf(SettingsRepository)
     expect(repos.activityLog).toBeInstanceOf(ActivityLogRepository)
+    expect(repos.attachments).toBeInstanceOf(AttachmentRepository)
     db.close()
   })
 })
@@ -788,5 +790,153 @@ describe('ActivityLogRepository', () => {
       repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: `action_${i}` })
     }
     expect(repo.getRecent(3)).toHaveLength(3)
+  })
+})
+
+describe('AttachmentRepository', () => {
+  let db: Database.Database
+  let repo: AttachmentRepository
+  let taskId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new AttachmentRepository(db)
+    const base = seedBase(db)
+    taskId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, owner_id, title, status_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(taskId, base.projectId, base.userId, 'Attachment Test', base.statusId, now, now)
+  })
+
+  it('creates and finds an attachment', () => {
+    const id = randomUUID()
+    const att = repo.create({
+      id,
+      task_id: taskId,
+      filename: 'report.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 1024,
+      local_path: '/tmp/report.pdf'
+    })
+    expect(att.filename).toBe('report.pdf')
+    expect(att.mime_type).toBe('application/pdf')
+    expect(att.size_bytes).toBe(1024)
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds attachments by task id', () => {
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'a.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 100,
+      local_path: '/tmp/a.pdf'
+    })
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'b.png',
+      mime_type: 'image/png',
+      size_bytes: 200,
+      local_path: '/tmp/b.png'
+    })
+    expect(repo.findByTaskId(taskId)).toHaveLength(2)
+  })
+
+  it('counts attachments by task id', () => {
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'a.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 100,
+      local_path: '/tmp/a.pdf'
+    })
+    expect(repo.countByTaskId(taskId)).toBe(1)
+  })
+
+  it('updates icloud path', () => {
+    const id = randomUUID()
+    repo.create({
+      id,
+      task_id: taskId,
+      filename: 'doc.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 500,
+      local_path: '/tmp/doc.pdf'
+    })
+    const updated = repo.updateIcloudPath(id, '/icloud/doc.pdf')
+    expect(updated!.icloud_path).toBe('/icloud/doc.pdf')
+  })
+
+  it('deletes an attachment', () => {
+    const id = randomUUID()
+    repo.create({
+      id,
+      task_id: taskId,
+      filename: 'temp.txt',
+      mime_type: 'text/plain',
+      size_bytes: 10,
+      local_path: '/tmp/temp.txt'
+    })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('deletes all attachments by task id', () => {
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'a.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 100,
+      local_path: '/tmp/a.pdf'
+    })
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'b.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 200,
+      local_path: '/tmp/b.pdf'
+    })
+    expect(repo.deleteByTaskId(taskId)).toBe(2)
+    expect(repo.findByTaskId(taskId)).toHaveLength(0)
+  })
+
+  it('cascades on task delete', () => {
+    repo.create({
+      id: randomUUID(),
+      task_id: taskId,
+      filename: 'cascade.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 100,
+      local_path: '/tmp/cascade.pdf'
+    })
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+    expect(repo.findByTaskId(taskId)).toHaveLength(0)
+  })
+
+  it('stores icloud_path as null when not provided', () => {
+    const id = randomUUID()
+    const att = repo.create({
+      id,
+      task_id: taskId,
+      filename: 'local-only.txt',
+      mime_type: 'text/plain',
+      size_bytes: 50,
+      local_path: '/tmp/local-only.txt'
+    })
+    expect(att.icloud_path).toBeNull()
+  })
+
+  it('returns empty array for task with no attachments', () => {
+    expect(repo.findByTaskId(randomUUID())).toHaveLength(0)
+  })
+
+  it('returns 0 count for task with no attachments', () => {
+    expect(repo.countByTaskId(randomUUID())).toBe(0)
   })
 })

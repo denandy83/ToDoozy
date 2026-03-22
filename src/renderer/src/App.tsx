@@ -7,6 +7,7 @@ import { useTaskStore } from './shared/stores/taskStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
+import { useAttachmentStore } from './shared/stores/attachmentStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 
@@ -23,11 +24,14 @@ function App(): React.JSX.Element {
     initAuth()
   }, [initAuth])
 
+  const { checkIcloudStatus } = useAttachmentStore()
+
   // Hydrate settings and themes on mount
   useEffect(() => {
     hydrateSettings()
     hydrateThemes()
-  }, [hydrateSettings, hydrateThemes])
+    checkIcloudStatus()
+  }, [hydrateSettings, hydrateThemes, checkIcloudStatus])
 
   // Hydrate projects when authenticated + set tray user ID
   useEffect(() => {

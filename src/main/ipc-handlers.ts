@@ -1,7 +1,8 @@
-import { ipcMain, safeStorage, BrowserWindow } from 'electron'
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, copyFileSync, rmSync, statSync } from 'fs'
+import { join, basename, extname } from 'path'
 import { app } from 'electron'
+import { homedir } from 'os'
 import { getDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
@@ -650,4 +651,206 @@ export function registerIpcHandlers(): void {
       win.webContents.send('tray:navigate-to-task', taskId)
     }
   })
+
+  // ── Attachments ─────────────────────────────────────────────────────
+  ipcMain.handle('attachments:findByTaskId', (_e, taskId: string) => {
+    return getRepos().attachments.findByTaskId(taskId)
+  })
+
+  ipcMain.handle('attachments:findById', (_e, id: string) => {
+    return getRepos().attachments.findById(id) ?? null
+  })
+
+  ipcMain.handle(
+    'attachments:create',
+    (_e, input: Parameters<Repositories['attachments']['create']>[0]) => {
+      return getRepos().attachments.create(input)
+    }
+  )
+
+  ipcMain.handle('attachments:delete', (_e, id: string) => {
+    return getRepos().attachments.delete(id)
+  })
+
+  ipcMain.handle('attachments:countByTaskId', (_e, taskId: string) => {
+    return getRepos().attachments.countByTaskId(taskId)
+  })
+
+  ipcMain.handle(
+    'attachments:updateIcloudPath',
+    (_e, id: string, icloudPath: string | null) => {
+      return getRepos().attachments.updateIcloudPath(id, icloudPath) ?? null
+    }
+  )
+
+  // ── File System (Attachments) ───────────────────────────────────────
+  ipcMain.handle('fs:checkIcloudAvailable', () => {
+    const icloudPath = join(
+      homedir(),
+      'Library',
+      'Mobile Documents',
+      'com~apple~CloudDocs'
+    )
+    return existsSync(icloudPath)
+  })
+
+  ipcMain.handle('fs:getLocalAttachmentsDir', (_e, taskId: string) => {
+    const dir = join(app.getPath('userData'), 'attachments', taskId)
+    mkdirSync(dir, { recursive: true })
+    return dir
+  })
+
+  ipcMain.handle('fs:getIcloudAttachmentsDir', (_e, taskId: string) => {
+    const dir = join(
+      homedir(),
+      'Library',
+      'Mobile Documents',
+      'com~apple~CloudDocs',
+      'ToDoozy',
+      taskId
+    )
+    mkdirSync(dir, { recursive: true })
+    return dir
+  })
+
+  ipcMain.handle(
+    'fs:copyFileToAttachments',
+    (
+      _e,
+      sourcePath: string,
+      taskId: string,
+      icloudEnabled: boolean
+    ): { localPath: string; icloudPath: string | null; filename: string; sizeBytes: number; mimeType: string } => {
+      const stat = statSync(sourcePath)
+      const originalName = basename(sourcePath)
+      const ext = extname(originalName)
+      const nameWithoutExt = originalName.slice(0, -ext.length || undefined)
+
+      // Local dir
+      const localDir = join(app.getPath('userData'), 'attachments', taskId)
+      mkdirSync(localDir, { recursive: true })
+
+      // Resolve duplicate filenames
+      let finalName = originalName
+      let counter = 1
+      while (existsSync(join(localDir, finalName))) {
+        finalName = `${nameWithoutExt} (${counter})${ext}`
+        counter++
+      }
+
+      const localPath = join(localDir, finalName)
+      copyFileSync(sourcePath, localPath)
+
+      let icloudPath: string | null = null
+      if (icloudEnabled) {
+        const icloudDir = join(
+          homedir(),
+          'Library',
+          'Mobile Documents',
+          'com~apple~CloudDocs',
+          'ToDoozy',
+          taskId
+        )
+        mkdirSync(icloudDir, { recursive: true })
+        icloudPath = join(icloudDir, finalName)
+        copyFileSync(sourcePath, icloudPath)
+      }
+
+      // Simple MIME type detection
+      const mimeType = getMimeType(ext)
+
+      return {
+        localPath,
+        icloudPath,
+        filename: finalName,
+        sizeBytes: stat.size,
+        mimeType
+      }
+    }
+  )
+
+  ipcMain.handle('fs:openFile', (_e, filePath: string) => {
+    shell.openPath(filePath)
+  })
+
+  ipcMain.handle('fs:deleteAttachmentFiles', (_e, localPath: string, icloudPath: string | null) => {
+    try {
+      if (localPath && existsSync(localPath)) unlinkSync(localPath)
+    } catch (err) {
+      console.error('Failed to delete local attachment:', err)
+    }
+    try {
+      if (icloudPath && existsSync(icloudPath)) unlinkSync(icloudPath)
+    } catch (err) {
+      console.error('Failed to delete iCloud attachment:', err)
+    }
+  })
+
+  ipcMain.handle('fs:deleteTaskAttachmentDirs', (_e, taskId: string) => {
+    const localDir = join(app.getPath('userData'), 'attachments', taskId)
+    try {
+      if (existsSync(localDir)) rmSync(localDir, { recursive: true })
+    } catch (err) {
+      console.error('Failed to delete local attachment dir:', err)
+    }
+    const icloudDir = join(
+      homedir(),
+      'Library',
+      'Mobile Documents',
+      'com~apple~CloudDocs',
+      'ToDoozy',
+      taskId
+    )
+    try {
+      if (existsSync(icloudDir)) rmSync(icloudDir, { recursive: true })
+    } catch (err) {
+      console.error('Failed to delete iCloud attachment dir:', err)
+    }
+  })
+
+  ipcMain.handle('fs:showOpenDialog', async () => {
+    const win = getMainWindow()
+    if (!win) return { canceled: true, filePaths: [] }
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      title: 'Select files to attach'
+    })
+    return result
+  })
+}
+
+function getMimeType(ext: string): string {
+  const map: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.zip': 'application/zip',
+    '.gz': 'application/gzip',
+    '.tar': 'application/x-tar',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo',
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.ts': 'application/typescript',
+    '.md': 'text/markdown'
+  }
+  return map[ext.toLowerCase()] ?? 'application/octet-stream'
 }

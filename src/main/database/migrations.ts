@@ -283,4 +283,22 @@ const migration_6: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6]
+const migration_7: Migration = (db) => {
+  // Story #32: iCloud Drive File Attachments
+  db.exec(`
+    CREATE TABLE attachments (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      local_path TEXT NOT NULL,
+      icloud_path TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7]

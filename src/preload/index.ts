@@ -123,6 +123,29 @@ const api: TodoozyAPI = {
     delete: (id) => ipcRenderer.invoke('projectTemplates:delete', id)
   },
 
+  attachments: {
+    findById: (id) => ipcRenderer.invoke('attachments:findById', id),
+    findByTaskId: (taskId) => ipcRenderer.invoke('attachments:findByTaskId', taskId),
+    create: (input) => ipcRenderer.invoke('attachments:create', input),
+    delete: (id) => ipcRenderer.invoke('attachments:delete', id),
+    countByTaskId: (taskId) => ipcRenderer.invoke('attachments:countByTaskId', taskId),
+    updateIcloudPath: (id, icloudPath) =>
+      ipcRenderer.invoke('attachments:updateIcloudPath', id, icloudPath)
+  },
+
+  fs: {
+    checkIcloudAvailable: () => ipcRenderer.invoke('fs:checkIcloudAvailable'),
+    getLocalAttachmentsDir: (taskId) => ipcRenderer.invoke('fs:getLocalAttachmentsDir', taskId),
+    getIcloudAttachmentsDir: (taskId) => ipcRenderer.invoke('fs:getIcloudAttachmentsDir', taskId),
+    copyFileToAttachments: (sourcePath, taskId, icloudEnabled) =>
+      ipcRenderer.invoke('fs:copyFileToAttachments', sourcePath, taskId, icloudEnabled),
+    openFile: (filePath) => ipcRenderer.invoke('fs:openFile', filePath),
+    deleteAttachmentFiles: (localPath, icloudPath) =>
+      ipcRenderer.invoke('fs:deleteAttachmentFiles', localPath, icloudPath),
+    deleteTaskAttachmentDirs: (taskId) => ipcRenderer.invoke('fs:deleteTaskAttachmentDirs', taskId),
+    showOpenDialog: () => ipcRenderer.invoke('fs:showOpenDialog')
+  },
+
   auth: {
     storeSession: (sessionJson) => ipcRenderer.invoke('auth:storeSession', sessionJson),
     getSession: () => ipcRenderer.invoke('auth:getSession'),
