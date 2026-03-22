@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, FolderMinus } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -23,23 +23,37 @@ function ColorDot({ color, onChange }: { color: string; onChange: (c: string) =>
     </button>
   )
 }
-import { useLabelStore, useLabelsByProject } from '../../shared/stores/labelStore'
+import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores/projectStore'
-import { useTaskStore } from '../../shared/stores/taskStore'
 import { useToast } from '../../shared/components/Toast'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
-import type { Label } from '../../../../shared/types'
+import type { Label, LabelUsageInfo } from '../../../../shared/types'
 
 export function LabelSettingsContent(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
-  const labels = useLabelsByProject(projectId)
-  const { createLabel, updateLabel, deleteLabel, reorderLabels, filterMode, setFilterMode } = useLabelStore()
-  const taskLabels = useTaskStore((s) => s.taskLabels)
+  const { createLabel, updateLabel, deleteLabel, removeFromProject, addToProject, reorderLabels, filterMode, setFilterMode } = useLabelStore()
   const { addToast } = useToast()
   const setSetting = useSettingsStore((s) => s.setSetting)
   const blurOpacityStr = useSetting('label_blur_opacity')
   const blurOpacity = blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8
+
+  // Fetch all labels with usage info
+  const [labelsWithUsage, setLabelsWithUsage] = useState<LabelUsageInfo[]>([])
+  const [projectLabelIds, setProjectLabelIds] = useState<Set<string>>(new Set())
+
+  const refreshLabels = useCallback(async () => {
+    const [all, projectLabels] = await Promise.all([
+      window.api.labels.findAllWithUsage(),
+      window.api.labels.findByProjectId(projectId)
+    ])
+    setLabelsWithUsage(all)
+    setProjectLabelIds(new Set(projectLabels.map((l) => l.id)))
+  }, [projectId])
+
+  useEffect(() => {
+    refreshLabels()
+  }, [refreshLabels])
 
   const [showAddInput, setShowAddInput] = useState(false)
   const [newName, setNewName] = useState('')
@@ -67,17 +81,25 @@ export function LabelSettingsContent(): React.JSX.Element {
   const handleCreate = useCallback(async () => {
     const name = newName.trim()
     if (!name || !projectId) return
-    await createLabel({ id: crypto.randomUUID(), project_id: projectId, name, color: newColor })
+    // Check for existing global label
+    const existing = await window.api.labels.findByName(name)
+    if (existing) {
+      await addToProject(projectId, existing.id)
+      addToast({ message: `Existing label added: ${existing.name}` })
+    } else {
+      await createLabel({ id: crypto.randomUUID(), project_id: projectId, name, color: newColor })
+    }
     setNewName('')
+    await refreshLabels()
     requestAnimationFrame(() => {
       addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       addInputRef.current?.focus()
     })
-  }, [newName, newColor, projectId, createLabel])
+  }, [newName, newColor, projectId, createLabel, addToProject, addToast, refreshLabels])
 
   const sortedLabels = useMemo(
-    () => [...labels].sort((a, b) => a.order_index - b.order_index),
-    [labels]
+    () => [...labelsWithUsage].sort((a, b) => a.order_index - b.order_index),
+    [labelsWithUsage]
   )
   const labelIds = useMemo(() => sortedLabels.map((l) => l.id), [sortedLabels])
 
@@ -109,34 +131,56 @@ export function LabelSettingsContent(): React.JSX.Element {
     const name = editName.trim()
     if (name) {
       await updateLabel(editingId, { name, color: editColor })
+      await refreshLabels()
     }
     setEditingId(null)
-  }, [editingId, editName, editColor, updateLabel])
+  }, [editingId, editName, editColor, updateLabel, refreshLabels])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)
   }, [])
 
-  const handleDelete = useCallback((id: string) => {
+  const handleDeleteGlobally = useCallback(async (id: string) => {
     const label = sortedLabels.find((l) => l.id === id)
-    const name = label?.name ?? 'label'
-    const assignedCount = Object.values(taskLabels).filter(
-      (labels) => labels.some((l) => l.id === id)
-    ).length
+    if (!label) return
 
-    const message = assignedCount > 0
-      ? `Delete "${name}"? It's assigned to ${assignedCount} task${assignedCount === 1 ? '' : 's'}.`
-      : `Delete "${name}"?`
+    const projects = await window.api.labels.findProjectsUsingLabel(id)
+    const totalTasks = projects.reduce((sum, p) => sum + p.task_count, 0)
+
+    const projectList = projects.map((p) => `${p.project_name} (${p.task_count} task${p.task_count === 1 ? '' : 's'})`).join(', ')
+    const message = totalTasks > 0
+      ? `Delete "${label.name}" everywhere? Used in: ${projectList}.`
+      : `Delete "${label.name}" everywhere?`
 
     addToast({
       message,
       persistent: true,
       actions: [
-        { label: 'Delete', variant: 'danger', onClick: () => deleteLabel(id) },
+        { label: 'Delete everywhere', variant: 'danger', onClick: async () => {
+          await deleteLabel(id)
+          await refreshLabels()
+        }},
         { label: 'Cancel', variant: 'muted', onClick: () => {} }
       ]
     })
-  }, [deleteLabel, taskLabels, addToast, sortedLabels])
+  }, [deleteLabel, addToast, sortedLabels, refreshLabels])
+
+  const handleRemoveFromProject = useCallback(async (id: string) => {
+    const label = sortedLabels.find((l) => l.id === id)
+    if (!label || !currentProject) return
+
+    addToast({
+      message: `Remove "${label.name}" from ${currentProject.name}? Tasks in this project will lose the label.`,
+      persistent: true,
+      actions: [
+        { label: 'Remove', variant: 'danger', onClick: async () => {
+          await removeFromProject(projectId, id)
+          await refreshLabels()
+        }},
+        { label: 'Cancel', variant: 'muted', onClick: () => {} }
+      ]
+    })
+  }, [removeFromProject, projectId, currentProject, addToast, sortedLabels, refreshLabels])
 
   return (
     <div className="flex flex-col gap-6">
@@ -187,7 +231,7 @@ export function LabelSettingsContent(): React.JSX.Element {
       {/* Label list */}
       <div>
         <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-          Labels
+          All Labels
         </p>
 
         {/* Add label — on top */}
@@ -234,6 +278,7 @@ export function LabelSettingsContent(): React.JSX.Element {
                   label={label}
                   disabled={showAddInput}
                   isEditing={editingId === label.id}
+                  isInProject={projectLabelIds.has(label.id)}
                   editName={editName}
                   editColor={editColor}
                   editInputRef={editingId === label.id ? editInputRef : undefined}
@@ -242,7 +287,8 @@ export function LabelSettingsContent(): React.JSX.Element {
                   onSaveEdit={handleSaveEdit}
                   onCancelEdit={handleCancelEdit}
                   onStartEdit={() => handleStartEdit(label)}
-                  onDelete={() => handleDelete(label.id)}
+                  onDeleteGlobally={() => handleDeleteGlobally(label.id)}
+                  onRemoveFromProject={() => handleRemoveFromProject(label.id)}
                 />
               ))}
 
@@ -263,9 +309,10 @@ const LABEL_COLORS = [
 ]
 
 interface SortableLabelRowProps {
-  label: Label
+  label: LabelUsageInfo
   disabled: boolean
   isEditing: boolean
+  isInProject: boolean
   editName: string
   editColor: string
   editInputRef?: React.RefObject<HTMLInputElement | null>
@@ -274,13 +321,15 @@ interface SortableLabelRowProps {
   onSaveEdit: () => void
   onCancelEdit: () => void
   onStartEdit: () => void
-  onDelete: () => void
+  onDeleteGlobally: () => void
+  onRemoveFromProject: () => void
 }
 
 function SortableLabelRow({
   label,
   disabled,
   isEditing,
+  isInProject,
   editName,
   editColor,
   editInputRef,
@@ -289,7 +338,8 @@ function SortableLabelRow({
   onSaveEdit,
   onCancelEdit,
   onStartEdit,
-  onDelete
+  onDeleteGlobally,
+  onRemoveFromProject
 }: SortableLabelRowProps): React.JSX.Element {
   const {
     attributes,
@@ -377,6 +427,14 @@ function SortableLabelRow({
         style={{ backgroundColor: label.color }}
       />
       <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
+      {/* Usage counts */}
+      <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
+        {label.project_count}p / {label.task_count}t
+      </span>
+      {/* In-project indicator */}
+      {isInProject && (
+        <span className="text-[9px] text-accent" title="In this project">&#10003;</span>
+      )}
       <button
         onClick={onStartEdit}
         className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
@@ -384,10 +442,19 @@ function SortableLabelRow({
       >
         <Pencil size={12} />
       </button>
+      {isInProject && (
+        <button
+          onClick={onRemoveFromProject}
+          className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
+          title="Remove from this project"
+        >
+          <FolderMinus size={12} />
+        </button>
+      )}
       <button
-        onClick={onDelete}
+        onClick={onDeleteGlobally}
         className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-        title="Delete"
+        title="Delete everywhere"
       >
         <Trash2 size={12} />
       </button>

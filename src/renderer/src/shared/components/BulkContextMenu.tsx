@@ -8,7 +8,7 @@ import { useTaskStore } from '../stores/taskStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
-import { useLabelStore } from '../stores/labelStore'
+import { useCreateOrMatchLabel } from '../hooks/useCreateOrMatchLabel'
 import {
   StatusSubmenu,
   PrioritySubmenu,
@@ -34,6 +34,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const projectId = firstTask?.project_id ?? ''
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
+  const createOrMatchLabel = useCreateOrMatchLabel(projectId)
 
   useEffect(() => {
     if (!isOpen || !isBulk) return
@@ -156,12 +157,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
             useTaskStore.getState().bulkAddLabel(bulkTaskIds, labelId)
           }}
           onCreateLabel={(name, color) => {
-            useLabelStore.getState().createLabel({
-              id: crypto.randomUUID(),
-              project_id: projectId,
-              name,
-              color
-            })
+            createOrMatchLabel(name, color)
           }}
         />
       </FlyoutItem>

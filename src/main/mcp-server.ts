@@ -549,14 +549,21 @@ function copyTemplateSubtasks(
     for (const sl of subtaskLabels) {
       let target = targetLabels.find((l) => l.name === sl.name)
       if (!target) {
-        const newLabel = repos.labels.create({
-          id: randomUUID(),
-          project_id: projectId,
-          name: sl.name,
-          color: sl.color
-        })
-        targetLabels.push(newLabel)
-        target = newLabel
+        const existing = repos.labels.findByName(sl.name)
+        if (existing) {
+          repos.labels.addToProject(projectId, existing.id)
+          targetLabels.push(existing)
+          target = existing
+        } else {
+          const newLabel = repos.labels.create({
+            id: randomUUID(),
+            project_id: projectId,
+            name: sl.name,
+            color: sl.color
+          })
+          targetLabels.push(newLabel)
+          target = newLabel
+        }
       }
       repos.tasks.addLabel(subtaskId, target.id)
     }
@@ -595,17 +602,23 @@ function deployTemplate(
     defaultStatusId = statusMap[data.statuses[0].order_index]
   }
 
-  // Create labels
+  // Create or reuse global labels and link to project
   const labelMap: Record<string, string> = {}
   for (const l of data.labels) {
-    const labelId = randomUUID()
-    repos.labels.create({
-      id: labelId,
-      project_id: projectId,
-      name: l.name,
-      color: l.color
-    })
-    labelMap[l.name] = labelId
+    const existing = repos.labels.findByName(l.name)
+    if (existing) {
+      repos.labels.addToProject(projectId, existing.id)
+      labelMap[l.name] = existing.id
+    } else {
+      const labelId = randomUUID()
+      repos.labels.create({
+        id: labelId,
+        project_id: projectId,
+        name: l.name,
+        color: l.color
+      })
+      labelMap[l.name] = labelId
+    }
   }
 
   // Create tasks recursively
@@ -1010,20 +1023,28 @@ const handlers: Record<string, Handler> = {
       order_index: 0
     })
 
-    // Copy labels, auto-creating missing ones
+    // Copy labels — reuse existing global labels or create new ones
     const templateLabels = repos.labels.findByTaskId(templateId)
     const targetLabels = [...repos.labels.findByProjectId(projectId)]
     for (const tl of templateLabels) {
       let target = targetLabels.find((l) => l.name === tl.name)
       if (!target) {
-        const created = repos.labels.create({
-          id: randomUUID(),
-          project_id: projectId,
-          name: tl.name,
-          color: tl.color
-        })
-        targetLabels.push(created)
-        target = created
+        // Check for existing global label by name
+        const existing = repos.labels.findByName(tl.name)
+        if (existing) {
+          repos.labels.addToProject(projectId, existing.id)
+          targetLabels.push(existing)
+          target = existing
+        } else {
+          const created = repos.labels.create({
+            id: randomUUID(),
+            project_id: projectId,
+            name: tl.name,
+            color: tl.color
+          })
+          targetLabels.push(created)
+          target = created
+        }
       }
       repos.tasks.addLabel(newId, target.id)
     }

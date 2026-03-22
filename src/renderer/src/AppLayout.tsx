@@ -36,7 +36,7 @@ import { TimerOverlay } from './shared/components/TimerOverlay'
 import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
 import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
-import type { Task, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
+import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
 
 export function AppLayout(): React.JSX.Element {
@@ -430,10 +430,11 @@ export function AppLayout(): React.JSX.Element {
   const handleSaveProjectAsTemplate = useCallback(() => {
     if (!selectedProject || !currentUser) return
     const projStatuses = statuses
-    const projLabels = useLabelStore.getState().labels
-    const labelsForProject = Object.values(projLabels).filter(
-      (l) => l.project_id === selectedProject.id
-    )
+    const labelState = useLabelStore.getState()
+    const projectLabelIds = labelState.projectLabels[selectedProject.id] ?? new Set()
+    const labelsForProject = Array.from(projectLabelIds)
+      .map((id) => labelState.labels[id])
+      .filter((l): l is Label => l !== undefined)
     const tasksForProject = Object.values(allTasks).filter(
       (t) =>
         t.project_id === selectedProject.id &&

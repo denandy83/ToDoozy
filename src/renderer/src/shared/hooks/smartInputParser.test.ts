@@ -10,10 +10,9 @@ import {
 } from './smartInputParser'
 import type { Label } from '../../../../shared/types'
 
-function makeLabel(id: string, name: string, color: string, projectId = 'proj1'): Label {
+function makeLabel(id: string, name: string, color: string, _projectId = 'proj1'): Label {
   return {
     id,
-    project_id: projectId,
     name,
     color,
     order_index: 0,

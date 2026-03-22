@@ -2,10 +2,11 @@ import { useCallback, useRef, useEffect, useState } from 'react'
 import { X, PanelBottom, PanelRight } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
-import { useLabelStore, useLabelsByProject } from '../../shared/stores'
+import { useLabelsByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useProjectStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
+import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { DetailTitle } from './DetailTitle'
 import { DetailStatusRow } from './DetailStatusRow'
 import { DetailLabels } from './DetailLabels'
@@ -137,13 +138,9 @@ export function DetailPanel(): React.JSX.Element | null {
     await removeLabel(task.id, labelId)
   }
 
+  const createOrMatchLabel = useCreateOrMatchLabel(task.project_id)
   const handleCreateLabel = async (name: string, color: string): Promise<void> => {
-    const label = await useLabelStore.getState().createLabel({
-      id: crypto.randomUUID(),
-      project_id: task.project_id,
-      name,
-      color
-    })
+    const label = await createOrMatchLabel(name, color)
     await addLabel(task.id, label.id)
   }
 

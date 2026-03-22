@@ -8,6 +8,7 @@ import type {
   TaskLabelMapping,
   CreateLabelInput,
   UpdateLabelInput,
+  LabelUsageInfo,
   Project,
   ProjectMember,
   CreateProjectInput,
@@ -53,13 +54,20 @@ export interface TasksAPI {
 
 export interface LabelsAPI {
   findById(id: string): Promise<Label | null>
+  findAll(): Promise<Label[]>
   findByProjectId(projectId: string): Promise<Label[]>
+  findByName(name: string): Promise<Label | null>
   create(input: CreateLabelInput): Promise<Label>
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>
+  removeFromProject(projectId: string, labelId: string): Promise<boolean>
+  addToProject(projectId: string, labelId: string): Promise<void>
   findByTaskId(taskId: string): Promise<Label[]>
   findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
   reorder(labelIds: string[]): Promise<void>
+  findAllWithUsage(): Promise<LabelUsageInfo[]>
+  findProjectsUsingLabel(labelId: string): Promise<Array<{ project_id: string; project_name: string; task_count: number }>>
+  findActiveLabelsForProject(projectId: string): Promise<Label[]>
 }
 
 export interface ProjectsAPI {

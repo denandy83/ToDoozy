@@ -19,7 +19,7 @@
         "Migration merges duplicate names (oldest wins), reassigns task references",
         "Filter by label in project view only shows labels assigned to active (non-archived) tasks in that project"
       ],
-      "passes": false,
+      "passes": true,
       "tested": false
     },
     {

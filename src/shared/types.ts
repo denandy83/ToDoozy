@@ -67,12 +67,17 @@ export interface Task {
 
 export interface Label {
   id: string
-  project_id: string
   name: string
   color: string
   order_index: number
   created_at: string
   updated_at: string
+}
+
+export interface ProjectLabel {
+  project_id: string
+  label_id: string
+  created_at: string
 }
 
 export interface TaskLabel {
@@ -217,9 +222,14 @@ export type UpdateTaskInput = Partial<Pick<Task, TaskUpdatableColumn>>
 
 export interface CreateLabelInput {
   id: string
-  project_id: string
   name: string
   color?: string
+  project_id?: string // Optional: if provided, also links label to this project
+}
+
+export interface LabelUsageInfo extends Label {
+  project_count: number
+  task_count: number
 }
 
 export interface UpdateLabelInput {

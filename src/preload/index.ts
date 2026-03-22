@@ -26,14 +26,25 @@ const api: TodoozyAPI = {
 
   labels: {
     findById: (id) => ipcRenderer.invoke('labels:findById', id),
+    findAll: () => ipcRenderer.invoke('labels:findAll'),
     findByProjectId: (projectId) => ipcRenderer.invoke('labels:findByProjectId', projectId),
+    findByName: (name) => ipcRenderer.invoke('labels:findByName', name),
     create: (input) => ipcRenderer.invoke('labels:create', input),
     update: (id, input) => ipcRenderer.invoke('labels:update', id, input),
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
+    removeFromProject: (projectId, labelId) =>
+      ipcRenderer.invoke('labels:removeFromProject', projectId, labelId),
+    addToProject: (projectId, labelId) =>
+      ipcRenderer.invoke('labels:addToProject', projectId, labelId),
     findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId),
     findTaskLabelsByProject: (projectId) =>
       ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId),
-    reorder: (labelIds) => ipcRenderer.invoke('labels:reorder', labelIds)
+    reorder: (labelIds) => ipcRenderer.invoke('labels:reorder', labelIds),
+    findAllWithUsage: () => ipcRenderer.invoke('labels:findAllWithUsage'),
+    findProjectsUsingLabel: (labelId) =>
+      ipcRenderer.invoke('labels:findProjectsUsingLabel', labelId),
+    findActiveLabelsForProject: (projectId) =>
+      ipcRenderer.invoke('labels:findActiveLabelsForProject', projectId)
   },
 
   projects: {

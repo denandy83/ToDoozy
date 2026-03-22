@@ -14,6 +14,7 @@ import {
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
+import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
@@ -73,7 +74,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
-  const { createLabel: createLabelInStore } = useLabelStore()
+  const createOrMatchLabel = useCreateOrMatchLabel(addTaskProjectId)
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
 
@@ -115,17 +116,16 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   // Aggregate labels from ALL projects with My Day tasks
   const allLabelsAcrossProjects = useMemo(() => {
-    const labelStore = useLabelStore.getState()
+    const labelState = useLabelStore.getState()
     const labels: Label[] = []
     const seen = new Set<string>()
     for (const pid of myDayProjectIds) {
-      const projectLabels = Object.values(labelStore.labels).filter(
-        (l) => l.project_id === pid
-      )
-      for (const l of projectLabels) {
-        if (!seen.has(l.id)) {
-          seen.add(l.id)
-          labels.push(l)
+      const projectLabelIds = labelState.projectLabels[pid] ?? new Set()
+      for (const id of projectLabelIds) {
+        if (!seen.has(id)) {
+          seen.add(id)
+          const l = labelState.labels[id]
+          if (l) labels.push(l)
         }
       }
     }
@@ -134,9 +134,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   // Labels for the add-task input (current add-task project)
   const addTaskLabels = useMemo(() => {
-    const labelStore = useLabelStore.getState()
-    return Object.values(labelStore.labels)
-      .filter((l) => l.project_id === addTaskProjectId)
+    const labelState = useLabelStore.getState()
+    const projectLabelIds = labelState.projectLabels[addTaskProjectId] ?? new Set()
+    return Array.from(projectLabelIds)
+      .map((id) => labelState.labels[id])
+      .filter((l): l is Label => l !== undefined)
       .sort((a, b) => a.order_index - b.order_index)
   }, [addTaskProjectId])
 
@@ -367,14 +369,9 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const handleCreateLabel = useCallback(
     async (name: string, color: string) => {
       if (!addTaskProject) return
-      await createLabelInStore({
-        id: crypto.randomUUID(),
-        project_id: addTaskProject.id,
-        name,
-        color
-      })
+      await createOrMatchLabel(name, color)
     },
-    [createLabelInStore, addTaskProject]
+    [createOrMatchLabel, addTaskProject]
   )
 
   // Keyboard navigation

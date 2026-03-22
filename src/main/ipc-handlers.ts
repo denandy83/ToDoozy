@@ -215,8 +215,16 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.findById(id) ?? null
   })
 
+  ipcMain.handle('labels:findAll', () => {
+    return getRepos().labels.findAll()
+  })
+
   ipcMain.handle('labels:findByProjectId', (_e, projectId: string) => {
     return getRepos().labels.findByProjectId(projectId)
+  })
+
+  ipcMain.handle('labels:findByName', (_e, name: string) => {
+    return getRepos().labels.findByName(name) ?? null
   })
 
   ipcMain.handle(
@@ -237,6 +245,14 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.delete(id)
   })
 
+  ipcMain.handle('labels:removeFromProject', (_e, projectId: string, labelId: string) => {
+    return getRepos().labels.removeFromProject(projectId, labelId)
+  })
+
+  ipcMain.handle('labels:addToProject', (_e, projectId: string, labelId: string) => {
+    return getRepos().labels.addToProject(projectId, labelId)
+  })
+
   ipcMain.handle('labels:findByTaskId', (_e, taskId: string) => {
     return getRepos().labels.findByTaskId(taskId)
   })
@@ -247,6 +263,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('labels:reorder', (_e, labelIds: string[]) => {
     return getRepos().labels.reorder(labelIds)
+  })
+
+  ipcMain.handle('labels:findAllWithUsage', () => {
+    return getRepos().labels.findAllWithUsage()
+  })
+
+  ipcMain.handle('labels:findProjectsUsingLabel', (_e, labelId: string) => {
+    return getRepos().labels.findProjectsUsingLabel(labelId)
+  })
+
+  ipcMain.handle('labels:findActiveLabelsForProject', (_e, projectId: string) => {
+    return getRepos().labels.findActiveLabelsForProject(projectId)
   })
 
   // ── Projects ───────────────────────────────────────────────────────

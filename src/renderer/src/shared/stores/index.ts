@@ -37,6 +37,7 @@ export { useLabelStore } from './labelStore'
 export type { LabelStore, LabelFilterMode } from './labelStore'
 export {
   selectLabelsByProject,
+  selectAllLabels,
   selectLabelById,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,

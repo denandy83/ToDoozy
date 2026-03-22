@@ -48,20 +48,20 @@ export function UseTemplateModal({
     // Get template labels
     const templateLabels = useTaskStore.getState().taskLabels[template.id] ?? []
 
-    // Get or create labels in target project
-    const targetLabels = Object.values(useLabelStore.getState().labels).filter(
-      (l) => l.project_id === selectedProjectId
-    )
+    // Get or create labels globally, then link to target project
+    const allLabels = Object.values(useLabelStore.getState().labels)
     const labelIdMap: Record<string, string> = {}
 
     for (const tl of templateLabels) {
-      const existing = targetLabels.find(
+      const existing = allLabels.find(
         (l) => l.name.toLowerCase() === tl.name.toLowerCase()
       )
       if (existing) {
         labelIdMap[tl.id] = existing.id
+        // Ensure label is linked to target project
+        await useLabelStore.getState().addToProject(selectedProjectId, existing.id)
       } else {
-        // Auto-create missing label
+        // Auto-create new global label linked to target project
         const newLabel = await useLabelStore.getState().createLabel({
           id: crypto.randomUUID(),
           project_id: selectedProjectId,

@@ -7,7 +7,8 @@ import {
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore, useTaskLabelsHook } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
-import { useLabelStore, useLabelsByProject } from '../stores/labelStore'
+import { useLabelsByProject } from '../stores/labelStore'
+import { useCreateOrMatchLabel } from '../hooks/useCreateOrMatchLabel'
 import { useToast } from './Toast'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import {
@@ -35,6 +36,7 @@ export function ContextMenu(): React.JSX.Element | null {
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(taskId ?? '')
+  const createOrMatchLabel = useCreateOrMatchLabel(projectId)
   const { updateTask, deleteTask, duplicateTask, saveTaskAsTemplate, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
 
@@ -166,12 +168,7 @@ export function ContextMenu(): React.JSX.Element | null {
             }
           }}
           onCreateLabel={(name, color) => {
-            useLabelStore.getState().createLabel({
-              id: crypto.randomUUID(),
-              project_id: task.project_id,
-              name,
-              color
-            })
+            createOrMatchLabel(name, color)
           }}
         />
       </FlyoutItem>

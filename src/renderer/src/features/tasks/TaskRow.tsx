@@ -8,6 +8,7 @@ import { LabelPicker } from '../../shared/components/LabelPicker'
 import { PriorityBadge } from '../../shared/components/PriorityBadge'
 import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
+import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../../shared/stores'
 import { useLabelStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
@@ -273,18 +274,13 @@ export function TaskRow({
     [task.id, taskLabels, onAddLabel, onRemoveLabel]
   )
 
-  const { createLabel: createLabelInStore } = useLabelStore()
+  const createOrMatchLabel = useCreateOrMatchLabel(task.project_id)
   const handlePickerCreateLabel = useCallback(
     async (name: string, color: string) => {
-      const label = await createLabelInStore({
-        id: crypto.randomUUID(),
-        project_id: task.project_id,
-        name,
-        color
-      })
+      const label = await createOrMatchLabel(name, color)
       onAddLabel(task.id, label.id)
     },
-    [createLabelInStore, onAddLabel, task.id, task.project_id]
+    [createOrMatchLabel, onAddLabel, task.id]
   )
 
   const assignedLabelIds = new Set(taskLabels.map((l) => l.id))

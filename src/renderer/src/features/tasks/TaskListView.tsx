@@ -13,6 +13,7 @@ import {
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
+import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
@@ -49,7 +50,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
-  const { createLabel: createLabelInStore } = useLabelStore()
+  const createOrMatchLabel = useCreateOrMatchLabel(projectId)
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
 
@@ -241,14 +242,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleCreateLabel = useCallback(
     async (name: string, color: string) => {
-      await createLabelInStore({
-        id: crypto.randomUUID(),
-        project_id: projectId,
-        name,
-        color
-      })
+      await createOrMatchLabel(name, color)
     },
-    [createLabelInStore, projectId]
+    [createOrMatchLabel]
   )
 
   // Keyboard navigation

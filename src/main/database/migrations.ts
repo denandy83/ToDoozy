@@ -186,4 +186,101 @@ const migration_5: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5]
+const migration_6: Migration = (db) => {
+  // Story #30: Global Labels — labels become global entities linked to projects via junction table
+
+  // 1. Create project_labels junction table
+  db.exec(`
+    CREATE TABLE project_labels (
+      project_id TEXT NOT NULL,
+      label_id TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, label_id),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+    )
+  `)
+
+  // 2. Populate project_labels from existing labels (each label currently belongs to one project)
+  db.exec(`
+    INSERT INTO project_labels (project_id, label_id, created_at)
+    SELECT project_id, id, created_at FROM labels
+  `)
+
+  // 3. Merge duplicate label names — oldest wins, reassign task references
+  // Find duplicates: labels with the same name (case-insensitive) across projects
+  const dupes = db.prepare(`
+    SELECT name, GROUP_CONCAT(id, ',') as ids, MIN(created_at) as oldest_created
+    FROM labels
+    GROUP BY LOWER(name)
+    HAVING COUNT(*) > 1
+  `).all() as Array<{ name: string; ids: string; oldest_created: string }>
+
+  for (const dupe of dupes) {
+    const ids = dupe.ids.split(',')
+    // Find the oldest label (keeper)
+    const keeper = db.prepare(
+      `SELECT id FROM labels WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at ASC LIMIT 1`
+    ).get(...ids) as { id: string }
+
+    const duplicateIds = ids.filter((id) => id !== keeper.id)
+    for (const dupId of duplicateIds) {
+      // Move project_labels links to keeper (skip if already linked)
+      db.prepare(`
+        INSERT OR IGNORE INTO project_labels (project_id, label_id, created_at)
+        SELECT project_id, ?, created_at FROM project_labels WHERE label_id = ?
+      `).run(keeper.id, dupId)
+
+      // Reassign task_labels from duplicate to keeper (skip if already assigned)
+      db.prepare(`
+        UPDATE OR IGNORE task_labels SET label_id = ? WHERE label_id = ?
+      `).run(keeper.id, dupId)
+
+      // Delete orphaned task_labels that couldn't be updated (duplicate constraint)
+      db.prepare(`DELETE FROM task_labels WHERE label_id = ?`).run(dupId)
+
+      // Delete the project_labels for the duplicate
+      db.prepare(`DELETE FROM project_labels WHERE label_id = ?`).run(dupId)
+
+      // Delete the duplicate label
+      db.prepare(`DELETE FROM labels WHERE id = ?`).run(dupId)
+    }
+  }
+
+  // 4. Recreate labels table without project_id FK
+  // SQLite doesn't support DROP COLUMN, so we need to recreate
+  db.exec(`
+    CREATE TABLE labels_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#888888',
+      order_index INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    INSERT INTO labels_new (id, name, color, order_index, created_at, updated_at)
+    SELECT id, name, color, order_index, created_at, updated_at FROM labels;
+
+    DROP TABLE labels;
+
+    ALTER TABLE labels_new RENAME TO labels;
+  `)
+
+  // 5. Recreate task_labels with FK to new labels table
+  db.exec(`
+    CREATE TABLE task_labels_new (
+      task_id TEXT NOT NULL,
+      label_id TEXT NOT NULL,
+      PRIMARY KEY (task_id, label_id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+    );
+
+    INSERT INTO task_labels_new SELECT * FROM task_labels;
+    DROP TABLE task_labels;
+    ALTER TABLE task_labels_new RENAME TO task_labels;
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6]
