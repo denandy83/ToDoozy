@@ -96,20 +96,25 @@ export default function QuickAddApp(): React.JSX.Element {
     const unsub = window.api.quickadd.onFocus(() => {
       smart.reset()
       inputRef.current?.focus()
-      // Re-read settings in case they changed in the main window
-      window.api.settings.getAll().then((allSettings) => {
+      if (!userId) return
+      // Re-fetch projects and settings on every focus so the list is always fresh
+      Promise.all([
+        window.api.settings.getAll(),
+        window.api.projects.getProjectsForUser(userId)
+      ]).then(([allSettings, freshProjects]) => {
         const map: Record<string, string | null> = {}
         for (const s of allSettings) map[s.key] = s.value
         setNewTaskPosition(map['new_task_position'] ?? 'top')
         setAddToMyDay((map['quickadd_default_myday'] ?? 'true') === 'true')
         setDateFormat(map['date_format'] ?? 'dd/mm/yyyy')
+        setProjects(freshProjects)
         const quickAddProject = map['quickadd_default_project']
-        const defaultProj = projects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? projects[0]
+        const defaultProj = freshProjects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? freshProjects[0]
         if (defaultProj) setSelectedProjectId(defaultProj.id)
       }).catch(() => {})
     })
     return unsub
-  }, [smart])
+  }, [smart, userId])
 
   // Auto-focus when ready
   useEffect(() => {

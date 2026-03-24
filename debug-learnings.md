@@ -8,6 +8,7 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Symptoms**: MCP tools become unavailable after restarting the dev server
 - **Root cause**: `pkill -9 -f "Electron.app"` kills the MCP server process too, since it runs as a Node subprocess
 - **Fix**: When restarting the dev server, only kill the electron-vite dev process and the port, NOT the Electron app broadly. Use: `pkill -f "electron-vite" 2>/dev/null; lsof -ti:5200 | xargs kill -9 2>/dev/null`
+- **Never use**: `pkill -f "todoozy"` or `pkill -f "Electron"` — too broad, kills the MCP server subprocess
 - **Check first**: If MCP tools stop working, the server process was likely killed during a restart
 
 ---
