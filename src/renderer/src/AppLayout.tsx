@@ -4,8 +4,10 @@ import {
   DragOverlay,
   PointerSensor,
   useSensor,
-  useSensors
+  useSensors,
+  type Modifier
 } from '@dnd-kit/core'
+import { getEventCoordinates } from '@dnd-kit/utilities'
 import { LayoutList, Columns3, LayoutTemplate, Trash2 } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
@@ -143,9 +145,24 @@ export function AppLayout(): React.JSX.Element {
 
   const collapsed = !sidebarExpanded
 
+  // Snap drag overlay top-left to cursor position
+  const snapToPointer: Modifier = useCallback(({ activatorEvent, draggingNodeRect, transform }) => {
+    if (draggingNodeRect && activatorEvent) {
+      const coords = getEventCoordinates(activatorEvent)
+      if (coords) {
+        return {
+          ...transform,
+          x: transform.x + (coords.x - draggingNodeRect.left),
+          y: transform.y + (coords.y - draggingNodeRect.top)
+        }
+      }
+    }
+    return transform
+  }, [])
+
   // DnD sensors
   const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { delay: 200, tolerance: 5 }
+    activationConstraint: { distance: 5 }
   })
   const sensors = useSensors(pointerSensor)
 
@@ -172,18 +189,32 @@ export function AppLayout(): React.JSX.Element {
 
   const handleReparent = useCallback(
     async (taskId: string, newParentId: string | null) => {
+      const task = tasks[taskId]
+      const prevParentId = task?.parent_id ?? null
+      const prevStatusId = task?.status_id
+
       const update: { parent_id: string | null; status_id?: string } = {
         parent_id: newParentId
       }
       if (newParentId) {
         const parent = tasks[newParentId]
-        if (parent) {
-          update.status_id = parent.status_id
-        }
+        if (parent) update.status_id = parent.status_id
       }
       await updateTask(taskId, update)
+
+      if (newParentId && newParentId !== prevParentId) {
+        const parentTitle = tasks[newParentId]?.title ?? 'task'
+        addToast({
+          message: `Nested under "${parentTitle}"`,
+          duration: 3000,
+          action: {
+            label: 'Undo',
+            onClick: () => updateTask(taskId, { parent_id: prevParentId, status_id: prevStatusId })
+          }
+        })
+      }
     },
-    [tasks, updateTask]
+    [tasks, updateTask, addToast]
   )
 
   const handleDndStatusChange = useCallback(
@@ -205,28 +236,37 @@ export function AppLayout(): React.JSX.Element {
   )
 
   const handleMoveToView = useCallback(
-    async (taskId: string, viewId: string) => {
+    async (taskIds: string[], viewId: string) => {
       if (viewId === 'my-day') {
-        await updateTask(taskId, { is_in_my_day: 1 })
-        addToast({ message: 'Added to My Day' })
+        await Promise.all(taskIds.map((id) => updateTask(id, { is_in_my_day: 1 })))
+        addToast({ message: taskIds.length > 1 ? `Added ${taskIds.length} tasks to My Day` : 'Added to My Day' })
       } else if (viewId.startsWith('project-')) {
-        // Dropped on a project nav item — move to that project
         const targetProjectId = viewId.replace('project-', '')
-        const task = useTaskStore.getState().tasks[taskId]
-        if (task && task.project_id !== targetProjectId) {
-          const targetStatuses = Object.values(useStatusStore.getState().statuses)
-            .filter((s) => s.project_id === targetProjectId)
-          const defaultStatus = targetStatuses.find((s) => s.is_default === 1) ?? targetStatuses[0]
-          if (defaultStatus) {
-            await updateTask(taskId, { project_id: targetProjectId, status_id: defaultStatus.id })
-            const projects = useProjectStore.getState().projects
-            const targetProject = Object.values(projects).find((p) => p.id === targetProjectId)
-            addToast({ message: `Moved to ${targetProject?.name ?? 'project'}` })
+        const allTasks = useTaskStore.getState().tasks
+        const targetStatuses = Object.values(useStatusStore.getState().statuses)
+          .filter((s) => s.project_id === targetProjectId)
+        const defaultStatus = targetStatuses.find((s) => s.is_default === 1) ?? targetStatuses[0]
+        if (!defaultStatus) return
+        const toMove = taskIds.filter((id) => allTasks[id]?.project_id !== targetProjectId)
+        if (toMove.length === 0) return
+        const prevStates = toMove.map((id) => ({
+          id,
+          project_id: allTasks[id]!.project_id,
+          status_id: allTasks[id]!.status_id
+        }))
+        await Promise.all(toMove.map((id) => updateTask(id, { project_id: targetProjectId, status_id: defaultStatus.id })))
+        const targetProject = Object.values(useProjectStore.getState().projects).find((p) => p.id === targetProjectId)
+        addToast({
+          message: toMove.length > 1 ? `Moved ${toMove.length} tasks to ${targetProject?.name ?? 'project'}` : `Moved to ${targetProject?.name ?? 'project'}`,
+          duration: 3000,
+          action: {
+            label: 'Undo',
+            onClick: () => Promise.all(prevStates.map(({ id, project_id, status_id }) => updateTask(id, { project_id, status_id })))
           }
-        }
+        })
       } else if (viewId === 'archive' || viewId === 'nav-archive') {
-        await updateTask(taskId, { is_archived: 1 })
-        addToast({ message: 'Archived' })
+        await Promise.all(taskIds.map((id) => updateTask(id, { is_archived: 1 })))
+        addToast({ message: taskIds.length > 1 ? `Archived ${taskIds.length} tasks` : 'Archived' })
       }
     },
     [updateTask, addToast]
@@ -253,7 +293,8 @@ export function AppLayout(): React.JSX.Element {
       onMoveToView: handleMoveToView,
       onStatusChange: handleDndStatusChange,
       onBucketDrop: handleBucketDrop,
-      getTasksForParent
+      getTasksForParent,
+      getSelectedTaskIds: () => [...useTaskStore.getState().selectedTaskIds]
     })
 
   const handleOpenSettings = useCallback(() => {
@@ -573,7 +614,7 @@ export function AppLayout(): React.JSX.Element {
         />
 
         {/* Main content area */}
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main className={`flex flex-1 flex-col overflow-hidden transition-opacity duration-150 ${dragState.isDragging ? 'opacity-40' : 'opacity-100'}`}>
           <header className="flex h-[57px] items-center gap-3 border-b border-border px-6">
             {currentView === 'project' && selectedProject && (
               <div
@@ -712,7 +753,7 @@ export function AppLayout(): React.JSX.Element {
       </div>
 
       {/* Drag overlay - ghost card */}
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={null} modifiers={[snapToPointer]}>
         {dragState.activeTask ? (
           layoutMode === 'kanban' ? (
             <KanbanCard
@@ -725,7 +766,7 @@ export function AppLayout(): React.JSX.Element {
               onDeleteTask={() => {}}
             />
           ) : (
-            <TaskDragOverlay task={dragState.activeTask} statuses={statuses} />
+            <TaskDragOverlay task={dragState.activeTask} statuses={statuses} count={selectedTaskIds.size > 1 && selectedTaskIds.has(dragState.activeTask.id) ? selectedTaskIds.size : 1} />
           )
         ) : null}
       </DragOverlay>

@@ -13,6 +13,7 @@ interface ToastItem {
   actions?: ToastAction[]
   variant?: 'default' | 'danger'
   persistent?: boolean
+  duration?: number
 }
 
 interface ToastState {
@@ -72,7 +73,7 @@ export function ToastContainer(): React.JSX.Element {
               setGlobalHasToasts(next.length > 0)
               return next
             })
-          }, 5000)
+          }, toast.duration ?? 5000)
         }
       },
       removeToast: (id) => {

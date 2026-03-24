@@ -28,10 +28,11 @@ interface UseDragAndDropOptions {
   tasks: Record<string, Task>
   onReorder: (taskIds: string[]) => Promise<void>
   onReparent: (taskId: string, newParentId: string | null) => Promise<void>
-  onMoveToView?: (taskId: string, viewId: string) => Promise<void>
+  onMoveToView?: (taskIds: string[], viewId: string) => Promise<void>
   onStatusChange?: (taskId: string, newStatusId: string) => Promise<void>
   onBucketDrop?: (taskId: string, bucketKey: string) => Promise<void>
   getTasksForParent: (parentId: string | null, statusId: string) => Task[]
+  getSelectedTaskIds?: () => string[]
 }
 
 interface UseDragAndDropReturn {
@@ -55,7 +56,8 @@ export function useDragAndDrop({
   onMoveToView,
   onStatusChange,
   onBucketDrop,
-  getTasksForParent
+  getTasksForParent,
+  getSelectedTaskIds
 }: UseDragAndDropOptions): UseDragAndDropReturn {
   const onStatusChangeRef = useRef(onStatusChange)
   onStatusChangeRef.current = onStatusChange
@@ -216,7 +218,9 @@ export function useDragAndDrop({
       // Handle sidebar nav drops
       if (overId.startsWith('nav-') && onMoveToView) {
         const viewId = overId.replace('nav-', '')
-        await onMoveToView(activeId, viewId)
+        const selected = getSelectedTaskIds?.() ?? []
+        const taskIds = selected.length > 1 && selected.includes(activeId) ? selected : [activeId]
+        await onMoveToView(taskIds, viewId)
         return
       }
 

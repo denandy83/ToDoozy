@@ -7,11 +7,13 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 ### Don't kill MCP server when restarting dev
 - **Symptoms**: MCP tools become unavailable after restarting the dev server
 - **Root cause**: `pkill -9 -f "Electron.app"` kills the MCP server process too, since it runs as a Node subprocess
-- **Fix**: Kill by exact process pattern using `kill $(...)` — `pkill -f` is unreliable on macOS. Reliable kill:
+- **Fix**: Kill electron-vite, the port, AND the dev Electron app (identified by `"Electron \."`) — but NOT the MCP server (identified by `"mcp-server.js"`). Full reliable restart:
   ```
   kill $(ps aux | grep "electron-vite dev" | grep -v grep | awk '{print $2}') 2>/dev/null
-  kill $(ps aux | grep "todoozy/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \." | grep -v grep | awk '{print $2}') 2>/dev/null
+  kill $(ps aux | grep "Electron \." | grep -v grep | awk '{print $2}') 2>/dev/null
+  lsof -ti:5200 | xargs kill -9 2>/dev/null
   ```
+- **Dev app vs MCP server**: dev Electron runs as `Electron .` (dot = project dir); MCP server runs as `Electron out/main/mcp-server.js`. Kill the dot, not the js file.
 - **Never use**: `pkill -f "todoozy"` or `pkill -f "Electron"` — too broad, kills the MCP server subprocess
 - **`pkill -f "electron-vite"` is unreliable on macOS** — use the `kill $(ps aux | grep ...)` pattern instead
 - **Check first**: If MCP tools stop working, the server process was likely killed during a restart
