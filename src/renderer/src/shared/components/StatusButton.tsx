@@ -40,13 +40,21 @@ export function StatusButton({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') {
         e.preventDefault()
         e.stopPropagation()
         if (sorted.length === 0) return
         const currentIndex = sorted.findIndex((s) => s.id === currentStatusId)
         const nextIndex = (currentIndex + 1) % sorted.length
         onStatusChange(sorted[nextIndex].id)
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (sorted.length === 0) return
+        const currentIndex = sorted.findIndex((s) => s.id === currentStatusId)
+        const prevIndex = (currentIndex - 1 + sorted.length) % sorted.length
+        onStatusChange(sorted[prevIndex].id)
       }
     },
     [sorted, currentStatusId, onStatusChange]

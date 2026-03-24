@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTaskStore } from '../../shared/stores'
 import { useDroppable } from '@dnd-kit/core'
 import {
   Sun,
@@ -161,6 +162,8 @@ export function Sidebar({
     (projectId: string) => {
       clearLabelFilters()
       setSelectedProject(projectId)
+      // Reset to first task — TaskListView auto-select will pick it up
+      useTaskStore.setState({ selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false })
     },
     [setSelectedProject, clearLabelFilters]
   )

@@ -59,25 +59,26 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     if (projectId) hydrateAllTaskLabels(projectId)
   }, [projectId, hydrateAllTaskLabels])
 
-  // Auto-focus first task (or add input if empty) when navigating to project
+  // Auto-select first task (without opening detail panel) when navigating to project
+  // or when selection is cleared (e.g. clicking same project in sidebar)
+  const hasSelection = selectedTaskIds.size > 0
   useEffect(() => {
+    if (hasSelection) return
     requestAnimationFrame(() => {
+      if (flatTasks.length > 0) {
+        useTaskStore.setState({
+          selectedTaskIds: new Set([flatTasks[0].id]),
+          lastSelectedTaskId: flatTasks[0].id,
+          showDetailPanel: false
+        })
+      }
+      // Scroll to top and focus
+      const grid = containerRef.current?.querySelector('[role="grid"]')
+      if (grid) grid.scrollTop = 0
       containerRef.current?.focus()
     })
-  }, [projectId])
-
-  // Labels actually in use (assigned to at least one non-archived task in this view)
-  const labelsInUse = useMemo(() => {
-    const usedLabelIds = new Set<string>()
-    for (const task of tasks) {
-      if (task.is_archived === 1 || task.is_template === 1) continue
-      const labels = taskLabels[task.id]
-      if (labels) {
-        for (const l of labels) usedLabelIds.add(l.id)
-      }
-    }
-    return allLabels.filter((l) => usedLabelIds.has(l.id))
-  }, [tasks, taskLabels, allLabels])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, hasSelection])
 
   // Compute filter opacity for each task (for blur mode)
   const blurOpacityStr = useSetting('label_blur_opacity')
@@ -121,7 +122,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
     const result: Task[] = []
-    const sorted = [...statuses].sort((a, b) => a.order_index - b.order_index)
+    // Sort statuses: default first, middle by order_index, done last
+    const defaults = statuses.filter((s) => s.is_default === 1)
+    const middle = statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index)
+    const doneStatuses = statuses.filter((s) => s.is_done === 1)
+    const sorted = [...defaults, ...middle, ...doneStatuses]
     for (const status of sorted) {
       const statusTasks = filteredTasks
         .filter(
@@ -324,6 +329,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       })
     }
 
+    const scrollTaskIntoView = (taskId: string): void => {
+      requestAnimationFrame(() => {
+        const el = container.querySelector(`[data-task-id="${taskId}"]`)
+        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
+    }
+
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
@@ -331,6 +343,23 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const currentIndex = currentTaskId
         ? flatTasks.findIndex((t) => t.id === currentTaskId)
         : -1
+
+      // Tab/Shift+Tab cycles through tasks without opening detail panel
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        if (flatTasks.length === 0) return
+        const idx = e.shiftKey
+          ? (currentIndex <= 0 ? flatTasks.length - 1 : currentIndex - 1)
+          : (currentIndex >= flatTasks.length - 1 ? 0 : currentIndex + 1)
+        const id = flatTasks[idx].id
+        useTaskStore.setState((s) => ({
+          selectedTaskIds: new Set([id]),
+          lastSelectedTaskId: id,
+          showDetailPanel: s.showDetailPanel
+        }))
+        scrollTaskIntoView(id)
+        return
+      }
 
       // Cmd+A = select all visible tasks
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
@@ -388,16 +417,30 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         case 'ArrowDown': {
           e.preventDefault()
           const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-          if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
+          if (flatTasks[nextIndex]) {
+            const id = flatTasks[nextIndex].id
+            useTaskStore.setState((s) => ({
+              selectedTaskIds: new Set([id]),
+              lastSelectedTaskId: id,
+              showDetailPanel: s.showDetailPanel
+            }))
+            scrollTaskIntoView(id)
+          }
           break
         }
         case 'ArrowUp': {
           e.preventDefault()
           if (currentIndex <= 0) {
-            setCurrentTask(null)
+            useTaskStore.setState({ selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false })
             addInputRef.current?.focus()
           } else {
-            setCurrentTask(flatTasks[currentIndex - 1].id)
+            const id = flatTasks[currentIndex - 1].id
+            useTaskStore.setState((s) => ({
+              selectedTaskIds: new Set([id]),
+              lastSelectedTaskId: id,
+              showDetailPanel: s.showDetailPanel
+            }))
+            scrollTaskIntoView(id)
           }
           break
         }
@@ -418,7 +461,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
             if (expandedTaskIds.has(currentTaskId)) {
               setExpanded(currentTaskId, false)
             } else if (task?.parent_id) {
-              setCurrentTask(task.parent_id)
+              useTaskStore.setState((s) => ({
+                selectedTaskIds: new Set([task.parent_id!]),
+                lastSelectedTaskId: task.parent_id!,
+                showDetailPanel: s.showDetailPanel
+              }))
             }
           }
           break
@@ -520,7 +567,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
 
-      <LabelFilterBar labels={labelsInUse} />
+      <LabelFilterBar labels={allLabels} projectId={projectId} />
 
       {layoutMode === 'kanban' ? (
         <KanbanView

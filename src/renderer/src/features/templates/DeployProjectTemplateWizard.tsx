@@ -130,17 +130,24 @@ export function DeployProjectTemplateWizard({
         defaultStatusId = statusIdMap[0]
       }
 
-      // Create labels
+      // Create or reuse global labels
       const labelIdMap: Record<string, string> = {}
       for (const l of labels) {
-        const labelId = crypto.randomUUID()
-        await window.api.labels.create({
-          id: labelId,
-          project_id: project.id,
-          name: l.name,
-          color: l.color
-        })
-        labelIdMap[l.name.toLowerCase()] = labelId
+        const existing = await window.api.labels.findByName(l.name)
+        if (existing) {
+          // Reuse existing global label, just link to new project
+          await window.api.labels.addToProject(project.id, existing.id)
+          labelIdMap[l.name.toLowerCase()] = existing.id
+        } else {
+          const labelId = crypto.randomUUID()
+          await window.api.labels.create({
+            id: labelId,
+            project_id: project.id,
+            name: l.name,
+            color: l.color
+          })
+          labelIdMap[l.name.toLowerCase()] = labelId
+        }
       }
 
       // Create tasks recursively

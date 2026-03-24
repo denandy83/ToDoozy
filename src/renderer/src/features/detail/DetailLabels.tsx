@@ -10,6 +10,7 @@ interface DetailLabelsProps {
   onAddLabel: (labelId: string) => void
   onRemoveLabel: (labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  projectId?: string
 }
 
 export function DetailLabels({
@@ -17,7 +18,8 @@ export function DetailLabels({
   allLabels,
   onAddLabel,
   onRemoveLabel,
-  onCreateLabel
+  onCreateLabel,
+  projectId
 }: DetailLabelsProps): React.JSX.Element {
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
@@ -63,6 +65,7 @@ export function DetailLabels({
             onToggleLabel={handleToggleLabel}
             onCreateLabel={onCreateLabel}
             onClose={() => setDropdownOpen(false)}
+            projectId={projectId}
           />
         </div>
       )}

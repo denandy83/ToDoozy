@@ -59,8 +59,8 @@ export function DetailPanel(): React.JSX.Element | null {
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
-        // Only close if no inner element has stopped propagation
-        setCurrentTask(null)
+        // Close detail panel but keep task selected
+        useTaskStore.setState({ showDetailPanel: false })
         const el = focusRestoreRef.current
         if (el && typeof el.focus === 'function' && document.body.contains(el)) {
           requestAnimationFrame(() => el.focus())
@@ -98,14 +98,21 @@ export function DetailPanel(): React.JSX.Element | null {
         if (nextField) {
           e.preventDefault()
           e.stopPropagation()
-          // Focus the first focusable element within the field, or the field itself
-          const focusable = nextField.querySelector<HTMLElement>(
-            'input, button, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+          // Focus the active/checked element first, then fall back to first focusable
+          const active = nextField.querySelector<HTMLElement>(
+            '[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]'
           )
-          if (focusable) {
-            focusable.focus()
-          } else if (nextField.matches('input')) {
-            nextField.focus()
+          if (active) {
+            active.focus()
+          } else {
+            const focusable = nextField.querySelector<HTMLElement>(
+              'input, button, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+            )
+            if (focusable) {
+              focusable.focus()
+            } else if (nextField.matches('input')) {
+              nextField.focus()
+            }
           }
         }
       }
@@ -404,7 +411,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
     </Section>,
     <Section key="labels" label="Labels" fieldIndex={3}>
-      <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} />
+      <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} projectId={task.project_id} />
     </Section>,
     !isTemplate ? (
       <Section key="due" label="Due Date" fieldIndex={4}>
@@ -416,16 +423,16 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
         <span className="text-sm font-light text-success">{formatDate(task.completed_date)}</span>
       </Section>
     ) : null,
-    <Section key="recurrence" label="Recurrence">
+    <Section key="recurrence" label="Recurrence" fieldIndex={5}>
       <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
     </Section>,
     !isTemplate ? (
-      <Section key="snooze" label="Snooze">
+      <Section key="snooze" label="Snooze" fieldIndex={6}>
         <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
       </Section>
     ) : null,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
-    <div key="desc" data-detail-field="5"><DetailDescription description={task.description} onDescriptionChange={props.onDescriptionChange} /></div>,
+    <div key="desc" data-detail-field="7"><DetailDescription description={task.description} onDescriptionChange={props.onDescriptionChange} /></div>,
     !isTemplate ? <DetailAttachments key="attachments" taskId={task.id} /> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]

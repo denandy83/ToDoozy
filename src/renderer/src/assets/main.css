@@ -36,7 +36,7 @@ body {
 
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 60%, transparent);
   border-radius: 0.25rem;
 }
 

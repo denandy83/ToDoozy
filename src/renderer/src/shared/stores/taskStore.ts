@@ -144,24 +144,24 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllForProject(projectId: string, userId: string): Promise<void> {
+  async hydrateAllForProject(_projectId: string, userId: string): Promise<void> {
     set({ loading: true, error: null })
     try {
       // Load all projects' tasks for accurate sidebar counts
       const allProjects = await window.api.projects.getProjectsForUser(userId)
       const projectTaskPromises = allProjects.map((p) => window.api.tasks.findByProjectId(p.id))
-      const [myDay, archived, templates, ...projectTasks] = await Promise.all([
+      const archivedPromises = allProjects.map((p) => window.api.tasks.findArchived(p.id))
+      const [myDay, templates, ...rest] = await Promise.all([
         window.api.tasks.findMyDay(userId),
-        window.api.tasks.findArchived(projectId),
         window.api.tasks.findAllTemplates(),
-        ...projectTaskPromises
+        ...projectTaskPromises,
+        ...archivedPromises
       ])
       const taskMap: Record<string, Task> = {}
-      for (const tasks of projectTasks) {
+      for (const tasks of rest) {
         for (const task of tasks) taskMap[task.id] = task
       }
       for (const task of myDay) taskMap[task.id] = task
-      for (const task of archived) taskMap[task.id] = task
       for (const task of templates) taskMap[task.id] = task
       set({ tasks: taskMap, loading: false })
     } catch (err) {

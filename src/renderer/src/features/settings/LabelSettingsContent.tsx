@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { Plus, Trash2, Pencil, Check, X, FolderMinus } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -40,16 +40,10 @@ export function LabelSettingsContent(): React.JSX.Element {
 
   // Fetch all labels with usage info
   const [labelsWithUsage, setLabelsWithUsage] = useState<LabelUsageInfo[]>([])
-  const [projectLabelIds, setProjectLabelIds] = useState<Set<string>>(new Set())
-
   const refreshLabels = useCallback(async () => {
-    const [all, projectLabels] = await Promise.all([
-      window.api.labels.findAllWithUsage(),
-      window.api.labels.findByProjectId(projectId)
-    ])
+    const all = await window.api.labels.findAllWithUsage()
     setLabelsWithUsage(all)
-    setProjectLabelIds(new Set(projectLabels.map((l) => l.id)))
-  }, [projectId])
+  }, [])
 
   useEffect(() => {
     refreshLabels()
@@ -140,47 +134,85 @@ export function LabelSettingsContent(): React.JSX.Element {
     setEditingId(null)
   }, [])
 
-  const handleDeleteGlobally = useCallback(async (id: string) => {
+  const handleDeleteGlobally = useCallback(async (id: string, shiftKey: boolean) => {
     const label = sortedLabels.find((l) => l.id === id)
     if (!label) return
 
+    // Shift+click: silent delete everywhere
+    if (shiftKey) {
+      await deleteLabel(id)
+      await refreshLabels()
+      return
+    }
+
     const projects = await window.api.labels.findProjectsUsingLabel(id)
-    const totalTasks = projects.reduce((sum, p) => sum + p.task_count, 0)
+
+    if (projects.length === 0) {
+      // Not in any project — just delete
+      addToast({
+        message: `Delete "${label.name}"?`,
+        persistent: true,
+        actions: [
+          { label: 'Delete', variant: 'danger', onClick: async () => {
+            await deleteLabel(id)
+            await refreshLabels()
+          }},
+          { label: 'Cancel', variant: 'muted', onClick: () => {} }
+        ]
+      })
+      return
+    }
 
     const projectList = projects.map((p) => `${p.project_name} (${p.task_count} task${p.task_count === 1 ? '' : 's'})`).join(', ')
-    const message = totalTasks > 0
-      ? `Delete "${label.name}" everywhere? Used in: ${projectList}.`
-      : `Delete "${label.name}" everywhere?`
+
+    if (projects.length === 1) {
+      // Only in one project — simple delete or cancel
+      addToast({
+        message: `Delete "${label.name}"? Used in: ${projectList}.`,
+        persistent: true,
+        actions: [
+          { label: 'Delete', variant: 'danger', onClick: async () => {
+            await deleteLabel(id)
+            await refreshLabels()
+          }},
+          { label: 'Cancel', variant: 'muted', onClick: () => {} }
+        ]
+      })
+      return
+    }
+
+    // Multiple projects — show delete everywhere + per-project remove options
+    const actions: Array<{ label: string; variant: 'danger' | 'muted'; onClick: () => Promise<void> | void }> = []
+
+    actions.push({
+      label: 'Delete everywhere',
+      variant: 'danger',
+      onClick: async () => {
+        await deleteLabel(id)
+        await refreshLabels()
+      }
+    })
+
+    for (const p of projects) {
+      actions.push({
+        label: `Delete from ${p.project_name}`,
+        variant: 'danger',
+        onClick: async () => {
+          await removeFromProject(p.project_id, id)
+          await refreshLabels()
+        }
+      })
+    }
+
+    actions.push({ label: 'Cancel', variant: 'muted', onClick: () => {} })
 
     addToast({
-      message,
+      message: `"${label.name}" is used in: ${projectList}`,
       persistent: true,
-      actions: [
-        { label: 'Delete everywhere', variant: 'danger', onClick: async () => {
-          await deleteLabel(id)
-          await refreshLabels()
-        }},
-        { label: 'Cancel', variant: 'muted', onClick: () => {} }
-      ]
+      actions
     })
-  }, [deleteLabel, addToast, sortedLabels, refreshLabels])
+  }, [deleteLabel, removeFromProject, addToast, sortedLabels, refreshLabels])
 
-  const handleRemoveFromProject = useCallback(async (id: string) => {
-    const label = sortedLabels.find((l) => l.id === id)
-    if (!label || !currentProject) return
-
-    addToast({
-      message: `Remove "${label.name}" from ${currentProject.name}? Tasks in this project will lose the label.`,
-      persistent: true,
-      actions: [
-        { label: 'Remove', variant: 'danger', onClick: async () => {
-          await removeFromProject(projectId, id)
-          await refreshLabels()
-        }},
-        { label: 'Cancel', variant: 'muted', onClick: () => {} }
-      ]
-    })
-  }, [removeFromProject, projectId, currentProject, addToast, sortedLabels, refreshLabels])
 
   return (
     <div className="flex flex-col gap-6">
@@ -278,7 +310,6 @@ export function LabelSettingsContent(): React.JSX.Element {
                   label={label}
                   disabled={showAddInput}
                   isEditing={editingId === label.id}
-                  isInProject={projectLabelIds.has(label.id)}
                   editName={editName}
                   editColor={editColor}
                   editInputRef={editingId === label.id ? editInputRef : undefined}
@@ -287,8 +318,7 @@ export function LabelSettingsContent(): React.JSX.Element {
                   onSaveEdit={handleSaveEdit}
                   onCancelEdit={handleCancelEdit}
                   onStartEdit={() => handleStartEdit(label)}
-                  onDeleteGlobally={() => handleDeleteGlobally(label.id)}
-                  onRemoveFromProject={() => handleRemoveFromProject(label.id)}
+                  onDeleteGlobally={(shiftKey) => handleDeleteGlobally(label.id, shiftKey)}
                 />
               ))}
 
@@ -312,7 +342,6 @@ interface SortableLabelRowProps {
   label: LabelUsageInfo
   disabled: boolean
   isEditing: boolean
-  isInProject: boolean
   editName: string
   editColor: string
   editInputRef?: React.RefObject<HTMLInputElement | null>
@@ -321,15 +350,13 @@ interface SortableLabelRowProps {
   onSaveEdit: () => void
   onCancelEdit: () => void
   onStartEdit: () => void
-  onDeleteGlobally: () => void
-  onRemoveFromProject: () => void
+  onDeleteGlobally: (shiftKey: boolean) => void
 }
 
 function SortableLabelRow({
   label,
   disabled,
   isEditing,
-  isInProject,
   editName,
   editColor,
   editInputRef,
@@ -338,8 +365,7 @@ function SortableLabelRow({
   onSaveEdit,
   onCancelEdit,
   onStartEdit,
-  onDeleteGlobally,
-  onRemoveFromProject
+  onDeleteGlobally
 }: SortableLabelRowProps): React.JSX.Element {
   const {
     attributes,
@@ -427,14 +453,9 @@ function SortableLabelRow({
         style={{ backgroundColor: label.color }}
       />
       <span className="flex-1 text-sm font-light text-foreground">{label.name}</span>
-      {/* Usage counts */}
       <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
         {label.project_count}p / {label.task_count}t
       </span>
-      {/* In-project indicator */}
-      {isInProject && (
-        <span className="text-[9px] text-accent" title="In this project">&#10003;</span>
-      )}
       <button
         onClick={onStartEdit}
         className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
@@ -442,19 +463,10 @@ function SortableLabelRow({
       >
         <Pencil size={12} />
       </button>
-      {isInProject && (
-        <button
-          onClick={onRemoveFromProject}
-          className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-          title="Remove from this project"
-        >
-          <FolderMinus size={12} />
-        </button>
-      )}
       <button
-        onClick={onDeleteGlobally}
+        onClick={(e) => onDeleteGlobally(e.shiftKey)}
         className="rounded p-0.5 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-        title="Delete everywhere"
+        title="Delete (Shift+click to skip confirmation)"
       >
         <Trash2 size={12} />
       </button>

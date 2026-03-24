@@ -20,7 +20,7 @@
         "Filter by label in project view only shows labels assigned to active (non-archived) tasks in that project"
       ],
       "passes": true,
-      "tested": false
+      "tested": true
     },
     {
       "id": "31",

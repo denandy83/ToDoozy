@@ -6,18 +6,46 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode
 } from '../stores'
+import { useToast } from './Toast'
 import type { Label } from '../../../../shared/types'
 import type { LabelFilterMode } from '../stores'
 
 interface LabelFilterBarProps {
   labels: Label[]
+  projectId?: string
 }
 
-export function LabelFilterBar({ labels }: LabelFilterBarProps): React.JSX.Element | null {
+export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): React.JSX.Element | null {
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
-  const { toggleLabelFilter, clearLabelFilters, setFilterMode } = useLabelStore()
+  const { toggleLabelFilter, clearLabelFilters, setFilterMode, removeFromProject } = useLabelStore()
+  const { addToast } = useToast()
+
+  const handleRemoveLabel = useCallback(async (label: Label, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!projectId) return
+
+    // Count tasks in this project that have this label
+    const projects = await window.api.labels.findProjectsUsingLabel(label.id)
+    const projectInfo = projects.find((p) => p.project_id === projectId)
+    const count = projectInfo?.task_count ?? 0
+
+    const taskMsg = count > 0
+      ? `${count} task${count === 1 ? '' : 's'} will lose this label.`
+      : 'No tasks use this label.'
+
+    addToast({
+      message: `Delete "${label.name}" from this project? ${taskMsg}`,
+      persistent: true,
+      actions: [
+        { label: 'Delete', variant: 'danger', onClick: async () => {
+          await removeFromProject(projectId, label.id)
+        }},
+        { label: 'Cancel', variant: 'muted', onClick: () => {} }
+      ]
+    })
+  }, [projectId, removeFromProject, addToast])
 
   const handleToggleMode = useCallback(() => {
     const next: LabelFilterMode = filterMode === 'hide' ? 'blur' : 'hide'
@@ -36,21 +64,35 @@ export function LabelFilterBar({ labels }: LabelFilterBarProps): React.JSX.Eleme
         {labels.map((label) => {
           const isActive = activeLabelFilters.has(label.id)
           return (
-            <button
+            <span
               key={label.id}
-              onClick={() => toggleLabelFilter(label.id)}
-              className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+              className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer"
               style={{
                 backgroundColor: isActive ? `${label.color}30` : `${label.color}15`,
                 color: label.color,
                 border: `1px solid ${isActive ? label.color : `${label.color}30`}`,
                 boxShadow: isActive ? `0 0 0 2px ${label.color}40` : 'none'
               }}
-              aria-pressed={isActive}
-              aria-label={`Filter by ${label.name}`}
             >
-              {label.name}
-            </button>
+              <button
+                onClick={() => toggleLabelFilter(label.id)}
+                className="transition-colors"
+                aria-pressed={isActive}
+                aria-label={`Filter by ${label.name}`}
+              >
+                {label.name}
+              </button>
+              {projectId && (
+                <button
+                  onClick={(e) => handleRemoveLabel(label, e)}
+                  className="rounded-full p-0.5 transition-colors hover:bg-black/10"
+                  aria-label={`Delete ${label.name} from project`}
+                  title="Delete from project"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </span>
           )
         })}
       </div>

@@ -309,10 +309,14 @@ export function AppLayout(): React.JSX.Element {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
-      // Tab/Shift+Tab cycles projects when in project view
+      // Tab/Shift+Tab cycles projects when in project view (only when no task is selected)
       if (e.key === 'Tab' && currentView === 'project' && sortedProjects.length > 1) {
+        if (e.defaultPrevented) return
         const target = e.target as HTMLElement
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+        // Don't cycle projects if any task is selected — Tab should cycle tasks instead
+        const { selectedTaskIds } = useTaskStore.getState()
+        if (selectedTaskIds.size > 0) return
         e.preventDefault()
         const currentIdx = sortedProjects.findIndex((p) => p.id === selectedProjectId)
         if (e.shiftKey) {

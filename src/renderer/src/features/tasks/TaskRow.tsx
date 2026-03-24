@@ -321,6 +321,7 @@ export function TaskRow({
         {...attributes}
         {...listeners}
         role="row"
+        data-task-id={task.id}
         aria-selected={isSelected}
         aria-expanded={hasChildren ? isExpanded : undefined}
         tabIndex={0}
@@ -459,6 +460,7 @@ export function TaskRow({
               onToggleLabel={handleToggleLabel}
               onCreateLabel={handlePickerCreateLabel}
               onClose={() => setPickerOpen(false)}
+              projectId={task.project_id}
             />
           </div>,
           document.body

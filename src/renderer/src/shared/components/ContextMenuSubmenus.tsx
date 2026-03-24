@@ -125,6 +125,7 @@ interface LabelsSubmenuProps {
   openLeft: boolean
   onToggleLabel: (labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  projectId?: string
 }
 
 export function LabelsSubmenu({
@@ -132,7 +133,8 @@ export function LabelsSubmenu({
   assignedLabelIds,
   openLeft,
   onToggleLabel,
-  onCreateLabel
+  onCreateLabel,
+  projectId
 }: LabelsSubmenuProps): React.JSX.Element {
   return (
     <div
@@ -144,6 +146,7 @@ export function LabelsSubmenu({
         onToggleLabel={onToggleLabel}
         onCreateLabel={onCreateLabel}
         onClose={() => {}}
+        projectId={projectId}
       />
     </div>
   )

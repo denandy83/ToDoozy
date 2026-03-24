@@ -44,9 +44,20 @@ function PriorityButton({ level, isActive, onSelect }: PriorityButtonProps): Rea
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault()
-        onSelect(level.value)
+        e.stopPropagation()
+        const btn = e.currentTarget as HTMLElement
+        const parent = btn.parentElement
+        if (!parent) return
+        const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
+        const idx = buttons.indexOf(btn)
+        const nextIdx = e.key === 'ArrowLeft'
+          ? (idx - 1 + buttons.length) % buttons.length
+          : (idx + 1) % buttons.length
+        const nextBtn = buttons[nextIdx]
+        nextBtn.focus()
+        nextBtn.click()
       }
     },
     [level.value, onSelect]
@@ -56,7 +67,7 @@ function PriorityButton({ level, isActive, onSelect }: PriorityButtonProps): Rea
     <button
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+      className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         isActive
           ? 'text-accent-fg'
           : 'text-muted hover:bg-foreground/6'

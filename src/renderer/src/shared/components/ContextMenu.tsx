@@ -165,6 +165,7 @@ export function ContextMenu(): React.JSX.Element | null {
           allLabels={allLabels}
           assignedLabelIds={assignedLabelIds}
           openLeft={openLeft}
+          projectId={task.project_id}
           onToggleLabel={(labelId) => {
             if (assignedLabelIds.has(labelId)) {
               useTaskStore.getState().removeLabel(task.id, labelId)
@@ -172,8 +173,9 @@ export function ContextMenu(): React.JSX.Element | null {
               useTaskStore.getState().addLabel(task.id, labelId)
             }
           }}
-          onCreateLabel={(name, color) => {
-            createOrMatchLabel(name, color)
+          onCreateLabel={async (name, color) => {
+            const label = await createOrMatchLabel(name, color)
+            useTaskStore.getState().addLabel(task.id, label.id)
           }}
         />
       </FlyoutItem>

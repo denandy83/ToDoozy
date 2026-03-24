@@ -63,9 +63,29 @@ function StatusChip({ status, isActive, onSelect }: StatusChipProps): React.JSX.
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') {
         e.preventDefault()
-        onSelect(status.id)
+        e.stopPropagation()
+        const btn = e.currentTarget as HTMLElement
+        const parent = btn.parentElement
+        if (!parent) return
+        const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
+        const idx = buttons.indexOf(btn)
+        const next = buttons[(idx + 1) % buttons.length]
+        next.focus()
+        next.click()
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        e.stopPropagation()
+        const btn = e.currentTarget as HTMLElement
+        const parent = btn.parentElement
+        if (!parent) return
+        const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
+        const idx = buttons.indexOf(btn)
+        const prev = buttons[(idx - 1 + buttons.length) % buttons.length]
+        prev.focus()
+        prev.click()
       }
     },
     [status.id, onSelect]
@@ -75,7 +95,7 @@ function StatusChip({ status, isActive, onSelect }: StatusChipProps): React.JSX.
     <button
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+      className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         isActive ? 'text-accent-fg' : 'text-muted hover:bg-foreground/6'
       }`}
       style={isActive ? { backgroundColor: status.color } : undefined}

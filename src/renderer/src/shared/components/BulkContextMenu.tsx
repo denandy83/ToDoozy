@@ -158,6 +158,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
           allLabels={allLabels}
           assignedLabelIds={new Set<string>()}
           openLeft={openLeft}
+          projectId={firstTask?.project_id}
           onToggleLabel={(labelId) => {
             useTaskStore.getState().bulkAddLabel(bulkTaskIds, labelId)
           }}
