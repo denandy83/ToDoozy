@@ -6,7 +6,7 @@ import {
   useSensor,
   useSensors
 } from '@dnd-kit/core'
-import { LayoutList, Columns3, LayoutTemplate } from 'lucide-react'
+import { LayoutList, Columns3, LayoutTemplate, Trash2 } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -38,6 +38,7 @@ import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
 import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
 import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
+import { shouldForceDelete } from './shared/utils/shiftDelete'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -410,7 +411,7 @@ export function AppLayout(): React.JSX.Element {
   const [editingProjectName, setEditingProjectName] = useState(false)
   const [projectNameValue, setProjectNameValue] = useState('')
   const projectNameRef = useRef<HTMLInputElement>(null)
-  const { updateProject } = useProjectStore()
+  const { updateProject, deleteProject } = useProjectStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 
   const handleStartEditProjectName = useCallback(() => {
@@ -494,6 +495,52 @@ export function AppLayout(): React.JSX.Element {
     })
   }, [selectedProject, currentUser, statuses, allTasks])
 
+  const handleDeleteCurrentProject = useCallback(async (e: React.MouseEvent) => {
+    if (!selectedProject) return
+    if (sortedProjects.length <= 1) return
+    const doDelete = async (): Promise<void> => {
+      try {
+        await deleteProject(selectedProject.id)
+        const remainingTasks: Record<string, Task> = {}
+        for (const [id, t] of Object.entries(useTaskStore.getState().tasks)) {
+          if ((t as Task).project_id !== selectedProject.id) remainingTasks[id] = t as Task
+        }
+        useTaskStore.setState({ tasks: remainingTasks })
+        const remaining = sortedProjects.filter((p) => p.id !== selectedProject.id)
+        if (remaining.length > 0) {
+          useViewStore.getState().setSelectedProject(remaining[0].id)
+        } else {
+          setView('my-day')
+        }
+        addToast({ message: `Deleted "${selectedProject.name}"`, variant: 'danger' })
+      } catch (err) {
+        addToast({ message: err instanceof Error ? err.message : 'Failed to delete project', variant: 'danger' })
+      }
+    }
+    if (shouldForceDelete(e)) {
+      await doDelete()
+      return
+    }
+    const allTaskValues = Object.values(useTaskStore.getState().tasks) as Task[]
+    const projectTasks = allTaskValues.filter((t) => t.project_id === selectedProject.id && t.is_archived === 0)
+    const archivedTasks = allTaskValues.filter((t) => t.project_id === selectedProject.id && t.is_archived === 1)
+    const parts = [`Delete "${selectedProject.name}"?`]
+    if (projectTasks.length > 0 || archivedTasks.length > 0) {
+      const counts: string[] = []
+      if (projectTasks.length > 0) counts.push(`${projectTasks.length} task${projectTasks.length !== 1 ? 's' : ''}`)
+      if (archivedTasks.length > 0) counts.push(`${archivedTasks.length} archived`)
+      parts.push(`This will delete ${counts.join(' and ')}.`)
+    }
+    addToast({
+      message: parts.join(' '),
+      persistent: true,
+      actions: [
+        { label: 'Delete', variant: 'danger' as const, onClick: async () => { await doDelete() } },
+        { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+      ]
+    })
+  }, [selectedProject, sortedProjects, deleteProject, addToast, setView])
+
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
@@ -557,14 +604,28 @@ export function AppLayout(): React.JSX.Element {
             )}
 
             {currentView === 'project' && selectedProject && (
-              <button
-                onClick={handleSaveProjectAsTemplate}
-                className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-                title="Save as Project Template"
-                aria-label="Save as Project Template"
-              >
-                <LayoutTemplate size={16} />
-              </button>
+              <>
+                <button
+                  onClick={handleSaveProjectAsTemplate}
+                  className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                  title="Save as Project Template"
+                  aria-label="Save as Project Template"
+                >
+                  <LayoutTemplate size={16} />
+                </button>
+                <div className="group relative">
+                  <button
+                    onClick={handleDeleteCurrentProject}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors ${sortedProjects.length <= 1 ? 'opacity-30' : 'hover:bg-danger/10 hover:text-danger'}`}
+                    aria-label="Delete project"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover:opacity-100">
+                    {sortedProjects.length <= 1 ? "Can't delete the last project" : 'Shift+click to skip confirmation'}
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Layout toggle */}

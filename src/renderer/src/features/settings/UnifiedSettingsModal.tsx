@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { LogOut, Pencil, Trash2, Plus, X, Check } from 'lucide-react'
+import { LogOut, Pencil, Plus, X, Check } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Modal } from '../../shared/components/Modal'
-import { useProjectStore, selectAllProjects, useStatusStore, useTaskStore } from '../../shared/stores'
-import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { useProjectStore, selectAllProjects, useStatusStore } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
@@ -476,67 +475,9 @@ function ProjectsTab({
   const nameInputRef = useRef<HTMLInputElement>(null)
   const newProjectInputRef = useRef<HTMLInputElement>(null)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const deleteProject = useProjectStore((s) => s.deleteProject)
   const createProject = useProjectStore((s) => s.createProject)
   const createStatus = useStatusStore((s) => s.createStatus)
   const currentUser = useAuthStore((s) => s.currentUser)
-
-  const doDeleteProject = useCallback(async (project: Project) => {
-    try {
-      await deleteProject(project.id)
-      const remainingTasks: Record<string, import('../../../../shared/types').Task> = {}
-      for (const [id, t] of Object.entries(useTaskStore.getState().tasks)) {
-        if (t.project_id !== project.id) remainingTasks[id] = t
-      }
-      useTaskStore.setState({ tasks: remainingTasks })
-      if (selectedProjectId === project.id) {
-        const remaining = projects.filter((p) => p.id !== project.id)
-        if (remaining.length > 0) onProjectChange(remaining[0].id)
-      }
-    } catch (err) {
-      addToast({ message: err instanceof Error ? err.message : 'Failed to delete project', variant: 'danger' })
-    }
-  }, [deleteProject, selectedProjectId, projects, onProjectChange, addToast])
-
-  const handleDeleteProject = useCallback((project: Project, e?: React.MouseEvent) => {
-    if (project.is_default === 1) {
-      addToast({ message: 'Cannot delete the default project', variant: 'danger' })
-      return
-    }
-    if (e && shouldForceDelete(e)) {
-      doDeleteProject(project)
-      return
-    }
-    const allTasks = Object.values(useTaskStore.getState().tasks)
-    const projectTasks = allTasks.filter((t) => t.project_id === project.id && t.is_archived === 0)
-    const archivedTasks = allTasks.filter((t) => t.project_id === project.id && t.is_archived === 1)
-    const parts = [`Delete "${project.name}"?`]
-    if (projectTasks.length > 0 || archivedTasks.length > 0) {
-      const counts: string[] = []
-      if (projectTasks.length > 0) counts.push(`${projectTasks.length} task${projectTasks.length !== 1 ? 's' : ''}`)
-      if (archivedTasks.length > 0) counts.push(`${archivedTasks.length} archived`)
-      parts.push(`This will delete ${counts.join(' and ')}.`)
-    }
-    addToast({
-      message: parts.join(' '),
-      persistent: true,
-      actions: [
-        {
-          label: 'Delete',
-          variant: 'danger' as const,
-          onClick: async () => {
-            await doDeleteProject(project)
-            addToast({ message: `Deleted "${project.name}"` })
-          }
-        },
-        {
-          label: 'Cancel',
-          variant: 'muted' as const,
-          onClick: () => {}
-        }
-      ]
-    })
-  }, [addToast, deleteProject, projects, selectedProjectId, onProjectChange])
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => a.sidebar_order - b.sidebar_order),
@@ -756,7 +697,6 @@ function ProjectsTab({
                       project={p}
                       isSelected={p.id === selectedProjectId}
                       onClick={() => onProjectChange(p.id)}
-                      onDelete={p.is_default === 1 ? undefined : (e) => handleDeleteProject(p, e)}
                     />
                   ))}
                 </div>
@@ -767,6 +707,7 @@ function ProjectsTab({
           {/* Delete — always last */}
           <ProjectDeleteSection
             project={selectedProject}
+            isLastProject={sortedProjects.length <= 1}
             onClose={onClose}
             addToast={addToast}
           />
@@ -779,13 +720,11 @@ function ProjectsTab({
 function SortableProjectRow({
   project,
   isSelected,
-  onClick,
-  onDelete
+  onClick
 }: {
   project: Project
   isSelected: boolean
   onClick: () => void
-  onDelete?: (e: React.MouseEvent) => void
 }): React.JSX.Element {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id
@@ -815,19 +754,6 @@ function SortableProjectRow({
       <span className="flex-1 truncate text-sm font-light text-foreground">
         {project.name}
       </span>
-      {onDelete && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete(e)
-          }}
-          className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
-          title="Delete project"
-          aria-label="Delete project"
-        >
-          <Trash2 size={12} />
-        </button>
-      )}
     </div>
   )
 }
@@ -879,15 +805,14 @@ function ProjectColorPicker({ project }: { project: Project }): React.JSX.Elemen
 
 interface ProjectDeleteSectionProps {
   project: Project
+  isLastProject: boolean
   onClose: () => void
   addToast: (toast: { message: string; variant?: 'default' | 'danger' }) => void
 }
 
-function ProjectDeleteSection({ project, onClose, addToast }: ProjectDeleteSectionProps): React.JSX.Element | null {
+function ProjectDeleteSection({ project, isLastProject, onClose, addToast }: ProjectDeleteSectionProps): React.JSX.Element | null {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const deleteProject = useProjectStore((s) => s.deleteProject)
-
-  if (project.is_default === 1) return null
 
   const handleDelete = async (): Promise<void> => {
     try {
@@ -906,8 +831,9 @@ function ProjectDeleteSection({ project, onClose, addToast }: ProjectDeleteSecti
     <div className="mt-4 border-t border-border pt-4">
       {!confirmDelete ? (
         <button
-          onClick={() => setConfirmDelete(true)}
-          className="rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10"
+          onClick={(e) => { if (!isLastProject) { e.shiftKey ? handleDelete() : setConfirmDelete(true) } }}
+          className={`rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors ${isLastProject ? 'opacity-30' : 'hover:bg-danger/10'}`}
+          title={isLastProject ? "Can't delete the last project" : "Delete project (Shift+click to skip confirmation)"}
         >
           Delete Project
         </button>

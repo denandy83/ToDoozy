@@ -315,3 +315,26 @@ Common icons:
 | Button (icon-only) | `p-0.5` to `p-2` | — |
 | Section gap | — | `mb-6` |
 | Task gap | — | `mb-1` |
+
+---
+
+## Tooltips
+
+Native `title` attribute tooltips do NOT work reliably in Electron on macOS. Always use the CSS tooltip pattern instead.
+
+### Pattern
+Wrap the trigger element in a `group relative` div, then add a sibling tooltip div:
+
+```jsx
+<div className="group relative">
+  <button ...>...</button>
+  <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover:opacity-100">
+    Tooltip text
+  </div>
+</div>
+```
+
+### Positioning
+- Below the element: `top-full mt-1.5` (use in headers where above would be clipped)
+- Above the element: `bottom-full mb-1.5` (use in footers or body content)
+- Always: `left-1/2 -translate-x-1/2` for horizontal centering, `z-50` to avoid clipping, `whitespace-nowrap` to prevent wrapping

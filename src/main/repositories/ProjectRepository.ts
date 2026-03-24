@@ -83,8 +83,16 @@ export class ProjectRepository {
   }
 
   delete(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
-    return result.changes > 0
+    return this.db.transaction(() => {
+      // tasks.status_id references statuses(id) with no CASCADE.
+      // Deleting the project cascades to statuses, which would fail if any task
+      // (including tasks from other projects) still references those statuses.
+      // Delete all such tasks first.
+      this.db.prepare('DELETE FROM tasks WHERE status_id IN (SELECT id FROM statuses WHERE project_id = ?)').run(id)
+      this.db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
+      const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+      return result.changes > 0
+    })()
   }
 
   list(): Project[] {

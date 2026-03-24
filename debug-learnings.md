@@ -7,9 +7,20 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 ### Don't kill MCP server when restarting dev
 - **Symptoms**: MCP tools become unavailable after restarting the dev server
 - **Root cause**: `pkill -9 -f "Electron.app"` kills the MCP server process too, since it runs as a Node subprocess
-- **Fix**: When restarting the dev server, only kill the electron-vite dev process and the port, NOT the Electron app broadly. Use: `pkill -f "electron-vite" 2>/dev/null; lsof -ti:5200 | xargs kill -9 2>/dev/null`
+- **Fix**: Kill by exact process pattern using `kill $(...)` — `pkill -f` is unreliable on macOS. Reliable kill:
+  ```
+  kill $(ps aux | grep "electron-vite dev" | grep -v grep | awk '{print $2}') 2>/dev/null
+  kill $(ps aux | grep "todoozy/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \." | grep -v grep | awk '{print $2}') 2>/dev/null
+  ```
 - **Never use**: `pkill -f "todoozy"` or `pkill -f "Electron"` — too broad, kills the MCP server subprocess
+- **`pkill -f "electron-vite"` is unreliable on macOS** — use the `kill $(ps aux | grep ...)` pattern instead
 - **Check first**: If MCP tools stop working, the server process was likely killed during a restart
+
+### SQLite WAL restore
+- **Symptoms**: After `cp backup.db live.db`, the restored DB still shows stale/missing data
+- **Root cause**: SQLite WAL mode keeps a `.db-shm` (shared memory index) alongside the main file. Copying just the DB file leaves a stale SHM that overrides the restore.
+- **Fix**: Delete the SHM and WAL files before restoring: `rm todoozy.db-shm todoozy.db-wal && cp backup.db todoozy.db`
+- **Check first**: Are there `.db-shm` / `.db-wal` files next to the DB?
 
 ---
 
