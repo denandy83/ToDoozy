@@ -259,12 +259,16 @@ After the fix is merged, use `/screenshot` one more time and analyze the result.
 
 ### Update Changelog
 
-Append an entry to `pending-changes.md`:
+Append an entry to `pending-changes.md` using the full format so a cold session has everything it needs:
 
 ```
 ## <YYYY-MM-DD> — Fix: <short title>
-**User-facing:** <one sentence: what was broken and what the fix does>
-**Affected area:** <component/feature/view>
+**What was broken:** <what the user experienced — specific, user-facing language>
+**Root cause:** <what was actually wrong in the code — one sentence>
+**What was fixed:** <what changed and how it resolves the issue>
+**User-facing impact:** <what the user now experiences — one sentence>
+**Affected area:** <view/component/feature>
+**Files changed:** <key files modified>
 **Commit:** <commit hash from the squash merge>
 ```
 

@@ -1,27 +1,42 @@
 # Pending Changes
 
-Working file — captures changes during each session for processing into CHANGELOG.md, RELEASE_NOTES.md, and other docs.
+Working file — entries written here during a session are processed into permanent docs at the start of the next session (or end of current session if explicit).
 
 **How this works:**
-- `/fix` appends a bug fix entry after each successful fix
-- `/feature` appends a feature entry after each story is verified
-- The Stop hook appends recent git commits as a fallback
-- At session start (or next day), Claude reads this file, processes entries into the permanent docs, then clears this file
+- `/fix` appends a fix entry (rich context) after each confirmed fix
+- `/feature` appends a feature entry (rich context) after each verified story
+- The `SessionEnd` hook appends a fallback entry with git metadata
+- At session start, if `.docs-pending` exists, Claude processes all entries below into CHANGELOG.md, RELEASE_NOTES.md, FEATURES.md, README.md, DEVLOG.md — then clears this file
 
-**Format for entries:**
-
+**Entry format — Fix:**
 ```
 ## YYYY-MM-DD — Fix: <short title>
-**User-facing:** <one sentence describing what was broken and what the fix does>
-**Affected area:** <component/feature/view>
-**Commit:** <hash if known>
+**What was broken:** <what the user experienced — specific, user-facing language>
+**Root cause:** <what was actually wrong in the code>
+**What was fixed:** <what changed and how it resolves the issue>
+**User-facing impact:** <what the user now experiences — one sentence>
+**Affected area:** <view/component/feature>
+**Files changed:** <list of key files modified>
+**Commit:** <hash>
 ```
 
+**Entry format — Feature:**
 ```
 ## YYYY-MM-DD — Feature: <title>
-**User-facing:** <one sentence describing what the user can now do>
-**Details:** <brief technical summary>
-**Commit:** <hash if known>
+**What it does:** <what the user can now do — concrete, user-facing>
+**Why it was built:** <the problem it solves>
+**How to use it:** <brief user-facing instructions>
+**Technical summary:** <what was added: components, stores, IPC handlers, DB changes>
+**Acceptance criteria met:** <list from the story>
+**Affected views/components:** <list>
+**Commit:** <hash>
+```
+
+**Entry format — Session-end fallback (hook):**
+```
+## YYYY-MM-DD — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+<commit hash> <subject> (<date>) — files: <changed file count>
 ```
 
 ---
@@ -29,10 +44,11 @@ Working file — captures changes during each session for processing into CHANGE
 <!-- entries below this line are added automatically -->
 
 <!-- session-end: 2026-03-25T07:11:41 -->
-## 2026-03-25 — Git commits (unprocessed)
-- 45e0133 feat: multi-select drag to project, undo toast, drag UX improvements (2026-03-24)
-- fa6d600 fix: project delete and quick-add improvements (2026-03-24)
-- c402aa8 fix: refresh projects and settings on every quick add focus (2026-03-24)
+## 2026-03-25 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 45e0133 feat: multi-select drag to project, undo toast, drag UX improvements (2026-03-24) — files: 5
+- fa6d600 fix: project delete and quick-add improvements (2026-03-24) — files: 3
+- c402aa8 fix: refresh projects and settings on every quick add focus (2026-03-24) — files: 2
 - f062612 wip: save ralph agent work before fix session (2026-03-24)
 - 794d451 feat: add rolling dev database system to protect production data (2026-03-22)
 - cc24751 feat: implement iCloud Drive file attachments (#32) (2026-03-22)

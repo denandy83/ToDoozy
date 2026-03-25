@@ -163,12 +163,16 @@ After push (or after testing if not pushing), update the documentation for every
 
 ### 9a — Append to pending-changes.md
 
-For each verified story, append an entry to `pending-changes.md`:
+For each verified story, append a full entry to `pending-changes.md` so a cold session has everything it needs to update docs without re-reading the code:
 
 ```
 ## <YYYY-MM-DD> — Feature: <title>
-**User-facing:** <one sentence describing what the user can now do>
-**Details:** <brief technical summary — what was added, main components>
+**What it does:** <what the user can now do — concrete, user-facing>
+**Why it was built:** <the problem it solves>
+**How to use it:** <brief user-facing instructions — 2-4 sentences>
+**Technical summary:** <what was added: key components, stores, IPC handlers, DB changes>
+**Acceptance criteria met:** <bullet list from the story>
+**Affected views/components:** <list>
 **Commit:** <commit hash>
 ```
 
