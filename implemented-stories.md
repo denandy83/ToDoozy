@@ -229,3 +229,12 @@
 - **Acceptance Criteria:** Play button on hover, timer presets, tray countdown, pause/resume/stop, break timer, repetition mode, activity log, sound/system notifications, Settings > Timer section.
 - **Passes:** true
 - **Implemented:** 2026-03-22
+
+---
+
+### #30 — Global Labels — Shared Across All Projects
+- **Description:** Labels become global entities with a many-to-many relationship to projects. A label is created once (with a globally unique name and color) and can be added to multiple projects. Each project only sees labels explicitly added to it. New `project_labels` junction table. Migration merges duplicate label names. Label picker shows project-scoped labels. Label settings shows global labels with usage counts. Delete flow with per-project and global options. Filter by label shows only labels assigned to active tasks in that project.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Labels exist as global entities with unique names per user, project_labels junction table links labels to projects, Label picker only shows labels added to current project, Creating a label that matches an existing global label silently adds it with toast, Label settings shows all labels with project/task usage counts, Editing a label name or color applies globally, Delete shows projects where used with per-project remove and global delete options, All destructive actions are red with undo toast, Migration merges duplicate names (oldest wins), Filter by label shows only labels assigned to active tasks.
+- **Passes:** true
+- **Implemented:** 2026-03-25

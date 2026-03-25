@@ -1,27 +1,7 @@
 {
   "project": "ToDoozy",
-  "branchName": "ralph/features-30-31-32",
+  "branchName": "ralph/feature-33-in-app-help",
   "stories": [
-    {
-      "id": "30",
-      "title": "Global Labels — Shared Across All Projects",
-      "description": "Labels become global entities with a many-to-many relationship to projects. A label is created once (with a globally unique name and color) and can be added to multiple projects. Each project only sees labels that have been explicitly added to it.\n\n**Database changes:**\n- New `project_labels` junction table: `project_id (FK)`, `label_id (FK)`, `created_at`\n- Remove `project_id` FK from the `labels` table (labels become global, owned by user)\n- Migration: merge duplicate label names — keep the oldest, reassign all task references, delete duplicates\n\n**Label picker (in task detail):**\n- Shows only labels added to the current project\n- When user types a name that matches an existing global label, silently add it to the project with a toast: \"Existing label added: {name}\"\n- When user types a name with no match, create a new global label and add it to the project\n\n**Label settings page:**\n- Shows all global labels with count of projects and tasks using each\n- Edit name/color — changes apply everywhere\n- Delete flow:\n  - Shows list of all projects where the label exists\n  - Option to \"Remove from project\" (individual) — unlinks from that project but keeps the label globally. Tasks in that project lose the label.\n  - Option to \"Delete everywhere\" — removes from all projects and all tasks\n  - Both options follow UX rules: red destructive styling, confirmation, undo toast\n  - Warning toast listing projects and task counts per project\n\n**Filtering:**\n- \"Filter by label\" in project view shows only labels that are currently assigned to at least one task in that project (in Not Started, In Progress, or Done status — excludes archived tasks)\n\n**Color:**\n- Colors are global — changing a label's color updates it everywhere\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
-      "spec_section": "N/A",
-      "acceptance_criteria": [
-        "Labels exist as global entities with unique names per user",
-        "project_labels junction table links labels to projects",
-        "Label picker only shows labels added to current project",
-        "Creating a label that matches an existing global label silently adds it with toast",
-        "Label settings shows all labels with project/task usage counts",
-        "Editing a label name or color applies globally",
-        "Delete shows projects where used, with per-project remove and global delete options",
-        "All destructive actions are red, at bottom of menu, with undo toast",
-        "Migration merges duplicate names (oldest wins), reassigns task references",
-        "Filter by label in project view only shows labels assigned to active (non-archived) tasks in that project"
-      ],
-      "passes": true,
-      "tested": true
-    },
     {
       "id": "31",
       "title": "Fix Tab Order and Focus Management",
@@ -61,6 +41,27 @@
         "attachments table with proper schema and FK constraints"
       ],
       "passes": true,
+      "tested": false
+    },
+    {
+      "id": "33",
+      "title": "In-App Help & Keyboard Shortcuts",
+      "description": "Adds two discoverable help entry points to ToDoozy.\n\n**Entry point 1 — Keyboard Shortcuts Modal:**\nA `?` (HelpCircle, 16px, stroke 1.5) icon button is added as its own row in the sidebar bottom column (same column as the gear and theme toggle, each as their own row — do NOT inline with existing rows). Clicking it opens a centered modal styled like the command palette (dark overlay, rounded panel, max-w-lg). The modal shows all keyboard shortcuts grouped into 4 sections: Navigation, Tasks, Detail Panel, Global. Shortcut values are read dynamically from `useSettingsStore` so configurable shortcuts (e.g. app toggle hotkey) always reflect current settings. The `?` key globally opens the modal when focus is not in a text input or textarea. `Escape` closes it.\n\n**Shortcuts to include:**\n- Navigation: Cmd+1 (My Day), Cmd+2 (project nav), Cmd+3 (Archive), Cmd+4 (Templates), Cmd+L (toggle kanban)\n- Tasks: Enter (open detail), Space (toggle status), Cmd+C (copy titles), Delete/Backspace (delete selected), Drag (reorder/subtask)\n- Detail Panel: Tab (cycle fields), Shift+Tab (reverse), Escape (close)\n- Global: Cmd+K (command palette), ? (this modal), app toggle shortcut (from settings)\n\n**Entry point 2 — Settings → Help Tab:**\nA new `'help'` tab is added to `UnifiedSettingsModal` after the existing tabs. A new `HelpSettingsContent.tsx` component renders full feature documentation. Content is authored directly in the component — do NOT attempt to read .md files at runtime from the filesystem. Draw on the information in HELP.md, FEATURES.md, and README.md (read them during implementation) to write comprehensive static content covering every major feature: tasks, subtasks, projects, labels, priorities, due dates, My Day, kanban, quick add, pomodoro, attachments, MCP, templates, smart input. Also include the full shortcuts reference table.\n\n**Implementation files:**\n- `src/renderer/src/features/help/KeyboardShortcutsModal.tsx` (new) — modal component\n- `src/renderer/src/features/help/HelpSettingsContent.tsx` (new) — settings tab content\n- `src/renderer/src/features/layout/Sidebar.tsx` — add `?` button as its own row in the bottom column\n- `src/renderer/src/features/settings/UnifiedSettingsModal.tsx` — add `'help'` tab\n- `src/renderer/src/App.tsx` or `AppLayout.tsx` — register global `?` keydown listener\n\n**UX rules:**\n- Modal uses same overlay/panel styling as CommandPalette\n- Each shortcut row: key chip (monospace, small badge style) + description label\n- Section headers use section-label typography (text-[10px] font-bold uppercase tracking-[0.3em])\n- `?` button in sidebar follows same hover/focus style as gear button\n- Help tab content uses body text scale (text-sm font-light) with section headers\n- Scrollable content area in settings tab\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "A `?` icon button appears as its own row in the sidebar bottom column, visually consistent with the gear and theme toggle rows",
+        "Clicking the `?` button opens a centered modal overlaying the app",
+        "The modal displays shortcuts in 4 labeled sections: Navigation, Tasks, Detail Panel, Global",
+        "Configurable shortcuts (e.g. app toggle) show the current value from settings, not a hardcoded string",
+        "Pressing `?` anywhere in the app (when not focused in a text input or textarea) opens the shortcuts modal",
+        "Escape closes the shortcuts modal",
+        "Settings modal has a Help tab that opens without errors",
+        "The Help tab contains documentation for all major features (tasks, subtasks, projects, labels, priorities, due dates, My Day, kanban, quick add, pomodoro, attachments, MCP, templates, smart input)",
+        "The Help tab contains a keyboard shortcuts reference table",
+        "npm run typecheck passes with zero errors",
+        "npm run test passes — all existing tests still pass"
+      ],
+      "passes": false,
       "tested": false
     }
   ]
