@@ -42,17 +42,3 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
-
-<!-- session-end: 2026-03-25T07:11:41 -->
-## 2026-03-25 — Session end (git fallback)
-<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
-- 45e0133 feat: multi-select drag to project, undo toast, drag UX improvements (2026-03-24) — files: 5
-- fa6d600 fix: project delete and quick-add improvements (2026-03-24) — files: 3
-- c402aa8 fix: refresh projects and settings on every quick add focus (2026-03-24) — files: 2
-- f062612 wip: save ralph agent work before fix session (2026-03-24)
-- 794d451 feat: add rolling dev database system to protect production data (2026-03-22)
-- cc24751 feat: implement iCloud Drive file attachments (#32) (2026-03-22)
-- a3fa7cd feat: fix tab order and focus management (#31) (2026-03-22)
-- 04228b7 feat: implement global labels (#30) — labels shared across all projects (2026-03-22)
-- 8e6725e feat: add stories #30-32 — global labels, tab order, iCloud attachments (2026-03-22)
-- e44cae3 fix: label hydration, archive cascade, and My Day subtask bugs (2026-03-22)

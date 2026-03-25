@@ -1,71 +1,19 @@
 # Ralph Progress Log
-Started: Sun Mar 22 10:02:36 CET 2026
+Started: Wed Mar 25 15:29:50 CET 2026
 ---
 
-## Story #30: Global Labels — Shared Across All Projects
-**Completed:** 2026-03-22
+## 2026-03-25 — Story #33: In-App Help & Keyboard Shortcuts
 
-### What was done:
-- **Migration 6**: Created `project_labels` junction table, populated from existing data, merged duplicate label names (oldest wins), recreated `labels` table without `project_id` FK, recreated `task_labels` with FK to new table
-- **LabelRepository**: Full rewrite — `findAll()`, `findByName()`, `addToProject()`, `removeFromProject()`, `findAllWithUsage()`, `findProjectsUsingLabel()`, `findActiveLabelsForProject()`
-- **Types**: Removed `project_id` from `Label` interface, added `ProjectLabel` and `LabelUsageInfo` types, made `project_id` optional in `CreateLabelInput`
-- **IPC/Preload**: Added 6 new IPC handlers for the new repository methods
-- **Label Store**: Added `projectLabels` state (projectId -> Set<labelId>), `hydrateAllLabels()`, `addToProject()`, `removeFromProject()` actions
-- **useCreateOrMatchLabel hook**: Shared logic for label creation — checks for existing global label by name, adds to project with toast if found, creates new if not
-- **LabelPicker consumers**: Updated DetailPanel, TaskRow, TaskListView, ContextMenu, BulkContextMenu, MyDayView to use `useCreateOrMatchLabel`
-- **LabelSettingsContent**: Full rewrite — shows all global labels with project/task usage counts, edit name/color globally, "Remove from project" and "Delete everywhere" flows with red destructive styling and confirmation toasts
-- **LabelFilterBar**: Already filters to labels assigned to non-archived tasks (no change needed)
-- **MCP Server**: Updated `create_label`, `use_task_template`, `deploy_template`, and `copyTemplateSubtasks` to use global label matching
-- **Tests**: Updated existing tests to remove `project_id` from Label, added 12 new LabelRepository tests
+**Status:** Implemented
 
-### Decisions:
-- Kept `project_id` as optional in `CreateLabelInput` for backward compat — if provided, auto-links to that project
-- Label settings shows ALL global labels (not just project-scoped) with usage counts
-- The `useCreateOrMatchLabel` hook centralizes the "create or match" logic to avoid duplication across 6+ components
-- Pre-existing test failures (shortcut-utils, smartInputParser) are unrelated; repository tests fail due to Node.js native module version mismatch (not our issue)
+**What was built:**
+- `KeyboardShortcutsModal.tsx` — centered modal with 4 shortcut sections (Navigation, Tasks, Detail Panel, Global). Reads `app_toggle_shortcut` from settings so configurable shortcuts always reflect current config.
+- `HelpSettingsContent.tsx` — comprehensive Help tab with full feature documentation (tasks, subtasks, projects, labels, priorities, kanban, pomodoro, attachments, MCP, smart input, shortcuts table).
+- Sidebar footer: added `?` (HelpCircle) button as its own row, with `onHelp` prop.
+- UnifiedSettingsModal: added `'help'` tab, renders HelpSettingsContent.
+- AppLayout: added `helpOpen` state, global `?` key listener (skips when focused in inputs/textareas/contenteditable), passes `onHelp` to Sidebar, renders KeyboardShortcutsModal.
 
-## Story #31: Fix Tab Order and Focus Management
-
-### What was done:
-- Created `useFocusTrap` hook: traps Tab/Shift+Tab within a container, cycles between first and last focusable elements
-- Created `useFocusRestore` hook: saves active element on mount, restores on unmount
-- Applied focus trap + restore to: Modal, CommandPalette, ContextMenu, BulkContextMenu, LabelPicker, DeployProjectTemplateWizard
-- Sidebar: added `tabIndex={-1}` to aside, all nav items, buttons, and inputs — sidebar is now unreachable via Tab
-- Task list: Enter/Space now opens detail panel and focuses title (replaces old move-mode and status-cycle behavior)
-- Task list: Tab stopPropagation prevents AppLayout from intercepting Tab when inside task list
-- Task list: auto-focuses container when navigating to a project
-- Detail panel: Tab cycles through fields (title→status→priority→labels→due date→description) using `data-detail-field` attributes
-- Detail panel: Escape closes panel and restores focus to the previously focused element (task row)
-- TimerPlayButton: changed tabIndex from -1 to 0
-- Add-label button in TaskRow: changed tabIndex from -1 to 0, added focus-visible ring
-- Global CSS: added `*:focus-visible` style with accent ring for consistent keyboard focus indicator
-
-### Decisions:
-- Enter/Space in task list changed from move-mode/status-cycle to opening detail panel (per story requirements). Move mode is still accessible but needs a new trigger.
-- Used `data-detail-field` attributes instead of refs for Tab cycling — simpler, works across column layouts
-- Focus-visible ring uses CSS `box-shadow` instead of Tailwind ring utility to apply globally without class changes
-
-## Story #32: iCloud Drive File Attachments
-**Completed:** 2026-03-22
-
-### What was done:
-- **Migration 7**: Created `attachments` table with FK to tasks (ON DELETE CASCADE), columns: id, task_id, filename, mime_type, size_bytes, local_path, icloud_path, timestamps
-- **AttachmentRepository**: Full CRUD — `findById()`, `findByTaskId()`, `create()`, `updateIcloudPath()`, `delete()`, `deleteByTaskId()`, `countByTaskId()`
-- **Types**: Added `Attachment` and `CreateAttachmentInput` interfaces in shared/types.ts
-- **IPC/Preload**: Added 6 attachment handlers + 8 file system handlers (iCloud detection, file copy, open, delete, dialog)
-- **Attachment Store** (Zustand): `hydrateAttachments()`, `checkIcloudStatus()`, `setIcloudEnabled()`, `addAttachment()`, `removeAttachment()`, `useAttachmentsByTaskId()` selector
-- **iCloud Settings**: New tab in UnifiedSettingsModal — toggle to enable/disable iCloud sync, shows storage location info, detects iCloud Drive availability
-- **DetailAttachments**: Attachment cards below description — horizontal row of rectangular cards with file type icon + truncated filename, hover X to remove, click to open in default app
-- **EditorToolbar**: Paperclip button enabled/disabled based on iCloud status (reads from attachment store)
-- **useAttachFiles hook**: Shared file picker logic — enforces 10 MB max per file, 10 attachments max per task, duplicate filename suffix, error toasts
-- **Task deletion cleanup**: Added file cleanup (local + iCloud dirs) on task delete in taskStore, fire-and-forget with error logging
-- **App.tsx**: Hydrates iCloud status on app startup
-- **Tests**: Added 10 AttachmentRepository tests (CRUD, cascade, counts, edge cases)
-
-### Decisions:
-- Used `getMimeType()` function in main process for MIME detection instead of adding a dependency — covers 30+ common file types
-- Toolbar paperclip shows as disabled with tooltip when iCloud is off; actual attachment management is via the Attachments section below description
-- File picker uses Electron's native `dialog.showOpenDialog` with multiSelections
-- Dual storage: files copied to both `~/.todoozy/attachments/<task-id>/` (local) and `~/Library/Mobile Documents/com~apple~CloudDocs/ToDoozy/<task-id>/` (iCloud)
-- Undo on attachment remove: re-creates the DB record (files remain on disk until confirmed)
-- Pre-existing test failures remain unchanged (native module mismatch, shortcut-utils, smartInputParser)
+**Decisions:**
+- Previous session had committed only metadata (prd.json + implemented-stories.md) without the actual feature files — rebuilt from scratch.
+- Pending docs from .docs-pending were session-end fallback entries, all already captured in CHANGELOG/RELEASE_NOTES — cleared without re-documenting.
+- Pre-existing test failures (smartInputParser, shortcut-utils, worktree repo tests) unrelated to this feature. No new tests needed (UI components only).

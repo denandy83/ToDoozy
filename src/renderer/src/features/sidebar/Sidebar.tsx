@@ -12,7 +12,8 @@ import {
   PanelLeft,
   Settings,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  HelpCircle
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
@@ -32,6 +33,7 @@ interface SidebarProps {
   projectCounts: Record<string, number>
   projects: Project[]
   onSettings: () => void
+  onHelp: () => void
   onNewProject?: () => void
   collapsed: boolean
   pinned: boolean
@@ -69,6 +71,7 @@ export function Sidebar({
   projectCounts,
   projects,
   onSettings,
+  onHelp,
   collapsed,
   pinned,
   isDragging,
@@ -364,6 +367,17 @@ export function Sidebar({
         >
           {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
           {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+        </button>
+        <button
+          onClick={onHelp}
+          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
+            collapsed ? 'justify-center' : ''
+          }`}
+          title="Keyboard shortcuts & help (?)"
+          tabIndex={-1}
+        >
+          <HelpCircle size={14} strokeWidth={1.5} />
+          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Help</span>}
         </button>
         <button
           onClick={onSettings}

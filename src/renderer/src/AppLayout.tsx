@@ -37,6 +37,7 @@ import { ConfirmDeleteModal } from './shared/components/ConfirmDeleteModal'
 import { TimerOverlay } from './shared/components/TimerOverlay'
 import { CommandPalette } from './features/command-palette'
 import { useCommandPaletteStore } from './shared/stores/commandPaletteStore'
+import { KeyboardShortcutsModal } from './features/help/KeyboardShortcutsModal'
 import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
 import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
@@ -45,6 +46,7 @@ import { shouldForceDelete } from './shared/utils/shiftDelete'
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   // Apply current theme CSS variables
   useThemeApplicator()
@@ -348,9 +350,23 @@ export function AppLayout(): React.JSX.Element {
     return counts
   }, [allTasks, allProjects])
 
+  const handleOpenHelp = useCallback(() => {
+    setHelpOpen(true)
+  }, [])
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
+      // ? opens keyboard shortcuts modal (when not in a text field)
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
+        const target = e.target as HTMLElement
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+        if (target.isContentEditable) return
+        e.preventDefault()
+        setHelpOpen((prev) => !prev)
+        return
+      }
+
       // Tab/Shift+Tab cycles projects when in project view (only when no task is selected)
       if (e.key === 'Tab' && currentView === 'project' && sortedProjects.length > 1) {
         if (e.defaultPrevented) return
@@ -604,6 +620,7 @@ export function AppLayout(): React.JSX.Element {
           projectCounts={projectCounts}
           projects={sortedProjects}
           onSettings={handleOpenSettings}
+          onHelp={handleOpenHelp}
           onNewProject={() => setNewProjectOpen(true)}
           collapsed={collapsed}
           pinned={sidebarPinned}
@@ -740,6 +757,9 @@ export function AppLayout(): React.JSX.Element {
 
         {/* Command palette */}
         <CommandPalette />
+
+        {/* Keyboard shortcuts modal */}
+        <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
         {/* Save project template wizard */}
         {saveTemplateWizard && currentUser && (

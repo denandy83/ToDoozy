@@ -61,7 +61,7 @@
         "npm run typecheck passes with zero errors",
         "npm run test passes — all existing tests still pass"
       ],
-      "passes": false,
+      "passes": true,
       "tested": false
     }
   ]
