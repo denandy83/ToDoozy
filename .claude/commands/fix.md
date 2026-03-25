@@ -257,6 +257,36 @@ git branch -D fix/<name>
 
 After the fix is merged, use `/screenshot` one more time and analyze the result. If you notice any visual inconsistency introduced by the fix (even in areas you didn't directly touch), flag it to the user and offer to fix it — either directly if it's trivial, or by continuing on the current branch.
 
+### Update Changelog
+
+Append an entry to `pending-changes.md`:
+
+```
+## <YYYY-MM-DD> — Fix: <short title>
+**User-facing:** <one sentence: what was broken and what the fix does>
+**Affected area:** <component/feature/view>
+**Commit:** <commit hash from the squash merge>
+```
+
+Then append to `CHANGELOG.md` under today's date (create the heading if it doesn't exist):
+
+```markdown
+## YYYY-MM-DD
+
+### Fixed
+- **<Short title>** — <User-facing description of what was broken and what the fix does>
+```
+
+If the fix affects something the user interacts with directly (not an internal refactor), also add a bullet to today's entry in `RELEASE_NOTES.md`:
+
+```markdown
+## YYYY-MM-DD
+
+- **Fix: <short title>** — <What changed for the user>
+```
+
+Finally, write the current HEAD commit hash to `.last-documented-commit` to sync the Stop hook marker.
+
 ---
 
 ## Rules
@@ -271,5 +301,6 @@ After the fix is merged, use `/screenshot` one more time and analyze the result.
 - **Kill before restarting.** Always kill existing dev server before `npm run dev`.
 - **Clean up after yourself.** Remove all diagnostic logging before the final commit.
 - **Learn from every fix.** Update the relevant learnings file.
+- **Document every fix.** Update CHANGELOG.md and pending-changes.md — this is mandatory, not optional.
 - **Measure, don't guess.** For UI issues, combine screenshot analysis with code measurements for precise fixes.
 - **Cross-view consistency.** If a component appears in multiple places, check all of them.

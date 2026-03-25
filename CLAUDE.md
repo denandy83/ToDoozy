@@ -85,6 +85,34 @@ Never run migrations or destructive operations against the production database. 
 - All animations respect `prefers-reduced-motion`.
 - Keyboard-first: every feature must be usable without a mouse.
 
+## Documentation System
+
+### Session Start
+At the start of every session (or when resuming after a new day), check if `.docs-pending` exists in the project root. If it does:
+1. Read `pending-changes.md` — it contains unprocessed fix/feature entries and raw git commits
+2. Process entries into the permanent docs:
+   - Append fix entries to `CHANGELOG.md` under today's date heading
+   - Append feature entries to `RELEASE_NOTES.md` under today's date heading
+   - Update `FEATURES.md` for any new features (add or update the relevant section)
+   - Update `README.md` feature table if significant new features were added
+   - Append a summary entry to `DEVLOG.md`
+3. Clear the processed entries from `pending-changes.md` (keep the file header/format section)
+4. Write the current HEAD commit hash to `.last-documented-commit`
+5. Delete `.docs-pending`
+
+### Session End (automatic via hook)
+The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It captures recent git commits into `pending-changes.md` and writes `.docs-pending`. No action needed from Claude.
+
+### Documentation Files
+- `README.md` — project overview, tech stack, feature table. Update feature table when new features ship.
+- `FEATURES.md` — complete feature inventory with technical details. Update when features are added or change.
+- `HELP.md` — end-user guide. Update when user-facing behavior changes.
+- `DEVLOG.md` — reverse-chronological dev log. Append an entry for each significant session.
+- `CHANGELOG.md` — all bug fixes and changes, dated. Append after every fix.
+- `RELEASE_NOTES.md` — user-facing daily release notes. Append after every user-visible change.
+- `pending-changes.md` — working file, session-scoped. Written by /fix and /feature skills + SessionEnd hook. Cleared after processing.
+- `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
+
 ## Issue Tracking via ToDoozy MCP
 When you encounter a bug, improvement idea, or feature request that is NOT being fixed right now, create a task in the user's ToDoozy app via MCP tools. Use the Personal project (`1b8d1825-8f5f-48da-b1d3-1dd2e4554d85`) and assign the appropriate labels:
 - **Bug**: label `Todoozy` (`82cc13d9`) + label `bug` (`8a67ae36`)

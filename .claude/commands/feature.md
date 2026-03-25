@@ -157,6 +157,58 @@ After testing is complete, ask the user: "All stories tested and verified. Want 
 
 ---
 
+## Phase 9: Update Documentation
+
+After push (or after testing if not pushing), update the documentation for every story that reached `tested: true` in this session:
+
+### 9a — Append to pending-changes.md
+
+For each verified story, append an entry to `pending-changes.md`:
+
+```
+## <YYYY-MM-DD> — Feature: <title>
+**User-facing:** <one sentence describing what the user can now do>
+**Details:** <brief technical summary — what was added, main components>
+**Commit:** <commit hash>
+```
+
+### 9b — Update RELEASE_NOTES.md
+
+Open `RELEASE_NOTES.md`. Under today's date heading (create it if it doesn't exist, at the top), add a bullet for each new feature:
+
+```markdown
+## YYYY-MM-DD
+
+- **Feature title** — User-facing description of what this enables.
+```
+
+### 9c — Update FEATURES.md
+
+Add or update the relevant section in `FEATURES.md` to reflect the new feature. Include: what it does, how it works technically, and mark status as Complete with the date.
+
+### 9d — Update README.md feature table
+
+If the feature is significant enough to be in the README feature table, add a row. Keep descriptions to one line.
+
+### 9e — Append to DEVLOG.md
+
+Add a session entry at the top of `DEVLOG.md`:
+
+```markdown
+## <YYYY-MM-DD> — Feature: <title>
+
+**Stories implemented:** #<ids>
+**Branch:** <branch name>
+**What was built:** <brief summary>
+**Decisions:** <any notable choices made during implementation>
+```
+
+### 9f — Clear pending-changes.md entries
+
+After all docs are updated, remove the entries you just processed from `pending-changes.md` (keep the header and format instructions). Write the current HEAD commit hash to `.last-documented-commit`.
+
+---
+
 ## Rules
 
 - Never skip the grill-me phase. A vague story produces a bad implementation.
@@ -166,3 +218,5 @@ After testing is complete, ask the user: "All stories tested and verified. Want 
 - The description footer (ui-reference, debug-learnings, tests, typecheck) is mandatory on every story.
 - Ralph runs with `--tool claude 3`. Do not change the iteration count.
 - Ask before pushing. Never push automatically.
+- `implemented-stories.md` is permanent — never delete entries from it.
+- Documentation updates (Phase 9) are mandatory after every verified story, not optional.
