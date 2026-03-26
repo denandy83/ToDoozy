@@ -122,7 +122,17 @@ When you encounter a bug, improvement idea, or feature request that is NOT being
 
 Task title should be clear and actionable. Description should include enough context to understand and reproduce the issue later. Do NOT silently skip issues — always log them.
 
+**Status IDs — Personal project (`1b8d1825-8f5f-48da-b1d3-1dd2e4554d85`):**
+- Not Started: `869ebe82-f249-4a81-b53a-ca23480b6e8c`
+- In Progress: `b85b1973-ebc9-469b-b44c-52c3b91d4197`
+- Testing: `26686d55-1cfb-4fcd-ad19-674436b2392f`
+- Verified: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
+- Done: `6c3b0144-8629-486f-8b10-d9fc4e5c35f5`
+
 When tackling a bug/improvement/feature from the ToDoozy task list:
 - **Starting work**: Move the task to In Progress (`b85b1973-ebc9-469b-b44c-52c3b91d4197`)
-- **Implementation done (ralph passes)**: Move the task to Testing (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
-- **User confirms tested**: Move the task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
+- **Implementation + automated tests done** (`passes:true` + `tested:true`): Move the task to Testing (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
+- **User manually verifies acceptance criteria**: Move the task to Verified (`a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`)
+- **User confirms complete**: Move the task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
+
+For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — move to In Progress when starting, Testing when `passes:true` + `tested:true`, and leave Verified/Done for the user.
