@@ -10,11 +10,12 @@ ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with E
 4. Follow all Architecture Rules and UX Consistency rules below
 5. Run `npm run typecheck` — loop and fix until zero errors
 6. Run `npm run dev` to verify it compiles (use port 5200), then kill the process
-7. Update `prd.json` to set `passes: true` for the completed story
-8. Git commit with a conventional commit message describing what was built
-9. Append any decisions, blockers, or learnings to `progress.txt`
-10. If there are more stories with `passes: false`, exit normally — you will be called again for the next one
-11. If ALL stories have `passes: true`, output exactly `<promise>COMPLETE</promise>` and exit
+7. Write Vitest tests for any new repository methods or utility functions added in this story — run `npm run test` and loop until all tests pass
+8. Update `prd.json` to set `passes: true` and `tested: true` for the completed story (`verified` stays `false` — that is set manually by the user after acceptance criteria review)
+9. Git commit with a conventional commit message describing what was built
+10. Append any decisions, blockers, or learnings to `progress.txt`
+11. If there are more stories with `passes: false`, exit normally — you will be called again for the next one
+12. If ALL stories have `passes: true`, output exactly `<promise>COMPLETE</promise>` and exit
 
 ## Important Context
 - `.env` has Supabase credentials (`SUPABASE_URL` and `SUPABASE_ANON_KEY`)

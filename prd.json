@@ -20,7 +20,8 @@
         "Consistent focus-visible ring style across all focusable elements"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": false
     },
     {
       "id": "32",
@@ -41,7 +42,8 @@
         "attachments table with proper schema and FK constraints"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": false
     },
     {
       "id": "33",
@@ -62,7 +64,8 @@
         "npm run test passes — all existing tests still pass"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": false
     }
   ]
 }
