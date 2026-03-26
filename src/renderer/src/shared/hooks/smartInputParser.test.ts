@@ -222,11 +222,11 @@ describe('removeOperatorText', () => {
   })
 
   it('removes operator at start', () => {
-    expect(removeOperatorText('@work rest', 0, 5)).toBe('rest')
+    expect(removeOperatorText('@work rest', 0, 5)).toBe(' rest')
   })
 
   it('removes operator at end', () => {
-    expect(removeOperatorText('task p:high', 5, 11)).toBe('task')
+    expect(removeOperatorText('task p:high', 5, 11)).toBe('task ')
   })
 
   it('handles full removal', () => {

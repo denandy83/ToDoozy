@@ -26,10 +26,16 @@ describe('getReservedShortcutName', () => {
     expect(getReservedShortcutName('CommandOrControl+Alt+Escape')).toBe('Force Quit')
   })
 
+  it('returns feature name for in-app reserved shortcuts', () => {
+    expect(getReservedShortcutName('CommandOrControl+K')).toBe('Command Palette')
+    expect(getReservedShortcutName('CommandOrControl+L')).toBe('Toggle Layout')
+    expect(getReservedShortcutName('CommandOrControl+1')).toBe('My Day')
+  })
+
   it('returns null for non-reserved shortcuts', () => {
     expect(getReservedShortcutName('CommandOrControl+Shift+Space')).toBeNull()
-    expect(getReservedShortcutName('CommandOrControl+K')).toBeNull()
     expect(getReservedShortcutName('Alt+Shift+A')).toBeNull()
+    expect(getReservedShortcutName('CommandOrControl+Shift+B')).toBeNull()
   })
 })
 

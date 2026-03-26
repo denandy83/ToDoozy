@@ -345,9 +345,10 @@ describe('TaskRepository', () => {
 
     const labelId = randomUUID()
     const now = new Date().toISOString()
-    db.prepare('INSERT INTO labels (id, project_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-      labelId, projectId, 'Bug', '#ff0000', now, now
+    db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      labelId, 'Bug', '#ff0000', 0, now, now
     )
+    db.prepare('INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)').run(projectId, labelId, now)
 
     repo.addLabel(taskId, labelId)
     expect(repo.getLabels(taskId)).toHaveLength(1)
@@ -441,8 +442,11 @@ describe('TaskRepository', () => {
       const labelId = randomUUID()
       const now = new Date().toISOString()
       db.prepare(
-        'INSERT INTO labels (id, project_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(labelId, projectId, 'Bug', '#ff0000', now, now)
+        'INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(labelId, 'Bug', '#ff0000', 0, now, now)
+      db.prepare(
+        'INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)'
+      ).run(projectId, labelId, now)
 
       const taskWithLabel = randomUUID()
       repo.create({ id: taskWithLabel, project_id: projectId, owner_id: userId, title: 'Labeled', status_id: statusId })
