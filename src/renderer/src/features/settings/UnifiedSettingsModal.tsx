@@ -16,11 +16,10 @@ import { LabelSettingsContent } from './LabelSettingsContent'
 import { ShortcutRecorder, AppToggleShortcutRecorder } from './ShortcutRecorder'
 import { McpSettingsContent } from './McpSettingsContent'
 import { TimerSettingsContent } from './TimerSettingsContent'
-import { IcloudSettingsContent } from './IcloudSettingsContent'
 import { HelpSettingsContent } from '../help/HelpSettingsContent'
 import type { Project } from '../../../../shared/types'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'icloud' | 'help'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'help'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -159,7 +158,6 @@ export function UnifiedSettingsModal({
     { key: 'labels', label: 'Labels' },
     { key: 'mcp', label: 'MCP' },
     { key: 'timer', label: 'Timer' },
-    { key: 'icloud', label: 'iCloud' },
     { key: 'help', label: 'Help' }
   ]
 
@@ -230,9 +228,6 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'timer' && (
             <TimerSettingsContent />
-          )}
-          {activeTab === 'icloud' && (
-            <IcloudSettingsContent />
           )}
           {activeTab === 'help' && (
             <HelpSettingsContent />

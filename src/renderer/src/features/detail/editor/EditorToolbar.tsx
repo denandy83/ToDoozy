@@ -13,14 +13,15 @@ import {
   Minus,
   ChevronDown
 } from 'lucide-react'
-import { useAttachmentStore } from '../../../shared/stores'
+import { useAttachFiles } from '../../../shared/hooks/useAttachFiles'
 
 interface EditorToolbarProps {
   editor: Editor
+  taskId: string
 }
 
-export function EditorToolbar({ editor }: EditorToolbarProps): React.JSX.Element {
-  const icloudEnabled = useAttachmentStore((s) => s.icloudEnabled)
+export function EditorToolbar({ editor, taskId }: EditorToolbarProps): React.JSX.Element {
+  const handleAttachFiles = useAttachFiles(taskId)
   const [headingOpen, setHeadingOpen] = useState(false)
   const headingRef = useRef<HTMLDivElement>(null)
 
@@ -139,10 +140,9 @@ export function EditorToolbar({ editor }: EditorToolbarProps): React.JSX.Element
       />
       <ToolbarButton
         icon={<Paperclip size={14} />}
-        title={icloudEnabled ? 'Use the Attachments section below to attach files' : 'Configure iCloud Drive in Settings to attach files'}
+        title="Attach file"
         active={false}
-        onClick={() => {}}
-        disabled={!icloudEnabled}
+        onClick={handleAttachFiles}
       />
     </div>
   )

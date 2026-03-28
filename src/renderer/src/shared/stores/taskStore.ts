@@ -243,12 +243,6 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
       const result = await window.api.tasks.delete(id)
       if (result) {
-        // Clean up attachment files on disk (fire and forget)
-        for (const tid of idsForCleanup) {
-          window.api.fs.deleteTaskAttachmentDirs(tid).catch((err: unknown) =>
-            console.error('Failed to clean attachment dirs for task:', tid, err)
-          )
-        }
 
         set((state) => {
           // Collect all descendant IDs (cascade delete in DB, mirror in store)

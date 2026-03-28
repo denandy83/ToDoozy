@@ -8,7 +8,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
-import Database from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
@@ -45,9 +45,9 @@ if (!existsSync(dbPath)) {
   process.exit(1)
 }
 
-const db = new Database(dbPath)
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
+const db = new DatabaseSync(dbPath)
+db.exec('PRAGMA journal_mode = WAL')
+db.exec('PRAGMA foreign_keys = ON')
 
 const repos = createRepositories(db)
 

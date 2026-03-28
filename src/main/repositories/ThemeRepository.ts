@@ -1,21 +1,21 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
 
 export class ThemeRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): Theme | undefined {
-    return this.db.prepare('SELECT * FROM themes WHERE id = ?').get(id) as Theme | undefined
+    return this.db.prepare('SELECT * FROM themes WHERE id = ?').get(id) as unknown as Theme | undefined
   }
 
   list(): Theme[] {
-    return this.db.prepare('SELECT * FROM themes ORDER BY name ASC').all() as Theme[]
+    return this.db.prepare('SELECT * FROM themes ORDER BY name ASC').all() as unknown as Theme[]
   }
 
   listByMode(mode: string): Theme[] {
     return this.db
       .prepare('SELECT * FROM themes WHERE mode = ? ORDER BY name ASC')
-      .all(mode) as Theme[]
+      .all(mode) as unknown as Theme[]
   }
 
   create(input: CreateThemeInput): Theme {
@@ -60,6 +60,6 @@ export class ThemeRepository {
   getConfig(id: string): ThemeConfig | undefined {
     const theme = this.findById(id)
     if (!theme) return undefined
-    return JSON.parse(theme.config) as ThemeConfig
+    return JSON.parse(theme.config) as unknown as ThemeConfig
   }
 }

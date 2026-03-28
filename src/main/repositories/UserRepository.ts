@@ -1,15 +1,15 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type { User, CreateUserInput, UpdateUserInput } from '../../shared/types'
 
 export class UserRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): User | undefined {
-    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined
+    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined
   }
 
   findByEmail(email: string): User | undefined {
-    return this.db.prepare('SELECT * FROM users WHERE email = ?').get(email) as User | undefined
+    return this.db.prepare('SELECT * FROM users WHERE email = ?').get(email) as unknown as User | undefined
   }
 
   create(input: CreateUserInput): User {
@@ -48,6 +48,6 @@ export class UserRepository {
   }
 
   list(): User[] {
-    return this.db.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as User[]
+    return this.db.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as unknown as User[]
   }
 }

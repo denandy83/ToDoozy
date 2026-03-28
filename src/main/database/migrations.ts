@@ -1,7 +1,7 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_THEMES, DEFAULT_SETTINGS } from './seed'
 
-type Migration = (db: Database.Database) => void
+type Migration = (db: DatabaseSync) => void
 
 const migration_1: Migration = (db) => {
   db.exec(`
@@ -284,15 +284,15 @@ const migration_6: Migration = (db) => {
 }
 
 const migration_7: Migration = (db) => {
-  // Story #32: iCloud Drive File Attachments
+  // Story #32: iCloud Drive File Attachments (original, replaced by migration_8)
   db.exec(`
-    CREATE TABLE attachments (
+    CREATE TABLE IF NOT EXISTS attachments (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
       filename TEXT NOT NULL,
       mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
       size_bytes INTEGER NOT NULL DEFAULT 0,
-      local_path TEXT NOT NULL,
+      local_path TEXT NOT NULL DEFAULT '',
       icloud_path TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
@@ -301,4 +301,22 @@ const migration_7: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7]
+const migration_8: Migration = (db) => {
+  // Redesign attachments: store file data as BLOB in SQLite, remove filesystem paths
+  db.exec(`
+    DROP TABLE IF EXISTS attachments;
+    CREATE TABLE attachments (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      file_data BLOB NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8]

@@ -432,7 +432,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       </Section>
     ) : null,
     <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
-    <div key="desc" data-detail-field="7"><DetailDescription description={task.description} onDescriptionChange={props.onDescriptionChange} /></div>,
+    <div key="desc" data-detail-field="7"><DetailDescription description={task.description} taskId={task.id} onDescriptionChange={props.onDescriptionChange} /></div>,
     !isTemplate ? <DetailAttachments key="attachments" taskId={task.id} /> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]

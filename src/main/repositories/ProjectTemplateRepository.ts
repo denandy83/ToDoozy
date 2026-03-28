@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type {
   ProjectTemplate,
   CreateProjectTemplateInput,
@@ -9,7 +9,7 @@ const UPDATABLE_COLUMNS = ['name', 'color', 'data'] as const
 type UpdatableColumn = (typeof UPDATABLE_COLUMNS)[number]
 
 export class ProjectTemplateRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): ProjectTemplate | undefined {
     return this.db.prepare('SELECT * FROM project_templates WHERE id = ?').get(id) as
@@ -20,13 +20,13 @@ export class ProjectTemplateRepository {
   findByOwnerId(ownerId: string): ProjectTemplate[] {
     return this.db
       .prepare('SELECT * FROM project_templates WHERE owner_id = ? ORDER BY created_at DESC')
-      .all(ownerId) as ProjectTemplate[]
+      .all(ownerId) as unknown as ProjectTemplate[]
   }
 
   findAll(): ProjectTemplate[] {
     return this.db
       .prepare('SELECT * FROM project_templates ORDER BY created_at DESC')
-      .all() as ProjectTemplate[]
+      .all() as unknown as ProjectTemplate[]
   }
 
   create(input: CreateProjectTemplateInput): ProjectTemplate {

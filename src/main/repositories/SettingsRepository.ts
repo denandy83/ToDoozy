@@ -1,8 +1,9 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
+import { withTransaction } from '../database'
 import type { Setting } from '../../shared/types'
 
 export class SettingsRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   get(key: string): string | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
@@ -21,7 +22,7 @@ export class SettingsRepository {
   }
 
   getAll(): Setting[] {
-    return this.db.prepare('SELECT * FROM settings ORDER BY key ASC').all() as Setting[]
+    return this.db.prepare('SELECT * FROM settings ORDER BY key ASC').all() as unknown as Setting[]
   }
 
   getMultiple(keys: string[]): Setting[] {
@@ -29,11 +30,11 @@ export class SettingsRepository {
     const placeholders = keys.map(() => '?').join(', ')
     return this.db
       .prepare(`SELECT * FROM settings WHERE key IN (${placeholders}) ORDER BY key ASC`)
-      .all(...keys) as Setting[]
+      .all(...keys) as unknown as Setting[]
   }
 
   setMultiple(settings: Setting[]): void {
-    const setAll = this.db.transaction(() => {
+    withTransaction(this.db, () => {
       const stmt = this.db.prepare(
         `INSERT INTO settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`
@@ -42,7 +43,6 @@ export class SettingsRepository {
         stmt.run(setting.key, setting.value)
       }
     })
-    setAll()
   }
 
   delete(key: string): boolean {

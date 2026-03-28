@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
+import { withTransaction } from '../database'
 
 export interface TaskSearchFilters {
   project_id?: string
@@ -16,10 +17,10 @@ export interface TaskSearchFilters {
 }
 
 export class TaskRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): Task | undefined {
-    return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined
+    return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as unknown as Task | undefined
   }
 
   findByProjectId(projectId: string): Task[] {
@@ -27,7 +28,7 @@ export class TaskRepository {
       .prepare(
         'SELECT * FROM tasks WHERE project_id = ? AND is_archived = 0 AND is_template = 0 ORDER BY order_index ASC'
       )
-      .all(projectId) as Task[]
+      .all(projectId) as unknown as Task[]
   }
 
   findByStatusId(statusId: string): Task[] {
@@ -35,7 +36,7 @@ export class TaskRepository {
       .prepare(
         'SELECT * FROM tasks WHERE status_id = ? AND is_archived = 0 AND is_template = 0 ORDER BY order_index ASC'
       )
-      .all(statusId) as Task[]
+      .all(statusId) as unknown as Task[]
   }
 
   findMyDay(userId: string): Task[] {
@@ -46,25 +47,25 @@ export class TaskRepository {
          AND (is_in_my_day = 1 OR (due_date IS NOT NULL AND date(due_date) = date('now')))
          ORDER BY order_index ASC`
       )
-      .all(userId) as Task[]
+      .all(userId) as unknown as Task[]
   }
 
   findArchived(projectId: string): Task[] {
     return this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_archived = 1 ORDER BY updated_at DESC')
-      .all(projectId) as Task[]
+      .all(projectId) as unknown as Task[]
   }
 
   findTemplates(projectId: string): Task[] {
     return this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_template = 1 ORDER BY created_at ASC')
-      .all(projectId) as Task[]
+      .all(projectId) as unknown as Task[]
   }
 
   findSubtasks(parentId: string): Task[] {
     return this.db
       .prepare('SELECT * FROM tasks WHERE parent_id = ? ORDER BY order_index ASC')
-      .all(parentId) as Task[]
+      .all(parentId) as unknown as Task[]
   }
 
   getSubtaskCount(parentId: string): { total: number; done: number } {
@@ -143,13 +144,12 @@ export class TaskRepository {
   }
 
   reorder(taskIds: string[]): void {
-    const reorderTx = this.db.transaction(() => {
+    withTransaction(this.db, () => {
       const stmt = this.db.prepare('UPDATE tasks SET order_index = ? WHERE id = ?')
       for (let i = 0; i < taskIds.length; i++) {
         stmt.run(i, taskIds[i])
       }
     })
-    reorderTx()
   }
 
   // Label assignments
@@ -169,13 +169,13 @@ export class TaskRepository {
   getLabels(taskId: string): TaskLabel[] {
     return this.db
       .prepare('SELECT * FROM task_labels WHERE task_id = ?')
-      .all(taskId) as TaskLabel[]
+      .all(taskId) as unknown as TaskLabel[]
   }
 
   findAllTemplates(): Task[] {
     return this.db
       .prepare('SELECT * FROM tasks WHERE is_template = 1 ORDER BY created_at ASC')
-      .all() as Task[]
+      .all() as unknown as Task[]
   }
 
   saveAsTemplate(id: string, newId: string): Task | undefined {
@@ -188,7 +188,7 @@ export class TaskRepository {
     const defaultStatus = defaultStatusStmt.get(original.project_id) as { id: string } | undefined
     const statusId = defaultStatus?.id ?? original.status_id
 
-    const saveTx = this.db.transaction(() => {
+    return withTransaction(this.db, () => {
       const template = this.create({
         id: newId,
         project_id: original.project_id,
@@ -216,8 +216,6 @@ export class TaskRepository {
 
       return template
     })
-
-    return saveTx()
   }
 
   private copySubtasksAsTemplate(
@@ -311,7 +309,7 @@ export class TaskRepository {
     sql += ' WHERE ' + conditions.join(' AND ')
     sql += ' ORDER BY t.order_index ASC'
 
-    return this.db.prepare(sql).all(...params) as Task[]
+    return this.db.prepare(sql).all(...params) as unknown as Task[]
   }
 
   duplicate(id: string, newId: string): Task | undefined {

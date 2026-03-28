@@ -1,29 +1,30 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
+import { withTransaction } from '../database'
 import type { Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
 
 export class StatusRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): Status | undefined {
-    return this.db.prepare('SELECT * FROM statuses WHERE id = ?').get(id) as Status | undefined
+    return this.db.prepare('SELECT * FROM statuses WHERE id = ?').get(id) as unknown as Status | undefined
   }
 
   findByProjectId(projectId: string): Status[] {
     return this.db
       .prepare('SELECT * FROM statuses WHERE project_id = ? ORDER BY order_index ASC')
-      .all(projectId) as Status[]
+      .all(projectId) as unknown as Status[]
   }
 
   findDefault(projectId: string): Status | undefined {
     return this.db
       .prepare('SELECT * FROM statuses WHERE project_id = ? AND is_default = 1')
-      .get(projectId) as Status | undefined
+      .get(projectId) as unknown as Status | undefined
   }
 
   findDone(projectId: string): Status | undefined {
     return this.db
       .prepare('SELECT * FROM statuses WHERE project_id = ? AND is_done = 1')
-      .get(projectId) as Status | undefined
+      .get(projectId) as unknown as Status | undefined
   }
 
   create(input: CreateStatusInput): Status {
@@ -89,12 +90,11 @@ export class StatusRepository {
   }
 
   reassignAndDelete(statusId: string, targetStatusId: string): boolean {
-    const reassignAndRemove = this.db.transaction(() => {
+    return withTransaction(this.db, () => {
       this.db
         .prepare('UPDATE tasks SET status_id = ? WHERE status_id = ?')
         .run(targetStatusId, statusId)
       return this.db.prepare('DELETE FROM statuses WHERE id = ?').run(statusId).changes > 0
     })
-    return reassignAndRemove()
   }
 }

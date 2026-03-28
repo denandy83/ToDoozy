@@ -13,6 +13,7 @@ import { LinkPopover } from './LinkPopover'
 
 interface TiptapEditorProps {
   content: string | null
+  taskId: string
   onChange: (content: string | null) => void
 }
 
@@ -23,7 +24,7 @@ export function normalizeUrl(url: string): string {
   return `https://${trimmed}`
 }
 
-export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JSX.Element {
+export function TiptapEditor({ content, taskId, onChange }: TiptapEditorProps): React.JSX.Element {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [linkPopover, setLinkPopover] = useState<{
     top: number
@@ -258,7 +259,7 @@ export function TiptapEditor({ content, onChange }: TiptapEditorProps): React.JS
         ref={editorContainerRef}
         className="rounded border border-border transition-colors focus-within:border-accent"
       >
-        <EditorToolbar editor={editor} />
+        <EditorToolbar editor={editor} taskId={taskId} />
         <div onBlur={handleBlur}>
           <EditorContent editor={editor} />
         </div>

@@ -65,7 +65,7 @@
       ],
       "passes": true,
       "tested": true,
-      "verified": false
+      "verified": true
     }
   ]
 }

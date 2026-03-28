@@ -1,26 +1,26 @@
-import Database from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
 import { migrations } from './migrations'
 
-let db: Database.Database | null = null
+let db: DatabaseSync | null = null
 
-export function getDatabase(): Database.Database {
+export function getDatabase(): DatabaseSync {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.')
   }
   return db
 }
 
-export function initDatabase(): Database.Database {
+export function initDatabase(): DatabaseSync {
   const dbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
 
-  db = new Database(dbPath)
+  db = new DatabaseSync(dbPath)
 
   // Enable WAL mode for better concurrent read performance
-  db.pragma('journal_mode = WAL')
+  db.exec('PRAGMA journal_mode = WAL')
   // Enable foreign keys
-  db.pragma('foreign_keys = ON')
+  db.exec('PRAGMA foreign_keys = ON')
 
   // Create schema_version table if it doesn't exist
   db.exec(`
@@ -34,28 +34,39 @@ export function initDatabase(): Database.Database {
   return db
 }
 
-function runMigrations(database: Database.Database): void {
+function runMigrations(database: DatabaseSync): void {
   const currentVersion = getCurrentVersion(database)
 
   for (let i = currentVersion; i < migrations.length; i++) {
     const version = i + 1
     console.log(`Running migration ${version}...`)
 
-    const runMigration = database.transaction(() => {
+    withTransaction(database, () => {
       migrations[i](database)
       database.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version)
     })
 
-    runMigration()
     console.log(`Migration ${version} complete.`)
   }
 }
 
-function getCurrentVersion(database: Database.Database): number {
+function getCurrentVersion(database: DatabaseSync): number {
   const row = database.prepare('SELECT MAX(version) as version FROM schema_version').get() as
     | { version: number | null }
     | undefined
   return row?.version ?? 0
+}
+
+export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec('BEGIN')
+  try {
+    const result = fn()
+    db.exec('COMMIT')
+    return result
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
 }
 
 export function closeDatabase(): void {

@@ -1,4 +1,5 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
+import { withTransaction } from '../database'
 import type {
   Project,
   ProjectMember,
@@ -7,22 +8,22 @@ import type {
 } from '../../shared/types'
 
 export class ProjectRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Project | undefined
+    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined
   }
 
   findByOwnerId(ownerId: string): Project[] {
     return this.db
       .prepare('SELECT * FROM projects WHERE owner_id = ? ORDER BY created_at ASC')
-      .all(ownerId) as Project[]
+      .all(ownerId) as unknown as Project[]
   }
 
   findDefault(ownerId: string): Project | undefined {
     return this.db
       .prepare('SELECT * FROM projects WHERE owner_id = ? AND is_default = 1')
-      .get(ownerId) as Project | undefined
+      .get(ownerId) as unknown as Project | undefined
   }
 
   create(input: CreateProjectInput): Project {
@@ -83,7 +84,7 @@ export class ProjectRepository {
   }
 
   delete(id: string): boolean {
-    return this.db.transaction(() => {
+    return withTransaction(this.db, () => {
       // tasks.status_id references statuses(id) with no CASCADE.
       // Deleting the project cascades to statuses, which would fail if any task
       // (including tasks from other projects) still references those statuses.
@@ -92,11 +93,11 @@ export class ProjectRepository {
       this.db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
       const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
       return result.changes > 0
-    })()
+    })
   }
 
   list(): Project[] {
-    return this.db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all() as Project[]
+    return this.db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all() as unknown as Project[]
   }
 
   // Project members
@@ -119,7 +120,7 @@ export class ProjectRepository {
   getMembers(projectId: string): ProjectMember[] {
     return this.db
       .prepare('SELECT * FROM project_members WHERE project_id = ? ORDER BY joined_at ASC')
-      .all(projectId) as ProjectMember[]
+      .all(projectId) as unknown as ProjectMember[]
   }
 
   getProjectsForUser(userId: string): Project[] {
@@ -130,17 +131,16 @@ export class ProjectRepository {
          WHERE pm.user_id = ?
          ORDER BY p.sidebar_order ASC, p.created_at ASC`
       )
-      .all(userId) as Project[]
+      .all(userId) as unknown as Project[]
   }
 
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): void {
     const stmt = this.db.prepare('UPDATE projects SET sidebar_order = ?, updated_at = ? WHERE id = ?')
     const now = new Date().toISOString()
-    const transaction = this.db.transaction(() => {
+    withTransaction(this.db, () => {
       for (const u of updates) {
         stmt.run(u.sidebar_order, now, u.id)
       }
     })
-    transaction()
   }
 }

@@ -11,8 +11,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "vitest run",
-    "postinstall": "electron-vite rebuild-native"
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -30,7 +29,6 @@
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
@@ -57,7 +55,6 @@
     "@tiptap/extension-task-list": "^3.20.4",
     "@tiptap/react": "^3.20.4",
     "@tiptap/starter-kit": "^3.20.4",
-    "better-sqlite3": "^12.8.0",
     "dotenv": "^17.3.1",
     "lucide-react": "^0.577.0",
     "react-datepicker": "^9.1.0",

@@ -12,17 +12,14 @@ interface DetailAttachmentsProps {
 }
 
 export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX.Element {
-  const { hydrateAttachments, addAttachment, removeAttachment, checkIcloudStatus } = useAttachmentStore()
-  const icloudEnabled = useAttachmentStore((s) => s.icloudEnabled)
-  const icloudAvailable = useAttachmentStore((s) => s.icloudAvailable)
+  const { hydrateAttachments, addAttachment, removeAttachment } = useAttachmentStore()
   const attachments = useAttachmentsByTaskId(taskId)
   const { addToast } = useToast()
-  const handleAttachFiles = useAttachFiles(taskId, attachments.length)
+  const handleAttachFiles = useAttachFiles(taskId)
 
   useEffect(() => {
     hydrateAttachments(taskId)
-    checkIcloudStatus()
-  }, [taskId, hydrateAttachments, checkIcloudStatus])
+  }, [taskId, hydrateAttachments])
 
   const handleRemove = useCallback(
     async (attachment: Attachment) => {
@@ -34,15 +31,9 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
             label: 'Undo',
             variant: 'accent',
             onClick: async () => {
-              await addAttachment({
-                id: attachment.id,
-                task_id: attachment.task_id,
-                filename: attachment.filename,
-                mime_type: attachment.mime_type,
-                size_bytes: attachment.size_bytes,
-                local_path: attachment.local_path,
-                icloud_path: attachment.icloud_path
-              })
+              // Re-attach would require the original file — not possible after deletion
+              // Just inform the user
+              addToast({ message: 'Cannot undo attachment removal', variant: 'danger' })
             }
           }
         ]
@@ -51,9 +42,14 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
     [removeAttachment, addAttachment, addToast]
   )
 
-  const handleOpen = useCallback((attachment: Attachment) => {
-    window.api.fs.openFile(attachment.local_path)
-  }, [])
+  const handleOpen = useCallback(async (attachment: Attachment) => {
+    try {
+      await window.api.attachments.open(attachment.id)
+    } catch (err) {
+      console.error('Failed to open attachment:', err)
+      addToast({ message: 'Failed to open file', variant: 'danger' })
+    }
+  }, [addToast])
 
   return (
     <div className="flex flex-col gap-2">
@@ -63,28 +59,13 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
         </span>
         <button
           onClick={handleAttachFiles}
-          disabled={!icloudEnabled}
-          className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${
-            icloudEnabled
-              ? 'text-muted hover:bg-foreground/6 hover:text-foreground'
-              : 'cursor-not-allowed text-muted opacity-40'
-          }`}
-          title={
-            !icloudEnabled
-              ? 'Configure iCloud Drive in Settings to attach files'
-              : 'Attach files'
-          }
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition-colors text-muted hover:bg-foreground/6 hover:text-foreground"
+          title="Attach files"
         >
           <Paperclip size={10} />
           Add
         </button>
       </div>
-
-      {!icloudEnabled && icloudAvailable && attachments.length === 0 && (
-        <p className="text-[10px] text-muted">
-          Enable iCloud Drive in Settings to attach files
-        </p>
-      )}
 
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -114,16 +95,16 @@ function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): 
       ? attachment.filename.slice(0, FILENAME_MAX_DISPLAY) + '...'
       : attachment.filename
 
-  const icon = getFileIcon(attachment.mime_type)
-
   return (
-    <button
-      onClick={onOpen}
-      className="group relative flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:bg-foreground/6"
-      title={attachment.filename}
-    >
-      <span className="text-muted">{icon}</span>
-      <span className="text-[11px] font-light text-foreground">{truncated}</span>
+    <div className="group relative flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 transition-colors hover:bg-foreground/6">
+      <button
+        onClick={onOpen}
+        className="flex items-center gap-2 cursor-pointer"
+        title={attachment.filename}
+      >
+        <span className="text-muted">{getFileIcon(attachment.mime_type)}</span>
+        <span className="text-[11px] font-light text-foreground">{truncated}</span>
+      </button>
       <button
         onClick={(e) => {
           e.stopPropagation()
@@ -135,7 +116,7 @@ function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): 
       >
         <X size={10} />
       </button>
-    </button>
+    </div>
   )
 }
 

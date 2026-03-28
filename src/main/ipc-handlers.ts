@@ -1,8 +1,7 @@
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, copyFileSync, rmSync, statSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
-import { homedir } from 'os'
 import { getDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
@@ -598,7 +597,7 @@ export function registerIpcHandlers(): void {
     const devServerPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
     const actualPath = existsSync(devServerPath) ? devServerPath : serverPath
 
-    // Use the real Electron binary with ELECTRON_RUN_AS_NODE=1 so better-sqlite3 native module matches
+    // Use the real Electron binary with ELECTRON_RUN_AS_NODE=1 so node:sqlite built-in is available
     // In dev, resolve via require('electron') which points to the actual binary, not the cli.js wrapper
     const devElectronBin = join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
     const actualElectron = existsSync(devElectronBin) ? devElectronBin : app.getPath('exe')
@@ -657,155 +656,31 @@ export function registerIpcHandlers(): void {
     return getRepos().attachments.findByTaskId(taskId)
   })
 
-  ipcMain.handle('attachments:findById', (_e, id: string) => {
-    return getRepos().attachments.findById(id) ?? null
+  ipcMain.handle('attachments:createFromFile', (_e, taskId: string, filePath: string) => {
+    const fileData = readFileSync(filePath)
+    const stat = statSync(filePath)
+    const filename = basename(filePath)
+    const ext = extname(filename)
+    return getRepos().attachments.create({
+      id: crypto.randomUUID(),
+      task_id: taskId,
+      filename,
+      mime_type: getMimeType(ext),
+      size_bytes: stat.size,
+      file_data: fileData
+    })
   })
 
-  ipcMain.handle(
-    'attachments:create',
-    (_e, input: Parameters<Repositories['attachments']['create']>[0]) => {
-      return getRepos().attachments.create(input)
-    }
-  )
+  ipcMain.handle('attachments:open', async (_e, id: string) => {
+    const data = getRepos().attachments.getFileData(id)
+    if (!data) return
+    const tmpPath = join(app.getPath('temp'), data.filename)
+    writeFileSync(tmpPath, data.file_data)
+    await shell.openPath(tmpPath)
+  })
 
   ipcMain.handle('attachments:delete', (_e, id: string) => {
     return getRepos().attachments.delete(id)
-  })
-
-  ipcMain.handle('attachments:countByTaskId', (_e, taskId: string) => {
-    return getRepos().attachments.countByTaskId(taskId)
-  })
-
-  ipcMain.handle(
-    'attachments:updateIcloudPath',
-    (_e, id: string, icloudPath: string | null) => {
-      return getRepos().attachments.updateIcloudPath(id, icloudPath) ?? null
-    }
-  )
-
-  // ── File System (Attachments) ───────────────────────────────────────
-  ipcMain.handle('fs:checkIcloudAvailable', () => {
-    const icloudPath = join(
-      homedir(),
-      'Library',
-      'Mobile Documents',
-      'com~apple~CloudDocs'
-    )
-    return existsSync(icloudPath)
-  })
-
-  ipcMain.handle('fs:getLocalAttachmentsDir', (_e, taskId: string) => {
-    const dir = join(app.getPath('userData'), 'attachments', taskId)
-    mkdirSync(dir, { recursive: true })
-    return dir
-  })
-
-  ipcMain.handle('fs:getIcloudAttachmentsDir', (_e, taskId: string) => {
-    const dir = join(
-      homedir(),
-      'Library',
-      'Mobile Documents',
-      'com~apple~CloudDocs',
-      'ToDoozy',
-      taskId
-    )
-    mkdirSync(dir, { recursive: true })
-    return dir
-  })
-
-  ipcMain.handle(
-    'fs:copyFileToAttachments',
-    (
-      _e,
-      sourcePath: string,
-      taskId: string,
-      icloudEnabled: boolean
-    ): { localPath: string; icloudPath: string | null; filename: string; sizeBytes: number; mimeType: string } => {
-      const stat = statSync(sourcePath)
-      const originalName = basename(sourcePath)
-      const ext = extname(originalName)
-      const nameWithoutExt = originalName.slice(0, -ext.length || undefined)
-
-      // Local dir
-      const localDir = join(app.getPath('userData'), 'attachments', taskId)
-      mkdirSync(localDir, { recursive: true })
-
-      // Resolve duplicate filenames
-      let finalName = originalName
-      let counter = 1
-      while (existsSync(join(localDir, finalName))) {
-        finalName = `${nameWithoutExt} (${counter})${ext}`
-        counter++
-      }
-
-      const localPath = join(localDir, finalName)
-      copyFileSync(sourcePath, localPath)
-
-      let icloudPath: string | null = null
-      if (icloudEnabled) {
-        const icloudDir = join(
-          homedir(),
-          'Library',
-          'Mobile Documents',
-          'com~apple~CloudDocs',
-          'ToDoozy',
-          taskId
-        )
-        mkdirSync(icloudDir, { recursive: true })
-        icloudPath = join(icloudDir, finalName)
-        copyFileSync(sourcePath, icloudPath)
-      }
-
-      // Simple MIME type detection
-      const mimeType = getMimeType(ext)
-
-      return {
-        localPath,
-        icloudPath,
-        filename: finalName,
-        sizeBytes: stat.size,
-        mimeType
-      }
-    }
-  )
-
-  ipcMain.handle('fs:openFile', (_e, filePath: string) => {
-    shell.openPath(filePath)
-  })
-
-  ipcMain.handle('fs:deleteAttachmentFiles', (_e, localPath: string, icloudPath: string | null) => {
-    try {
-      if (localPath && existsSync(localPath)) unlinkSync(localPath)
-    } catch (err) {
-      console.error('Failed to delete local attachment:', err)
-    }
-    try {
-      if (icloudPath && existsSync(icloudPath)) unlinkSync(icloudPath)
-    } catch (err) {
-      console.error('Failed to delete iCloud attachment:', err)
-    }
-  })
-
-  ipcMain.handle('fs:deleteTaskAttachmentDirs', (_e, taskId: string) => {
-    const localDir = join(app.getPath('userData'), 'attachments', taskId)
-    try {
-      if (existsSync(localDir)) rmSync(localDir, { recursive: true })
-    } catch (err) {
-      console.error('Failed to delete local attachment dir:', err)
-    }
-    const icloudDir = join(
-      homedir(),
-      'Library',
-      'Mobile Documents',
-      'com~apple~CloudDocs',
-      'ToDoozy',
-      taskId
-    )
-    try {
-      if (existsSync(icloudDir)) rmSync(icloudDir, { recursive: true })
-    } catch (err) {
-      console.error('Failed to delete iCloud attachment dir:', err)
-    }
   })
 
   ipcMain.handle('fs:showOpenDialog', async () => {

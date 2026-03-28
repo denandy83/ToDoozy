@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type { ActivityLogEntry, CreateActivityLogInput } from '../../shared/types'
 
 export class ActivityLogRepository {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   findById(id: string): ActivityLogEntry | undefined {
     return this.db.prepare('SELECT * FROM activity_log WHERE id = ?').get(id) as
@@ -13,13 +13,13 @@ export class ActivityLogRepository {
   findByTaskId(taskId: string): ActivityLogEntry[] {
     return this.db
       .prepare('SELECT * FROM activity_log WHERE task_id = ? ORDER BY created_at DESC')
-      .all(taskId) as ActivityLogEntry[]
+      .all(taskId) as unknown as ActivityLogEntry[]
   }
 
   findByUserId(userId: string): ActivityLogEntry[] {
     return this.db
       .prepare('SELECT * FROM activity_log WHERE user_id = ? ORDER BY created_at DESC')
-      .all(userId) as ActivityLogEntry[]
+      .all(userId) as unknown as ActivityLogEntry[]
   }
 
   create(input: CreateActivityLogInput): ActivityLogEntry {
@@ -43,12 +43,12 @@ export class ActivityLogRepository {
 
   deleteByTaskId(taskId: string): number {
     const result = this.db.prepare('DELETE FROM activity_log WHERE task_id = ?').run(taskId)
-    return result.changes
+    return Number(result.changes)
   }
 
   getRecent(limit: number): ActivityLogEntry[] {
     return this.db
       .prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?')
-      .all(limit) as ActivityLogEntry[]
+      .all(limit) as unknown as ActivityLogEntry[]
   }
 }

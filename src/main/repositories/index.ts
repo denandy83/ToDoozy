@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import { UserRepository } from './UserRepository'
 import { ProjectRepository } from './ProjectRepository'
 import { StatusRepository } from './StatusRepository'
@@ -23,7 +23,7 @@ export interface Repositories {
   attachments: AttachmentRepository
 }
 
-export function createRepositories(db: Database.Database): Repositories {
+export function createRepositories(db: DatabaseSync): Repositories {
   return {
     users: new UserRepository(db),
     projects: new ProjectRepository(db),
