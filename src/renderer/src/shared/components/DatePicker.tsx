@@ -240,7 +240,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
 
       {/* Time picker — only visible when toggled on */}
       {showTime && value && (
-        <div className="datepicker-wrapper-time">
+        <div className="datepicker-wrapper-time" data-detail-subfield="1">
           <ReactDatePicker
             ref={timePickerRef}
             selected={timeObj}
@@ -266,6 +266,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       {/* Clock toggle */}
       {value && (
         <button
+          data-detail-subfield="2"
           onClick={handleToggleTime}
           className={`flex-shrink-0 rounded p-0.5 transition-colors hover:bg-foreground/6 hover:text-foreground ${
             showTime ? 'text-accent' : 'text-muted'

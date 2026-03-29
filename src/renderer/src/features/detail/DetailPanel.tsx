@@ -63,7 +63,7 @@ export function DetailPanel(): React.JSX.Element | null {
         return
       }
 
-      // Tab cycling through detail fields
+      // Tab cycling through detail fields (with subfield support for complex fields like DatePicker)
       if (e.key === 'Tab' && panel.contains(document.activeElement)) {
         const fieldElements = Array.from(
           panel.querySelectorAll<HTMLElement>('[data-detail-field]')
@@ -75,7 +75,6 @@ export function DetailPanel(): React.JSX.Element | null {
 
         if (fieldElements.length === 0) return
 
-        // Find which field currently has focus
         const activeEl = document.activeElement as HTMLElement
         let currentFieldIdx = -1
         for (let i = 0; i < fieldElements.length; i++) {
@@ -85,6 +84,74 @@ export function DetailPanel(): React.JSX.Element | null {
           }
         }
 
+        // Helper: focus into a subfield (the element itself if focusable, else first focusable inside)
+        const focusSub = (sf: HTMLElement): void => {
+          if (sf.matches('input, button, [tabindex]:not([tabindex="-1"])')) {
+            sf.focus()
+          } else {
+            sf.querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')?.focus()
+          }
+        }
+
+        // Helper: focus first element in a field (used when entering forward)
+        const focusFieldEntry = (field: HTMLElement): void => {
+          const active = field.querySelector<HTMLElement>(
+            '[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]'
+          )
+          if (active) { active.focus(); return }
+          const contenteditable = field.querySelector<HTMLElement>('[contenteditable="true"]')
+          if (contenteditable) {
+            contenteditable.focus()
+            requestAnimationFrame(() => contenteditable.dispatchEvent(new Event('tiptap:focus-end')))
+            return
+          }
+          const focusable = field.querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+          if (focusable) { focusable.focus(); return }
+          if (field.matches('input')) field.focus()
+        }
+
+        // Subfield navigation within the current field
+        if (currentFieldIdx !== -1) {
+          const currentField = fieldElements[currentFieldIdx]
+          const subfields = Array.from(
+            currentField.querySelectorAll<HTMLElement>('[data-detail-subfield]')
+          ).sort((a, b) => parseInt(a.dataset.detailSubfield ?? '0', 10) - parseInt(b.dataset.detailSubfield ?? '0', 10))
+
+          if (subfields.length > 0) {
+            const subfieldIdx = subfields.findIndex((sf) => sf === activeEl || sf.contains(activeEl))
+
+            if (!e.shiftKey) {
+              if (subfieldIdx === -1) {
+                // On main field entry → jump to first subfield
+                e.preventDefault(); e.stopPropagation()
+                focusSub(subfields[0]); return
+              }
+              if (subfieldIdx < subfields.length - 1) {
+                // Jump to next subfield
+                e.preventDefault(); e.stopPropagation()
+                focusSub(subfields[subfieldIdx + 1]); return
+              }
+              // On last subfield: fall through to next main field
+            } else {
+              if (subfieldIdx > 0) {
+                // Shift-Tab: jump to previous subfield
+                e.preventDefault(); e.stopPropagation()
+                focusSub(subfields[subfieldIdx - 1]); return
+              }
+              if (subfieldIdx === 0) {
+                // Shift-Tab on first subfield → back to main entry (first focusable not in a subfield)
+                e.preventDefault(); e.stopPropagation()
+                const mainEntry = Array.from(
+                  currentField.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+                ).find((el) => !el.closest('[data-detail-subfield]'))
+                mainEntry?.focus(); return
+              }
+              // subfieldIdx === -1: on main entry, Shift-Tab falls through to prev main field
+            }
+          }
+        }
+
+        // Navigate between main fields
         const nextIdx = e.shiftKey
           ? (currentFieldIdx <= 0 ? fieldElements.length - 1 : currentFieldIdx - 1)
           : (currentFieldIdx >= fieldElements.length - 1 ? 0 : currentFieldIdx + 1)
@@ -93,32 +160,18 @@ export function DetailPanel(): React.JSX.Element | null {
         if (nextField) {
           e.preventDefault()
           e.stopPropagation()
-          // Focus the active/checked element first, then fall back to first focusable.
-          // Check contenteditable before buttons so the Tiptap editor wins over toolbar buttons.
-          const active = nextField.querySelector<HTMLElement>(
-            '[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]'
-          )
-          if (active) {
-            active.focus()
-          } else {
-            const contenteditable = nextField.querySelector<HTMLElement>('[contenteditable="true"]')
-            if (contenteditable) {
-              // Use Tiptap's own focus-at-end command via custom event
-              contenteditable.focus()
-              requestAnimationFrame(() => {
-                contenteditable.dispatchEvent(new Event('tiptap:focus-end'))
-              })
-            } else {
-              const focusable = nextField.querySelector<HTMLElement>(
-                'input, button, [tabindex]:not([tabindex="-1"])'
-              )
-              if (focusable) {
-                focusable.focus()
-              } else if (nextField.matches('input')) {
-                nextField.focus()
-              }
+
+          // When entering a field via Shift-Tab, land on the last subfield (if any)
+          if (e.shiftKey) {
+            const nextSubfields = Array.from(
+              nextField.querySelectorAll<HTMLElement>('[data-detail-subfield]')
+            ).sort((a, b) => parseInt(a.dataset.detailSubfield ?? '0', 10) - parseInt(b.dataset.detailSubfield ?? '0', 10))
+            if (nextSubfields.length > 0) {
+              focusSub(nextSubfields[nextSubfields.length - 1]); return
             }
           }
+
+          focusFieldEntry(nextField)
         }
       }
     }
