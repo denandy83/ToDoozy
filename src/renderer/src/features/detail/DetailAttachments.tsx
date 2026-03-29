@@ -1,4 +1,5 @@
-import { useEffect, useCallback } from 'react'
+import { useCallback, useRef } from 'react'
+import { useEffect } from 'react'
 import { Paperclip, X, FileText, FileImage, FileArchive, FileAudio, FileVideo, File, FileCode } from 'lucide-react'
 import { useAttachmentStore, useAttachmentsByTaskId } from '../../shared/stores'
 import { useAttachFiles } from '../../shared/hooks/useAttachFiles'
@@ -16,6 +17,7 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
   const attachments = useAttachmentsByTaskId(taskId)
   const { addToast } = useToast()
   const handleAttachFiles = useAttachFiles(taskId)
+  const rowRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     hydrateAttachments(taskId)
@@ -31,8 +33,6 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
             label: 'Undo',
             variant: 'accent',
             onClick: async () => {
-              // Re-attach would require the original file — not possible after deletion
-              // Just inform the user
               addToast({ message: 'Cannot undo attachment removal', variant: 'danger' })
             }
           }
@@ -51,6 +51,23 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
     }
   }, [addToast])
 
+  // Arrow key navigation between attachment cards and the Add button
+  const handleRowKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    const row = rowRef.current
+    if (!row) return
+    const focusable = Array.from(row.querySelectorAll<HTMLElement>('[tabindex="0"]'))
+    if (focusable.length === 0) return
+    const idx = focusable.indexOf(document.activeElement as HTMLElement)
+    if (idx === -1) return
+    e.preventDefault()
+    if (e.key === 'ArrowRight') {
+      focusable[(idx + 1) % focusable.length].focus()
+    } else {
+      focusable[(idx - 1 + focusable.length) % focusable.length].focus()
+    }
+  }, [])
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -68,7 +85,7 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
       </div>
 
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div ref={rowRef} className="flex flex-wrap gap-2" onKeyDown={handleRowKeyDown}>
           {attachments.map((att) => (
             <AttachmentCard
               key={att.id}
@@ -95,10 +112,26 @@ function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): 
       ? attachment.filename.slice(0, FILENAME_MAX_DISPLAY) + '...'
       : attachment.filename
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onOpen()
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      onRemove()
+    }
+  }, [onOpen, onRemove])
+
   return (
-    <div className="group relative flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 transition-colors hover:bg-foreground/6">
+    <div
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      className="group relative flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 transition-colors hover:bg-foreground/6 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 cursor-default"
+    >
       <button
         onClick={onOpen}
+        tabIndex={-1}
         className="flex items-center gap-2 cursor-pointer"
         title={attachment.filename}
       >
@@ -110,6 +143,7 @@ function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): 
           e.stopPropagation()
           onRemove()
         }}
+        tabIndex={-1}
         className="absolute -right-1 -top-1 hidden rounded-full bg-surface p-0.5 text-muted shadow-md transition-colors hover:bg-danger/10 hover:text-danger group-hover:block"
         title="Remove attachment"
         aria-label={`Remove ${attachment.filename}`}

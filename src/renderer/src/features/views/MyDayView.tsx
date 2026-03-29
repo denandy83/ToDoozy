@@ -359,6 +359,9 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         }
       } else {
         selectTask(taskId)
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+        })
       }
     },
     [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
@@ -415,6 +418,9 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
       // Escape: close panel first (keeps selection), then clear selection on second press
       if (e.key === 'Escape') {
+        // If a date/time picker dropdown is open (or was just closed), don't close panel
+        if (document.querySelector('.react-datepicker-popper')) return
+        if ((e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled) return
         const { showDetailPanel: panelOpen } = useTaskStore.getState()
         if (panelOpen) {
           e.preventDefault()
@@ -576,11 +582,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       if (e.key !== 'Tab') return
       const container = containerRef.current
       if (!container) return
-      const active = document.activeElement as HTMLElement | null
+      // Only handle when focus is inside this container (not on body, detail panel, or popups)
+      if (!container.contains(document.activeElement)) return
       // Let Tab work normally inside text inputs and textareas
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
-      // Let Tab work normally inside the detail panel (handled by DetailPanel's own Tab logic)
-      if (active?.closest('[data-detail-panel]')) return
+      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
       // If no tasks, nothing to cycle — let browser handle it
       const tasks = flatTasks
       if (tasks.length === 0) return

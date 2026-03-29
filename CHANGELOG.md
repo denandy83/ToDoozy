@@ -4,6 +4,19 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## 2026-03-26
+
+### Internal
+- **Verified status in workflow** — Added `Verified` status to the ralph PRD workflow and wired ToDoozy task lifecycle (In Progress → Testing → Verified → Done).
+- **Test suite fixes** — Fixed Vitest tests for stories 31–33 and added worktree exclusions to prevent false failures.
+
+## 2026-03-25
+
+### Added
+- **In-app help & keyboard shortcuts modal** — A `?` button in the sidebar footer opens a centered modal showing all keyboard shortcuts grouped into 4 sections: Navigation, Tasks, Detail Panel, Global.
+- **Global `?` hotkey** — Press `?` anywhere outside a text input to open the shortcuts modal.
+- **Help tab in Settings** — Settings modal now has a Help tab with full feature documentation covering every major feature.
+
 ## 2026-03-22
 
 ### Fixed

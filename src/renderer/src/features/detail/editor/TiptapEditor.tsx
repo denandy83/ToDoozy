@@ -170,6 +170,15 @@ export function TiptapEditor({ content, taskId, onChange }: TiptapEditorProps): 
     }
   }, [])
 
+  // Allow external code to focus at end via custom event on the contenteditable element
+  useEffect(() => {
+    if (!editor) return
+    const el = editor.view.dom
+    const handleFocusEnd = (): void => { editor.commands.focus('end') }
+    el.addEventListener('tiptap:focus-end', handleFocusEnd)
+    return () => el.removeEventListener('tiptap:focus-end', handleFocusEnd)
+  }, [editor])
+
   // Handle image paste
   useEffect(() => {
     if (!editor) return

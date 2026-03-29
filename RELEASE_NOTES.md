@@ -4,6 +4,11 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-03-25
+
+- **Keyboard shortcuts modal** — Press `?` anywhere (or click the `?` button in the sidebar) to open a modal listing every keyboard shortcut, grouped by category. Configurable shortcuts always show their current binding.
+- **Help tab in Settings** — A new Help tab in Settings contains full documentation for every ToDoozy feature, plus a complete shortcuts reference table.
+
 ## 2026-03-22
 
 - **Multi-select drag to project** — Select multiple tasks, then drag any of them onto a project in the sidebar to move them all at once. An undo option appears for 5 seconds.

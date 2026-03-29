@@ -362,6 +362,24 @@ export function AppLayout(): React.JSX.Element {
       if (closeTopPopup()) {
         e.preventDefault()
         e.stopImmediatePropagation()
+        return
+      }
+      // Fallback: if a date/time picker popper is visible but wasn't registered in the popup stack
+      // (e.g. showTimeSelectOnly mode), set a flag so downstream handlers know to bail out.
+      // We do NOT stopImmediatePropagation here — react-datepicker needs the event to close the popper.
+      const popper = document.querySelector('.react-datepicker-popper')
+      if (popper) {
+        e.preventDefault()
+        ;(e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled = true
+        // After react-datepicker closes the popper, ensure focus lands on the date input
+        // inside the detail panel (not on body, which would break Tab navigation)
+        requestAnimationFrame(() => {
+          if (!document.activeElement || document.activeElement === document.body) {
+            const panel = document.querySelector('[data-detail-panel]')
+            const dateInput = panel?.querySelector<HTMLInputElement>('.datepicker-wrapper input, .datepicker-wrapper-time input')
+            dateInput?.focus()
+          }
+        })
       }
     }
     window.addEventListener('keydown', handleEscape, { capture: true })

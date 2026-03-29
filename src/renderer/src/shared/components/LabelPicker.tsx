@@ -34,6 +34,7 @@ export function LabelPicker({
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -103,6 +104,12 @@ export function LabelPicker({
   useEffect(() => {
     setHighlightedIndex(0)
   }, [searchQuery])
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-label-index="${highlightedIndex}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [highlightedIndex])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -195,12 +202,13 @@ export function LabelPicker({
               className="w-full rounded border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
             />
           </div>
-          <div className="max-h-48 overflow-y-auto">
+          <div ref={listRef} className="max-h-48 overflow-y-auto">
             {filteredLabels.map((label, index) => {
               const isAssigned = assignedLabelIds.has(label.id)
               return (
                 <button
                   key={label.id}
+                  data-label-index={index}
                   onClick={() => onToggleLabel(label.id)}
                   className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${index === highlightedIndex ? 'bg-foreground/6' : ''}`}
                 >
@@ -226,6 +234,7 @@ export function LabelPicker({
                   return (
                     <button
                       key={label.id}
+                      data-label-index={globalIndex}
                       onClick={() => handleAddGlobalLabel(label.id)}
                       className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${globalIndex === highlightedIndex ? 'bg-foreground/6' : ''}`}
                     >

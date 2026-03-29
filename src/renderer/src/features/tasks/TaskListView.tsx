@@ -32,7 +32,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const tasks = useTasksByProject(projectId)
   const statuses = useStatusesByProject(projectId)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
+  const { createTask, updateTask, deleteTask, setCurrentTask, navigateTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, toggleExpanded, setExpanded, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, setMovingTask, reorderTasks } =
     useTaskStore()
   const movingTaskId = useTaskStore((s) => s.movingTaskId)
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
@@ -44,6 +44,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
 
   // Label state
   const allLabels = useLabelsByProject(projectId)
@@ -233,6 +234,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
       } else {
         selectTask(taskId)
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+        })
       }
     },
     [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
@@ -344,22 +348,6 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         ? flatTasks.findIndex((t) => t.id === currentTaskId)
         : -1
 
-      // Tab/Shift+Tab cycles through tasks without opening detail panel
-      if (e.key === 'Tab') {
-        e.preventDefault()
-        if (flatTasks.length === 0) return
-        const idx = e.shiftKey
-          ? (currentIndex <= 0 ? flatTasks.length - 1 : currentIndex - 1)
-          : (currentIndex >= flatTasks.length - 1 ? 0 : currentIndex + 1)
-        const id = flatTasks[idx].id
-        useTaskStore.setState((s) => ({
-          selectedTaskIds: new Set([id]),
-          lastSelectedTaskId: id,
-          showDetailPanel: s.showDetailPanel
-        }))
-        scrollTaskIntoView(id)
-        return
-      }
 
       // Cmd+A = select all visible tasks
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
@@ -377,8 +365,17 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         return
       }
 
-      // Escape clears selection
+      // Escape: close panel first (keeps selection), then clear selection on second press
       if (e.key === 'Escape') {
+        // If a date/time picker dropdown is open (or was just closed), don't close panel
+        if (document.querySelector('.react-datepicker-popper')) return
+        if ((e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled) return
+        const { showDetailPanel: panelOpen } = useTaskStore.getState()
+        if (panelOpen) {
+          e.preventDefault()
+          useTaskStore.setState({ showDetailPanel: false })
+          return
+        }
         if (selectedTaskIds.size > 0) {
           e.preventDefault()
           clearSelection()
@@ -470,11 +467,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           }
           break
         }
-        case 'Enter':
-        case ' ': {
+        case 'Enter': {
           if (currentTaskId) {
             e.preventDefault()
-            // Open detail panel and focus the title field
             selectTask(currentTaskId)
             requestAnimationFrame(() => {
               const titleEl = document.querySelector<HTMLElement>('[data-detail-title]')
@@ -483,6 +478,23 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           } else {
             e.preventDefault()
             addInputRef.current?.focus()
+          }
+          break
+        }
+        case ' ': {
+          if (currentTaskId) {
+            e.preventDefault()
+            const task = allTasks[currentTaskId]
+            if (task) {
+              const sortedStatuses = [
+                ...statuses.filter((s) => s.is_default === 1),
+                ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
+                ...statuses.filter((s) => s.is_done === 1)
+              ]
+              const idx = sortedStatuses.findIndex((s) => s.id === task.status_id)
+              const nextStatus = sortedStatuses[(idx + 1) % sortedStatuses.length]
+              if (nextStatus) handleStatusChange(currentTaskId, nextStatus.id)
+            }
           }
           break
         }
@@ -516,18 +528,6 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           }
           break
         }
-        case 'Tab': {
-          e.preventDefault()
-          e.stopPropagation()
-          if (e.shiftKey) {
-            const prevIndex = Math.max(currentIndex - 1, 0)
-            if (flatTasks[prevIndex]) setCurrentTask(flatTasks[prevIndex].id)
-          } else {
-            const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-            if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
-          }
-          break
-        }
       }
     }
 
@@ -553,8 +553,38 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     reorderTasks,
     prioritySortFn,
     copySelectedTasks,
-    selectTask
+    selectTask,
+    navigateTask
   ])
+
+  // Tab navigation: document-level capture so it fires before any element's handler
+  useEffect(() => {
+    const handleTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab') return
+      const container = containerRef.current
+      if (!container) return
+      // Only handle when focus is inside this container
+      if (!container.contains(document.activeElement)) return
+      // Don't intercept Tab in text inputs
+      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
+      // Don't intercept Tab when a date/time picker dropdown is open
+      if (document.activeElement?.closest('.react-datepicker-popper')) return
+      e.preventDefault()
+      const tasks = flatTasks
+      if (tasks.length === 0) return
+      const selectedId = useTaskStore.getState().selectedTaskIds.values().next().value as string | undefined
+      const idx = selectedId ? tasks.findIndex((t) => t.id === selectedId) : -1
+      const nextId = e.shiftKey
+        ? tasks[idx <= 0 ? tasks.length - 1 : idx - 1].id
+        : tasks[idx >= tasks.length - 1 ? 0 : idx + 1].id
+      navigateTask(nextId)
+      requestAnimationFrame(() => {
+        container.querySelector<HTMLElement>(`[data-task-id="${nextId}"]`)?.focus()
+      })
+    }
+    document.addEventListener('keydown', handleTab, { capture: true })
+    return () => document.removeEventListener('keydown', handleTab, { capture: true })
+  }, [flatTasks, navigateTask])
 
   const sortedStatuses = useMemo(() => {
     const defaults = statuses.filter((s) => s.is_default === 1)

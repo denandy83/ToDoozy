@@ -51,6 +51,9 @@ export function DetailPanel(): React.JSX.Element | null {
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        // If a date/time picker dropdown is open (or was just closed), don't close the panel
+        if (document.querySelector('.react-datepicker-popper')) return
+        if ((e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled) return
         // Close detail panel but keep task selected, then focus the task row
         const selectedId = useTaskStore.getState().lastSelectedTaskId
         useTaskStore.setState({ showDetailPanel: false })

@@ -42,6 +42,7 @@ interface TaskActions {
   hydrateTaskLabels(taskId: string): Promise<void>
   hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
+  navigateTask(id: string): void
   selectTask(id: string, options?: { fromContextMenu?: boolean }): void
   toggleTaskInSelection(id: string): void
   selectTaskRange(ids: string[]): void
@@ -440,6 +441,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     } else {
       set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: true })
     }
+  },
+
+  // Navigate to a task without affecting showDetailPanel (for Tab key navigation)
+  navigateTask(id: string): void {
+    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
   },
 
   selectTask(id: string, options?: { fromContextMenu?: boolean }): void {

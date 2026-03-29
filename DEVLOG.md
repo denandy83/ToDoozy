@@ -4,6 +4,29 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-26 — Workflow & test suite hardening
+
+**Session type:** Internal tooling / QA
+
+**What was done:**
+- Added `Verified` status to the ralph PRD workflow (`prd.json` now has `verified` field, separate from `passes` and `tested`)
+- Wired ralph into the ToDoozy task lifecycle: In Progress when starting, Testing when passes+tested, Verified/Done for the user
+- Fixed Vitest test suite for stories 31–33; added `.claude/worktrees/` exclusions to prevent worktree files from interfering with test discovery
+
+**Commits:** 5ba02a6, 16ed0eb, e68458b
+
+---
+
+## 2026-03-25 — Story #33: In-App Help & Keyboard Shortcuts
+
+**Session type:** Feature implementation
+
+**What was built:** In-App Help & Keyboard Shortcuts (Story #33). Added a `?` icon button as its own row in the sidebar footer, a `KeyboardShortcutsModal` showing all shortcuts in 4 groups, a global `?` keydown listener in AppLayout, and a `HelpSettingsContent` tab in UnifiedSettingsModal with full feature documentation.
+
+**Commits:** 3d209d9 feat: add story #33 — in-app help & keyboard shortcuts
+
+---
+
 ## 2026-03-25 — Initial documentation baseline
 
 **Session type:** Documentation audit + tooling setup

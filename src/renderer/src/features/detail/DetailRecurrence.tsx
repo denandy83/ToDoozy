@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 const RECURRENCE_OPTIONS = [
   { value: null, label: 'None' },
@@ -25,6 +25,7 @@ export function DetailRecurrence({
     }
     return ''
   })
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const isPreset = (val: string | null): boolean =>
     val === null || val === 'daily' || val === 'weekly' || val === 'monthly'
@@ -71,8 +72,38 @@ export function DetailRecurrence({
     [customInterval, onRecurrenceChange]
   )
 
+  // Arrow keys cycle through options and immediately apply them
+  const handleContainerKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (showCustom) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      e.preventDefault()
+
+      // All options including Custom as last item
+      const allValues: Array<string | null | 'custom'> = [
+        ...RECURRENCE_OPTIONS.map((o) => o.value),
+        'custom'
+      ]
+      const currentIdx = allValues.findIndex((v) => v === recurrenceRule) === -1
+        ? 0
+        : allValues.findIndex((v) => v === recurrenceRule)
+
+      const nextIdx = e.key === 'ArrowRight'
+        ? (currentIdx + 1) % allValues.length
+        : (currentIdx - 1 + allValues.length) % allValues.length
+
+      const next = allValues[nextIdx]
+      if (next === 'custom') {
+        setShowCustom(true)
+      } else {
+        handlePresetClick(next as string | null)
+      }
+    },
+    [showCustom, recurrenceRule, handlePresetClick]
+  )
+
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div ref={containerRef} className="flex flex-wrap items-center gap-1" onKeyDown={handleContainerKeyDown}>
       {RECURRENCE_OPTIONS.map((opt) => (
         <button
           key={opt.label}

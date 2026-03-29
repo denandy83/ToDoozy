@@ -105,6 +105,10 @@ export function ContextMenu(): React.JSX.Element | null {
 
   const assignedLabelIds = new Set(taskLabels.map((l) => l.id))
   const isInMyDay = task.is_in_my_day === 1
+  // A task can appear in My Day either because it was explicitly added OR because it's due today
+  const today = new Date().toISOString().split('T')[0]
+  const isDueToday = task.due_date ? task.due_date.startsWith(today) : false
+  const isVisibleInMyDay = isInMyDay || isDueToday
 
   const handleStatusChange = (statusId: string): void => {
     const st = statuses.find((s) => s.id === statusId)
@@ -134,9 +138,23 @@ export function ContextMenu(): React.JSX.Element | null {
     >
       {/* Pin/Unpin My Day */}
       <MenuItem
-        icon={isInMyDay ? <SunMedium size={14} /> : <Sun size={14} />}
-        label={isInMyDay ? 'Remove from My Day' : 'Add to My Day'}
-        onClick={() => handleAction(() => updateTask(task.id, { is_in_my_day: isInMyDay ? 0 : 1 }))}
+        icon={isVisibleInMyDay ? <SunMedium size={14} /> : <Sun size={14} />}
+        label={isVisibleInMyDay ? 'Remove from My Day' : 'Add to My Day'}
+        onClick={() => {
+          if (isInMyDay) {
+            // Explicitly pinned — just unpin
+            handleAction(() => updateTask(task.id, { is_in_my_day: 0 }))
+          } else if (isDueToday) {
+            // Visible only because due today — move due date to tomorrow so it leaves My Day
+            const tomorrow = new Date()
+            tomorrow.setDate(tomorrow.getDate() + 1)
+            const nextDate = tomorrow.toISOString().split('T')[0]
+            handleAction(() => updateTask(task.id, { due_date: nextDate }))
+          } else {
+            // Not in My Day — add it
+            handleAction(() => updateTask(task.id, { is_in_my_day: 1 }))
+          }
+        }}
       />
       {/* Add Subtask */}
       <MenuItem
