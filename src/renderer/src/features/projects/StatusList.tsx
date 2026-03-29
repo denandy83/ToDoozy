@@ -167,13 +167,20 @@ export function StatusList({
       return
     }
     try {
+      // Insert before the Done status so order is: default, middles, new, done
+      const doneStatus = statuses.find((s) => s.is_done === 1)
+      const insertIndex = doneStatus ? doneStatus.order_index : statuses.length
+      // Bump Done status order_index to make room
+      if (doneStatus && doneStatus.order_index === insertIndex) {
+        await updateStatus(doneStatus.id, { order_index: insertIndex + 1 })
+      }
       await createStatus({
         id: crypto.randomUUID(),
         project_id: projectId,
         name: name.trim(),
         color,
         icon: isDone ? 'check-circle' : 'circle',
-        order_index: statuses.length,
+        order_index: insertIndex,
         is_default: 0,
         is_done: isDone ? 1 : 0
       })

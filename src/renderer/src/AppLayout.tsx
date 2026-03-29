@@ -258,6 +258,22 @@ export function AppLayout(): React.JSX.Element {
           status_id: allTasks[id]!.status_id
         }))
         await Promise.all(toMove.map((id) => updateTask(id, { project_id: targetProjectId, status_id: defaultStatus.id })))
+        // Link moved tasks' labels to the target project so they appear in filters
+        const taskLabelMap = useTaskStore.getState().taskLabels
+        const targetProjectLabelIds = useLabelStore.getState().projectLabels[targetProjectId] ?? new Set<string>()
+        const labelsToLink = new Set<string>()
+        for (const id of toMove) {
+          const labels = taskLabelMap[id]
+          if (labels) {
+            for (const l of labels) {
+              if (!targetProjectLabelIds.has(l.id)) labelsToLink.add(l.id)
+            }
+          }
+        }
+        if (labelsToLink.size > 0) {
+          const { addToProject } = useLabelStore.getState()
+          await Promise.all([...labelsToLink].map((labelId) => addToProject(targetProjectId, labelId)))
+        }
         const targetProject = Object.values(useProjectStore.getState().projects).find((p) => p.id === targetProjectId)
         addToast({
           message: toMove.length > 1 ? `Moved ${toMove.length} tasks to ${targetProject?.name ?? 'project'}` : `Moved to ${targetProject?.name ?? 'project'}`,

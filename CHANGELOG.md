@@ -4,6 +4,11 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## 2026-03-29
+
+### Fixed
+- **Quick-add window follows theme** — The Cmd+Shift+Space quick-add popup now always opens with the correct theme. Previously it flashed dark before switching to light.
+
 ## 2026-03-26
 
 ### Internal

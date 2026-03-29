@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-03-29
+
+- **Fix: Quick-add follows theme** — The quick-add popup (Cmd+Shift+Space) now opens with the correct theme instantly, no more dark flash when using a light theme.
+
 ## 2026-03-25
 
 - **Keyboard shortcuts modal** — Press `?` anywhere (or click the `?` button in the sidebar) to open a modal listing every keyboard shortcut, grouped by category. Configurable shortcuts always show their current binding.

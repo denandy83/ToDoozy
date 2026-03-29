@@ -96,13 +96,15 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [allTasks])
 
   const hydrateStatuses = useStatusStore((s) => s.hydrateStatuses)
+  const hydrateLabels = useLabelStore((s) => s.hydrateLabels)
 
   useEffect(() => {
     for (const pid of myDayProjectIds) {
       hydrateAllTaskLabels(pid)
       hydrateStatuses(pid)
+      hydrateLabels(pid)
     }
-  }, [myDayProjectIds, hydrateAllTaskLabels, hydrateStatuses])
+  }, [myDayProjectIds, hydrateAllTaskLabels, hydrateStatuses, hydrateLabels])
 
   // My Day tasks — only top-level tasks (no subtasks), consistent with sidebar count
   const myDayTasks = useMemo(() => {

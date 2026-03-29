@@ -7,6 +7,7 @@ import {
   selectFilterMode
 } from '../stores'
 import { useToast } from './Toast'
+import { shouldForceDelete } from '../utils/shiftDelete'
 import type { Label } from '../../../../shared/types'
 import type { LabelFilterMode } from '../stores'
 
@@ -25,6 +26,11 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
   const handleRemoveLabel = useCallback(async (label: Label, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!projectId) return
+
+    if (shouldForceDelete(e)) {
+      await removeFromProject(projectId, label.id)
+      return
+    }
 
     // Count tasks in this project that have this label
     const projects = await window.api.labels.findProjectsUsingLabel(label.id)
