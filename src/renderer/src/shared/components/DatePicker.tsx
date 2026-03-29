@@ -285,6 +285,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       {/* Clear */}
       {value && (
         <button
+          data-detail-subfield="3"
           onClick={handleClear}
           className="flex-shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/6 hover:text-danger"
           title={showTime ? 'Remove time' : 'Clear date'}
