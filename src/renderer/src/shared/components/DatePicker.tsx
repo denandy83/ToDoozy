@@ -267,8 +267,8 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
         </div>
       )}
 
-      {/* Clock toggle */}
-      {value && (
+      {/* Clock toggle — only shown when no time is set; use X to remove an existing time */}
+      {value && !showTime && (
         <button
           data-detail-subfield="2"
           onClick={handleToggleTime}
