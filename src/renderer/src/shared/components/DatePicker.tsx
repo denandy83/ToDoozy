@@ -189,13 +189,17 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       setShowTime(false)
     } else {
       setShowTime(true)
-      // Add default time (current hour) if date exists
+      // Default to 3 hours from now (consistent with snooze "Later Today")
       if (dateObj) {
-        const now = new Date()
+        const threeHoursFromNow = new Date(Date.now() + 3 * 60 * 60 * 1000)
         const combined = new Date(dateObj)
-        combined.setHours(now.getHours(), 0)
+        combined.setHours(threeHoursFromNow.getHours(), threeHoursFromNow.getMinutes())
         onChange(formatIso(combined, true))
       }
+      // Focus the time input once it renders
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('.datepicker-wrapper-time input')?.focus()
+      })
     }
   }, [showTime, value, dateObj, onChange])
 
