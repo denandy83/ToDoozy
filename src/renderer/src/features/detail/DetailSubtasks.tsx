@@ -113,9 +113,19 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-          Subtasks
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+            Subtasks
+          </span>
+          <button
+            onClick={() => setShowInput(true)}
+            className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            aria-label="Add subtask"
+          >
+            <Plus size={10} />
+            Add
+          </button>
+        </div>
         {childCount.total > 0 && (
           <div className="flex items-center gap-1.5">
             <div className="h-1 w-8 overflow-hidden rounded-full bg-foreground/10">
@@ -131,24 +141,9 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
         )}
       </div>
 
-      {/* Subtask list */}
-      <div ref={listRef} onKeyDown={handleListKeyDown}>
-        {subtasks.map((subtask) => (
-          <SubtaskRow
-            key={subtask.id}
-            subtask={subtask}
-            statuses={statuses}
-            onStatusChange={handleStatusChange}
-            onDelete={handleDelete}
-            onClick={handleSubtaskClick}
-          />
-        ))}
-      </div>
-
-      {/* Add subtask input */}
-      {showInput ? (
+      {/* Add subtask input — between header and list */}
+      {showInput && (
         <div className="flex items-center gap-2 px-2 py-1.5">
-          {/* Spacer to align with subtask title text (after the status icon) */}
           <div className="flex-shrink-0 invisible"><div className="h-4 w-4" /></div>
           <input
             ref={inputRef}
@@ -165,15 +160,22 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
             className="flex-1 bg-transparent text-[13px] font-light text-foreground placeholder:text-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
         </div>
-      ) : (
-        <button
-          onClick={() => setShowInput(true)}
-          className="flex items-center gap-1.5 py-1 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
-        >
-          <Plus size={12} />
-          Add Subtask
-        </button>
       )}
+
+      {/* Subtask list */}
+      <div ref={listRef} onKeyDown={handleListKeyDown}>
+        {subtasks.map((subtask, i) => (
+          <SubtaskRow
+            key={subtask.id}
+            subtask={subtask}
+            statuses={statuses}
+            onStatusChange={handleStatusChange}
+            onDelete={handleDelete}
+            onClick={handleSubtaskClick}
+            subfieldIndex={i + 1}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -184,6 +186,7 @@ interface SubtaskRowProps {
   onStatusChange: (subtaskId: string, newStatusId: string) => void
   onDelete: (subtaskId: string) => void
   onClick: (subtaskId: string) => void
+  subfieldIndex?: number
 }
 
 function SubtaskRow({
@@ -191,7 +194,8 @@ function SubtaskRow({
   statuses,
   onStatusChange,
   onDelete,
-  onClick
+  onClick,
+  subfieldIndex
 }: SubtaskRowProps): React.JSX.Element {
   const doneStatus = statuses.find((s) => s.id === subtask.status_id)
   const isDone = doneStatus?.is_done === 1
@@ -224,6 +228,7 @@ function SubtaskRow({
       role="button"
       tabIndex={0}
       onKeyDown={handleRowKeyDown}
+      data-detail-subfield={subfieldIndex}
     >
       <StatusButton
         currentStatusId={subtask.status_id}

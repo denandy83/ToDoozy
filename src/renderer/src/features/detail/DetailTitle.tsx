@@ -8,10 +8,20 @@ interface DetailTitleProps {
 export function DetailTitle({ title, onTitleChange }: DetailTitleProps): React.JSX.Element {
   const [value, setValue] = useState(title)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     setValue(title)
   }, [title])
+
+  // Auto-resize textarea to fit content
+  useEffect(() => {
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${el.scrollHeight}px`
+    }
+  }, [value])
 
   useEffect(() => {
     return () => {
@@ -20,7 +30,7 @@ export function DetailTitle({ title, onTitleChange }: DetailTitleProps): React.J
   }, [])
 
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value
       setValue(val)
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -48,18 +58,19 @@ export function DetailTitle({ title, onTitleChange }: DetailTitleProps): React.J
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      ;(e.target as HTMLInputElement).blur()
+      ;(e.target as HTMLTextAreaElement).blur()
     }
   }, [])
 
   return (
-    <input
-      type="text"
+    <textarea
+      ref={textareaRef}
       value={value}
       onChange={handleChange}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className="w-full bg-transparent text-xl font-light tracking-tight text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+      rows={1}
+      className="w-full resize-none overflow-hidden bg-transparent text-xl font-light tracking-tight text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       placeholder="Task title..."
       aria-label="Task title"
       data-detail-title=""

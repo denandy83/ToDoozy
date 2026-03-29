@@ -1,5 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { X, PanelBottom, PanelRight } from 'lucide-react'
+import { X, PanelBottom, PanelRight, AlertTriangle } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useLabelsByProject } from '../../shared/stores'
@@ -89,10 +89,10 @@ export function DetailPanel(): React.JSX.Element | null {
 
         // Helper: focus into a subfield (the element itself if focusable, else first focusable inside)
         const focusSub = (sf: HTMLElement): void => {
-          if (sf.matches('input, button, [tabindex]:not([tabindex="-1"])')) {
+          if (sf.matches('input, textarea, button, [tabindex]:not([tabindex="-1"])')) {
             sf.focus()
           } else {
-            sf.querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')?.focus()
+            sf.querySelector<HTMLElement>('input, textarea, button, [tabindex]:not([tabindex="-1"])')?.focus()
           }
         }
 
@@ -108,9 +108,9 @@ export function DetailPanel(): React.JSX.Element | null {
             requestAnimationFrame(() => contenteditable.dispatchEvent(new Event('tiptap:focus-end')))
             return
           }
-          const focusable = field.querySelector<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+          const focusable = field.querySelector<HTMLElement>('input, textarea, button, [tabindex]:not([tabindex="-1"])')
           if (focusable) { focusable.focus(); return }
-          if (field.matches('input')) field.focus()
+          if (field.matches('input, textarea')) field.focus()
         }
 
         // Subfield navigation within the current field
@@ -145,7 +145,7 @@ export function DetailPanel(): React.JSX.Element | null {
                 // Shift-Tab on first subfield → back to main entry (first focusable not in a subfield)
                 e.preventDefault(); e.stopPropagation()
                 const mainEntry = Array.from(
-                  currentField.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+                  currentField.querySelectorAll<HTMLElement>('input, textarea, button, [tabindex]:not([tabindex="-1"])')
                 ).find((el) => !el.closest('[data-detail-subfield]'))
                 mainEntry?.focus(); return
               }
@@ -476,7 +476,12 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} projectId={task.project_id} />
     </Section>,
     !isTemplate ? (
-      <Section key="due" label="Due Date" fieldIndex={4}>
+      <Section key="due" label="Due Date" fieldIndex={4}
+        labelIcon={task.due_date && !task.completed_date && task.due_date.split('T')[0] < new Date().toISOString().split('T')[0]
+          ? <AlertTriangle size={10} className="text-danger" />
+          : undefined
+        }
+      >
         <DatePicker value={task.due_date} onChange={props.onDueDateChange} />
       </Section>
     ) : null,
@@ -495,7 +500,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     ) : null,
     <div key="subtasks" data-detail-field="7"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
     <div key="desc" data-detail-field="8"><DetailDescription description={task.description} taskId={task.id} onDescriptionChange={props.onDescriptionChange} /></div>,
-    !isTemplate ? <DetailAttachments key="attachments" taskId={task.id} /> : null,
+    !isTemplate ? <div key="attachments" data-detail-field="9"><DetailAttachments taskId={task.id} /></div> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
 
@@ -532,12 +537,16 @@ interface SectionProps {
   label: string
   children: React.ReactNode
   fieldIndex?: number
+  labelIcon?: React.ReactNode
 }
 
-function Section({ label, children, fieldIndex }: SectionProps): React.JSX.Element {
+function Section({ label, children, fieldIndex, labelIcon }: SectionProps): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1.5" data-detail-field={fieldIndex}>
-      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{label}</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+        {label}
+        {labelIcon}
+      </span>
       {children}
     </div>
   )

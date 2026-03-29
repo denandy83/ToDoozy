@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { useEffect } from 'react'
-import { Paperclip, X, FileText, FileImage, FileArchive, FileAudio, FileVideo, File, FileCode } from 'lucide-react'
+import { Plus, X, FileText, FileImage, FileArchive, FileAudio, FileVideo, File, FileCode } from 'lucide-react'
 import { useAttachmentStore, useAttachmentsByTaskId } from '../../shared/stores'
 import { useAttachFiles } from '../../shared/hooks/useAttachFiles'
 import { useToast } from '../../shared/components/Toast'
@@ -79,19 +79,20 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition-colors text-muted hover:bg-foreground/6 hover:text-foreground"
           title="Attach files"
         >
-          <Paperclip size={10} />
+          <Plus size={10} />
           Add
         </button>
       </div>
 
       {attachments.length > 0 && (
         <div ref={rowRef} className="flex flex-wrap gap-2" onKeyDown={handleRowKeyDown}>
-          {attachments.map((att) => (
+          {attachments.map((att, i) => (
             <AttachmentCard
               key={att.id}
               attachment={att}
               onRemove={() => handleRemove(att)}
               onOpen={() => handleOpen(att)}
+              subfieldIndex={i + 1}
             />
           ))}
         </div>
@@ -104,9 +105,10 @@ interface AttachmentCardProps {
   attachment: Attachment
   onRemove: () => void
   onOpen: () => void
+  subfieldIndex?: number
 }
 
-function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): React.JSX.Element {
+function AttachmentCard({ attachment, onRemove, onOpen, subfieldIndex }: AttachmentCardProps): React.JSX.Element {
   const truncated =
     attachment.filename.length > FILENAME_MAX_DISPLAY
       ? attachment.filename.slice(0, FILENAME_MAX_DISPLAY) + '...'
@@ -127,6 +129,7 @@ function AttachmentCard({ attachment, onRemove, onOpen }: AttachmentCardProps): 
     <div
       tabIndex={0}
       onKeyDown={handleKeyDown}
+      data-detail-subfield={subfieldIndex}
       className="group relative flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 transition-colors hover:bg-foreground/6 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 cursor-default"
     >
       <button

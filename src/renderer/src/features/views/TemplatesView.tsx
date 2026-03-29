@@ -8,6 +8,7 @@ import { useToast } from '../../shared/components/Toast'
 import { UseTemplateModal } from '../templates/UseTemplateModal'
 import { DeployProjectTemplateWizard } from '../templates/DeployProjectTemplateWizard'
 import type { Task, ProjectTemplate } from '../../../../shared/types'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 
 export function TemplatesView(): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
@@ -48,17 +49,53 @@ export function TemplatesView(): React.JSX.Element {
   }, [projectTemplates, searchQuery])
 
   const handleDeleteTaskTemplate = useCallback(
-    async (template: Task) => {
-      await deleteTask(template.id)
-      addToast({ message: 'Template deleted' })
+    (template: Task, e: React.MouseEvent) => {
+      if (shouldForceDelete(e)) {
+        deleteTask(template.id)
+        addToast({ message: 'Template deleted' })
+        return
+      }
+      addToast({
+        message: `Delete task template "${template.title}"?`,
+        persistent: true,
+        actions: [
+          {
+            label: 'Delete',
+            variant: 'danger' as const,
+            onClick: async () => {
+              await deleteTask(template.id)
+              addToast({ message: 'Template deleted' })
+            }
+          },
+          { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+        ]
+      })
     },
     [deleteTask, addToast]
   )
 
   const handleDeleteProjectTemplate = useCallback(
-    async (template: ProjectTemplate) => {
-      await deleteProjectTemplate(template.id)
-      addToast({ message: 'Project template deleted' })
+    (template: ProjectTemplate, e: React.MouseEvent) => {
+      if (shouldForceDelete(e)) {
+        deleteProjectTemplate(template.id)
+        addToast({ message: 'Project template deleted' })
+        return
+      }
+      addToast({
+        message: `Delete project template "${template.name}"?`,
+        persistent: true,
+        actions: [
+          {
+            label: 'Delete',
+            variant: 'danger' as const,
+            onClick: async () => {
+              await deleteProjectTemplate(template.id)
+              addToast({ message: 'Project template deleted' })
+            }
+          },
+          { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+        ]
+      })
     },
     [deleteProjectTemplate, addToast]
   )
@@ -141,7 +178,7 @@ export function TemplatesView(): React.JSX.Element {
                 onSelectSubtask={(id) => setCurrentTask(id)}
                 onUse={() => setUseTemplateTask(task)}
                 onEdit={() => setCurrentTask(task.id)}
-                onDelete={() => handleDeleteTaskTemplate(task)}
+                onDelete={(e) => handleDeleteTaskTemplate(task, e)}
               />
             ))}
           </div>
@@ -161,7 +198,7 @@ export function TemplatesView(): React.JSX.Element {
                 template={template}
                 onDeploy={() => setDeployTemplate(template)}
                 onEdit={() => setEditTemplate(template)}
-                onDelete={() => handleDeleteProjectTemplate(template)}
+                onDelete={(e) => handleDeleteProjectTemplate(template, e)}
               />
             ))}
           </div>
@@ -225,7 +262,7 @@ interface TaskTemplateRowProps {
   onSelectSubtask: (taskId: string) => void
   onUse: () => void
   onEdit: () => void
-  onDelete: () => void
+  onDelete: (e: React.MouseEvent) => void
 }
 
 function TaskTemplateRow({
@@ -308,7 +345,7 @@ function TaskTemplateRow({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onDelete()
+              onDelete(e)
             }}
             className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
             title="Delete Template"
@@ -341,7 +378,7 @@ interface ProjectTemplateRowProps {
   template: ProjectTemplate
   onDeploy: () => void
   onEdit: () => void
-  onDelete: () => void
+  onDelete: (e: React.MouseEvent) => void
 }
 
 function countTemplateTasks(tasks: { subtasks: { subtasks: unknown[] }[] }[]): number {
@@ -406,7 +443,7 @@ function ProjectTemplateRow({
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onDelete()
+            onDelete(e)
           }}
           className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger"
           title="Delete Template"

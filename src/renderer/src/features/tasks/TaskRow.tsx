@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus, Sun } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Sun, Calendar } from 'lucide-react'
+import { formatDate } from '../../shared/utils/dateFormat'
 import { useSortable } from '@dnd-kit/sortable'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
@@ -363,7 +364,10 @@ export function TaskRow({
         </button>
 
         {project ? (
-          <ProjectIndicator project={project} />
+          <>
+            <ProjectIndicator project={project} />
+            <StatusLabel statusId={task.status_id} />
+          </>
         ) : (
           <MyDayIndicator visible={task.is_in_my_day === 1} />
         )}
@@ -402,6 +406,16 @@ export function TaskRow({
         {/* Subtask count badge + progress */}
         {hasChildren && (
           <SubtaskBadge done={childCount.done} total={childCount.total} />
+        )}
+
+        {/* Due date */}
+        {task.due_date && !isDone && (
+          <span className={`inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${
+            task.due_date.split('T')[0] < new Date().toISOString().split('T')[0] ? 'text-danger' : 'text-muted'
+          }`}>
+            <Calendar size={10} />
+            {formatDate(task.due_date, undefined, { omitCurrentYear: true })}
+          </span>
         )}
 
         {/* Priority badge */}
@@ -615,29 +629,6 @@ function SubtaskList({
 
   return (
     <>
-      {subtasks.map((child) => (
-        <TaskRow
-          key={child.id}
-          task={child}
-          statuses={statuses}
-          allLabels={allLabels}
-          isSelected={selectedTaskIds.has(child.id)}
-          depth={depth}
-          isExpanded={expandedTaskIds.has(child.id)}
-          dropIndicator={dropIndicator}
-          onSelect={onSelect}
-          onStatusChange={onStatusChange}
-          onTitleChange={onTitleChange}
-          onDelete={onDelete}
-          onToggleExpanded={onToggleExpanded}
-          onAddLabel={onAddLabel}
-          onRemoveLabel={onRemoveLabel}
-          onCreateLabel={onCreateLabel}
-          project={project}
-          statusIdOverride={mapStatusId ? mapStatusId(child.status_id) : undefined}
-          mapStatusId={mapStatusId}
-        />
-      ))}
       {isPending && (
         <div
           className="flex items-center gap-2 rounded border border-transparent py-2 pr-6"
@@ -662,6 +653,29 @@ function SubtaskList({
           />
         </div>
       )}
+      {subtasks.map((child) => (
+        <TaskRow
+          key={child.id}
+          task={child}
+          statuses={statuses}
+          allLabels={allLabels}
+          isSelected={selectedTaskIds.has(child.id)}
+          depth={depth}
+          isExpanded={expandedTaskIds.has(child.id)}
+          dropIndicator={dropIndicator}
+          onSelect={onSelect}
+          onStatusChange={onStatusChange}
+          onTitleChange={onTitleChange}
+          onDelete={onDelete}
+          onToggleExpanded={onToggleExpanded}
+          onAddLabel={onAddLabel}
+          onRemoveLabel={onRemoveLabel}
+          onCreateLabel={onCreateLabel}
+          project={project}
+          statusIdOverride={mapStatusId ? mapStatusId(child.status_id) : undefined}
+          mapStatusId={mapStatusId}
+        />
+      ))}
     </>
   )
 }
@@ -715,6 +729,19 @@ function MyDayIndicator({ visible }: { visible: boolean }): React.JSX.Element {
     >
       {visible && <Sun size={10} className="text-accent" />}
     </div>
+  )
+}
+
+function StatusLabel({ statusId }: { statusId: string }): React.JSX.Element | null {
+  const status = useStatusStore((s) => s.statuses[statusId])
+  if (!status) return null
+  // Hide if it matches the bucket name (Not Started, In Progress, Done)
+  const name = status.name.toLowerCase()
+  if (status.is_default === 1 || status.is_done === 1 || name === 'in progress') return null
+  return (
+    <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">
+      [{status.name}]
+    </span>
   )
 }
 

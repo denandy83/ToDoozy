@@ -191,8 +191,8 @@ export function Sidebar({
       <div className={`flex h-[57px] items-center border-b border-border ${collapsed ? 'justify-center px-2' : 'gap-2 px-3'}`}>
         {!collapsed && (
           <>
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15">
-              <img src={appIcon} alt="ToDoozy" className="h-5 w-5" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
+              <img src={appIcon} alt="ToDoozy" className="h-6 w-6" />
             </div>
             <span className="flex-1 text-[13px] font-bold tracking-tight text-foreground">
               ToDoozy

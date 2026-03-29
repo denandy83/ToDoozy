@@ -45,18 +45,24 @@ export function ContextMenu(): React.JSX.Element | null {
   const { updateTask, deleteTask, duplicateTask, saveTaskAsTemplate, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
 
-  // Viewport clamp positioning
+  // Viewport clamp positioning — measure actual menu size after render
   useEffect(() => {
     if (!isOpen) return
-    const menuW = 208 // w-52
-    const menuH = 380 // approximate
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const x = Math.min(position.x, vw - menuW - 8)
-    const y = Math.min(position.y, vh - menuH - 8)
-    setMenuPos({ x: Math.max(4, x), y: Math.max(4, y) })
-    setOpenLeft(position.x + menuW + 220 > vw)
     setActiveSubmenu(null)
+    // Initial position at click point, then adjust after measuring
+    setMenuPos(position)
+    requestAnimationFrame(() => {
+      const menu = menuRef.current
+      if (!menu) return
+      const menuW = menu.offsetWidth
+      const menuH = menu.offsetHeight
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const x = Math.min(position.x, vw - menuW - 8)
+      const y = Math.min(position.y, vh - menuH - 8)
+      setMenuPos({ x: Math.max(4, x), y: Math.max(4, y) })
+      setOpenLeft(position.x + menuW + 220 > vw)
+    })
   }, [isOpen, position])
 
   // Close on click outside
