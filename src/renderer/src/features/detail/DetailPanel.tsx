@@ -44,14 +44,6 @@ export function DetailPanel(): React.JSX.Element | null {
     }
   }, [task?.id, hydrateTaskLabels]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save the element that had focus before the panel opened (for focus restoration)
-  const focusRestoreRef = useRef<HTMLElement | null>(null)
-  useEffect(() => {
-    if (task) {
-      focusRestoreRef.current = document.activeElement as HTMLElement | null
-    }
-  }, [task?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Escape closes panel and restores focus; Tab cycles through detail fields
   useEffect(() => {
     const panel = panelRef.current
@@ -59,11 +51,14 @@ export function DetailPanel(): React.JSX.Element | null {
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
-        // Close detail panel but keep task selected
+        // Close detail panel but keep task selected, then focus the task row
+        const selectedId = useTaskStore.getState().lastSelectedTaskId
         useTaskStore.setState({ showDetailPanel: false })
-        const el = focusRestoreRef.current
-        if (el && typeof el.focus === 'function' && document.body.contains(el)) {
-          requestAnimationFrame(() => el.focus())
+        if (selectedId) {
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>(`[data-task-id="${selectedId}"]`)
+            el?.focus()
+          })
         }
         return
       }
@@ -98,20 +93,30 @@ export function DetailPanel(): React.JSX.Element | null {
         if (nextField) {
           e.preventDefault()
           e.stopPropagation()
-          // Focus the active/checked element first, then fall back to first focusable
+          // Focus the active/checked element first, then fall back to first focusable.
+          // Check contenteditable before buttons so the Tiptap editor wins over toolbar buttons.
           const active = nextField.querySelector<HTMLElement>(
             '[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]'
           )
           if (active) {
             active.focus()
           } else {
-            const focusable = nextField.querySelector<HTMLElement>(
-              'input, button, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
-            )
-            if (focusable) {
-              focusable.focus()
-            } else if (nextField.matches('input')) {
-              nextField.focus()
+            const contenteditable = nextField.querySelector<HTMLElement>('[contenteditable="true"]')
+            if (contenteditable) {
+              // Use Tiptap's own focus-at-end command via custom event
+              contenteditable.focus()
+              requestAnimationFrame(() => {
+                contenteditable.dispatchEvent(new Event('tiptap:focus-end'))
+              })
+            } else {
+              const focusable = nextField.querySelector<HTMLElement>(
+                'input, button, [tabindex]:not([tabindex="-1"])'
+              )
+              if (focusable) {
+                focusable.focus()
+              } else if (nextField.matches('input')) {
+                nextField.focus()
+              }
             }
           }
         }
@@ -238,6 +243,7 @@ export function DetailPanel(): React.JSX.Element | null {
   return (
     <div
       ref={panelRef}
+      data-detail-panel
       className={`relative flex-shrink-0 border-border bg-background overflow-hidden ${
         isSide ? 'border-l' : 'border-t'
       }`}
@@ -431,8 +437,8 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
         <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
       </Section>
     ) : null,
-    <DetailSubtasks key="subtasks" taskId={task.id} projectId={task.project_id} />,
-    <div key="desc" data-detail-field="7"><DetailDescription description={task.description} taskId={task.id} onDescriptionChange={props.onDescriptionChange} /></div>,
+    <div key="subtasks" data-detail-field="7"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
+    <div key="desc" data-detail-field="8"><DetailDescription description={task.description} taskId={task.id} onDescriptionChange={props.onDescriptionChange} /></div>,
     !isTemplate ? <DetailAttachments key="attachments" taskId={task.id} /> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactDatePicker, { registerLocale } from 'react-datepicker'
 import { enGB } from 'date-fns/locale/en-GB'
 import { enUS } from 'date-fns/locale/en-US'
@@ -6,6 +6,7 @@ import { parse, isValid } from 'date-fns'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Clock, X } from 'lucide-react'
 import { useDateFormat, type DateFormatType } from '../utils/dateFormat'
+import { pushPopup } from '../utils/popupStack'
 
 registerLocale('en-GB', enGB)
 registerLocale('en-US', enUS)
@@ -68,6 +69,31 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
   const fmtConfig = FORMAT_CONFIG[dateFormat]
   const hasTime = value ? value.includes('T') : false
   const [showTime, setShowTime] = useState(hasTime)
+
+  const datePickerRef = useRef<InstanceType<typeof ReactDatePicker>>(null)
+  const timePickerRef = useRef<InstanceType<typeof ReactDatePicker>>(null)
+  const dateUnsubRef = useRef<(() => void) | null>(null)
+  const timeUnsubRef = useRef<(() => void) | null>(null)
+
+  const handleDateCalendarOpen = useCallback(() => {
+    dateUnsubRef.current = pushPopup(() => datePickerRef.current?.setOpen(false))
+  }, [])
+  const handleDateCalendarClose = useCallback(() => {
+    dateUnsubRef.current?.()
+    dateUnsubRef.current = null
+  }, [])
+  const handleTimeCalendarOpen = useCallback(() => {
+    timeUnsubRef.current = pushPopup(() => timePickerRef.current?.setOpen(false))
+  }, [])
+  const handleTimeCalendarClose = useCallback(() => {
+    timeUnsubRef.current?.()
+    timeUnsubRef.current = null
+  }, [])
+
+  // Sync showTime when an external update adds or removes a time component (e.g. snooze)
+  useEffect(() => {
+    setShowTime(value ? value.includes('T') : false)
+  }, [value])
   const dateObj = toDate(value)
 
   // Extract just the time portion as a Date for the time picker
@@ -196,9 +222,12 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       {/* Date picker */}
       <div className="datepicker-wrapper">
         <ReactDatePicker
+          ref={datePickerRef}
           selected={dateObj}
           onChange={handleDateChange}
           onChangeRaw={handleChangeRaw}
+          onCalendarOpen={handleDateCalendarOpen}
+          onCalendarClose={handleDateCalendarClose}
           dateFormat={fmtConfig.dateFnsFormat}
           locale={fmtConfig.locale}
           placeholderText={dateFormat.toUpperCase()}
@@ -213,10 +242,13 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       {showTime && value && (
         <div className="datepicker-wrapper-time">
           <ReactDatePicker
+            ref={timePickerRef}
             selected={timeObj}
             onChange={handleTimeChange}
             onChangeRaw={handleTimeChangeRaw}
             onFocus={handleTimeFocus}
+            onCalendarOpen={handleTimeCalendarOpen}
+            onCalendarClose={handleTimeCalendarClose}
             showTimeSelect
             showTimeSelectOnly
             timeIntervals={15}

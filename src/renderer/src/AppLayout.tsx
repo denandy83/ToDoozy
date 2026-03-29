@@ -42,6 +42,7 @@ import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
 import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
 import { shouldForceDelete } from './shared/utils/shiftDelete'
+import { closeTopPopup } from './shared/utils/popupStack'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -352,6 +353,19 @@ export function AppLayout(): React.JSX.Element {
 
   const handleOpenHelp = useCallback(() => {
     setHelpOpen(true)
+  }, [])
+
+  // Global Escape: close topmost popup (calendar, dropdowns, etc.) before anything else fires
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      if (closeTopPopup()) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    window.addEventListener('keydown', handleEscape, { capture: true })
+    return () => window.removeEventListener('keydown', handleEscape, { capture: true })
   }, [])
 
   // Global keyboard shortcuts

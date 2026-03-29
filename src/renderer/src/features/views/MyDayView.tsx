@@ -38,7 +38,7 @@ interface MyDayViewProps {
 export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element {
   const allProjects = useProjectStore(selectAllProjects)
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { createTask, updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask } =
+  const { createTask, updateTask, deleteTask, setCurrentTask, navigateTask, selectTask, toggleTaskInSelection, selectTaskRange, selectAllTasks, clearSelection, addLabel, removeLabel, hydrateAllTaskLabels, setPendingDeleteTask, toggleExpanded, setExpanded } =
     useTaskStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
@@ -86,6 +86,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       if (
         t.is_archived === 0 &&
         t.is_template === 0 &&
+        t.parent_id === null &&
         (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
       ) {
         ids.add(t.project_id)
@@ -103,13 +104,14 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     }
   }, [myDayProjectIds, hydrateAllTaskLabels, hydrateStatuses])
 
-  // My Day tasks
+  // My Day tasks — only top-level tasks (no subtasks), consistent with sidebar count
   const myDayTasks = useMemo(() => {
     const today = new Date().toISOString().split('T')[0]
     return Object.values(allTasks).filter(
       (t) =>
         t.is_archived === 0 &&
         t.is_template === 0 &&
+        t.parent_id === null &&
         (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
     )
   }, [allTasks])
@@ -259,14 +261,24 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return map
   }, [allProjects])
 
-  // Flat task list for keyboard navigation
+  const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
+
+  // Flat task list for keyboard navigation — includes subtasks of expanded parents
   const flatTasks = useMemo(() => {
     const result: Task[] = []
     for (const group of bucketGroups) {
-      result.push(...[...group.tasks].sort(prioritySortFn))
+      for (const task of [...group.tasks].sort(prioritySortFn)) {
+        result.push(task)
+        if (expandedTaskIds.has(task.id)) {
+          const subtasks = Object.values(allTasks)
+            .filter((t) => t.parent_id === task.id && t.is_archived === 0)
+            .sort((a, b) => a.order_index - b.order_index)
+          result.push(...subtasks)
+        }
+      }
     }
     return result
-  }, [bucketGroups, prioritySortFn])
+  }, [bucketGroups, prioritySortFn, expandedTaskIds, allTasks])
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
@@ -401,8 +413,14 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         return
       }
 
-      // Escape clears selection
+      // Escape: close panel first (keeps selection), then clear selection on second press
       if (e.key === 'Escape') {
+        const { showDetailPanel: panelOpen } = useTaskStore.getState()
+        if (panelOpen) {
+          e.preventDefault()
+          useTaskStore.setState({ showDetailPanel: false })
+          return
+        }
         if (selectedTaskIds.size > 0) {
           e.preventDefault()
           clearSelection()
@@ -428,8 +446,14 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           break
         }
         case 'Enter': {
-          if (!currentTaskId) {
-            e.preventDefault()
+          e.preventDefault()
+          if (currentTaskId) {
+            setCurrentTask(currentTaskId)
+            requestAnimationFrame(() => {
+              const titleEl = document.querySelector<HTMLElement>('[data-detail-title]')
+              titleEl?.focus()
+            })
+          } else {
             addInputRef.current?.focus()
           }
           break
@@ -441,10 +465,36 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
             if (task) {
               const taskStatuses = Object.values(allStatuses)
                 .filter((s) => s.project_id === task.project_id)
-                .sort((a, b) => a.order_index - b.order_index)
+                .sort((a, b) => {
+                  if (a.is_default === 1 && b.is_default !== 1) return -1
+                  if (b.is_default === 1 && a.is_default !== 1) return 1
+                  if (a.is_done === 1 && b.is_done !== 1) return 1
+                  if (b.is_done === 1 && a.is_done !== 1) return -1
+                  return a.order_index - b.order_index
+                })
               const idx = taskStatuses.findIndex((s) => s.id === task.status_id)
-              const nextIdx = (idx + 1) % taskStatuses.length
-              handleStatusChange(currentTaskId, taskStatuses[nextIdx].id)
+              const nextStatus = taskStatuses[(idx + 1) % taskStatuses.length]
+              if (nextStatus) handleStatusChange(currentTaskId, nextStatus.id)
+            }
+          }
+          break
+        }
+        case 'ArrowRight': {
+          if (currentTaskId) {
+            e.preventDefault()
+            const hasSubtasks = Object.values(allTasks).some((t) => t.parent_id === currentTaskId)
+            if (hasSubtasks) setExpanded(currentTaskId, true)
+          }
+          break
+        }
+        case 'ArrowLeft': {
+          if (currentTaskId) {
+            e.preventDefault()
+            const task = allTasks[currentTaskId]
+            if (expandedTaskIds.has(currentTaskId)) {
+              setExpanded(currentTaskId, false)
+            } else if (task?.parent_id) {
+              navigateTask(task.parent_id)
             }
           }
           break
@@ -479,19 +529,6 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           }
           break
         }
-        case 'Tab': {
-          if (!(e.target instanceof HTMLInputElement)) {
-            e.preventDefault()
-            if (e.shiftKey) {
-              const prevIndex = Math.max(currentIndex - 1, 0)
-              if (flatTasks[prevIndex]) setCurrentTask(flatTasks[prevIndex].id)
-            } else {
-              const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-              if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
-            }
-          }
-          break
-        }
       }
     }
 
@@ -501,14 +538,66 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     selectedTaskIds,
     flatTasks,
     setCurrentTask,
+    navigateTask,
     selectAllTasks,
     clearSelection,
     allTasks,
     allStatuses,
     handleStatusChange,
     handleDeleteTask,
-    copySelectedTasks
+    copySelectedTasks,
+    toggleExpanded,
+    setExpanded,
+    expandedTaskIds
   ])
+
+  // Auto-select first task (without opening detail panel) when My Day mounts or selection is cleared
+  const hasSelection = selectedTaskIds.size > 0
+  useEffect(() => {
+    if (hasSelection) return
+    requestAnimationFrame(() => {
+      if (flatTasks.length > 0) {
+        useTaskStore.setState({
+          selectedTaskIds: new Set([flatTasks[0].id]),
+          lastSelectedTaskId: flatTasks[0].id,
+          showDetailPanel: false
+        })
+      }
+      containerRef.current?.focus()
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasSelection])
+
+  // Tab navigation: intercept Tab globally when My Day is the active view.
+  // Skips text inputs and rich-text editors; everything else (header buttons, project
+  // filter chips, sidebar items) should not consume Tab — tasks should.
+  useEffect(() => {
+    const handleTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab') return
+      const container = containerRef.current
+      if (!container) return
+      const active = document.activeElement as HTMLElement | null
+      // Let Tab work normally inside text inputs and textareas
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
+      // Let Tab work normally inside the detail panel (handled by DetailPanel's own Tab logic)
+      if (active?.closest('[data-detail-panel]')) return
+      // If no tasks, nothing to cycle — let browser handle it
+      const tasks = flatTasks
+      if (tasks.length === 0) return
+      e.preventDefault()
+      const selectedId = useTaskStore.getState().selectedTaskIds.values().next().value as string | undefined
+      const idx = selectedId ? tasks.findIndex((t) => t.id === selectedId) : -1
+      const nextId = e.shiftKey
+        ? tasks[idx <= 0 ? tasks.length - 1 : idx - 1].id
+        : tasks[idx >= tasks.length - 1 ? 0 : idx + 1].id
+      navigateTask(nextId)
+      requestAnimationFrame(() => {
+        container.querySelector<HTMLElement>(`[data-task-id="${nextId}"]`)?.focus()
+      })
+    }
+    document.addEventListener('keydown', handleTab, { capture: true })
+    return () => document.removeEventListener('keydown', handleTab, { capture: true })
+  }, [flatTasks, navigateTask])
 
   // Handle status changes in My Day — map bucket IDs or cross-project statuses to correct project status
   const handleMyDayStatusChange = useCallback(

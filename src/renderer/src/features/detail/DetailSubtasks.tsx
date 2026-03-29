@@ -21,6 +21,7 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
   const [showInput, setShowInput] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (showInput) inputRef.current?.focus()
@@ -92,6 +93,21 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
     [setCurrentTask]
   )
 
+  // Arrow key navigation between subtask rows
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[role="button"][tabindex="0"]') ?? [])
+    if (rows.length === 0) return
+    const idx = rows.indexOf(document.activeElement as HTMLElement)
+    if (idx === -1) return
+    e.preventDefault()
+    if (e.key === 'ArrowDown') {
+      rows[Math.min(idx + 1, rows.length - 1)].focus()
+    } else {
+      rows[Math.max(idx - 1, 0)].focus()
+    }
+  }, [])
+
   const pct = childCount.total > 0 ? (childCount.done / childCount.total) * 100 : 0
 
   return (
@@ -116,16 +132,18 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
       </div>
 
       {/* Subtask list */}
-      {subtasks.map((subtask) => (
-        <SubtaskRow
-          key={subtask.id}
-          subtask={subtask}
-          statuses={statuses}
-          onStatusChange={handleStatusChange}
-          onDelete={handleDelete}
-          onClick={handleSubtaskClick}
-        />
-      ))}
+      <div ref={listRef} onKeyDown={handleListKeyDown}>
+        {subtasks.map((subtask) => (
+          <SubtaskRow
+            key={subtask.id}
+            subtask={subtask}
+            statuses={statuses}
+            onStatusChange={handleStatusChange}
+            onDelete={handleDelete}
+            onClick={handleSubtaskClick}
+          />
+        ))}
+      </div>
 
       {/* Add subtask input */}
       {showInput ? (
@@ -178,15 +196,34 @@ function SubtaskRow({
   const doneStatus = statuses.find((s) => s.id === subtask.status_id)
   const isDone = doneStatus?.is_done === 1
 
+  const handleRowKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        onClick(subtask.id)
+      }
+      if (e.key === ' ') {
+        e.preventDefault()
+        const sorted = [
+          ...statuses.filter((s) => s.is_default === 1),
+          ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
+          ...statuses.filter((s) => s.is_done === 1)
+        ]
+        const idx = sorted.findIndex((s) => s.id === subtask.status_id)
+        const next = sorted[(idx + 1) % sorted.length]
+        if (next) onStatusChange(subtask.id, next.id)
+      }
+    },
+    [subtask.id, subtask.status_id, statuses, onClick, onStatusChange]
+  )
+
   return (
     <div
       onClick={() => onClick(subtask.id)}
       className="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 transition-colors hover:bg-foreground/6"
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onClick(subtask.id)
-      }}
+      onKeyDown={handleRowKeyDown}
     >
       <StatusButton
         currentStatusId={subtask.status_id}
