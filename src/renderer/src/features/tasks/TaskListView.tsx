@@ -190,7 +190,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const handleStatusChange = useCallback(
     async (taskId: string, newStatusId: string) => {
       const newStatus = statuses.find((s) => s.id === newStatusId)
-      const update: { status_id: string; completed_date?: string | null } = {
+      const update: { status_id: string; completed_date?: string | null; order_index?: number } = {
         status_id: newStatusId
       }
       if (newStatus?.is_done === 1) {
@@ -198,9 +198,19 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       } else {
         update.completed_date = null
       }
+      // Position task at top or bottom of target status group based on setting
+      const allCurrentTasks = Object.values(useTaskStore.getState().tasks)
+      const targetTasks = allCurrentTasks.filter((t) => t.status_id === newStatusId && t.parent_id === null && t.id !== taskId)
+      if (targetTasks.length > 0) {
+        update.order_index = newTaskPosition === 'bottom'
+          ? Math.max(...targetTasks.map((t) => t.order_index)) + 1
+          : Math.min(...targetTasks.map((t) => t.order_index)) - 1
+      } else {
+        update.order_index = 0
+      }
       await updateTask(taskId, update)
     },
-    [statuses, updateTask]
+    [statuses, updateTask, newTaskPosition]
   )
 
   const handleTitleChange = useCallback(

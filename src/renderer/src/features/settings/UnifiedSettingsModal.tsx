@@ -253,8 +253,8 @@ function GeneralSettings(): React.JSX.Element {
       </p>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-light text-foreground">New task position</p>
-          <p className="text-[10px] text-muted">Where new tasks appear in their status group</p>
+          <p className="text-sm font-light text-foreground">Default task position</p>
+          <p className="text-[10px] text-muted">Where tasks appear when created or moved to a status group</p>
         </div>
         <div className="flex rounded-lg border border-border overflow-hidden">
           <button

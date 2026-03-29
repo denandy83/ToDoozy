@@ -225,13 +225,24 @@ export function AppLayout(): React.JSX.Element {
       const task = tasks[taskId]
       if (!task) return
       const newStatus = statuses.find((s) => s.id === newStatusId)
-      const update: { status_id: string; completed_date?: string | null } = {
+      const update: { status_id: string; completed_date?: string | null; order_index?: number } = {
         status_id: newStatusId
       }
       if (newStatus?.is_done === 1) {
         update.completed_date = new Date().toISOString()
       } else {
         update.completed_date = null
+      }
+      // Position task at top or bottom of target status group based on setting
+      const position = useSettingsStore.getState().settings['new_task_position'] ?? 'top'
+      const allCurrentTasks = Object.values(useTaskStore.getState().tasks)
+      const targetTasks = allCurrentTasks.filter((t) => t.status_id === newStatusId && t.parent_id === null && t.id !== taskId)
+      if (targetTasks.length > 0) {
+        update.order_index = position === 'bottom'
+          ? Math.max(...targetTasks.map((t) => t.order_index)) + 1
+          : Math.min(...targetTasks.map((t) => t.order_index)) - 1
+      } else {
+        update.order_index = 0
       }
       await updateTask(taskId, update)
     },

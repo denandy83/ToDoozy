@@ -317,7 +317,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const handleStatusChange = useCallback(
     async (taskId: string, newStatusId: string) => {
       const newStatus = Object.values(allStatuses).find((s) => s.id === newStatusId)
-      const update: { status_id: string; completed_date?: string | null } = {
+      const update: { status_id: string; completed_date?: string | null; order_index?: number } = {
         status_id: newStatusId
       }
       if (newStatus?.is_done === 1) {
@@ -325,9 +325,19 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       } else {
         update.completed_date = null
       }
+      // Position task at top or bottom of target status group based on setting
+      const allCurrentTasks = Object.values(useTaskStore.getState().tasks)
+      const targetTasks = allCurrentTasks.filter((t) => t.status_id === newStatusId && t.parent_id === null && t.id !== taskId)
+      if (targetTasks.length > 0) {
+        update.order_index = newTaskPosition === 'bottom'
+          ? Math.max(...targetTasks.map((t) => t.order_index)) + 1
+          : Math.min(...targetTasks.map((t) => t.order_index)) - 1
+      } else {
+        update.order_index = 0
+      }
       await updateTask(taskId, update)
     },
-    [allStatuses, updateTask]
+    [allStatuses, updateTask, newTaskPosition]
   )
 
   const handleTitleChange = useCallback(
