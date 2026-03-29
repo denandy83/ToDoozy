@@ -361,7 +361,7 @@ export function AppLayout(): React.JSX.Element {
       if (e.key !== 'Escape') return
       if (closeTopPopup()) {
         e.preventDefault()
-        e.stopPropagation()
+        e.stopImmediatePropagation()
       }
     }
     window.addEventListener('keydown', handleEscape, { capture: true })
