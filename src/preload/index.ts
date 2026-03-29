@@ -143,6 +143,7 @@ const api: TodoozyAPI = {
   },
 
   quickadd: {
+    signalReady: () => ipcRenderer.send('quickadd:ready'),
     hide: () => ipcRenderer.invoke('quickadd:hide'),
     notifyTaskCreated: () => ipcRenderer.invoke('quickadd:notifyTaskCreated'),
     updateShortcut: (accelerator) => ipcRenderer.invoke('quickadd:updateShortcut', accelerator),
@@ -151,7 +152,7 @@ const api: TodoozyAPI = {
       return () => {
         ipcRenderer.removeListener('quickadd:focus', callback)
       }
-    }
+    },
   },
 
   appToggle: {

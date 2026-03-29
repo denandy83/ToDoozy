@@ -1,4 +1,4 @@
-import { BrowserWindow, app, screen } from 'electron'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
@@ -36,23 +36,19 @@ function createQuickAddWindow(): BrowserWindow {
     })
   }
 
-  quickAddWindow.once('ready-to-show', () => {
-    if (quickAddWindow) centerOnActiveDisplay(quickAddWindow)
-    quickAddWindow?.show()
-    quickAddWindow?.focus()
-    // Delay blur handler so it doesn't fire during the show/focus sequence
-    setTimeout(() => {
-      quickAddWindow?.on('blur', () => {
-        quickAddWindow?.hide()
-      })
-    }, 200)
-  })
-
-  // Also hide when the app loses focus entirely (e.g. clicking desktop or another app)
-  app.on('browser-window-blur', (_event, window) => {
-    if (window === quickAddWindow && quickAddWindow?.isVisible()) {
-      quickAddWindow.hide()
-    }
+  // Wait for renderer to signal theme is applied before showing
+  ipcMain.once('quickadd:ready', () => {
+    if (!quickAddWindow || quickAddWindow.isDestroyed()) return
+    centerOnActiveDisplay(quickAddWindow)
+    quickAddWindow.show()
+    quickAddWindow.focus()
+    // Destroy on blur (clicking outside, switching apps, etc.)
+    quickAddWindow.on('blur', () => {
+      if (quickAddWindow && !quickAddWindow.isDestroyed()) {
+        quickAddWindow.destroy()
+        quickAddWindow = null
+      }
+    })
   })
 
   return quickAddWindow
@@ -70,21 +66,18 @@ function centerOnActiveDisplay(win: BrowserWindow): void {
 }
 
 export function showQuickAddWindow(): void {
+  // Always create fresh — ensures theme, projects, and settings are current
   if (quickAddWindow && !quickAddWindow.isDestroyed()) {
-    centerOnActiveDisplay(quickAddWindow)
-    quickAddWindow.show()
-    setTimeout(() => {
-      quickAddWindow?.focus()
-      quickAddWindow?.webContents.send('quickadd:focus')
-    }, 50)
-  } else {
-    createQuickAddWindow()
+    quickAddWindow.destroy()
+    quickAddWindow = null
   }
+  createQuickAddWindow()
 }
 
 export function hideQuickAddWindow(): void {
   if (quickAddWindow && !quickAddWindow.isDestroyed()) {
-    quickAddWindow.hide()
+    quickAddWindow.destroy()
+    quickAddWindow = null
   }
 }
 

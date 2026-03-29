@@ -174,6 +174,7 @@ export interface ShortcutUpdateResult {
 }
 
 export interface QuickAddAPI {
+  signalReady(): void
   hide(): Promise<void>
   notifyTaskCreated(): Promise<void>
   updateShortcut(accelerator: string): Promise<ShortcutUpdateResult>

@@ -84,37 +84,14 @@ export default function QuickAddApp(): React.JSX.Element {
         }
 
         setReady(true)
+        // Signal to main process that theme is applied and window can be shown
+        window.api.quickadd.signalReady()
       } catch (err) {
         console.error('Quick-add init failed:', err)
       }
     }
     init()
   }, [])
-
-  // Focus input when window receives focus signal
-  useEffect(() => {
-    const unsub = window.api.quickadd.onFocus(() => {
-      smart.reset()
-      inputRef.current?.focus()
-      if (!userId) return
-      // Re-fetch projects and settings on every focus so the list is always fresh
-      Promise.all([
-        window.api.settings.getAll(),
-        window.api.projects.getProjectsForUser(userId)
-      ]).then(([allSettings, freshProjects]) => {
-        const map: Record<string, string | null> = {}
-        for (const s of allSettings) map[s.key] = s.value
-        setNewTaskPosition(map['new_task_position'] ?? 'top')
-        setAddToMyDay((map['quickadd_default_myday'] ?? 'true') === 'true')
-        setDateFormat(map['date_format'] ?? 'dd/mm/yyyy')
-        setProjects(freshProjects)
-        const quickAddProject = map['quickadd_default_project']
-        const defaultProj = freshProjects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? freshProjects[0]
-        if (defaultProj) setSelectedProjectId(defaultProj.id)
-      }).catch(() => {})
-    })
-    return unsub
-  }, [smart, userId])
 
   // Auto-focus when ready
   useEffect(() => {
