@@ -163,14 +163,16 @@ interface SnoozeSubmenuProps {
 }
 
 export function SnoozeSubmenu({ openLeft, currentDueDate, onSnooze }: SnoozeSubmenuProps): React.JSX.Element {
-  const [showPicker, setShowPicker] = useState(false)
+  const [showTimePicker, setShowTimePicker] = useState(false)
   const presets = getSnoozePresets(currentDueDate)
 
-  const handlePickDate = useCallback(
+  const handleLaterTodayTime = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.value) {
-        onSnooze(e.target.value)
-      }
+      if (!e.target.value) return
+      const [hh, mm] = e.target.value.split(':').map(Number)
+      const d = new Date()
+      d.setHours(hh, mm, 0, 0)
+      onSnooze(d.toISOString())
     },
     [onSnooze]
   )
@@ -178,37 +180,39 @@ export function SnoozeSubmenu({ openLeft, currentDueDate, onSnooze }: SnoozeSubm
   return (
     <SubmenuContainer openLeft={openLeft}>
       {presets.map((preset) => (
-        <button
-          key={preset.label}
-          onClick={() => onSnooze(preset.getDate())}
-          className="flex w-full items-center px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-        >
-          {preset.label}
-        </button>
+        preset.label === 'Later Today' ? (
+          <button
+            key={preset.label}
+            onClick={() => setShowTimePicker(!showTimePicker)}
+            className="flex w-full items-center px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+          >
+            {preset.label}
+          </button>
+        ) : (
+          <button
+            key={preset.label}
+            onClick={() => onSnooze(preset.getDate())}
+            className="flex w-full items-center px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+          >
+            {preset.label}
+          </button>
+        )
       ))}
-      <div className="my-1 border-t border-border" />
-      {showPicker ? (
+      {showTimePicker && (
         <div className="px-3 py-1.5">
           <input
-            type="date"
-            onChange={handlePickDate}
-            className="w-full bg-transparent text-sm font-light text-foreground focus:outline-none [&::-webkit-calendar-picker-indicator]:invert"
+            type="time"
+            onChange={handleLaterTodayTime}
+            className="w-full bg-transparent text-sm font-light text-foreground focus:outline-none"
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.stopPropagation()
-                setShowPicker(false)
+                setShowTimePicker(false)
               }
             }}
           />
         </div>
-      ) : (
-        <button
-          onClick={() => setShowPicker(true)}
-          className="flex w-full items-center px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-        >
-          Pick Date...
-        </button>
       )}
     </SubmenuContainer>
   )

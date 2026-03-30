@@ -12,6 +12,10 @@ export default defineConfig({
         input: {
           index: resolve('src/main/index.ts'),
           'mcp-server': resolve('src/main/mcp-server.ts')
+        },
+        output: {
+          // Stable chunk filenames so dev rebuilds don't invalidate the running MCP server's imports
+          chunkFileNames: 'chunks/[name].js'
         }
       }
     }

@@ -107,14 +107,17 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [myDayProjectIds, hydrateAllTaskLabels, hydrateStatuses, hydrateLabels])
 
   // My Day tasks — only top-level tasks (no subtasks), consistent with sidebar count
+  // Also include archived tasks completed today so My Day shows the full day's work
   const myDayTasks = useMemo(() => {
     const today = new Date().toISOString().split('T')[0]
     return Object.values(allTasks).filter(
       (t) =>
-        t.is_archived === 0 &&
         t.is_template === 0 &&
         t.parent_id === null &&
-        (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
+        (
+          (t.is_archived === 0 && (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))) ||
+          (t.is_archived === 1 && t.completed_date && t.completed_date.startsWith(today))
+        )
     )
   }, [allTasks])
 
@@ -336,6 +339,20 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         update.order_index = 0
       }
       await updateTask(taskId, update)
+      // Cascade status to all subtasks when marking done or resetting to default
+      if (newStatus?.is_done === 1 || newStatus?.is_default === 1) {
+        const allTasks = Object.values(useTaskStore.getState().tasks)
+        const cascade = async (parentId: string): Promise<void> => {
+          for (const t of allTasks.filter((t) => t.parent_id === parentId)) {
+            await updateTask(t.id, {
+              status_id: newStatusId,
+              completed_date: newStatus.is_done === 1 ? new Date().toISOString() : null
+            })
+            await cascade(t.id)
+          }
+        }
+        await cascade(taskId)
+      }
     },
     [allStatuses, updateTask, newTaskPosition]
   )

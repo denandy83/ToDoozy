@@ -209,6 +209,20 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         update.order_index = 0
       }
       await updateTask(taskId, update)
+      // Cascade status to all subtasks when marking done or resetting to default
+      if (newStatus?.is_done === 1 || newStatus?.is_default === 1) {
+        const allTasks = Object.values(useTaskStore.getState().tasks)
+        const cascade = async (parentId: string): Promise<void> => {
+          for (const t of allTasks.filter((t) => t.parent_id === parentId)) {
+            await updateTask(t.id, {
+              status_id: newStatusId,
+              completed_date: newStatus.is_done === 1 ? new Date().toISOString() : null
+            })
+            await cascade(t.id)
+          }
+        }
+        await cascade(taskId)
+      }
     },
     [statuses, updateTask, newTaskPosition]
   )

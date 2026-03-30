@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Trash2,
+  ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Archive, Trash2,
   CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer
 } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
@@ -12,6 +12,7 @@ import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
 import { useCreateOrMatchLabel } from '../hooks/useCreateOrMatchLabel'
 import { useToast } from './Toast'
+import { useViewStore } from '../stores/viewStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import {
   StatusSubmenu,
@@ -44,6 +45,8 @@ export function ContextMenu(): React.JSX.Element | null {
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
   const { updateTask, deleteTask, duplicateTask, saveTaskAsTemplate, setPendingSubtaskParent, setPendingDeleteTask } = useTaskStore()
   const { addToast } = useToast()
+  const currentView = useViewStore((s) => s.currentView)
+  const isMyDay = currentView === 'my-day'
 
   // Viewport clamp positioning — measure actual menu size after render
   useEffect(() => {
@@ -121,7 +124,23 @@ export function ContextMenu(): React.JSX.Element | null {
     const update: { status_id: string; completed_date?: string | null } = { status_id: statusId }
     if (st?.is_done === 1) update.completed_date = new Date().toISOString()
     else update.completed_date = null
-    handleAction(() => updateTask(task.id, update))
+    handleAction(async () => {
+      await updateTask(task.id, update)
+      // Cascade status to all subtasks when marking done or resetting to default
+      if (st?.is_done === 1 || st?.is_default === 1) {
+        const allTasks = Object.values(useTaskStore.getState().tasks)
+        const cascade = async (parentId: string): Promise<void> => {
+          for (const t of allTasks.filter((t) => t.parent_id === parentId)) {
+            await updateTask(t.id, {
+              status_id: statusId,
+              completed_date: st.is_done === 1 ? new Date().toISOString() : null
+            })
+            await cascade(t.id)
+          }
+        }
+        await cascade(task.id)
+      }
+    })
   }
 
   const handleDelete = (e: React.MouseEvent): void => {
@@ -245,6 +264,15 @@ export function ContextMenu(): React.JSX.Element | null {
         }}
       />
       <Divider />
+
+      {/* Archive — not shown in My Day */}
+      {!isMyDay && (
+        <MenuItem
+          icon={<Archive size={14} />}
+          label="Archive"
+          onClick={() => handleAction(() => updateTask(task.id, { is_archived: 1 }))}
+        />
+      )}
 
       {/* Delete */}
       <button

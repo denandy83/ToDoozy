@@ -381,8 +381,15 @@ function DetailPanelContent({
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex h-[36px] items-center justify-between border-b border-border px-4">
-        <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+        <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           {isTemplate ? 'Template' : 'Task Details'}
+          <button
+            onClick={() => navigator.clipboard.writeText(task.id)}
+            className="font-mono text-[8px] tracking-normal text-muted/30 transition-colors hover:text-muted/60"
+            title={`Copy ID: ${task.id}`}
+          >
+            #{task.id.slice(0, 6)}
+          </button>
         </span>
         <div className="flex items-center gap-3">
           {project && !isTemplate && (
@@ -487,7 +494,10 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     ) : null,
     !isTemplate && task.completed_date ? (
       <Section key="completed" label="Completed">
-        <span className="text-sm font-light text-success">{formatDate(task.completed_date)}</span>
+        <span className="text-sm font-light text-success">
+          {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
+          {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
+        </span>
       </Section>
     ) : null,
     <Section key="recurrence" label="Recurrence" fieldIndex={5}>
@@ -499,7 +509,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       </Section>
     ) : null,
     <div key="subtasks" data-detail-field="7"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
-    <div key="desc" data-detail-field="8"><DetailDescription description={task.description} taskId={task.id} onDescriptionChange={props.onDescriptionChange} /></div>,
+    <div key="desc" data-detail-field="8"><DetailDescription description={task.description} taskId={task.id} updatedAt={task.updated_at} onDescriptionChange={props.onDescriptionChange} /></div>,
     !isTemplate ? <div key="attachments" data-detail-field="9"><DetailAttachments taskId={task.id} /></div> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]

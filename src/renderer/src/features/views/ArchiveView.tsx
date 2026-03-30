@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { Task, Project } from '../../../../shared/types'
-import { ChevronRight, Trash2 } from 'lucide-react'
+import { ChevronRight, Trash2, CheckCircle2 } from 'lucide-react'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
@@ -280,8 +280,10 @@ export function ArchiveView(): React.JSX.Element {
                     {task.title}
                   </span>
                   {task.completed_date && (
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                      {formatDate(task.completed_date)}
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-success/40">
+                      <CheckCircle2 size={10} />
+                      {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
+                      {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
                     </span>
                   )}
                   <button

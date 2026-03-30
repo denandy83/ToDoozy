@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus, Sun, Calendar } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2 } from 'lucide-react'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { useSortable } from '@dnd-kit/sortable'
 import { StatusButton } from '../../shared/components/StatusButton'
@@ -369,7 +369,10 @@ export function TaskRow({
             <StatusLabel statusId={task.status_id} />
           </>
         ) : (
-          <MyDayIndicator visible={task.is_in_my_day === 1} />
+          <MyDayIndicator
+            visible={task.is_in_my_day === 1}
+            onToggle={() => useTaskStore.getState().updateTask(task.id, { is_in_my_day: task.is_in_my_day === 1 ? 0 : 1 })}
+          />
         )}
 
         <StatusButton
@@ -415,6 +418,15 @@ export function TaskRow({
           }`}>
             <Calendar size={10} />
             {formatDate(task.due_date, undefined, { omitCurrentYear: true })}
+          </span>
+        )}
+
+        {/* Completed time — shown on done tasks instead of due date */}
+        {isDone && task.completed_date && (
+          <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-success/40">
+            <CheckCircle2 size={10} />
+            {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
+            {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
           </span>
         )}
 
@@ -721,14 +733,18 @@ function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element 
   )
 }
 
-function MyDayIndicator({ visible }: { visible: boolean }): React.JSX.Element {
+function MyDayIndicator({ visible, onToggle }: { visible: boolean; onToggle?: () => void }): React.JSX.Element {
   return (
-    <div
-      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${visible ? 'bg-accent/15' : ''}`}
-      title={visible ? 'In My Day' : undefined}
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggle?.() }}
+      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+        visible ? 'bg-accent/15 hover:bg-accent/25' : 'opacity-0 group-hover:opacity-100 hover:bg-accent/10'
+      }`}
+      title={visible ? 'Remove from My Day' : 'Add to My Day'}
+      aria-label={visible ? 'Remove from My Day' : 'Add to My Day'}
     >
-      {visible && <Sun size={10} className="text-accent" />}
-    </div>
+      <Sun size={10} className={visible ? 'text-accent' : 'text-accent/60'} />
+    </button>
   )
 }
 

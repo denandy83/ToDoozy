@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, CircleDot, Signal, Tag, Clock, Clipboard, Trash2
+  ChevronRight, Sun, CircleDot, Signal, Tag, Clock, Clipboard, Archive, Trash2
 } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useFocusRestore } from '../hooks/useFocusRestore'
@@ -18,6 +18,7 @@ import {
   SnoozeSubmenu
 } from './ContextMenuSubmenus'
 import { useToast } from './Toast'
+import { useViewStore } from '../stores/viewStore'
 
 type SubmenuId = 'status' | 'priority' | 'labels' | 'snooze' | null
 
@@ -35,6 +36,8 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const tasks = useTaskStore((s) => s.tasks)
   const { bulkUpdateTasks, setPendingBulkDeleteTasks, deleteTask, clearSelection } = useTaskStore()
   const { addToast } = useToast()
+  const currentView = useViewStore((s) => s.currentView)
+  const isMyDay = currentView === 'my-day'
   const firstTask = bulkTaskIds.length > 0 ? tasks[bulkTaskIds[0]] : null
   const projectId = firstTask?.project_id ?? ''
   const statuses = useStatusesByProject(projectId)
@@ -191,6 +194,15 @@ export function BulkContextMenu(): React.JSX.Element | null {
         }}
       />
       <Divider />
+
+      {/* Archive — not shown in My Day */}
+      {!isMyDay && (
+        <MenuItem
+          icon={<Archive size={14} />}
+          label="Archive"
+          onClick={() => handleAction(() => bulkUpdateTasks(bulkTaskIds, { is_archived: 1 }))}
+        />
+      )}
 
       {/* Delete */}
       <button

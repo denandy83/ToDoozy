@@ -134,12 +134,14 @@ export function LabelPicker({
         if (highlightedIndex < filteredLabels.length) {
           onToggleLabel(filteredLabels[highlightedIndex].id)
           setSearchQuery('')
+          requestAnimationFrame(() => searchInputRef.current?.focus())
         } else if (highlightedIndex < filteredLabels.length + filteredGlobalLabels.length) {
           // Global label selected — add to project then toggle
           const globalLabel = filteredGlobalLabels[highlightedIndex - filteredLabels.length]
           if (globalLabel) {
             handleAddGlobalLabel(globalLabel.id)
             setSearchQuery('')
+            requestAnimationFrame(() => searchInputRef.current?.focus())
           }
         } else {
           // "New label" is selected
@@ -209,7 +211,7 @@ export function LabelPicker({
                 <button
                   key={label.id}
                   data-label-index={index}
-                  onClick={() => onToggleLabel(label.id)}
+                  onClick={() => { onToggleLabel(label.id); setSearchQuery(''); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
                   className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${index === highlightedIndex ? 'bg-foreground/6' : ''}`}
                 >
                   <span

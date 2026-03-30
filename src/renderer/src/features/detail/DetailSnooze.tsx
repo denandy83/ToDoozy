@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { Bell } from 'lucide-react'
 import { getSnoozePresets } from '../../shared/utils/snooze'
-import { pushPopup } from '../../shared/utils/popupStack'
 
 interface DetailSnoozeProps {
   currentDueDate?: string | null
@@ -9,24 +8,7 @@ interface DetailSnoozeProps {
 }
 
 export function DetailSnooze({ currentDueDate, onSnooze }: DetailSnoozeProps): React.JSX.Element {
-  const [showDatePicker, setShowDatePicker] = useState(false)
   const presets = getSnoozePresets(currentDueDate)
-
-  // Register the date input with the popup stack so global Escape closes it first
-  useEffect(() => {
-    if (!showDatePicker) return
-    return pushPopup(() => setShowDatePicker(false))
-  }, [showDatePicker])
-
-  const handlePickDate = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.value) {
-        onSnooze(e.target.value)
-        setShowDatePicker(false)
-      }
-    },
-    [onSnooze]
-  )
 
   // Arrow keys move focus between buttons
   const handleContainerKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -65,21 +47,6 @@ export function DetailSnooze({ currentDueDate, onSnooze }: DetailSnoozeProps): R
           {preset.label}
         </button>
       ))}
-      {showDatePicker ? (
-        <input
-          type="date"
-          onChange={handlePickDate}
-          className="bg-transparent text-sm font-light text-foreground focus:outline-none [&::-webkit-calendar-picker-indicator]:invert"
-          autoFocus
-        />
-      ) : (
-        <button
-          onClick={() => setShowDatePicker(true)}
-          className="rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-        >
-          Pick Date...
-        </button>
-      )}
     </div>
   )
 }

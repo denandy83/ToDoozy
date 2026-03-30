@@ -245,6 +245,20 @@ export function AppLayout(): React.JSX.Element {
         update.order_index = 0
       }
       await updateTask(taskId, update)
+      // Cascade status to all subtasks when marking done or resetting to default
+      if (newStatus?.is_done === 1 || newStatus?.is_default === 1) {
+        const allTasks = Object.values(useTaskStore.getState().tasks)
+        const cascade = async (parentId: string): Promise<void> => {
+          for (const t of allTasks.filter((t) => t.parent_id === parentId)) {
+            await updateTask(t.id, {
+              status_id: newStatusId,
+              completed_date: newStatus.is_done === 1 ? new Date().toISOString() : null
+            })
+            await cascade(t.id)
+          }
+        }
+        await cascade(taskId)
+      }
     },
     [tasks, statuses, updateTask]
   )
@@ -345,9 +359,11 @@ export function AppLayout(): React.JSX.Element {
 
   // View task counts
   const projectTemplates = useTemplateStore(selectAllProjectTemplates)
+  const allStatusMap = useStatusStore((s) => s.statuses)
   const viewCounts = useMemo(() => {
     const taskList = Object.values(allTasks)
     const today = new Date().toISOString().split('T')[0]
+    const isDone = (t: Task): boolean => allStatusMap[t.status_id]?.is_done === 1
     const taskTemplateCount = taskList.filter((t) => t.is_template === 1 && t.parent_id === null).length
     return {
       'my-day': taskList.filter(
@@ -355,16 +371,18 @@ export function AppLayout(): React.JSX.Element {
           t.is_archived === 0 &&
           t.is_template === 0 &&
           t.parent_id === null &&
+          !isDone(t) &&
           (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
       ).length,
       archive: taskList.filter((t) => t.is_archived === 1 && t.parent_id === null).length,
       templates: taskTemplateCount + projectTemplates.length
     }
-  }, [allTasks, projectTemplates])
+  }, [allTasks, projectTemplates, allStatusMap])
 
-  // Per-project task counts
+  // Per-project task counts (exclude done tasks)
   const projectCounts = useMemo(() => {
     const taskList = Object.values(allTasks)
+    const isDone = (t: Task): boolean => allStatusMap[t.status_id]?.is_done === 1
     const counts: Record<string, number> = {}
     for (const project of allProjects) {
       counts[project.id] = taskList.filter(
@@ -372,11 +390,12 @@ export function AppLayout(): React.JSX.Element {
           t.project_id === project.id &&
           t.is_archived === 0 &&
           t.is_template === 0 &&
-          t.parent_id === null
+          t.parent_id === null &&
+          !isDone(t)
       ).length
     }
     return counts
-  }, [allTasks, allProjects])
+  }, [allTasks, allProjects, allStatusMap])
 
   const handleOpenHelp = useCallback(() => {
     setHelpOpen(true)

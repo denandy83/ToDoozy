@@ -1,5 +1,6 @@
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
+import { execSync } from 'child_process'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
 import { getDatabase } from './database'
@@ -614,6 +615,16 @@ export function registerIpcHandlers(): void {
     return {
       serverPath: actualPath,
       configJson: JSON.stringify(config, null, 2)
+    }
+  })
+
+  ipcMain.handle('mcp:isRunning', (): { running: boolean; instanceCount: number } => {
+    try {
+      const result = execSync('ps aux | grep "mcp-server.js" | grep -v grep', { encoding: 'utf8' })
+      const lines = result.trim().split('\n').filter(Boolean)
+      return { running: lines.length > 0, instanceCount: lines.length }
+    } catch {
+      return { running: false, instanceCount: 0 }
     }
   })
 

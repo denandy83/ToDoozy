@@ -160,7 +160,8 @@ const api: TodoozyAPI = {
   },
 
   mcp: {
-    getInfo: () => ipcRenderer.invoke('mcp:getInfo')
+    getInfo: () => ipcRenderer.invoke('mcp:getInfo'),
+    isRunning: () => ipcRenderer.invoke('mcp:isRunning')
   },
 
   timer: {

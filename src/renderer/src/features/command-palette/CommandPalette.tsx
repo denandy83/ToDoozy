@@ -54,6 +54,10 @@ export function CommandPalette(): React.JSX.Element | null {
         // Select and open the task
         selectTask(taskId)
         setCurrentTask(taskId)
+        // Scroll the task row into view after the view renders
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)?.scrollIntoView({ block: 'nearest' })
+        })
       }
       close()
     },

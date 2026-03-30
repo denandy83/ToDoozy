@@ -187,6 +187,7 @@ export interface AppToggleAPI {
 
 export interface McpAPI {
   getInfo(): Promise<{ serverPath: string; configJson: string }>
+  isRunning(): Promise<{ running: boolean; instanceCount: number }>
 }
 
 export interface TimerTrayState {
