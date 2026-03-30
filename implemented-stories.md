@@ -238,3 +238,30 @@
 - **Acceptance Criteria:** Labels exist as global entities with unique names per user, project_labels junction table links labels to projects, Label picker only shows labels added to current project, Creating a label that matches an existing global label silently adds it with toast, Label settings shows all labels with project/task usage counts, Editing a label name or color applies globally, Delete shows projects where used with per-project remove and global delete options, All destructive actions are red with undo toast, Migration merges duplicate names (oldest wins), Filter by label shows only labels assigned to active tasks.
 - **Passes:** true
 - **Implemented:** 2026-03-25
+
+---
+
+### #31 — Fix Tab Order and Focus Management
+- **Description:** Fixed tab order, added focus trapping to overlays, and ensured focus restoration when overlays close. Shared useFocusTrap and useFocusRestore hooks applied to all overlay components.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** First tab stop is first task, Tab/Shift+Tab cycles tasks, Enter opens detail with title focus, Tab cycles detail fields, Escape closes panel and restores focus, Sidebar not in tab order, All overlays trap focus, Focus restored on overlay close, Interactive elements focusable, Consistent focus-visible ring.
+- **Passes:** true
+- **Implemented:** 2026-03-30
+
+---
+
+### #32 — iCloud Drive File Attachments
+- **Description:** File attachments stored locally and synced to iCloud Drive. Tiptap toolbar attachment button, file picker, attachment cards with open/remove actions.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Settings iCloud link/unlink toggle, Tiptap toolbar attachment button, File picker saves locally + to iCloud, Attachment cards with filename/icon/remove, Click opens file, Keyboard accessible, Works offline.
+- **Passes:** true
+- **Implemented:** 2026-03-30
+
+---
+
+### #33 — In-App Help & Keyboard Shortcuts
+- **Description:** Help modal with keyboard shortcuts reference and help tab in settings with full documentation.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** ? button in sidebar opens help modal, Shortcuts shown in 4 sections, Help tab in Settings with full docs, ? keyboard shortcut opens modal, Escape closes modal.
+- **Passes:** true
+- **Implemented:** 2026-03-30
