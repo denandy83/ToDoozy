@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2 } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2, ExternalLink } from 'lucide-react'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { useSortable } from '@dnd-kit/sortable'
 import { StatusButton } from '../../shared/components/StatusButton'
@@ -409,6 +409,23 @@ export function TaskRow({
         {/* Subtask count badge + progress */}
         {hasChildren && (
           <SubtaskBadge done={childCount.done} total={childCount.total} />
+        )}
+
+        {/* Reference URL */}
+        {task.reference_url && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              const url = task.reference_url!
+              const href = url.match(/^https?:\/\//) ? url : `https://${url}`
+              window.open(href, '_blank')
+            }}
+            className="flex-shrink-0 rounded p-0.5 text-accent/40 transition-colors hover:bg-accent/10 hover:text-accent"
+            title={task.reference_url}
+            aria-label="Open reference URL"
+          >
+            <ExternalLink size={10} />
+          </button>
         )}
 
         {/* Due date */}
