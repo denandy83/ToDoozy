@@ -4,6 +4,16 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-30 — Due Date Notifications (Story #37) + Calendar View Fixes
+
+**Session type:** Feature implementation + bug fixes
+
+**What was built:** Native macOS due date notifications (Story #37) that fire 15 minutes before a task's due time. Also fixed notification timezone bug, calendar view polish (tooltips, week numbers, My Day tasks, status sorting, drag support), and osascript dev fallback.
+
+**Commits:** d3edc4b, 3ff0855, 72d0cbb
+
+---
+
 ## 2026-03-30 — Template Wizard Due Date Offsets (Story #36)
 
 **Session type:** Feature implementation

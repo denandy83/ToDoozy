@@ -1,44 +1,26 @@
 # Ralph Progress Log
-Started: Mon Mar 30 13:34:21 CEST 2026
+Started: Mon Mar 30 22:22:55 CEST 2026
 ---
 
-## Story #35 — Calendar View (2026-03-30)
-- Implemented full Calendar View with monthly grid and weekly layout
-- Added 'calendar' to ViewId type and VIEW_ORDER in viewStore.ts
-- Calendar accessible from sidebar (⌘2), bumped Projects to ⌘3, Archive to ⌘4, Templates to ⌘5
-- Monthly view: 7-column Mon-Sun grid with day cells, padding days from adjacent months
-- Weekly view: 7 columns with more vertical space per day, scrollable
-- Month/Week toggle persisted via settings store (key: 'calendar_layout')
-- Tasks show project color dot + title, done tasks have strikethrough, overdue tasks show in red
-- Click task → select + open detail panel, right-click → context menu
-- Drag task between day cells → updates due_date (via new onCalendarDayDrop in useDragAndDrop)
-- Left/right arrow keys navigate between months/weeks
-- Today highlighted with accent color circle
-- Empty state when no tasks have due dates
-- Cross-project: shows ALL non-archived, non-template tasks with due_date
-- Extracted pure utility functions (toYMD, startOfWeek, getMonthDays, getWeekDays, getCalendarTitle) for testability
-- 24 new Vitest tests for calendar utilities, all passing (276 total)
-- Zero typecheck errors
+## Story #38 — Smart Recurrence Picker
+**Status:** passes=true, tested=true
 
-## 2026-03-30 — Story #36: Template Wizard — Relative Due Date Offsets
-- Added `due_date_offset: number | null` to `ProjectTemplateTask` type
-- `buildTaskTree` in AppLayout.tsx now computes offset = (task due_date - today) in days
-- Save wizard: shows "Due Dates" step when tasks have due dates, with toggle to include/exclude offsets
-- Deploy wizard: shows "Due Dates" step when template has offsets, with date picker and computed date preview
-- `createTaskTree` applies `due_date = deployDate + offset` when deploying
-- Extracted pure utility functions to `dueDateOffsets.ts` with 24 unit tests
-- Backward compatible: existing templates without `due_date_offset` treated as null
+**What was built:**
+- Shared recurrence utility (src/shared/recurrenceUtils.ts) with parse, serialize, describe, getNextOccurrence, isValidRecurrence
+- RecurrenceConfig type in shared/types.ts
+- Migration_10 to clear all old-format recurrence_rule values
+- Structured recurrence picker UI replacing free-text input: preset buttons (None/Daily/Weekly/Monthly), expandable picker with interval/unit/weekday toggles/month options/year options, Fixed/After completion toggle, end date with DatePicker, live preview with next occurrence
+- completeRecurringTask in TaskRepository: clones task with next due date, copies labels and subtasks, resets statuses
+- IPC handler + preload bridge for task:complete-recurring
+- Task store detects done-status on recurring tasks and auto-clones, stores lastRecurringClone for toast
+- AppLayout watches lastRecurringClone and shows toast with "Go to task" action
+- TaskRow shows Repeat icon with tooltip for recurring tasks
+- Context menu uses new canonical format; "Custom..." opens detail panel
+- Auto-sets due_date to today when recurrence applied to task without due date
+- MCP server tool description updated with canonical format documentation
+- 46 tests covering all recurrence utility functions
 
-## 2026-03-30 — Story #37: Due Date Notifications
-- Created `src/main/notifications.ts` — main process notification service using Electron's Notification API
-- Polls every 60 seconds for tasks with upcoming due times (containing 'T' in due_date)
-- Configurable lead time: 5, 15, 30, or 60 minutes before due (default: 15 min)
-- Always fires a 1-minute-before notification as well
-- Duplicate prevention via in-memory Set tracking taskId:leadKey combos
-- Click notification → brings app to front, navigates to task's project, selects task, opens detail panel
-- Settings: Notifications tab in Settings modal with enable/disable toggle and lead time dropdown
-- Added `findWithUpcomingDueTimes(minutesAhead)` to TaskRepository — filters by time-containing due_date, excludes archived/template/done tasks
-- Preload bridge: `notifications.onNavigateToTask` event listener for click-to-navigate
-- AppLayout: listens for notification navigation events and navigates to project + selects task
-- 6 new Vitest tests for findWithUpcomingDueTimes, all passing (307 total)
-- Zero typecheck errors
+**Decisions:**
+- Used store field `lastRecurringClone` + AppLayout useEffect for toast instead of trying to call useToast from the store
+- "Custom..." in context menu opens the detail panel by selecting the task (simplest approach; focusing field index 6 would require more plumbing)
+- Kept weekday order as Mon-Sun in the picker (standard European order) but sun is still index 0 in WEEK_DAYS array for compatibility

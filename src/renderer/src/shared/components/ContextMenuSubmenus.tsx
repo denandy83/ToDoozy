@@ -85,25 +85,28 @@ export function PrioritySubmenu({ task, openLeft, onPriorityChange }: PrioritySu
 
 // --- Recurrence Flyout ---
 
-const RECURRENCE_OPTIONS = [
-  { value: null, label: 'None' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'every:3', label: 'Every 3 Days' },
-  { value: 'every:14', label: 'Every 14 Days' }
-] as const
+import { getTodayWeekDay, getTodayDate } from '../../../../shared/recurrenceUtils'
 
 interface RecurrenceSubmenuProps {
   task: Task
   openLeft: boolean
   onRecurrenceChange: (rule: string | null) => void
+  onCustom?: () => void
 }
 
-export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange }: RecurrenceSubmenuProps): React.JSX.Element {
+export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange, onCustom }: RecurrenceSubmenuProps): React.JSX.Element {
+  const todayDay = getTodayWeekDay()
+  const todayDate = getTodayDate()
+  const options: Array<{ value: string | null; label: string }> = [
+    { value: null, label: 'None' },
+    { value: 'every:1:days', label: 'Daily' },
+    { value: `every:1:weeks:${todayDay}`, label: 'Weekly' },
+    { value: `every:1:months:${todayDate}`, label: 'Monthly' }
+  ]
+
   return (
     <SubmenuContainer openLeft={openLeft}>
-      {RECURRENCE_OPTIONS.map((opt) => (
+      {options.map((opt) => (
         <button
           key={opt.label}
           onClick={() => onRecurrenceChange(opt.value)}
@@ -113,6 +116,13 @@ export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange }: Recurr
           {task.recurrence_rule === opt.value && <Check size={14} className="text-accent" />}
         </button>
       ))}
+      <div className="mx-2 my-1 border-t border-border" />
+      <button
+        onClick={onCustom}
+        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+      >
+        Custom…
+      </button>
     </SubmenuContainer>
   )
 }

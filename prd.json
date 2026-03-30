@@ -33,8 +33,8 @@
         "All keyboard navigation works: Tab between controls, arrows within, Space to toggle, Escape to collapse",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     }
   ]
 }

@@ -42,7 +42,3 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
-
-## 2026-03-30 — Session end (git fallback)
-<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
-- d3edc4b feat: implement due date notifications with native macOS alerts (#37) (2026-03-30) — files: 17

@@ -211,6 +211,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.saveAsTemplate(id, newId) ?? null
   })
 
+  ipcMain.handle('tasks:completeRecurring', (_e, taskId: string) => {
+    return getRepos().tasks.completeRecurringTask(taskId)
+  })
+
   // ── Labels ─────────────────────────────────────────────────────────
   ipcMain.handle('labels:findById', (_e, id: string) => {
     return getRepos().labels.findById(id) ?? null

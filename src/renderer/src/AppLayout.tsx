@@ -152,6 +152,30 @@ export function AppLayout(): React.JSX.Element {
   const setSidebarExpanded = useViewStore((s) => s.setSidebarExpanded)
   const sidebarExpanded = useViewStore((s) => s.sidebarExpanded)
   const { addToast } = useToast()
+  const lastRecurringClone = useTaskStore((s) => s.lastRecurringClone)
+
+  // Show toast when a recurring task clone is created
+  useEffect(() => {
+    if (!lastRecurringClone) return
+    const { taskId, dueDate, projectId: cloneProjectId } = lastRecurringClone
+    addToast({
+      message: `Recurring task created → due ${dueDate}`,
+      action: {
+        label: 'Go to task',
+        onClick: () => {
+          // Navigate to the cloned task
+          if (cloneProjectId !== selectedProject?.id) {
+            const proj = sortedProjects.find((p) => p.id === cloneProjectId)
+            if (proj) {
+              useViewStore.getState().setSelectedProject(proj.id)
+            }
+          }
+          useTaskStore.getState().selectTask(taskId)
+        }
+      }
+    })
+    useTaskStore.getState().clearLastRecurringClone()
+  }, [lastRecurringClone, addToast, selectedProject?.id, sortedProjects, rawSetView])
 
   const projectId = selectedProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)

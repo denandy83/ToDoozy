@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database'
+import { parseRecurrence, getNextOccurrence } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {
   project_id?: string
@@ -394,5 +395,98 @@ export class TaskRepository {
     }
 
     return newTask
+  }
+
+  completeRecurringTask(taskId: string): { id: string; dueDate: string } | null {
+    const task = this.findById(taskId)
+    if (!task || !task.recurrence_rule) return null
+
+    const config = parseRecurrence(task.recurrence_rule)
+    if (!config) return null
+
+    // Compute next due date
+    const fromDate = config.afterCompletion
+      ? new Date()
+      : task.due_date
+        ? new Date(task.due_date)
+        : new Date()
+
+    const nextDate = getNextOccurrence(task.recurrence_rule, fromDate)
+    if (!nextDate) return null // end date passed
+
+    const nextDueDate = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`
+
+    return withTransaction(this.db, () => {
+      // Find the project's default status
+      const defaultStatus = this.db
+        .prepare(
+          `SELECT id FROM statuses WHERE project_id = ? AND is_done = 0
+           ORDER BY is_default DESC, order_index ASC LIMIT 1`
+        )
+        .get(task.project_id) as { id: string } | undefined
+
+      const statusId = defaultStatus?.id ?? task.status_id
+
+      const newId = randomUUID()
+      const clonedTask = this.create({
+        id: newId,
+        project_id: task.project_id,
+        owner_id: task.owner_id,
+        title: task.title,
+        status_id: statusId,
+        assigned_to: task.assigned_to,
+        description: task.description,
+        priority: task.priority,
+        due_date: nextDueDate,
+        parent_id: task.parent_id,
+        order_index: task.order_index,
+        recurrence_rule: task.recurrence_rule,
+        reference_url: task.reference_url
+      })
+
+      // Copy labels
+      const labels = this.getLabels(taskId)
+      for (const label of labels) {
+        this.addLabel(clonedTask.id, label.label_id)
+      }
+
+      // Copy subtasks with reset status
+      this.copySubtasksForRecurrence(taskId, clonedTask.id, task.project_id, statusId)
+
+      return { id: clonedTask.id, dueDate: nextDueDate }
+    })
+  }
+
+  private copySubtasksForRecurrence(
+    originalParentId: string,
+    newParentId: string,
+    projectId: string,
+    defaultStatusId: string
+  ): void {
+    const subtasks = this.findSubtasks(originalParentId)
+    for (const subtask of subtasks) {
+      const subtaskId = randomUUID()
+      this.create({
+        id: subtaskId,
+        project_id: projectId,
+        owner_id: subtask.owner_id,
+        title: subtask.title,
+        status_id: defaultStatusId,
+        description: subtask.description,
+        priority: subtask.priority,
+        parent_id: newParentId,
+        order_index: subtask.order_index,
+        is_in_my_day: 0,
+        is_archived: 0,
+        completed_date: null
+      })
+      // Copy subtask labels
+      const labels = this.getLabels(subtask.id)
+      for (const label of labels) {
+        this.addLabel(subtaskId, label.label_id)
+      }
+      // Recursive subtasks
+      this.copySubtasksForRecurrence(subtask.id, subtaskId, projectId, defaultStatusId)
+    }
   }
 }

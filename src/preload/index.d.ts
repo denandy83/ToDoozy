@@ -51,6 +51,7 @@ export interface TasksAPI {
   duplicate(id: string, newId: string): Promise<Task | null>
   findAllTemplates(): Promise<Task[]>
   saveAsTemplate(id: string, newId: string): Promise<Task | null>
+  completeRecurring(taskId: string): Promise<{ id: string; dueDate: string } | null>
 }
 
 export interface LabelsAPI {

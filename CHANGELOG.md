@@ -6,7 +6,12 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ## 2026-03-30
 
+### Fixed
+- **Notification timezone bug** — Fixed timezone handling in due date notifications so they fire at the correct local time. (3ff0855)
+- **Calendar view polish** — Fixed tooltips, week numbers, My Day tasks display, status sorting, and drag support in the calendar view. (72d0cbb)
+
 ### Added
+- **Due date notifications** — Native macOS notification alerts for tasks with due date+time. Notifications fire 15 minutes before due time. Clicking the notification navigates to the task. (d3edc4b)
 - **Task reference URL field** — Tasks now have a `reference_url` field displayed as a clickable link icon on task rows and an editable URL input in the detail panel. URLs auto-prefix `https://` if missing. Autosave with 1s debounce. X button to clear. (a404d09)
 - **Calendar View** — New cross-project Calendar view showing all tasks organized by due date. Supports monthly grid and weekly layout with a toggle. Navigate months/weeks with arrow buttons. Today highlighted with accent color. Overdue tasks in red. Click task to open detail panel. Drag tasks between days to update due dates. (4eedfbc)
 - **Template Wizard — Relative Due Date Offsets** — When saving a project as a template, the wizard now asks whether to include due dates as relative offsets (days from a reference date). When deploying the template, actual due dates are computed from a user-chosen deploy date. (2a84ede)
