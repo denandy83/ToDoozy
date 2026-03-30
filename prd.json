@@ -20,6 +20,68 @@
       "passes": true,
       "tested": true,
       "verified": false
+    },
+    {
+      "id": "35",
+      "title": "Calendar View",
+      "description": "A new cross-project Calendar view that shows all tasks organized by their due date. Accessible from the sidebar between My Day and Projects (\u23182). Supports both monthly grid and weekly layout with a toggle.\n\n**Sidebar & Navigation:**\n- Add 'Calendar' to sidebar after My Day with Calendar icon from lucide-react\n- Keyboard shortcut \u23182 \u2014 bump Projects to \u23183+, Archive to \u23184, Templates to \u23185\n- Add 'calendar' to ViewId type and VIEW_ORDER in viewStore.ts\n- Add conditional render in AppLayout.tsx\n\n**Monthly View:**\n- Classic 7-column grid (Mon\u2013Sun), each cell lists tasks due that day\n- Navigate months with left/right arrow buttons in the header\n- Today highlighted with accent color/border\n- Each task shows: colored project dot + title (truncated if long)\n- Done tasks show strikethrough + muted text\n- Overdue tasks (past due, not done) show in red\n\n**Weekly View:**\n- 7-day horizontal columns with more vertical space per day\n- Scrollable if many tasks\n- Navigate weeks with left/right arrow buttons\n- Same task display as monthly\n\n**Toggle:**\n- Month/Week toggle button in the header area\n- Persist the user's choice via settings store (key: 'calendar_layout')\n\n**Interactions:**\n- Click task \u2192 select it and open detail panel (same as project views)\n- Drag task between day cells \u2192 updates due_date to the target day\n- Right-click task \u2192 context menu (same as other views)\n\n**Scope:**\n- Cross-project: shows ALL non-archived, non-template tasks that have a due_date\n- Project color dot on each task for identification\n- Tasks without due_date do NOT appear\n\n**Empty States:**\n- Days with no tasks: empty cell\n- No tasks with due dates at all: centered empty state message\n\n**Files to create/modify:**\n- Create `src/renderer/src/features/views/CalendarView.tsx`\n- Modify `src/renderer/src/shared/stores/viewStore.ts` \u2014 add 'calendar' to ViewId and VIEW_ORDER\n- Modify `src/renderer/src/AppLayout.tsx` \u2014 add conditional render, view title, view counts\n- Modify `src/renderer/src/features/sidebar/Sidebar.tsx` \u2014 add Calendar nav item\n- Modify keyboard shortcut mappings for \u23182-5\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Calendar view accessible from sidebar with Calendar icon (\u23182)",
+        "Monthly grid shows tasks on their due date with project color indicators",
+        "Weekly view shows tasks in day columns with more vertical space",
+        "Toggle between month and week views persists across sessions",
+        "Click a task opens the detail panel",
+        "Drag a task between days updates its due_date",
+        "Left/right arrows navigate between months (monthly) or weeks (weekly)",
+        "Today is visually highlighted with accent color",
+        "Overdue tasks show in red",
+        "Tasks without due dates don't appear in the calendar",
+        "Empty state when no tasks have due dates",
+        "Works with existing detail panel, context menu, and keyboard shortcuts"
+      ],
+      "passes": false,
+      "tested": false,
+      "verified": false
+    },
+    {
+      "id": "36",
+      "title": "Template Wizard \u2014 Relative Due Date Offsets",
+      "description": "When saving a project as a template, the wizard asks whether to include due dates as relative offsets. When deploying, compute actual due dates from a deploy date.\n\n**Save flow:**\n- Add a 'duedates' wizard step (between tasks and review) \u2014 only shown if any tasks have a due_date\n- Step shows: \"Transfer due dates as relative offsets?\" toggle (default on)\n- Offset = Math.round((taskDueDate - today) / msPerDay)\n- If toggled off, all due_date_offset values are set to null\n\n**Deploy flow:**\n- Add a 'duedates' wizard step \u2014 only shown if any tasks have due_date_offset !== null\n- Step shows: deploy date picker (defaults to today) + preview list with computed dates\n- When creating tasks, set due_date = deployDate + due_date_offset days (ISO 8601)\n\n**Files to change:**\n- src/shared/types.ts \u2014 add due_date_offset: number | null to ProjectTemplateTask type\n- src/renderer/src/AppLayout.tsx \u2014 in buildTaskTree, compute due_date_offset from task.due_date\n- src/renderer/src/features/templates/DeployProjectTemplateWizard.tsx \u2014 add duedates step, StepDueDates component, apply offset in createTaskTree\n\n**Edge cases:**\n- Tasks with no due date \u2192 due_date_offset: null, skip in deploy\n- Negative offsets are valid (overdue relative to save date)\n- Subtasks carry offsets too\n- Existing templates without due_date_offset \u2192 treated as null (backward compat)\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Save wizard shows due dates step when tasks have due dates",
+        "Toggle controls whether offsets are included in the template",
+        "Deploy wizard shows due dates step when template has offsets",
+        "Deploy date picker defaults to today",
+        "Preview shows computed dates for each task",
+        "Created tasks get correct due_date based on deploy date + offset",
+        "Subtasks carry offsets too",
+        "Existing templates without offsets work normally (backward compat)",
+        "Tasks without due dates are skipped"
+      ],
+      "passes": false,
+      "tested": false,
+      "verified": false
+    },
+    {
+      "id": "37",
+      "title": "Due Date Notifications",
+      "description": "Native macOS notifications that fire when a task's due date+time approaches. Only tasks with a specific time (not date-only) trigger notifications.\n\n**Notification timing:**\n- Configurable lead time: 5, 15, 30, or 60 minutes before (default: 15 min)\n- Always fires at 1 minute before due (when notifications enabled)\n- Only tasks with due_date containing 'T' (time component) trigger notifications\n\n**Settings:**\n- New 'Notifications' section in Settings (General tab)\n- Enable/disable toggle (default: enabled)\n- Lead time dropdown: 5 min, 15 min, 30 min, 1 hour\n\n**Implementation:**\n- Uses Electron's Notification API for native macOS notifications\n- Title: task title, Body: 'Due in X minutes' or 'Due in 1 minute'\n- Main process checks every 60 seconds for upcoming due tasks\n- Track which notifications have been sent to avoid duplicates (Set of taskId+time combos)\n- Click notification \u2192 bring app to front, navigate to task's project, select task, open detail panel\n\n**Edge cases:**\n- Task completed before notification \u2192 skip\n- Task due_date changed \u2192 re-evaluate on next check cycle\n- Multiple tasks due at same time \u2192 one notification per task\n- Date-only tasks (no time component) \u2192 no notification\n- App not running \u2192 no notifications\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Native macOS notification fires at configurable lead time before due",
+        "Second notification fires at 1 minute before due",
+        "Only tasks with due_date+time (contains T) trigger notifications",
+        "Clicking notification focuses app, navigates to task project, opens detail panel",
+        "Settings toggle enables/disables notifications",
+        "Settings dropdown configures lead time (5/15/30/60 min)",
+        "Completed/archived/template tasks don't trigger notifications",
+        "No duplicate notifications for the same task+time"
+      ],
+      "passes": false,
+      "tested": false,
+      "verified": false
     }
   ]
 }
