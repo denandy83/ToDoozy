@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
-import { useDroppable } from '@dnd-kit/core'
+import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Sun } from 'lucide-react'
+import { useDroppable, useDraggable } from '@dnd-kit/core'
 import { useTaskStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
@@ -8,9 +9,27 @@ import { useLabelStore } from '../../shared/stores'
 import { useSettingsStore } from '../../shared/stores/settingsStore'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Project } from '../../../../shared/types'
-import { useCalendar, toYMD, type CalendarLayout } from './useCalendar'
+import { useCalendar, type CalendarLayout } from './useCalendar'
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function getISOWeekNumber(dateStr: string): number {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7))
+  const yearStart = new Date(d.getFullYear(), 0, 4)
+  return 1 + Math.round(((d.getTime() - yearStart.getTime()) / 86400000 - 3 + ((yearStart.getDay() + 6) % 7)) / 7)
+}
+
+function sortTasksByStatus(tasks: Task[], allStatuses: Record<string, { is_done?: number; is_default?: number }>): Task[] {
+  return [...tasks].sort((a, b) => {
+    const sa = allStatuses[a.status_id]
+    const sb = allStatuses[b.status_id]
+    const bucketA = sa?.is_default === 1 ? 0 : sa?.is_done === 1 ? 2 : 1
+    const bucketB = sb?.is_default === 1 ? 0 : sb?.is_done === 1 ? 2 : 1
+    if (bucketA !== bucketB) return bucketA - bucketB
+    return a.order_index - b.order_index
+  })
+}
 
 export function CalendarView(): React.JSX.Element {
   const calendarLayoutSetting = useSettingsStore((s) => s.settings['calendar_layout'] ?? 'month')
@@ -32,28 +51,51 @@ export function CalendarView(): React.JSX.Element {
     return map
   }, [allProjects])
 
-  // Get all tasks that have a due_date and are not archived/template
+  // Get all tasks that have a due_date OR are in My Day (not archived/template)
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
   const calendarTasks = useMemo(() => {
     return Object.values(allTasks).filter(
-      (t) => t.due_date && t.is_archived === 0 && t.is_template === 0 && t.parent_id === null
+      (t) => (t.due_date || t.is_in_my_day === 1) && t.is_archived === 0 && t.is_template === 0 && t.parent_id === null
     )
   }, [allTasks])
 
-  // Group tasks by date (YYYY-MM-DD)
+  // Group tasks by date — My Day tasks appear on today (with sun icon) AND on their due date
+  // Track which task+date combos are "My Day" entries
+  const myDayEntries = useMemo(() => new Set<string>(), [])
   const tasksByDate = useMemo(() => {
     const grouped: Record<string, Task[]> = {}
-    for (const task of calendarTasks) {
-      if (!task.due_date) continue
-      const dateKey = task.due_date.split('T')[0]
+    myDayEntries.clear()
+    const addToDate = (dateKey: string, task: Task, isMyDayEntry: boolean): void => {
       if (!grouped[dateKey]) grouped[dateKey] = []
-      grouped[dateKey].push(task)
+      // Avoid duplicates (same task on same date)
+      if (!grouped[dateKey].some((t) => t.id === task.id)) {
+        grouped[dateKey].push(task)
+        if (isMyDayEntry) myDayEntries.add(`${task.id}:${dateKey}`)
+      }
+    }
+    for (const task of calendarTasks) {
+      // Add to due date
+      if (task.due_date) {
+        addToDate(task.due_date.split('T')[0], task, false)
+      }
+      // Add My Day tasks to today (even if they also have a due date on another day)
+      if (task.is_in_my_day === 1) {
+        const dueDateStr = task.due_date ? task.due_date.split('T')[0] : null
+        if (dueDateStr !== todayStr) {
+          // Different day or no due date — show on today as My Day entry
+          addToDate(todayStr, task, true)
+        } else {
+          // Due today AND in My Day — mark the today entry as My Day
+          myDayEntries.add(`${task.id}:${todayStr}`)
+        }
+      }
     }
     // Sort tasks within each date by order_index
     for (const date of Object.keys(grouped)) {
       grouped[date].sort((a, b) => a.order_index - b.order_index)
     }
     return grouped
-  }, [calendarTasks])
+  }, [calendarTasks, todayStr, myDayEntries])
 
   // Hydrate labels and statuses for all projects that have calendar tasks
   const calendarProjectIds = useMemo(() => {
@@ -75,7 +117,6 @@ export function CalendarView(): React.JSX.Element {
     setSetting('calendar_layout', next)
   }, [layout, setSetting])
 
-  const todayStr = useMemo(() => toYMD(new Date()), [])
   const hasAnyTasks = calendarTasks.length > 0
 
   // Keyboard navigation
@@ -107,7 +148,7 @@ export function CalendarView(): React.JSX.Element {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Calendar header */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+      <div className="flex h-[36px] items-center gap-3 border-b border-border px-4">
         <button
           onClick={goPrev}
           className="rounded-md p-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
@@ -142,7 +183,8 @@ export function CalendarView(): React.JSX.Element {
       </div>
 
       {/* Weekday labels */}
-      <div className={`grid ${layout === 'month' ? 'grid-cols-7' : 'grid-cols-7'} border-b border-border`}>
+      <div className="grid" style={{ gridTemplateColumns: '2rem repeat(7, 1fr)' }}>
+        <div className="py-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-muted/40">Wk</div>
         {WEEKDAY_LABELS.map((label) => (
           <div
             key={label}
@@ -155,9 +197,9 @@ export function CalendarView(): React.JSX.Element {
 
       {/* Calendar grid */}
       {layout === 'month' ? (
-        <MonthGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} />
+        <MonthGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} />
       ) : (
-        <WeekGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} />
+        <WeekGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} />
       )}
     </div>
   )
@@ -170,27 +212,32 @@ interface GridProps {
   tasksByDate: Record<string, Task[]>
   projectMap: Record<string, Project>
   todayStr: string
-  allStatuses: Record<string, { is_done?: number }>
+  allStatuses: Record<string, { is_done?: number; is_default?: number }>
+  myDayEntries: Set<string>
 }
 
-function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses }: GridProps): React.JSX.Element {
+function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries }: GridProps): React.JSX.Element {
   const rows: Array<Array<typeof days[number]>> = []
   for (let i = 0; i < days.length; i += 7) {
     rows.push(days.slice(i, i + 7))
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
+    <div className="grid flex-1 overflow-hidden" style={{ gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))` }}>
       {rows.map((week, ri) => (
-        <div key={ri} className="grid min-h-[100px] flex-1 grid-cols-7 border-b border-border last:border-b-0">
+        <div key={ri} className="grid overflow-hidden border-b border-border last:border-b-0" style={{ gridTemplateColumns: '2rem repeat(7, 1fr)' }}>
+          <div className="flex items-start justify-center pt-2 text-[9px] font-bold text-muted/30">
+            {getISOWeekNumber(week[0].date)}
+          </div>
           {week.map((day) => (
             <DayCell
               key={day.date}
               day={day}
-              tasks={tasksByDate[day.date] ?? []}
+              tasks={sortTasksByStatus(tasksByDate[day.date] ?? [], allStatuses)}
               projectMap={projectMap}
               todayStr={todayStr}
               allStatuses={allStatuses}
+              myDayEntries={myDayEntries}
               compact
             />
           ))}
@@ -202,17 +249,21 @@ function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses }: Gri
 
 // --- Week Grid ---
 
-function WeekGrid({ days, tasksByDate, projectMap, todayStr, allStatuses }: GridProps): React.JSX.Element {
+function WeekGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries }: GridProps): React.JSX.Element {
   return (
-    <div className="grid flex-1 grid-cols-7 overflow-hidden">
+    <div className="grid flex-1 overflow-hidden" style={{ gridTemplateColumns: '2rem repeat(7, 1fr)' }}>
+      <div className="flex items-start justify-center pt-2 text-[9px] font-bold text-muted/30">
+        {days.length > 0 ? getISOWeekNumber(days[0].date) : ''}
+      </div>
       {days.map((day) => (
         <DayCell
           key={day.date}
           day={day}
-          tasks={tasksByDate[day.date] ?? []}
+          tasks={sortTasksByStatus(tasksByDate[day.date] ?? [], allStatuses)}
           projectMap={projectMap}
           todayStr={todayStr}
           allStatuses={allStatuses}
+          myDayEntries={myDayEntries}
           compact={false}
         />
       ))}
@@ -228,10 +279,11 @@ interface DayCellProps {
   projectMap: Record<string, Project>
   todayStr: string
   allStatuses: Record<string, { is_done?: number }>
+  myDayEntries: Set<string>
   compact: boolean
 }
 
-function DayCell({ day, tasks, projectMap, todayStr, allStatuses, compact }: DayCellProps): React.JSX.Element {
+function DayCell({ day, tasks, projectMap, todayStr, allStatuses, myDayEntries, compact }: DayCellProps): React.JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: `calendar-day-${day.date}`,
     data: { type: 'calendar-day', date: day.date }
@@ -242,7 +294,7 @@ function DayCell({ day, tasks, projectMap, todayStr, allStatuses, compact }: Day
   return (
     <div
       ref={setNodeRef}
-      className={`flex flex-col border-r border-border last:border-r-0 ${
+      className={`flex flex-col overflow-hidden border-r border-border last:border-r-0 ${
         !day.isCurrentMonth ? 'opacity-40' : ''
       } ${isOver ? 'bg-accent/8' : ''} ${compact ? 'p-1' : 'p-2'}`}
     >
@@ -260,7 +312,7 @@ function DayCell({ day, tasks, projectMap, todayStr, allStatuses, compact }: Day
       </div>
 
       {/* Tasks */}
-      <div className={`flex flex-col gap-0.5 ${compact ? '' : 'flex-1 overflow-y-auto'}`}>
+      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
         {tasks.map((task) => (
           <CalendarTaskItem
             key={task.id}
@@ -268,6 +320,7 @@ function DayCell({ day, tasks, projectMap, todayStr, allStatuses, compact }: Day
             project={projectMap[task.project_id]}
             isDone={allStatuses[task.status_id]?.is_done === 1}
             isOverdue={isOverdue && allStatuses[task.status_id]?.is_done !== 1}
+            isMyDay={myDayEntries.has(`${task.id}:${day.date}`)}
           />
         ))}
       </div>
@@ -282,9 +335,10 @@ interface CalendarTaskItemProps {
   project: Project | undefined
   isDone: boolean
   isOverdue: boolean
+  isMyDay?: boolean
 }
 
-function CalendarTaskItem({ task, project, isDone, isOverdue }: CalendarTaskItemProps): React.JSX.Element {
+function CalendarTaskItem({ task, project, isDone, isOverdue, isMyDay }: CalendarTaskItemProps): React.JSX.Element {
   const { selectTask } = useTaskStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const openContextMenu = useContextMenuStore((s) => s.open)
@@ -315,34 +369,104 @@ function CalendarTaskItem({ task, project, isDone, isOverdue }: CalendarTaskItem
   )
 
   return (
-    <button
+    <CalendarTaskButton
+      task={task}
+      project={project}
+      isSelected={isSelected}
+      isDone={isDone}
+      isOverdue={isOverdue}
+      isMyDay={isMyDay}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors ${
-        isSelected
-          ? 'bg-accent/12 ring-1 ring-accent/30'
-          : 'hover:bg-foreground/6'
-      }`}
-    >
-      {/* Project color dot */}
-      {project && (
-        <div
-          className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
-          style={{ backgroundColor: project.color }}
-        />
-      )}
-      {/* Task title */}
-      <span
-        className={`truncate text-[11px] ${
-          isDone
-            ? 'font-light text-muted line-through'
-            : isOverdue
-              ? 'font-light text-danger'
-              : 'font-light text-foreground'
+    />
+  )
+}
+
+function CalendarTaskButton({
+  task,
+  project,
+  isSelected,
+  isDone,
+  isOverdue,
+  isMyDay,
+  onClick,
+  onContextMenu
+}: {
+  task: Task
+  project: Project | undefined
+  isSelected: boolean
+  isDone: boolean
+  isOverdue: boolean
+  isMyDay?: boolean
+  onClick: (e: React.MouseEvent) => void
+  onContextMenu: (e: React.MouseEvent) => void
+}): React.JSX.Element {
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [hover, setHover] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
+
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id
+  })
+
+  const setRefs = useCallback((el: HTMLButtonElement | null) => {
+    (btnRef as React.MutableRefObject<HTMLButtonElement | null>).current = el
+    setNodeRef(el)
+  }, [setNodeRef])
+
+  const handleMouseEnter = useCallback(() => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    const vw = window.innerWidth
+    const x = rect.right + 8 + 200 < vw ? rect.right + 8 : rect.left - 208
+    setTooltipPos({ x: Math.max(4, x), y: rect.top })
+    setHover(true)
+  }, [])
+
+  return (
+    <>
+      <button
+        ref={setRefs}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setHover(false)}
+        {...attributes}
+        {...listeners}
+        className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors ${
+          isDragging ? 'opacity-40' :
+          isSelected
+            ? 'bg-accent/12 ring-1 ring-accent/30'
+            : 'hover:bg-foreground/6'
         }`}
       >
-        {task.title}
-      </span>
-    </button>
+        {project && (
+          <div
+            className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
+            style={{ backgroundColor: project.color }}
+          />
+        )}
+        <span
+          className={`truncate text-[11px] ${
+            isDone
+              ? 'font-light text-muted line-through'
+              : isOverdue
+                ? 'font-light text-danger'
+                : 'font-light text-foreground'
+          }`}
+        >
+          {task.title}
+        </span>
+      </button>
+      {hover && createPortal(
+        <div
+          className="pointer-events-none fixed z-[10000] max-w-xs whitespace-normal rounded bg-surface px-2 py-1 text-[10px] font-light text-foreground shadow-md ring-1 ring-border"
+          style={{ left: tooltipPos.x, top: tooltipPos.y }}
+        >
+          {task.title}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
