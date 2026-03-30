@@ -4,6 +4,11 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## 2026-03-30
+
+### Added
+- **Task reference URL field** — Tasks now have a `reference_url` field displayed as a clickable link icon on task rows and an editable URL input in the detail panel. URLs auto-prefix `https://` if missing. Autosave with 1s debounce. X button to clear. (a404d09)
+
 ## 2026-03-29
 
 ### Fixed

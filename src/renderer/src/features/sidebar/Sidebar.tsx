@@ -5,6 +5,7 @@ import {
   Sun,
   Moon,
   Archive,
+  Calendar,
   LayoutTemplate,
   FolderOpen,
   Plus,
@@ -50,7 +51,8 @@ const TOP_VIEW_ITEMS: Array<{
   shortcut: string
   droppableId: string
 }> = [
-  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' }
+  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' },
+  { id: 'calendar', label: 'Calendar', icon: Calendar, shortcut: '⌘2', droppableId: 'nav-calendar' }
 ]
 
 const BOTTOM_VIEW_ITEMS: Array<{
@@ -60,8 +62,8 @@ const BOTTOM_VIEW_ITEMS: Array<{
   shortcut: string
   droppableId: string
 }> = [
-  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘3', droppableId: 'nav-archive' },
-  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘4', droppableId: 'nav-templates' }
+  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘4', droppableId: 'nav-archive' },
+  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘5', droppableId: 'nav-templates' }
 ]
 
 const MAX_VISIBLE_PROJECTS = 5

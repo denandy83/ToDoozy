@@ -40,8 +40,8 @@
         "Empty state when no tasks have due dates",
         "Works with existing detail panel, context menu, and keyboard shortcuts"
       ],
-      "passes": false,
-      "tested": false,
+      "passes": true,
+      "tested": true,
       "verified": false
     },
     {

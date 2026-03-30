@@ -4,6 +4,16 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-30 — Task Reference URL (Story #34)
+
+**Session type:** Feature implementation
+
+**What was built:** Task Reference URL field (Story #34). Added a `reference_url` column to the tasks table, an editable URL input in the detail panel below the task title, and a clickable link icon on task rows. URLs auto-prefix `https://` if no protocol is present. The field autosaves with a 1s debounce, and an X button clears the value. 14 files changed.
+
+**Commits:** a404d09 feat: implement task reference URL field (#34)
+
+---
+
 ## 2026-03-29 — Keyboard polish, date picker improvements, and node:sqlite migration
 
 **Session type:** Bug fixes, UX improvements, infrastructure migration

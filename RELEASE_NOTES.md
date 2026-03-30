@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-03-30
+
+- **Task reference URL** — Add a reference URL to any task. The URL appears as a clickable link icon on task rows and as an editable field in the detail panel. URLs without a protocol automatically get `https://` prepended. The field autosaves after 1 second, and you can clear it with the X button.
+
 ## 2026-03-29
 
 - **Fix: Quick-add follows theme** — The quick-add popup (Cmd+Shift+Space) now opens with the correct theme instantly, no more dark flash when using a light theme.

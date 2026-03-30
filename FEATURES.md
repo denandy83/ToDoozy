@@ -23,7 +23,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete
 
 ### Task Fields
-- Title (autosave 1s), Status (dynamic from project), Priority (5 levels), Labels, Due date + optional time, Recurrence (None/Daily/Weekly/Monthly/Custom), Snooze presets
+- Title (autosave 1s), Status (dynamic from project), Priority (5 levels), Labels, Due date + optional time, Reference URL, Recurrence (None/Daily/Weekly/Monthly/Custom), Snooze presets
 - `is_in_my_day`, `is_archived`, `is_template`, `parent_id`, `sort_order` flags
 - `completed_date` auto-set; `snoozed_until` for snooze feature
 - **Status:** Complete
@@ -126,6 +126,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Presets: Later today, Tomorrow, Next week, Custom
 - Sets `snoozed_until`; snoozed tasks hidden until that date
 - **Status:** Complete
+
+### Task Reference URL
+- Each task has an optional `reference_url` field for linking to external resources (PRs, docs, tickets, etc.)
+- Detail panel shows an editable URL input below the title; URLs auto-prefix `https://` if no protocol is provided
+- Task rows display a clickable link icon when a reference URL is set, opening it in the default browser
+- Autosave with 1s debounce; X button to clear the URL
+- **Status:** Complete (2026-03-30, Story #34)
 
 ### Activity Log
 - Timeline of task changes (create, update, status change, etc.)

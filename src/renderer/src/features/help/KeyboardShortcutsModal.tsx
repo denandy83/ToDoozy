@@ -101,9 +101,10 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           <div className="flex flex-col gap-5">
             <Section title="Navigation">
               <ShortcutRow keys={['⌘', '1']} description="My Day" />
-              <ShortcutRow keys={['⌘', '2']} description="Project view (first project)" />
-              <ShortcutRow keys={['⌘', '3']} description="Archive" />
-              <ShortcutRow keys={['⌘', '4']} description="Templates" />
+              <ShortcutRow keys={['⌘', '2']} description="Calendar" />
+              <ShortcutRow keys={['⌘', '3']} description="Project view (first project)" />
+              <ShortcutRow keys={['⌘', '4']} description="Archive" />
+              <ShortcutRow keys={['⌘', '5']} description="Templates" />
               <ShortcutRow keys={['⌘', 'L']} description="Toggle kanban / list view" />
               <ShortcutRow keys={['Tab']} description="Cycle to next project" />
               <ShortcutRow keys={['Shift', 'Tab']} description="Cycle to previous project" />

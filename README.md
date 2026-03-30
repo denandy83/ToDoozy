@@ -83,7 +83,7 @@ npm run build
 |---------|-------------|
 | **Task CRUD** | Create, edit, complete, archive, and delete tasks with full undo support |
 | **Subtasks** | Nested hierarchy with progress bars, expand/collapse, drag to nest |
-| **Detail Panel** | Resizable side/bottom panel with rich text, labels, due date, recurrence, snooze |
+| **Detail Panel** | Resizable side/bottom panel with rich text, labels, due date, reference URL, recurrence, snooze |
 | **Rich Text Editor** | Tiptap WYSIWYG with slash commands, bubble toolbar, Cmd+K links, image paste, checklists |
 | **My Day view** | Cross-project view combining tasks flagged for today and tasks due today |
 | **Per-project views** | Each project has its own task list with full CRUD and status sections |
@@ -108,3 +108,4 @@ npm run build
 | **Focus management** | Full keyboard navigation, focus traps in overlays, Tab cycles through detail fields |
 | **Due dates in rows** | Due dates display inline on task rows with overdue styling |
 | **Copy tasks** | Cmd+C copies selected task titles; multiple as bulleted markdown list |
+| **Reference URLs** | Attach an external URL to any task; clickable icon in task rows, editable in detail panel |

@@ -18,6 +18,7 @@ import { Sidebar } from './features/sidebar'
 import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
 import { findProjectStatusForBucket, type BucketKey } from './features/views/myDayBuckets'
+import { CalendarView } from './features/views/CalendarView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
@@ -329,6 +330,14 @@ export function AppLayout(): React.JSX.Element {
     [tasks, handleDndStatusChange]
   )
 
+  const handleCalendarDayDrop = useCallback(
+    async (taskId: string, date: string) => {
+      await updateTask(taskId, { due_date: date })
+      addToast({ message: `Due date set to ${date}` })
+    },
+    [updateTask, addToast]
+  )
+
   const { dragState, handleDragStart, handleDragOver, handleDragEnd, handleDragCancel, collisionDetection } =
     useDragAndDrop({
       tasks,
@@ -337,6 +346,7 @@ export function AppLayout(): React.JSX.Element {
       onMoveToView: handleMoveToView,
       onStatusChange: handleDndStatusChange,
       onBucketDrop: handleBucketDrop,
+      onCalendarDayDrop: handleCalendarDayDrop,
       getTasksForParent,
       getSelectedTaskIds: () => [...useTaskStore.getState().selectedTaskIds]
     })
@@ -474,8 +484,15 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+2 = Project view (topmost project)
+      // Cmd+2 = Calendar
       if (e.key === '2') {
+        e.preventDefault()
+        setView('calendar')
+        return
+      }
+
+      // Cmd+3 = Project view (topmost project)
+      if (e.key === '3') {
         e.preventDefault()
         if (sortedProjects.length > 0) {
           clearLabelFilters()
@@ -485,15 +502,15 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+3 = Archive
-      if (e.key === '3') {
+      // Cmd+4 = Archive
+      if (e.key === '4') {
         e.preventDefault()
         setView('archive')
         return
       }
 
-      // Cmd+4 = Templates
-      if (e.key === '4') {
+      // Cmd+5 = Templates
+      if (e.key === '5') {
         e.preventDefault()
         setView('templates')
         return
@@ -537,6 +554,7 @@ export function AppLayout(): React.JSX.Element {
   // Dynamic view title
   const viewTitle = useMemo(() => {
     if (currentView === 'my-day') return 'My Day'
+    if (currentView === 'calendar') return 'Calendar'
     if (currentView === 'project' && selectedProject) return selectedProject.name
     if (currentView === 'archive') return 'Archive'
     if (currentView === 'templates') return 'Templates'
@@ -803,6 +821,7 @@ export function AppLayout(): React.JSX.Element {
                   <p className="text-sm font-light text-muted">No project selected.</p>
                 </div>
               )}
+              {currentView === 'calendar' && <CalendarView />}
               {currentView === 'archive' && <ArchiveView />}
               {currentView === 'templates' && <TemplatesView />}
             </div>

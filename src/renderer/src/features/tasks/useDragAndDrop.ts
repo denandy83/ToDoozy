@@ -31,6 +31,7 @@ interface UseDragAndDropOptions {
   onMoveToView?: (taskIds: string[], viewId: string) => Promise<void>
   onStatusChange?: (taskId: string, newStatusId: string) => Promise<void>
   onBucketDrop?: (taskId: string, bucketKey: string) => Promise<void>
+  onCalendarDayDrop?: (taskId: string, date: string) => Promise<void>
   getTasksForParent: (parentId: string | null, statusId: string) => Task[]
   getSelectedTaskIds?: () => string[]
 }
@@ -56,6 +57,7 @@ export function useDragAndDrop({
   onMoveToView,
   onStatusChange,
   onBucketDrop,
+  onCalendarDayDrop,
   getTasksForParent,
   getSelectedTaskIds
 }: UseDragAndDropOptions): UseDragAndDropReturn {
@@ -235,6 +237,13 @@ export function useDragAndDrop({
         if (onStatusChangeRef.current && columnId !== activeTask.status_id) {
           await onStatusChangeRef.current(activeId, columnId)
         }
+        return
+      }
+
+      // Handle calendar day drops
+      if (overId.startsWith('calendar-day-') && onCalendarDayDrop) {
+        const date = overId.replace('calendar-day-', '')
+        await onCalendarDayDrop(activeId, date)
         return
       }
 

@@ -1,19 +1,21 @@
 # Ralph Progress Log
-Started: Wed Mar 25 15:29:50 CET 2026
+Started: Mon Mar 30 13:34:21 CEST 2026
 ---
 
-## 2026-03-25 — Story #33: In-App Help & Keyboard Shortcuts
-
-**Status:** Implemented
-
-**What was built:**
-- `KeyboardShortcutsModal.tsx` — centered modal with 4 shortcut sections (Navigation, Tasks, Detail Panel, Global). Reads `app_toggle_shortcut` from settings so configurable shortcuts always reflect current config.
-- `HelpSettingsContent.tsx` — comprehensive Help tab with full feature documentation (tasks, subtasks, projects, labels, priorities, kanban, pomodoro, attachments, MCP, smart input, shortcuts table).
-- Sidebar footer: added `?` (HelpCircle) button as its own row, with `onHelp` prop.
-- UnifiedSettingsModal: added `'help'` tab, renders HelpSettingsContent.
-- AppLayout: added `helpOpen` state, global `?` key listener (skips when focused in inputs/textareas/contenteditable), passes `onHelp` to Sidebar, renders KeyboardShortcutsModal.
-
-**Decisions:**
-- Previous session had committed only metadata (prd.json + implemented-stories.md) without the actual feature files — rebuilt from scratch.
-- Pending docs from .docs-pending were session-end fallback entries, all already captured in CHANGELOG/RELEASE_NOTES — cleared without re-documenting.
-- Pre-existing test failures (smartInputParser, shortcut-utils, worktree repo tests) unrelated to this feature. No new tests needed (UI components only).
+## Story #35 — Calendar View (2026-03-30)
+- Implemented full Calendar View with monthly grid and weekly layout
+- Added 'calendar' to ViewId type and VIEW_ORDER in viewStore.ts
+- Calendar accessible from sidebar (⌘2), bumped Projects to ⌘3, Archive to ⌘4, Templates to ⌘5
+- Monthly view: 7-column Mon-Sun grid with day cells, padding days from adjacent months
+- Weekly view: 7 columns with more vertical space per day, scrollable
+- Month/Week toggle persisted via settings store (key: 'calendar_layout')
+- Tasks show project color dot + title, done tasks have strikethrough, overdue tasks show in red
+- Click task → select + open detail panel, right-click → context menu
+- Drag task between day cells → updates due_date (via new onCalendarDayDrop in useDragAndDrop)
+- Left/right arrow keys navigate between months/weeks
+- Today highlighted with accent color circle
+- Empty state when no tasks have due dates
+- Cross-project: shows ALL non-archived, non-template tasks with due_date
+- Extracted pure utility functions (toYMD, startOfWeek, getMonthDays, getWeekDays, getCalendarTitle) for testability
+- 24 new Vitest tests for calendar utilities, all passing (276 total)
+- Zero typecheck errors
