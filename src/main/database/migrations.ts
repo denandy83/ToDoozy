@@ -319,4 +319,8 @@ const migration_8: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8]
+const migration_9: Migration = (db) => {
+  db.exec(`ALTER TABLE tasks ADD COLUMN reference_url TEXT`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9]

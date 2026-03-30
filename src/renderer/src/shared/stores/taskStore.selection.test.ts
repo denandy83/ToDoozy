@@ -19,6 +19,7 @@ function makeFakeTask(overrides: Partial<Task> & { id: string }): Task {
     is_archived: 0,
     completed_date: null,
     recurrence_rule: null,
+    reference_url: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     ...overrides

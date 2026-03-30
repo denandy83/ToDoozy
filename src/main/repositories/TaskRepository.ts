@@ -86,8 +86,8 @@ export class TaskRepository {
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, title, status_id, assigned_to, description,
          priority, due_date, parent_id, order_index, is_in_my_day, is_template, is_archived,
-         completed_date, recurrence_rule, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         completed_date, recurrence_rule, reference_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -106,6 +106,7 @@ export class TaskRepository {
         input.is_archived ?? 0,
         input.completed_date ?? null,
         input.recurrence_rule ?? null,
+        input.reference_url ?? null,
         now,
         now
       )

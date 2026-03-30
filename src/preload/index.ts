@@ -201,6 +201,10 @@ const api: TodoozyAPI = {
     }
   },
 
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
+  },
+
   onTasksChanged: (callback) => {
     ipcRenderer.on('tasks-changed', callback)
     return () => {

@@ -8,6 +8,7 @@ import { useProjectStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { DetailTitle } from './DetailTitle'
+import { DetailReferenceUrl } from './DetailReferenceUrl'
 import { DetailStatusRow } from './DetailStatusRow'
 import { DetailLabels } from './DetailLabels'
 import { DetailRecurrence } from './DetailRecurrence'
@@ -254,6 +255,10 @@ export function DetailPanel(): React.JSX.Element | null {
     logActivity('snoozed', task.due_date ?? '', date)
   }
 
+  const handleReferenceUrlChange = (referenceUrl: string | null): void => {
+    updateTask(task.id, { reference_url: referenceUrl })
+  }
+
   const handleDescriptionChange = (description: string | null): void => {
     updateTask(task.id, { description })
   }
@@ -317,6 +322,7 @@ export function DetailPanel(): React.JSX.Element | null {
         onClose={() => setCurrentTask(null)}
         onTogglePosition={togglePosition}
         onTitleChange={handleTitleChange}
+        onReferenceUrlChange={handleReferenceUrlChange}
         onStatusChange={handleStatusChange}
         onToggleArchive={handleToggleArchive}
         onPriorityChange={handlePriorityChange}
@@ -343,6 +349,7 @@ interface DetailPanelContentProps {
   onClose: () => void
   onTogglePosition: () => void
   onTitleChange: (title: string) => void
+  onReferenceUrlChange: (url: string | null) => void
   onStatusChange: (statusId: string) => void
   onToggleArchive: () => void
   onPriorityChange: (priority: number) => void
@@ -364,6 +371,7 @@ function DetailPanelContent({
   onClose,
   onTogglePosition,
   onTitleChange,
+  onReferenceUrlChange,
   onStatusChange,
   onToggleArchive,
   onPriorityChange,
@@ -432,6 +440,7 @@ function DetailPanelContent({
         taskLabels={taskLabels}
         allLabels={allLabels}
         onTitleChange={onTitleChange}
+        onReferenceUrlChange={onReferenceUrlChange}
         onStatusChange={onStatusChange}
         onToggleArchive={onToggleArchive}
         onPriorityChange={onPriorityChange}
@@ -471,19 +480,22 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
 
   const sections: React.ReactNode[] = [
     <DetailTitle key="title" title={task.title} onTitleChange={props.onTitleChange} />,
+    <Section key="reference" label="Reference" fieldIndex={1}>
+      <DetailReferenceUrl referenceUrl={task.reference_url} onReferenceUrlChange={props.onReferenceUrlChange} />
+    </Section>,
     !isTemplate ? (
-      <Section key="status" label="Status" fieldIndex={1}>
+      <Section key="status" label="Status" fieldIndex={2}>
         <DetailStatusRow currentStatusId={task.status_id} statuses={statuses} isArchived={task.is_archived === 1} onStatusChange={props.onStatusChange} onToggleArchive={props.onToggleArchive} />
       </Section>
     ) : null,
-    <Section key="priority" label="Priority" fieldIndex={2}>
+    <Section key="priority" label="Priority" fieldIndex={3}>
       <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
     </Section>,
-    <Section key="labels" label="Labels" fieldIndex={3}>
+    <Section key="labels" label="Labels" fieldIndex={4}>
       <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} projectId={task.project_id} />
     </Section>,
     !isTemplate ? (
-      <Section key="due" label="Due Date" fieldIndex={4}
+      <Section key="due" label="Due Date" fieldIndex={5}
         labelIcon={task.due_date && !task.completed_date && task.due_date.split('T')[0] < new Date().toISOString().split('T')[0]
           ? <AlertTriangle size={10} className="text-danger" />
           : undefined
@@ -500,17 +512,17 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
         </span>
       </Section>
     ) : null,
-    <Section key="recurrence" label="Recurrence" fieldIndex={5}>
+    <Section key="recurrence" label="Recurrence" fieldIndex={6}>
       <DetailRecurrence recurrenceRule={task.recurrence_rule} onRecurrenceChange={props.onRecurrenceChange} />
     </Section>,
     !isTemplate ? (
-      <Section key="snooze" label="Snooze" fieldIndex={6}>
+      <Section key="snooze" label="Snooze" fieldIndex={7}>
         <DetailSnooze currentDueDate={task.due_date} onSnooze={props.onSnooze} />
       </Section>
     ) : null,
-    <div key="subtasks" data-detail-field="7"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
-    <div key="desc" data-detail-field="8"><DetailDescription description={task.description} taskId={task.id} updatedAt={task.updated_at} onDescriptionChange={props.onDescriptionChange} /></div>,
-    !isTemplate ? <div key="attachments" data-detail-field="9"><DetailAttachments taskId={task.id} /></div> : null,
+    <div key="subtasks" data-detail-field="8"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
+    <div key="desc" data-detail-field="9"><DetailDescription description={task.description} taskId={task.id} updatedAt={task.updated_at} onDescriptionChange={props.onDescriptionChange} /></div>,
+    !isTemplate ? <div key="attachments" data-detail-field="10"><DetailAttachments taskId={task.id} /></div> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
 

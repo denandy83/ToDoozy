@@ -61,6 +61,7 @@ export interface Task {
   is_archived: number
   completed_date: string | null
   recurrence_rule: string | null
+  reference_url: string | null
   created_at: string
   updated_at: string
 }
@@ -196,6 +197,7 @@ export interface CreateTaskInput {
   is_archived?: number
   completed_date?: string | null
   recurrence_rule?: string | null
+  reference_url?: string | null
 }
 
 // Column whitelist for task updates (SQL injection prevention)
@@ -213,7 +215,8 @@ export const TASK_UPDATABLE_COLUMNS = [
   'is_template',
   'is_archived',
   'completed_date',
-  'recurrence_rule'
+  'recurrence_rule',
+  'reference_url'
 ] as const
 
 export type TaskUpdatableColumn = (typeof TASK_UPDATABLE_COLUMNS)[number]

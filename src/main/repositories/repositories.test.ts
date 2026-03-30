@@ -482,6 +482,47 @@ describe('TaskRepository', () => {
       expect(results[0].title).toBe('High Buy')
     })
   })
+
+  describe('reference_url', () => {
+    it('creates a task with reference_url', () => {
+      const id = randomUUID()
+      const task = repo.create({
+        id,
+        project_id: projectId,
+        owner_id: userId,
+        title: 'With URL',
+        status_id: statusId,
+        reference_url: 'https://example.com'
+      })
+      expect(task.reference_url).toBe('https://example.com')
+    })
+
+    it('creates a task with null reference_url by default', () => {
+      const id = randomUUID()
+      const task = repo.create({
+        id,
+        project_id: projectId,
+        owner_id: userId,
+        title: 'No URL',
+        status_id: statusId
+      })
+      expect(task.reference_url).toBeNull()
+    })
+
+    it('updates reference_url via column whitelist', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Task', status_id: statusId })
+      const updated = repo.update(id, { reference_url: 'https://github.com/issue/1' })
+      expect(updated!.reference_url).toBe('https://github.com/issue/1')
+    })
+
+    it('clears reference_url by setting to null', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Task', status_id: statusId, reference_url: 'https://example.com' })
+      const updated = repo.update(id, { reference_url: null })
+      expect(updated!.reference_url).toBeNull()
+    })
+  })
 })
 
 describe('LabelRepository', () => {

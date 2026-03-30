@@ -36,6 +36,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     is_archived: 0,
     completed_date: null,
     recurrence_rule: null,
+    reference_url: null,
     created_at: '',
     updated_at: '',
     ...overrides

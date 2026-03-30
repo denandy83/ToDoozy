@@ -17,8 +17,8 @@
         "URL persists across app restarts (stored in SQLite via reference_url column)",
         "Works in both project views and My Day"
       ],
-      "passes": false,
-      "tested": false,
+      "passes": true,
+      "tested": true,
       "verified": false
     }
   ]

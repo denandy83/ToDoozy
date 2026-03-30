@@ -694,6 +694,12 @@ export function registerIpcHandlers(): void {
     return getRepos().attachments.delete(id)
   })
 
+  // ── Shell ────────────────────────────────────────────────────────────
+
+  ipcMain.handle('shell:openExternal', (_e, url: string) => {
+    return shell.openExternal(url)
+  })
+
   ipcMain.handle('fs:showOpenDialog', async () => {
     const win = getMainWindow()
     if (!win) return { canceled: true, filePaths: [] }
