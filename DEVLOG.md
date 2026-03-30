@@ -4,6 +4,16 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-30 — Calendar View (Story #35)
+
+**Session type:** Feature implementation
+
+**What was built:** Calendar View (Story #35). New cross-project view accessible from the sidebar (⌘2) that shows all tasks with due dates organized in a calendar. Supports monthly grid and weekly layout with a toggle (persisted via settings store). Tasks display with project color dots, strikethrough for done tasks, and red for overdue. Click to select/open detail panel, drag between days to update due_date, right-click for context menu. 18 files changed.
+
+**Commits:** 4eedfbc feat: implement Calendar View with monthly grid and weekly layout (#35)
+
+---
+
 ## 2026-03-30 — Task Reference URL (Story #34)
 
 **Session type:** Feature implementation

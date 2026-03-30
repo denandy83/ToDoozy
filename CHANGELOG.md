@@ -8,6 +8,7 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ### Added
 - **Task reference URL field** — Tasks now have a `reference_url` field displayed as a clickable link icon on task rows and an editable URL input in the detail panel. URLs auto-prefix `https://` if missing. Autosave with 1s debounce. X button to clear. (a404d09)
+- **Calendar View** — New cross-project Calendar view showing all tasks organized by due date. Supports monthly grid and weekly layout with a toggle. Navigate months/weeks with arrow buttons. Today highlighted with accent color. Overdue tasks in red. Click task to open detail panel. Drag tasks between days to update due dates. (4eedfbc)
 
 ## 2026-03-29
 

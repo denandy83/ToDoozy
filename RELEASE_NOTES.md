@@ -7,6 +7,7 @@ User-facing changes by date. Most recent first.
 ## 2026-03-30
 
 - **Task reference URL** — Add a reference URL to any task. The URL appears as a clickable link icon on task rows and as an editable field in the detail panel. URLs without a protocol automatically get `https://` prepended. The field autosaves after 1 second, and you can clear it with the X button.
+- **Calendar View** — A new Calendar view in the sidebar (⌘2) shows all tasks organized by their due date. Toggle between monthly grid and weekly layout. Navigate with arrow buttons. Today is highlighted, overdue tasks show in red. Click a task to open the detail panel, or drag it to a different day to update the due date.
 
 ## 2026-03-29
 

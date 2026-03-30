@@ -60,8 +60,8 @@
         "Existing templates without offsets work normally (backward compat)",
         "Tasks without due dates are skipped"
       ],
-      "passes": false,
-      "tested": false,
+      "passes": true,
+      "tested": true,
       "verified": false
     },
     {

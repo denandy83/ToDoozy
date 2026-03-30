@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, ChevronRight, ChevronLeft } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, ChevronLeft, Calendar } from 'lucide-react'
 import { useFocusTrap } from '../../shared/hooks/useFocusTrap'
 import { useFocusRestore } from '../../shared/hooks/useFocusRestore'
 import { useProjectStore } from '../../shared/stores'
@@ -16,6 +16,12 @@ import type {
   ProjectTemplateTask,
   User
 } from '../../../../shared/types'
+import {
+  computeDateFromOffset,
+  formatOffset as formatOffsetUtil,
+  collectTasksWithOffsets,
+  stripOffsets as stripOffsetsUtil
+} from './dueDateOffsets'
 
 interface DeployWizardProps {
   template: ProjectTemplate
@@ -24,13 +30,13 @@ interface DeployWizardProps {
   mode?: 'deploy' | 'save'
 }
 
-type WizardStep = 'name' | 'statuses' | 'labels' | 'tasks' | 'review'
-const STEPS: WizardStep[] = ['name', 'statuses', 'labels', 'tasks', 'review']
+type WizardStep = 'name' | 'statuses' | 'labels' | 'tasks' | 'duedates' | 'review'
 const STEP_LABELS: Record<WizardStep, string> = {
   name: 'Name & Color',
   statuses: 'Statuses',
   labels: 'Labels',
   tasks: 'Tasks',
+  duedates: 'Due Dates',
   review: 'Review & Create'
 }
 
@@ -68,6 +74,35 @@ export function DeployProjectTemplateWizard({
   const [labels, setLabels] = useState<WizardLabel[]>(data.labels)
   const [tasks, setTasks] = useState<ProjectTemplateTask[]>(data.tasks)
   const [creating, setCreating] = useState(false)
+  const [includeDueDateOffsets, setIncludeDueDateOffsets] = useState(true)
+  const [deployDate, setDeployDate] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })
+
+  // Check if tasks have due date info (offsets for deploy, any due_date_offset !== null)
+  const hasTasksWithDueDates = useMemo(() => {
+    const check = (taskList: ProjectTemplateTask[]): boolean => {
+      for (const t of taskList) {
+        if (t.due_date_offset != null) return true
+        if (check(t.subtasks)) return true
+      }
+      return false
+    }
+    return check(tasks)
+  }, [tasks])
+
+  // Build dynamic steps: include 'duedates' only when relevant
+  const steps = useMemo<WizardStep[]>(() => {
+    const base: WizardStep[] = ['name', 'statuses', 'labels', 'tasks']
+    if (mode === 'save' && hasTasksWithDueDates) {
+      base.push('duedates')
+    } else if (mode === 'deploy' && hasTasksWithDueDates) {
+      base.push('duedates')
+    }
+    base.push('review')
+    return base
+  }, [mode, hasTasksWithDueDates])
 
   const { createProject } = useProjectStore()
   const { createProjectTemplate, updateProjectTemplate } = useTemplateStore()
@@ -81,15 +116,15 @@ export function DeployProjectTemplateWizard({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  const stepIndex = STEPS.indexOf(step)
+  const stepIndex = steps.indexOf(step)
   const isFirst = stepIndex === 0
-  const isLast = stepIndex === STEPS.length - 1
+  const isLast = stepIndex === steps.length - 1
 
   const goNext = (): void => {
-    if (!isLast) setStep(STEPS[stepIndex + 1])
+    if (!isLast) setStep(steps[stepIndex + 1])
   }
   const goBack = (): void => {
-    if (!isFirst) setStep(STEPS[stepIndex - 1])
+    if (!isFirst) setStep(steps[stepIndex - 1])
   }
 
   const handleCreate = useCallback(async () => {
@@ -157,6 +192,8 @@ export function DeployProjectTemplateWizard({
       ): Promise<void> => {
         for (const t of taskList) {
           const taskId = crypto.randomUUID()
+          const dueDate = computeDateFromOffset(deployDate, t.due_date_offset)
+
           await window.api.tasks.create({
             id: taskId,
             project_id: project.id,
@@ -169,7 +206,8 @@ export function DeployProjectTemplateWizard({
             parent_id: parentId,
             is_template: 0,
             is_in_my_day: 0,
-            recurrence_rule: t.recurrence_rule
+            recurrence_rule: t.recurrence_rule,
+            due_date: dueDate
           })
           // Assign labels
           for (const labelName of t.labels) {
@@ -202,13 +240,15 @@ export function DeployProjectTemplateWizard({
     } finally {
       setCreating(false)
     }
-  }, [creating, projectName, projectColor, statuses, labels, tasks, currentUser, createProject, addToast, onClose])
+  }, [creating, projectName, projectColor, statuses, labels, tasks, deployDate, currentUser, createProject, addToast, onClose])
 
   const handleSaveTemplate = useCallback(async () => {
     if (creating) return
     setCreating(true)
     try {
-      const templateData: ProjectTemplateData = { statuses, labels, tasks }
+      // If user toggled off due date offsets, strip them
+      const finalTasks = includeDueDateOffsets ? tasks : stripOffsetsUtil(tasks)
+      const templateData: ProjectTemplateData = { statuses, labels, tasks: finalTasks }
       const dataStr = JSON.stringify(templateData)
       if (template.id && template.created_at) {
         // Update existing template
@@ -231,7 +271,7 @@ export function DeployProjectTemplateWizard({
     } finally {
       setCreating(false)
     }
-  }, [creating, projectName, projectColor, statuses, labels, tasks, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose])
+  }, [creating, projectName, projectColor, statuses, labels, tasks, includeDueDateOffsets, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose])
 
   return createPortal(
     <div
@@ -246,7 +286,7 @@ export function DeployProjectTemplateWizard({
       >
         {/* Step indicators */}
         <div className="flex items-center gap-1 border-b border-border px-6 py-3">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <button
               key={s}
               onClick={() => setStep(s)}
@@ -280,6 +320,16 @@ export function DeployProjectTemplateWizard({
             <StepLabels labels={labels} onChange={setLabels} />
           )}
           {step === 'tasks' && <StepTasks tasks={tasks} onChange={setTasks} />}
+          {step === 'duedates' && (
+            <StepDueDates
+              mode={mode}
+              tasks={tasks}
+              includeDueDateOffsets={includeDueDateOffsets}
+              onToggleInclude={setIncludeDueDateOffsets}
+              deployDate={deployDate}
+              onDeployDateChange={setDeployDate}
+            />
+          )}
           {step === 'review' && (
             <StepReview
               name={projectName}
@@ -532,6 +582,7 @@ function StepTasks({ tasks, onChange }: StepTasksProps): React.JSX.Element {
         description: null,
         priority: 0,
         recurrence_rule: null,
+        due_date_offset: null,
         order_index: tasks.length,
         labels: [],
         subtasks: []
@@ -604,6 +655,117 @@ function TaskTreeNode({ task, depth, onRemove, onTitleChange }: TaskTreeNodeProp
           }}
         />
       ))}
+    </div>
+  )
+}
+
+// --- Due Dates step ---
+
+interface StepDueDatesProps {
+  mode: 'deploy' | 'save'
+  tasks: ProjectTemplateTask[]
+  includeDueDateOffsets: boolean
+  onToggleInclude: (include: boolean) => void
+  deployDate: string
+  onDeployDateChange: (date: string) => void
+}
+
+function StepDueDates({
+  mode,
+  tasks,
+  includeDueDateOffsets,
+  onToggleInclude,
+  deployDate,
+  onDeployDateChange
+}: StepDueDatesProps): React.JSX.Element {
+  const tasksWithOffsets = collectTasksWithOffsets(tasks)
+
+  if (mode === 'save') {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-light text-foreground">
+            {tasksWithOffsets.length} task{tasksWithOffsets.length !== 1 ? 's' : ''} have due dates.
+            Transfer them as relative offsets?
+          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
+            When deployed, actual dates will be computed from a chosen start date.
+          </p>
+        </div>
+        <label className="flex cursor-pointer items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={includeDueDateOffsets}
+            onClick={() => onToggleInclude(!includeDueDateOffsets)}
+            className={`relative h-5 w-9 rounded-full transition-colors ${
+              includeDueDateOffsets ? 'bg-accent' : 'bg-foreground/20'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                includeDueDateOffsets ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+          <span className="text-sm font-light text-foreground">
+            Transfer due dates as relative offsets
+          </span>
+        </label>
+        {includeDueDateOffsets && (
+          <div className="mt-2 flex flex-col gap-1.5 rounded-lg border border-border p-3">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+              Preview
+            </p>
+            {tasksWithOffsets.map((t, i) => (
+              <div key={i} className="flex items-center justify-between text-sm font-light">
+                <span className="truncate text-foreground/80">{t.title}</span>
+                <span className="ml-2 shrink-0 text-[10px] font-bold uppercase tracking-widest text-muted">
+                  {formatOffsetUtil(t.offset)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Deploy mode
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-light text-foreground">
+          This template includes relative due date offsets. Choose a deploy date to compute actual due dates.
+        </p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+          Deploy Date
+        </label>
+        <div className="flex items-center gap-2">
+          <Calendar size={14} className="text-muted" />
+          <input
+            type="date"
+            value={deployDate}
+            onChange={(e) => onDeployDateChange(e.target.value)}
+            className="rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:border-accent focus:outline-none"
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
+        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+          Computed Due Dates
+        </p>
+        {tasksWithOffsets.map((t, i) => (
+          <div key={i} className="flex items-center justify-between text-sm font-light">
+            <span className="truncate text-foreground/80">{t.title}</span>
+            <span className="ml-2 shrink-0 text-[10px] font-bold uppercase tracking-widest text-muted">
+              {computeDateFromOffset(deployDate, t.offset)} ({formatOffsetUtil(t.offset)})
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

@@ -63,6 +63,19 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Supports both list and kanban layout
 - **Status:** Complete
 
+### Calendar View
+- Cross-project view showing all non-archived, non-template tasks with a due_date
+- Monthly grid: 7-column Mon–Sun layout, navigate months with arrow buttons
+- Weekly view: 7-day horizontal columns with more vertical space
+- Toggle between month/week persisted via settings store (`calendar_layout` key)
+- Today highlighted with accent color/border
+- Overdue tasks (past due, not done) show in red; done tasks show strikethrough + muted
+- Each task shows project color dot + title (truncated)
+- Click task → select + open detail panel; drag between days → update due_date
+- Right-click → context menu (same as other views)
+- Sidebar shortcut: ⌘2
+- **Status:** Complete
+
 ### Per-Project Views
 - Each project in the sidebar has its own task list
 - Tasks grouped by status sections (ordered: not-done first by `order_index`, done last)

@@ -601,17 +601,30 @@ export function AppLayout(): React.JSX.Element {
         t.parent_id === null
     )
 
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const msPerDay = 86400000
+
     const buildTaskTree = (task: Task): import('../../shared/types').ProjectTemplateTask => {
       const taskLabelNames = (useTaskStore.getState().taskLabels[task.id] ?? []).map((l) => l.name)
       const subtasks = Object.values(allTasks)
         .filter((t) => t.parent_id === task.id)
         .sort((a, b) => a.order_index - b.order_index)
         .map(buildTaskTree)
+
+      let dueDateOffset: number | null = null
+      if (task.due_date) {
+        const dueDate = new Date(task.due_date)
+        const dueStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate())
+        dueDateOffset = Math.round((dueStart.getTime() - todayStart.getTime()) / msPerDay)
+      }
+
       return {
         title: task.title,
         description: task.description,
         priority: task.priority,
         recurrence_rule: task.recurrence_rule,
+        due_date_offset: dueDateOffset,
         order_index: task.order_index,
         labels: taskLabelNames,
         subtasks

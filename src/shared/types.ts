@@ -308,6 +308,7 @@ export interface ProjectTemplateTask {
   description: string | null
   priority: number
   recurrence_rule: string | null
+  due_date_offset: number | null
   order_index: number
   labels: string[] // label names for mapping
   subtasks: ProjectTemplateTask[]
