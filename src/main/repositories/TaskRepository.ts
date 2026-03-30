@@ -254,8 +254,13 @@ export class TaskRepository {
   }
 
   findWithUpcomingDueTimes(minutesAhead: number): Task[] {
+    // due_date is stored as local time without timezone (e.g. "2026-03-30T15:16")
+    // Compare using local time format to match
     const now = new Date()
     const cutoff = new Date(now.getTime() + minutesAhead * 60 * 1000)
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    const toLocal = (d: Date): string =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
     return this.db
       .prepare(
         `SELECT * FROM tasks
@@ -263,12 +268,12 @@ export class TaskRepository {
          AND is_template = 0
          AND due_date IS NOT NULL
          AND due_date LIKE '%T%'
-         AND due_date > ?
+         AND due_date >= ?
          AND due_date <= ?
          AND status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)
          ORDER BY due_date ASC`
       )
-      .all(now.toISOString(), cutoff.toISOString()) as unknown as Task[]
+      .all(toLocal(now), toLocal(cutoff)) as unknown as Task[]
   }
 
   search(filters: TaskSearchFilters): Task[] {

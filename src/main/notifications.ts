@@ -1,8 +1,11 @@
-import { Notification } from 'electron'
+import { Notification, app } from 'electron'
+import { execSync } from 'child_process'
 import { getDatabase } from './database'
 import { createRepositories } from './repositories'
 import { getMainWindow } from './index'
 import type { Task } from '../shared/types'
+
+const isDev = !app.isPackaged
 
 // Track sent notifications to avoid duplicates: "taskId:leadMinutes"
 const sentNotifications = new Set<string>()
@@ -76,22 +79,36 @@ function sendNotification(task: Task, minutesUntilDue: number, leadKey: number):
 
   const body = minutesUntilDue <= 1 ? 'Due in 1 minute' : `Due in ${minutesUntilDue} minutes`
 
-  const notification = new Notification({
-    title: task.title,
-    body,
-    silent: false
-  })
-
-  notification.on('click', () => {
+  if (isDev) {
+    // In dev mode, Electron notifications are unreliable on macOS — use osascript instead
+    const escapedTitle = task.title.replace(/'/g, "'\\''")
+    const escapedBody = body.replace(/'/g, "'\\''")
+    try {
+      execSync(`osascript -e 'display notification "${escapedBody}" with title "${escapedTitle}"'`)
+    } catch { /* ignore osascript failures */ }
+    // Still handle click-to-navigate for when the app is focused
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
-      win.show()
-      win.focus()
       win.webContents.send('notification:navigate-to-task', task.id, task.project_id)
     }
-  })
+  } else {
+    const notification = new Notification({
+      title: task.title,
+      body,
+      silent: false
+    })
 
-  notification.show()
+    notification.on('click', () => {
+      const win = getMainWindow()
+      if (win && !win.isDestroyed()) {
+        win.show()
+        win.focus()
+        win.webContents.send('notification:navigate-to-task', task.id, task.project_id)
+      }
+    })
+
+    notification.show()
+  }
 }
 
 export function clearSentNotifications(): void {

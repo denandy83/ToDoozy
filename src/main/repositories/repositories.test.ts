@@ -525,10 +525,16 @@ describe('TaskRepository', () => {
   })
 
   describe('findWithUpcomingDueTimes', () => {
+    // due_date is stored as local time without timezone (e.g. "2026-03-30T15:16")
+    const toLocalTime = (d: Date): string => {
+      const pad = (n: number): string => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+
     it('returns tasks with due times within the specified minutes', () => {
       const now = new Date()
-      const in10Min = new Date(now.getTime() + 10 * 60_000).toISOString()
-      const in60Min = new Date(now.getTime() + 60 * 60_000).toISOString()
+      const in10Min = toLocalTime(new Date(now.getTime() + 10 * 60_000))
+      const in60Min = toLocalTime(new Date(now.getTime() + 60 * 60_000))
 
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Soon', status_id: statusId, due_date: in10Min })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Later', status_id: statusId, due_date: in60Min })
@@ -542,7 +548,7 @@ describe('TaskRepository', () => {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
       const dateOnly = tomorrow.toISOString().split('T')[0]
-      const in10Min = new Date(Date.now() + 10 * 60_000).toISOString()
+      const in10Min = toLocalTime(new Date(Date.now() + 10 * 60_000))
 
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Date only', status_id: statusId, due_date: dateOnly })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'With time', status_id: statusId, due_date: in10Min })
@@ -553,7 +559,7 @@ describe('TaskRepository', () => {
     })
 
     it('excludes archived and template tasks', () => {
-      const in10Min = new Date(Date.now() + 10 * 60_000).toISOString()
+      const in10Min = toLocalTime(new Date(Date.now() + 10 * 60_000))
 
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Active', status_id: statusId, due_date: in10Min })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Archived', status_id: statusId, due_date: in10Min, is_archived: 1 })
@@ -571,7 +577,7 @@ describe('TaskRepository', () => {
         'INSERT INTO statuses (id, project_id, name, is_done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(doneStatusId, projectId, 'Done', 1, now, now)
 
-      const in10Min = new Date(Date.now() + 10 * 60_000).toISOString()
+      const in10Min = toLocalTime(new Date(Date.now() + 10 * 60_000))
 
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Active', status_id: statusId, due_date: in10Min })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Done', status_id: doneStatusId, due_date: in10Min })
@@ -582,8 +588,8 @@ describe('TaskRepository', () => {
     })
 
     it('excludes tasks already past due', () => {
-      const past = new Date(Date.now() - 5 * 60_000).toISOString()
-      const in10Min = new Date(Date.now() + 10 * 60_000).toISOString()
+      const past = toLocalTime(new Date(Date.now() - 5 * 60_000))
+      const in10Min = toLocalTime(new Date(Date.now() + 10 * 60_000))
 
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Past', status_id: statusId, due_date: past })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Future', status_id: statusId, due_date: in10Min })

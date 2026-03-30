@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Sun } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
 import { useDroppable, useDraggable } from '@dnd-kit/core'
 import { useTaskStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
@@ -388,7 +388,6 @@ function CalendarTaskButton({
   isSelected,
   isDone,
   isOverdue,
-  isMyDay,
   onClick,
   onContextMenu
 }: {
