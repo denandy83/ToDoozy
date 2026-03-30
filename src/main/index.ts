@@ -8,6 +8,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { showQuickAddWindow } from './quick-add'
 import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
+import { startNotificationChecker, stopNotificationChecker } from './notifications'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
 
 // Load .env from project root (2 levels up from out/main)
@@ -177,6 +178,7 @@ app.whenReady().then(() => {
   createTray()
   loadAndRegisterShortcut()
   loadAndRegisterAppToggleShortcut()
+  startNotificationChecker()
 
   // Poll for external database changes (e.g., MCP server writing tasks)
   // fs.watch is unreliable on macOS for WAL files, so we poll the modified time instead
@@ -226,6 +228,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  stopNotificationChecker()
   destroyTray()
   closeDatabase()
 })

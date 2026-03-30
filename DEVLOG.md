@@ -4,6 +4,16 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-30 — Template Wizard Due Date Offsets (Story #36)
+
+**Session type:** Feature implementation
+
+**What was built:** Relative due date offsets for the template wizard (Story #36). When saving a project as a template, the wizard now asks whether to include due dates as relative offsets. Due dates are stored as day offsets from a reference date. When deploying a template, the user picks a deploy date and actual due dates are computed automatically. 11 files changed.
+
+**Commits:** 2a84ede feat: add relative due date offsets to template wizard (#36)
+
+---
+
 ## 2026-03-30 — Calendar View (Story #35)
 
 **Session type:** Feature implementation

@@ -253,6 +253,24 @@ export class TaskRepository {
     }
   }
 
+  findWithUpcomingDueTimes(minutesAhead: number): Task[] {
+    const now = new Date()
+    const cutoff = new Date(now.getTime() + minutesAhead * 60 * 1000)
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE is_archived = 0
+         AND is_template = 0
+         AND due_date IS NOT NULL
+         AND due_date LIKE '%T%'
+         AND due_date > ?
+         AND due_date <= ?
+         AND status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)
+         ORDER BY due_date ASC`
+      )
+      .all(now.toISOString(), cutoff.toISOString()) as unknown as Task[]
+  }
+
   search(filters: TaskSearchFilters): Task[] {
     let sql = 'SELECT DISTINCT t.* FROM tasks t'
     const conditions: string[] = ['t.is_template = 0']

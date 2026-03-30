@@ -8,6 +8,7 @@ User-facing changes by date. Most recent first.
 
 - **Task reference URL** — Add a reference URL to any task. The URL appears as a clickable link icon on task rows and as an editable field in the detail panel. URLs without a protocol automatically get `https://` prepended. The field autosaves after 1 second, and you can clear it with the X button.
 - **Calendar View** — A new Calendar view in the sidebar (⌘2) shows all tasks organized by their due date. Toggle between monthly grid and weekly layout. Navigate with arrow buttons. Today is highlighted, overdue tasks show in red. Click a task to open the detail panel, or drag it to a different day to update the due date.
+- **Template Wizard — Relative Due Date Offsets** — When saving a project as a template, the wizard now offers to preserve due dates as relative offsets (e.g., "5 days after deploy"). When you deploy the template, pick a start date and all task due dates are computed automatically.
 
 ## 2026-03-29
 

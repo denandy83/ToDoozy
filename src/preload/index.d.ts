@@ -217,6 +217,10 @@ export interface TrayAPI {
   onNavigateToMyDay(callback: () => void): () => void
 }
 
+export interface NotificationsAPI {
+  onNavigateToTask(callback: (taskId: string, projectId: string) => void): () => void
+}
+
 export interface ShellAPI {
   openExternal(url: string): Promise<void>
 }
@@ -239,6 +243,7 @@ export interface TodoozyAPI {
   tray: TrayAPI
   mcp: McpAPI
   timer: TimerAPI
+  notifications: NotificationsAPI
   shell: ShellAPI
   onTasksChanged(callback: () => void): () => void
 }

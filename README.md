@@ -97,7 +97,7 @@ npm run build
 | **Context menu** | Right-click flyout with status, priority, recurrence, labels, snooze submenus |
 | **Command palette** | Cmd+K full-text search with operators: `p:`, `l:`, `s:`, `due:`, `has:` |
 | **Smart input** | `@label`, `p:priority`, `d:date` inline parsing in all task inputs |
-| **Templates** | Task templates (global) and project templates (multi-step deploy wizard) |
+| **Templates** | Task templates (global) and project templates (multi-step deploy wizard with relative due date offsets) |
 | **Pomodoro timer** | Per-task timer with tray countdown, configurable presets, break timer, activity log |
 | **Quick add** | Cmd+Shift+Space floating window to add tasks from anywhere on macOS |
 | **Global app toggle** | Cmd+Shift+B (configurable) shows/hides the main window |

@@ -79,8 +79,8 @@
         "Completed/archived/template tasks don't trigger notifications",
         "No duplicate notifications for the same task+time"
       ],
-      "passes": false,
-      "tested": false,
+      "passes": true,
+      "tested": true,
       "verified": false
     }
   ]

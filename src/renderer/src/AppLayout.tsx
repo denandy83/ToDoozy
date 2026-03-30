@@ -116,6 +116,15 @@ export function AppLayout(): React.JSX.Element {
     }
   }, [rawSetView])
 
+  // Listen for notification navigation events
+  useEffect(() => {
+    const unsub = window.api.notifications.onNavigateToTask((taskId, projectId) => {
+      useViewStore.setState({ currentView: 'project', selectedProjectId: projectId })
+      useTaskStore.getState().selectTask(taskId)
+    })
+    return unsub
+  }, [])
+
   // Auto-clear label filters and selection on view switch, reset kanban for non-supported views
   const setView = useCallback(
     (view: ViewId) => {

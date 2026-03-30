@@ -201,6 +201,17 @@ const api: TodoozyAPI = {
     }
   },
 
+  notifications: {
+    onNavigateToTask: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, taskId: string, projectId: string): void =>
+        callback(taskId, projectId)
+      ipcRenderer.on('notification:navigate-to-task', handler)
+      return () => {
+        ipcRenderer.removeListener('notification:navigate-to-task', handler)
+      }
+    }
+  },
+
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
   },

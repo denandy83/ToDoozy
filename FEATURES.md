@@ -291,6 +291,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Edit and delete project templates
 - **Status:** Complete
 
+### Template Wizard — Relative Due Date Offsets
+- When saving a project as a template, the wizard asks whether to include due dates as relative offsets
+- Due dates are stored as day offsets relative to a reference date (e.g., "+5 days", "+14 days")
+- When deploying, the user picks a deploy/start date; actual due dates are computed from that date
+- Tasks without due dates are unaffected
+- **Status:** Complete (2026-03-30, Story #36)
+
 ---
 
 ## Timer (Pomodoro)
