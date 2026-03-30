@@ -1,87 +1,40 @@
 {
   "project": "ToDoozy",
-  "branchName": "ralph/features-35-36-37",
+  "branchName": "ralph/feature-38-smart-recurrence",
   "stories": [
     {
-      "id": "34",
-      "title": "Task Reference URL",
-      "description": "Add a single reference URL field to each task, displayed directly below the title in the task detail panel.\n\n**Database:**\n- Add `reference_url TEXT` column to `tasks` table via migration\n\n**Detail Panel UI:**\n- Below the title (data-detail-field=\"0\"), add a reference URL field (data-detail-field between title and status)\n- Empty state: subtle \"Add reference...\" placeholder text, same style as other muted placeholders\n- With URL: display as clickable link (truncated to domain + path), with an X button to clear\n- Click the link \u2192 opens in default browser via shell.openExternal\n- URLs without http:// or https:// prefix are auto-prefixed with https:// when opened (so www.google.com works)\n- Auto-save with 1s debounce (same pattern as title and description)\n- In the Tab order between title and status\n\n**Edge cases:**\n- Very long URLs: truncated display with ellipsis, full URL shown on hover (title attribute or CSS tooltip)\n- Invalid/non-URL text: stored as-is but not clickable (no underline, no click handler)\n- Empty string after clearing: stored as null\n\n**Keyboard:**\n- Tab from title \u2192 reference URL field \u2192 status\n- Enter in the field: blur (same as title)\n- Escape: blur without saving\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
+      "id": "38",
+      "title": "Smart Recurrence Picker",
+      "description": "Replace the free-text custom recurrence input with a structured picker that validates input, provides live feedback, and powers actual recurrence logic on task completion. Based on patterns from Todoist, Things 3, Apple Reminders, and Google Calendar.\n\n## Storage Format\n\nCanonical structured strings stored in `recurrence_rule TEXT`:\n- `every:N:days` — e.g., `every:3:days`\n- `every:N:weeks:mon,wed,fri` — weekly with specific days (lowercase 3-letter abbreviations)\n- `every:N:months:15` — monthly on specific day (1-31)\n- `every:N:months:3rd:tue` — monthly on ordinal weekday (1st/2nd/3rd/4th/last + day)\n- `every:N:years:3:30` — yearly on specific month (1-12) + day (1-31)\n- After-completion mode: prefix `every!:` instead of `every:` (e.g., `every!:3:days`)\n- Optional end date suffix: `|until:YYYY-MM-DD` (e.g., `every:2:weeks:mon,wed|until:2026-06-01`)\n- `null` = no recurrence\n\n## One-Time Migration\n\nAdd a database migration that sets ALL existing `recurrence_rule` values to `null`. Clean slate — old format (`daily`, `weekly`, `monthly`, `every:3 days`) is not worth migrating.\n\n## Shared Utility: `src/shared/recurrenceUtils.ts`\n\nCreate a shared utility with these functions:\n- `parseRecurrence(rule: string | null): RecurrenceConfig | null` — parse canonical string to structured object\n- `serializeRecurrence(config: RecurrenceConfig): string` — structured object to canonical string\n- `describeRecurrence(rule: string | null): string` — human-readable description (e.g., \"Every 2 weeks on Mon, Wed\")\n- `getNextOccurrence(rule: string, fromDate: Date): Date | null` — compute next occurrence date. For Fixed mode: compute from `fromDate`. For After-completion mode: compute from `fromDate` (which will be the completion date). Returns null if end date has passed.\n- `isValidRecurrence(rule: string | null): boolean` — validate canonical format\n\nRecurrenceConfig interface:\n```typescript\ninterface RecurrenceConfig {\n  interval: number // 1+\n  unit: 'days' | 'weeks' | 'months' | 'years'\n  weekDays?: string[] // for weeks: ['mon', 'wed', 'fri']\n  monthDay?: number // for months: 1-31\n  monthOrdinal?: { nth: '1st' | '2nd' | '3rd' | '4th' | 'last'; day: string } // for months: ordinal weekday\n  yearMonth?: number // for years: 1-12\n  yearDay?: number // for years: 1-31\n  afterCompletion: boolean\n  untilDate?: string // ISO date YYYY-MM-DD\n}\n```\n\n## Detail Panel Picker UI\n\nReplace the current `DetailRecurrence.tsx` with a structured inline picker that expands vertically when any preset or Custom is clicked.\n\n**Preset buttons (top row):** None, Daily, Weekly, Monthly — same style as current. Clicking a preset expands the picker pre-filled:\n- Daily → `Every 1 days`\n- Weekly → `Every 1 weeks` with today's weekday toggled\n- Monthly → `Every 1 months` on today's date\n- None → clears recurrence, collapses picker\n\n**Picker rows (shown when expanded):**\n\nRow 1: `Every [number input] [unit dropdown]`\n- Number input: min 1, arrow up/down to increment/decrement, direct typing allowed\n- Unit dropdown: days, weeks, months, years\n\nRow 2 (conditional on unit):\n- **weeks**: 7 day-of-week toggle buttons (M T W T F S S) — at least one must be selected. Default: today's weekday. Use compact toggle buttons matching the app's badge/chip style.\n- **months**: Two-option toggle — \"On day [number input 1-31]\" OR \"On the [ordinal dropdown: 1st/2nd/3rd/4th/last] [weekday dropdown: Mon-Sun]\". Default: \"On day [today's date]\".\n- **years**: Month dropdown (Jan-Dec) + day number input (1-31). Default: today's month and day.\n- **days**: no Row 2\n\nRow 3: Segmented toggle — \"Fixed\" / \"After completion\". Default: Fixed. Use compact segmented control matching the app's button style.\n\nRow 4: `Ends: [dropdown: Never / On date]`. When \"On date\" selected, show the existing DatePicker component inline. Default: Never.\n\n**Preview line (always visible when picker is expanded):**\n- Below all rows, accent-colored text: `→ Every 2 weeks on Mon, Wed (next: Apr 14)`\n- Updates live as any control changes\n- \"next\" date computed from today using `getNextOccurrence`\n- If after-completion mode: show `→ Every 3 days after completion (next: computed from today)`\n\n**Keyboard navigation:**\n- Tab cycles through picker controls: number → unit → day toggles/month input → mode toggle → end date\n- Arrow Left/Right within day toggles moves focus between days, Space toggles\n- Arrow Up/Down on number inputs increments/decrements\n- Escape collapses the picker\n\n**Auto-set due date:** When a recurrence rule is applied to a task that has no due_date, auto-set `due_date` to today (ISO 8601 date string, no time).\n\n## Task Completion → Clone Logic\n\nIn `TaskRepository` (main process), add a `completeRecurringTask(taskId: string)` method that runs in a single transaction:\n\n1. Load the task and verify it has a `recurrence_rule`\n2. Parse the rule with `parseRecurrence`\n3. Compute next due date:\n   - Fixed mode: `getNextOccurrence(rule, task.due_date)` — from the original due date\n   - After-completion mode: `getNextOccurrence(rule, new Date())` — from now\n4. If `untilDate` is set and next date > untilDate: do NOT create clone, return null\n5. Create a new task cloning: title, description, priority, labels (via task_labels), project_id, recurrence_rule, reference_url\n6. Set the clone's due_date to the computed next occurrence\n7. Set the clone's status to the project's default status (first non-done status by order_index)\n8. Copy all subtasks, resetting their status to the project's default status and clearing completed_date\n9. Return the new task ID and due date\n\nThe renderer must detect when a task with recurrence is moved to a done status. In the task store's status-change logic, after updating the task, check if it has a `recurrence_rule`. If so, call the new `completeRecurringTask` IPC method. On success, show a toast: \"Recurring task created → due [formatted date]\". Clicking the toast navigates to the new task (select it, switch to its project if needed, open detail panel).\n\n**Add IPC handler:** `task:complete-recurring` that calls `TaskRepository.completeRecurringTask`.\n**Add preload bridge method:** `completeRecurringTask(taskId: string): Promise<{ id: string; dueDate: string } | null>`\n\n## Task Row Indicator\n\nIn `TaskRow.tsx`, when a task has a non-null `recurrence_rule`, show a small repeat icon (use `Repeat` from lucide-react, 12px, stroke 1.5, text-muted) next to the due date area. On hover, show a tooltip with the human-readable rule from `describeRecurrence`. If there's no due date displayed, show the icon after the task title metadata area.\n\n## Context Menu Updates\n\nIn `ContextMenuSubmenus.tsx`, update the `RecurrenceSubmenu`:\n- Keep presets: None, Daily, Weekly, Monthly\n- Daily sets `every:1:days`\n- Weekly sets `every:1:weeks:{today's weekday}` (e.g., `every:1:weeks:mon`)\n- Monthly sets `every:1:months:{today's date}` (e.g., `every:1:months:30`)\n- Remove the old \"Every 3 Days\" and \"Every 14 Days\" presets\n- Add a divider, then \"Custom...\" item at the bottom\n- \"Custom...\" opens the detail panel focused on the recurrence field (field index 6)\n\n## MCP Server Updates\n\nUpdate the `set_task_recurrence` tool description in `mcp-server.ts` to document the new canonical format. Accept canonical format strings only. Example in description: `every:2:weeks:mon,wed`, `every!:1:months:15|until:2026-12-31`.\n\n## Files to Create\n- `src/shared/recurrenceUtils.ts` — parsing, serialization, description, next-date computation\n- `src/shared/recurrenceUtils.test.ts` — comprehensive tests for all utility functions\n\n## Files to Modify\n- `src/shared/types.ts` — add RecurrenceConfig interface\n- `src/renderer/src/features/detail/DetailRecurrence.tsx` — replace with structured picker\n- `src/renderer/src/features/detail/DetailPanel.tsx` — wire up auto-set due date on recurrence change\n- `src/renderer/src/features/tasks/TaskRow.tsx` — add recurrence indicator icon with tooltip\n- `src/renderer/src/shared/components/ContextMenuSubmenus.tsx` — update RecurrenceSubmenu\n- `src/renderer/src/shared/components/ContextMenu.tsx` — wire Custom... to open detail panel\n- `src/main/repositories/TaskRepository.ts` — add completeRecurringTask method\n- `src/main/ipc-handlers.ts` — add task:complete-recurring handler\n- `src/preload/index.ts` and `src/preload/index.d.ts` — add completeRecurringTask bridge method\n- `src/renderer/src/shared/stores/taskStore.ts` — detect done status + recurrence, call IPC, show toast\n- `src/main/mcp-server.ts` — update set_task_recurrence tool description\n- `src/main/database/migrations.ts` — add migration to clear all existing recurrence_rule values\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
       "spec_section": "N/A",
       "acceptance_criteria": [
-        "Task detail panel shows a reference URL field below the title",
-        "Typing a URL saves it to the task with 1s debounce autosave",
-        "Clicking a saved URL opens it in the default browser",
-        "URLs without http/https prefix are auto-prefixed with https:// when opened",
-        "X button clears the URL",
-        "Field is keyboard-accessible and in the Tab order between title and status",
-        "URL persists across app restarts (stored in SQLite via reference_url column)",
-        "Works in both project views and My Day"
+        "Clicking a preset (Daily/Weekly/Monthly) expands the picker pre-filled with that interval and today as the reference day",
+        "Number input increments/decrements with arrow keys, minimum value 1",
+        "Unit dropdown offers days/weeks/months/years",
+        "Selecting weeks shows 7 day-of-week toggle buttons; at least one must be selected",
+        "Selecting months shows toggle between 'On day [N]' (1-31) and 'On the [ordinal] [weekday]'",
+        "Selecting years shows month dropdown + day input defaulting to today",
+        "Fixed / After completion toggle is visible and defaults to Fixed",
+        "Ends row shows Never by default; switching to On date shows a date picker",
+        "Live preview line updates on every change showing human-readable rule + next occurrence date",
+        "Preview uses accent color for valid rules",
+        "Clicking None clears recurrence and collapses the picker",
+        "Escape collapses the picker",
+        "Completing a recurring task creates a new cloned task with next due date and reset subtasks",
+        "Clone is not created if the end date has passed",
+        "Toast notification appears on clone creation showing next due date",
+        "Clicking the toast navigates to the new task",
+        "Task row shows a repeat icon for recurring tasks with tooltip showing the rule",
+        "Context menu presets use smart defaults (today's weekday/date); Custom... opens detail panel recurrence field",
+        "Setting recurrence on a task without a due date auto-sets due date to today",
+        "MCP set_task_recurrence accepts the new canonical format",
+        "One-time migration clears all existing recurrence_rule values to null",
+        "recurrenceUtils.ts has full test coverage for parsing, describing, and next-date computation",
+        "All keyboard navigation works: Tab between controls, arrows within, Space to toggle, Escape to collapse",
+        "npm run typecheck passes with zero errors"
       ],
-      "passes": true,
-      "tested": true,
-      "verified": false
-    },
-    {
-      "id": "35",
-      "title": "Calendar View",
-      "description": "A new cross-project Calendar view that shows all tasks organized by their due date. Accessible from the sidebar between My Day and Projects (\u23182). Supports both monthly grid and weekly layout with a toggle.\n\n**Sidebar & Navigation:**\n- Add 'Calendar' to sidebar after My Day with Calendar icon from lucide-react\n- Keyboard shortcut \u23182 \u2014 bump Projects to \u23183+, Archive to \u23184, Templates to \u23185\n- Add 'calendar' to ViewId type and VIEW_ORDER in viewStore.ts\n- Add conditional render in AppLayout.tsx\n\n**Monthly View:**\n- Classic 7-column grid (Mon\u2013Sun), each cell lists tasks due that day\n- Navigate months with left/right arrow buttons in the header\n- Today highlighted with accent color/border\n- Each task shows: colored project dot + title (truncated if long)\n- Done tasks show strikethrough + muted text\n- Overdue tasks (past due, not done) show in red\n\n**Weekly View:**\n- 7-day horizontal columns with more vertical space per day\n- Scrollable if many tasks\n- Navigate weeks with left/right arrow buttons\n- Same task display as monthly\n\n**Toggle:**\n- Month/Week toggle button in the header area\n- Persist the user's choice via settings store (key: 'calendar_layout')\n\n**Interactions:**\n- Click task \u2192 select it and open detail panel (same as project views)\n- Drag task between day cells \u2192 updates due_date to the target day\n- Right-click task \u2192 context menu (same as other views)\n\n**Scope:**\n- Cross-project: shows ALL non-archived, non-template tasks that have a due_date\n- Project color dot on each task for identification\n- Tasks without due_date do NOT appear\n\n**Empty States:**\n- Days with no tasks: empty cell\n- No tasks with due dates at all: centered empty state message\n\n**Files to create/modify:**\n- Create `src/renderer/src/features/views/CalendarView.tsx`\n- Modify `src/renderer/src/shared/stores/viewStore.ts` \u2014 add 'calendar' to ViewId and VIEW_ORDER\n- Modify `src/renderer/src/AppLayout.tsx` \u2014 add conditional render, view title, view counts\n- Modify `src/renderer/src/features/sidebar/Sidebar.tsx` \u2014 add Calendar nav item\n- Modify keyboard shortcut mappings for \u23182-5\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
-      "spec_section": "N/A",
-      "acceptance_criteria": [
-        "Calendar view accessible from sidebar with Calendar icon (\u23182)",
-        "Monthly grid shows tasks on their due date with project color indicators",
-        "Weekly view shows tasks in day columns with more vertical space",
-        "Toggle between month and week views persists across sessions",
-        "Click a task opens the detail panel",
-        "Drag a task between days updates its due_date",
-        "Left/right arrows navigate between months (monthly) or weeks (weekly)",
-        "Today is visually highlighted with accent color",
-        "Overdue tasks show in red",
-        "Tasks without due dates don't appear in the calendar",
-        "Empty state when no tasks have due dates",
-        "Works with existing detail panel, context menu, and keyboard shortcuts"
-      ],
-      "passes": true,
-      "tested": true,
-      "verified": false
-    },
-    {
-      "id": "36",
-      "title": "Template Wizard \u2014 Relative Due Date Offsets",
-      "description": "When saving a project as a template, the wizard asks whether to include due dates as relative offsets. When deploying, compute actual due dates from a deploy date.\n\n**Save flow:**\n- Add a 'duedates' wizard step (between tasks and review) \u2014 only shown if any tasks have a due_date\n- Step shows: \"Transfer due dates as relative offsets?\" toggle (default on)\n- Offset = Math.round((taskDueDate - today) / msPerDay)\n- If toggled off, all due_date_offset values are set to null\n\n**Deploy flow:**\n- Add a 'duedates' wizard step \u2014 only shown if any tasks have due_date_offset !== null\n- Step shows: deploy date picker (defaults to today) + preview list with computed dates\n- When creating tasks, set due_date = deployDate + due_date_offset days (ISO 8601)\n\n**Files to change:**\n- src/shared/types.ts \u2014 add due_date_offset: number | null to ProjectTemplateTask type\n- src/renderer/src/AppLayout.tsx \u2014 in buildTaskTree, compute due_date_offset from task.due_date\n- src/renderer/src/features/templates/DeployProjectTemplateWizard.tsx \u2014 add duedates step, StepDueDates component, apply offset in createTaskTree\n\n**Edge cases:**\n- Tasks with no due date \u2192 due_date_offset: null, skip in deploy\n- Negative offsets are valid (overdue relative to save date)\n- Subtasks carry offsets too\n- Existing templates without due_date_offset \u2192 treated as null (backward compat)\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
-      "spec_section": "N/A",
-      "acceptance_criteria": [
-        "Save wizard shows due dates step when tasks have due dates",
-        "Toggle controls whether offsets are included in the template",
-        "Deploy wizard shows due dates step when template has offsets",
-        "Deploy date picker defaults to today",
-        "Preview shows computed dates for each task",
-        "Created tasks get correct due_date based on deploy date + offset",
-        "Subtasks carry offsets too",
-        "Existing templates without offsets work normally (backward compat)",
-        "Tasks without due dates are skipped"
-      ],
-      "passes": true,
-      "tested": true,
-      "verified": false
-    },
-    {
-      "id": "37",
-      "title": "Due Date Notifications",
-      "description": "Native macOS notifications that fire when a task's due date+time approaches. Only tasks with a specific time (not date-only) trigger notifications.\n\n**Notification timing:**\n- Configurable lead time: 5, 15, 30, or 60 minutes before (default: 15 min)\n- Always fires at 1 minute before due (when notifications enabled)\n- Only tasks with due_date containing 'T' (time component) trigger notifications\n\n**Settings:**\n- New 'Notifications' section in Settings (General tab)\n- Enable/disable toggle (default: enabled)\n- Lead time dropdown: 5 min, 15 min, 30 min, 1 hour\n\n**Implementation:**\n- Uses Electron's Notification API for native macOS notifications\n- Title: task title, Body: 'Due in X minutes' or 'Due in 1 minute'\n- Main process checks every 60 seconds for upcoming due tasks\n- Track which notifications have been sent to avoid duplicates (Set of taskId+time combos)\n- Click notification \u2192 bring app to front, navigate to task's project, select task, open detail panel\n\n**Edge cases:**\n- Task completed before notification \u2192 skip\n- Task due_date changed \u2192 re-evaluate on next check cycle\n- Multiple tasks due at same time \u2192 one notification per task\n- Date-only tasks (no time component) \u2192 no notification\n- App not running \u2192 no notifications\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
-      "spec_section": "N/A",
-      "acceptance_criteria": [
-        "Native macOS notification fires at configurable lead time before due",
-        "Second notification fires at 1 minute before due",
-        "Only tasks with due_date+time (contains T) trigger notifications",
-        "Clicking notification focuses app, navigates to task project, opens detail panel",
-        "Settings toggle enables/disables notifications",
-        "Settings dropdown configures lead time (5/15/30/60 min)",
-        "Completed/archived/template tasks don't trigger notifications",
-        "No duplicate notifications for the same task+time"
-      ],
-      "passes": true,
-      "tested": true,
-      "verified": false
+      "passes": false,
+      "tested": false
     }
   ]
 }
