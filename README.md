@@ -11,7 +11,7 @@ A keyboard-driven, AI-native task manager built as a native macOS Electron app. 
 | Shell | Electron 41 (main + renderer + preload) |
 | UI | React 19, TypeScript 5 (strict), Tailwind CSS 4 |
 | State | Zustand 5 (zero prop-drilling) |
-| Database | SQLite via better-sqlite3, versioned migrations |
+| Database | SQLite via node:sqlite (Node.js built-in), versioned migrations |
 | Auth | Supabase Auth (email/password + Google OAuth) |
 | Editor | Tiptap 3 (WYSIWYG rich text) |
 | Drag & Drop | @dnd-kit/core + @dnd-kit/sortable |
@@ -106,4 +106,5 @@ npm run build
 | **iCloud attachments** | File attachments synced to iCloud Drive with local-first offline support |
 | **Supabase auth** | Email/password + Google OAuth, encrypted session storage, auto-login |
 | **Focus management** | Full keyboard navigation, focus traps in overlays, Tab cycles through detail fields |
+| **Due dates in rows** | Due dates display inline on task rows with overdue styling |
 | **Copy tasks** | Cmd+C copies selected task titles; multiple as bulleted markdown list |

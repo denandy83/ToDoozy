@@ -293,6 +293,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Cmd+Shift+Space (configurable) opens frameless floating window from anywhere on macOS
 - Creates task in My Day; closes on submit, Escape, or blur
 - Refreshes project list and settings on every focus
+- Window destroyed on close and recreated fresh; waits for theme confirmation before showing (no flash)
 - **Status:** Complete
 
 ### Global App Toggle
@@ -340,9 +341,44 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 | Cmd+C | Copy selected task titles |
 | Cmd+Shift+Space | Quick add (global) |
 | Cmd+Shift+B | Toggle app window (global, configurable) |
-| Escape | Close topmost overlay/panel/menu |
+| Escape | Close topmost overlay/panel/menu (via popup stack) |
 | Enter/Space | Open detail panel for focused task |
-| Tab | Cycle fields in detail panel |
+| Tab | Cycle fields in detail panel (including date picker subfields) |
+| Arrow Up/Down | Navigate tasks and subtasks |
+
+---
+
+### Global Escape Popup System
+- Centralized popup stack manages Escape key dismissal order
+- Topmost overlay (modal, menu, flyout, detail panel) always closes first
+- `stopImmediatePropagation` prevents Escape from leaking through layers
+- **Status:** Complete (2026-03-29)
+
+### Date Picker Keyboard Navigation
+- Tab cycles through date field, time field, and clear (X) button as subfields
+- Clock toggle auto-sets time to +3 hours from now and focuses time input
+- Clock icon hidden when a time value is already set
+- **Status:** Complete (2026-03-29)
+
+### Due Dates in Task Rows
+- Due dates display inline on task rows
+- Overdue tasks show red styling for past-due dates
+- **Status:** Complete (2026-03-29)
+
+### Subtask Keyboard Navigation
+- Arrow keys navigate through subtask lists
+- My Day auto-selects first task on view entry
+- **Status:** Complete (2026-03-29)
+
+---
+
+## Internal / Infrastructure
+
+### Database: node:sqlite Migration
+- Replaced `better-sqlite3` native module with Node.js built-in `node:sqlite`
+- Eliminates native compilation requirements and Electron rebuild issues
+- 32 files changed across repositories, migrations, and IPC handlers
+- **Status:** Complete (2026-03-28, commit aee3cc6)
 
 ---
 

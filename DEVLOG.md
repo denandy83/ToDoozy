@@ -4,6 +4,24 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-29 — Keyboard polish, date picker improvements, and node:sqlite migration
+
+**Session type:** Bug fixes, UX improvements, infrastructure migration
+
+**What was done:**
+- Fixed quick-add window theme flash by destroying/recreating window and waiting for theme confirmation before showing
+- Fixed status changes to respect default task position setting
+- Fixed context menu labels in My Day, label portability on task move, and Shift+Delete on labels
+- Achieved consistent ESC/Tab behavior across My Day and project views with a new global Escape popup stack
+- Improved date picker keyboard navigation: Tab into time picker, clock toggle auto-sets +3h, X button in Tab sequence
+- Added due dates inline on task rows with overdue styling
+- Improved subtask keyboard navigation with arrow keys; My Day auto-selects first task
+- Migrated from `better-sqlite3` to Node.js built-in `node:sqlite` (32 files changed), eliminating native module compilation
+
+**Commits:** 30d8e2b, a2d9ba9, 4c7cbee, 131b383, f345670, 38442c7, 6eb3bf5, c689c08, 90615e5, 99e6d43, aee3cc6, a8a1804
+
+---
+
 ## 2026-03-26 — Workflow & test suite hardening
 
 **Session type:** Internal tooling / QA

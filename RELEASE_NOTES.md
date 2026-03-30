@@ -7,6 +7,14 @@ User-facing changes by date. Most recent first.
 ## 2026-03-29
 
 - **Fix: Quick-add follows theme** — The quick-add popup (Cmd+Shift+Space) now opens with the correct theme instantly, no more dark flash when using a light theme.
+- **Fix: Status changes respect position setting** — Changing a task's status now places it according to your default task position preference.
+- **Fix: Context menu and label fixes in My Day** — Labels now display correctly in My Day context menus, labels transfer properly when moving tasks between projects, and Shift+Delete works on labels.
+- **Fix: Consistent ESC/Tab behavior** — Escape and Tab now work uniformly across My Day and project views.
+- **Improved date picker keyboard navigation** — Tab cycles through all date picker fields including the clear button and time picker. The clock icon auto-sets time to 3 hours from now.
+- **Global Escape popup system** — A centralized stack manages Escape key dismissal, ensuring the topmost overlay always closes first.
+- **Due dates visible in task rows** — Due dates now show inline on task rows with red overdue styling for past-due tasks.
+- **Subtask keyboard navigation** — Arrow keys now navigate through subtasks; My Day auto-selects the first task on view entry.
+- **Migrated to node:sqlite** — Replaced better-sqlite3 with Node.js built-in sqlite module for simpler builds and no native compilation.
 
 ## 2026-03-25
 

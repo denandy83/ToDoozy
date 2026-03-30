@@ -7,7 +7,22 @@ All bug fixes and changes to ToDoozy. Most recent first.
 ## 2026-03-29
 
 ### Fixed
-- **Quick-add window follows theme** — The Cmd+Shift+Space quick-add popup now always opens with the correct theme. Previously it flashed dark before switching to light.
+- **Quick-add window follows theme** — The quick-add popup now destroys on close and recreates fresh, waiting for theme confirmation before showing. No more dark flash on light themes. (4c7cbee)
+- **Status changes respect default task position** — Changing a task's status now correctly applies the user's default position setting (top or bottom of list). (30d8e2b)
+- **Context menu labels in My Day** — Fixed label display and portability when moving tasks between projects via context menu; fixed Shift+Delete on labels; fixed status ordering in My Day buckets. (a2d9ba9)
+- **Consistent ESC/Tab behavior** — ESC and Tab now behave consistently across My Day and project views, following the global popup/overlay dismissal system. (131b383)
+- **Hide clock icon when time is set** — The clock toggle in the date picker no longer shows when a time value is already present. (f345670)
+- **Global Escape propagation** — Used `stopImmediatePropagation` in the global Escape handler to prevent events leaking through overlay layers. (c689c08)
+
+### Added
+- **Due date X button in Tab sequence** — The clear (X) button in the due date picker is now reachable as Tab subfield 3. (38442c7)
+- **Clock toggle auto-sets time** — Clicking the clock icon sets time to +3 hours from now and focuses the time input. (6eb3bf5)
+- **Tab into time picker and focus restore** — Tab now navigates into the time picker / clock field; focus is restored after label removal. (90615e5)
+- **Global Escape popup system** — New centralized popup stack for Escape key handling; My Day auto-selects first task on view entry; subtask keyboard navigation improvements. (99e6d43)
+- **Due dates in task rows, overdue styling** — Due dates now display inline on task rows with overdue styling; subtask UX and status label improvements. (a8a1804)
+
+### Internal
+- **Migrated from better-sqlite3 to node:sqlite** — Replaced the better-sqlite3 native module with Node.js built-in `node:sqlite`, eliminating native compilation requirements. 32 files changed. (aee3cc6)
 
 ## 2026-03-26
 
