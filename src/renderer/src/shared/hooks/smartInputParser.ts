@@ -134,12 +134,25 @@ export function detectOperator(
 }
 
 /**
- * Filter labels by substring match.
+ * Filter labels by substring match, ranked: exact > prefix > substring.
  */
 export function filterLabels(labels: Label[], query: string): Label[] {
   if (!query) return labels.slice(0, 5)
   const q = query.toLowerCase()
-  return labels.filter((l) => l.name.toLowerCase().includes(q)).slice(0, 5)
+  return labels
+    .filter((l) => l.name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aName = a.name.toLowerCase()
+      const bName = b.name.toLowerCase()
+      const aExact = aName === q
+      const bExact = bName === q
+      if (aExact !== bExact) return aExact ? -1 : 1
+      const aPrefix = aName.startsWith(q)
+      const bPrefix = bName.startsWith(q)
+      if (aPrefix !== bPrefix) return aPrefix ? -1 : 1
+      return aName.localeCompare(bName)
+    })
+    .slice(0, 5)
 }
 
 /**
@@ -305,10 +318,23 @@ function formatDateDisplay(d: Date): string {
 }
 
 /**
- * Filter projects by substring match on name.
+ * Filter projects by substring match on name, ranked: exact > prefix > substring.
  */
 export function filterProjects(projects: Project[], query: string): Project[] {
   const q = query.toLowerCase()
   if (!q) return projects.slice(0, 5)
-  return projects.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 5)
+  return projects
+    .filter((p) => p.name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aName = a.name.toLowerCase()
+      const bName = b.name.toLowerCase()
+      const aExact = aName === q
+      const bExact = bName === q
+      if (aExact !== bExact) return aExact ? -1 : 1
+      const aPrefix = aName.startsWith(q)
+      const bPrefix = bName.startsWith(q)
+      if (aPrefix !== bPrefix) return aPrefix ? -1 : 1
+      return aName.localeCompare(bName)
+    })
+    .slice(0, 5)
 }

@@ -159,6 +159,16 @@ describe('filterLabels', () => {
   it('returns empty for no match', () => {
     expect(filterLabels(labels, 'xyz')).toEqual([])
   })
+
+  it('ranks exact match before prefix before substring', () => {
+    const ranked = [
+      makeLabel('a', 'sfbug', '#ef4444'),
+      makeLabel('b', 'bugfix', '#22c55e'),
+      makeLabel('c', 'bug', '#3b82f6')
+    ]
+    const result = filterLabels(ranked, 'bug')
+    expect(result.map((l) => l.name)).toEqual(['bug', 'bugfix', 'sfbug'])
+  })
 })
 
 describe('filterPriorities', () => {
