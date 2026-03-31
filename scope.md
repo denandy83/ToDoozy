@@ -1,31 +1,31 @@
-# Remove Mandatory In-Progress Status Enforcement
+# Make ToDoozy Distribution-Ready
 
-## Decisions
+## Phase 1: User-Scope All Data — DONE
 
-- My Day always shows 3 buckets, even if tasks belong to projects without in-progress statuses
-- Dragging to In Progress bucket in kanban: show block icon + "No in-progress status" indicator, drop handler shows toast
-- Status cycling for 2-status projects: cycles Not Started → Done → Not Started (no code change needed)
-- Timer play button: do nothing if no in-progress status (no code change needed)
-- TaskRow status label in My Day: show non-default/non-done status names. Not applicable for projects with no in-progress status.
+### Completed:
+- [x] Migration 11: settings table gets user_id composite key, themes table gets owner_id column
+- [x] LabelRepository: findAll → findAllForUser(userId), findByName takes userId, findAllWithUsage takes userId, findProjectsUsingLabel takes userId
+- [x] SettingsRepository: all methods take userId, falls back to global defaults (user_id='')
+- [x] ThemeRepository: list/listByMode filter by is_builtin OR owner_id, create sets owner_id
+- [x] ActivityLogRepository: getRecent scoped through project_members
+- [x] TaskRepository: findAllTemplates scoped through project_members
+- [x] ProjectTemplateRepository: findAll IPC now uses findByOwnerId
+- [x] projects:list IPC now uses getProjectsForUser instead of unfiltered list()
+- [x] All IPC handlers updated with userId parameters
+- [x] Preload bridge types and implementation updated
+- [x] settingsStore: stores userId, uses it in all API calls
+- [x] labelStore, taskStore: get userId from authStore
+- [x] templateStore: hydrateProjectTemplates takes userId
+- [x] App.tsx: hydration waits for auth, passes userId
+- [x] All renderer callers updated (LabelSettingsContent, LabelPicker, LabelFilterBar, QuickAddApp, DeployProjectTemplateWizard, useCreateOrMatchLabel)
+- [x] MCP server callers updated
+- [x] Notifications callers use global userId ('')
+- [x] All tests updated and passing (357/357)
 
-## Changes Made
-
-### 1. StatusList.tsx — Remove enforcement [x]
-- Removed `middleStatuses.length <= 1` check and "Must have at least one in-progress status" toast
-
-### 2. DeployProjectTemplateWizard.tsx — Remove enforcement in template wizard [x]
-- Removed guard that prevented removing the only middle status
-
-### 3. findProjectStatusForBucket (myDayBuckets.ts) — Fix fallback [x]
-- `in_progress` case now returns `undefined` instead of falling back to wrong status
-
-### 4. Drag to In Progress — Block indicator + toast [x]
-- KanbanColumn.tsx: Shows ban icon + red background when dragging a task over In Progress column if project has no in-progress status
-- AppLayout.tsx: handleBucketDrop shows toast when findProjectStatusForBucket returns undefined
-- MyDayView.tsx: handleMyDayStatusChange shows toast when bucket status not found
-
-### 5. TaskRow.tsx — Remove hardcoded "in progress" name check [x]
-- Removed `name === 'in progress'` string check, kept default/done hiding
-
-### Also fixed in this branch (pre-existing):
-- MyDayView.tsx: handleStatusChange now computes order_index by bucket membership instead of exact status_id (fixes done task positioning in My Day)
+## Phase 2: Build & Packaging — TODO
+- [ ] Embed Supabase credentials at build time (electron.vite.config.ts define block)
+- [ ] Remove dotenv from index.ts and dependencies
+- [ ] Fix hardcoded OAuth redirect URL in authStore.ts:210
+- [ ] Remove vestigial better-sqlite3 references
+- [ ] Install electron-builder + add build scripts
+- [ ] Create macOS entitlements file

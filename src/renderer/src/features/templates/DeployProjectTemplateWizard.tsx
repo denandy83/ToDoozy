@@ -168,7 +168,7 @@ export function DeployProjectTemplateWizard({
       // Create or reuse global labels
       const labelIdMap: Record<string, string> = {}
       for (const l of labels) {
-        const existing = await window.api.labels.findByName(l.name)
+        const existing = await window.api.labels.findByName(currentUser.id, l.name)
         if (existing) {
           // Reuse existing global label, just link to new project
           await window.api.labels.addToProject(project.id, existing.id)

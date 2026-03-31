@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useLabelStore } from '../stores/labelStore'
+import { useAuthStore } from '../stores/authStore'
 import { useToast } from '../components/Toast'
 import type { Label } from '../../../../shared/types'
 
@@ -10,12 +11,13 @@ import type { Label } from '../../../../shared/types'
  */
 export function useCreateOrMatchLabel(projectId: string): (name: string, color: string) => Promise<Label> {
   const { createLabel, addToProject } = useLabelStore()
+  const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const { addToast } = useToast()
 
   return useCallback(
     async (name: string, color: string): Promise<Label> => {
       // Check if a global label with this name already exists
-      const existing = await window.api.labels.findByName(name)
+      const existing = await window.api.labels.findByName(userId, name)
       if (existing) {
         // Add existing global label to this project
         await addToProject(projectId, existing.id)
@@ -30,6 +32,6 @@ export function useCreateOrMatchLabel(projectId: string): (name: string, color: 
         color
       })
     },
-    [projectId, createLabel, addToProject, addToast]
+    [projectId, userId, createLabel, addToProject, addToast]
   )
 }

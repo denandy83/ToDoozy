@@ -106,7 +106,7 @@ function loadAndRegisterShortcut(): void {
   try {
     const db = getDatabase()
     const settingsRepo = new SettingsRepository(db)
-    const savedShortcut = settingsRepo.get('quick_add_shortcut')
+    const savedShortcut = settingsRepo.get('', 'quick_add_shortcut')
     registerQuickAddShortcut(savedShortcut ?? undefined)
   } catch (err) {
     console.error('Failed to load quick-add shortcut setting:', err)
@@ -156,7 +156,7 @@ function loadAndRegisterAppToggleShortcut(): void {
   try {
     const db = getDatabase()
     const settingsRepo = new SettingsRepository(db)
-    const savedShortcut = settingsRepo.get('app_toggle_shortcut')
+    const savedShortcut = settingsRepo.get('', 'app_toggle_shortcut')
     registerAppToggleShortcut(savedShortcut ?? undefined)
   } catch (err) {
     console.error('Failed to load app-toggle shortcut setting:', err)

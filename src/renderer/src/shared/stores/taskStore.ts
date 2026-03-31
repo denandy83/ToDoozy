@@ -8,6 +8,11 @@ import type {
   Label,
   TaskLabelMapping
 } from '../../../../shared/types'
+import { useAuthStore } from './authStore'
+
+function getUserId(): string {
+  return useAuthStore.getState().currentUser?.id ?? ''
+}
 
 interface RecurringCloneResult {
   taskId: string
@@ -140,7 +145,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async hydrateTemplates(_projectId: string): Promise<void> {
     try {
-      const tasks = await window.api.tasks.findAllTemplates()
+      const tasks = await window.api.tasks.findAllTemplates(getUserId())
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of tasks) {
@@ -163,7 +168,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const archivedPromises = allProjects.map((p) => window.api.tasks.findArchived(p.id))
       const [myDay, templates, ...rest] = await Promise.all([
         window.api.tasks.findMyDay(userId),
-        window.api.tasks.findAllTemplates(),
+        window.api.tasks.findAllTemplates(getUserId()),
         ...projectTaskPromises,
         ...archivedPromises
       ])
@@ -370,7 +375,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const template = await window.api.tasks.saveAsTemplate(id, newId)
       if (template) {
         // Re-hydrate templates globally
-        const allTemplates = await window.api.tasks.findAllTemplates()
+        const allTemplates = await window.api.tasks.findAllTemplates(getUserId())
         set((state) => {
           const updated = { ...state.tasks }
           for (const t of allTemplates) {

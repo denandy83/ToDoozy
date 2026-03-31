@@ -42,6 +42,10 @@ function seedBase(db: DatabaseSync): { userId: string; projectId: string; status
     'INSERT INTO statuses (id, project_id, name, order_index, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(statusId, projectId, 'Not Started', 0, 1, now, now)
 
+  db.prepare(
+    'INSERT INTO project_members (project_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)'
+  ).run(projectId, userId, 'owner', now)
+
   return { userId, projectId, statusId }
 }
 
@@ -611,12 +615,14 @@ describe('LabelRepository', () => {
   let db: DatabaseSync
   let repo: LabelRepository
   let projectId: string
+  let userId: string
 
   beforeEach(() => {
     db = createTestDb()
     repo = new LabelRepository(db)
     const base = seedBase(db)
     projectId = base.projectId
+    userId = base.userId
   })
 
   it('creates a global label and finds it', () => {
@@ -634,10 +640,10 @@ describe('LabelRepository', () => {
     expect(labels[0].name).toBe('Feature')
   })
 
-  it('finds all global labels', () => {
-    repo.create({ id: randomUUID(), name: 'Zzz' })
-    repo.create({ id: randomUUID(), name: 'Aaa' })
-    const labels = repo.findAll()
+  it('finds all labels for user', () => {
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Zzz' })
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Aaa' })
+    const labels = repo.findAllForUser(userId)
     expect(labels).toHaveLength(2)
   })
 
@@ -651,10 +657,10 @@ describe('LabelRepository', () => {
   })
 
   it('finds label by name case-insensitively', () => {
-    repo.create({ id: randomUUID(), name: 'Bug' })
-    expect(repo.findByName('bug')).toBeDefined()
-    expect(repo.findByName('BUG')).toBeDefined()
-    expect(repo.findByName('nonexistent')).toBeUndefined()
+    repo.create({ id: randomUUID(), project_id: projectId, name: 'Bug' })
+    expect(repo.findByName(userId, 'bug')).toBeDefined()
+    expect(repo.findByName(userId, 'BUG')).toBeDefined()
+    expect(repo.findByName(userId, 'nonexistent')).toBeUndefined()
   })
 
   it('updates a label globally', () => {
@@ -727,7 +733,7 @@ describe('LabelRepository', () => {
   it('findAllWithUsage returns usage counts', () => {
     const labelId = randomUUID()
     repo.create({ id: labelId, project_id: projectId, name: 'Bug' })
-    const usage = repo.findAllWithUsage()
+    const usage = repo.findAllWithUsage(userId)
     expect(usage).toHaveLength(1)
     expect(usage[0].project_count).toBe(1)
     expect(usage[0].task_count).toBe(0)
@@ -736,7 +742,7 @@ describe('LabelRepository', () => {
   it('findProjectsUsingLabel returns project info', () => {
     const labelId = randomUUID()
     repo.create({ id: labelId, project_id: projectId, name: 'Bug' })
-    const projects = repo.findProjectsUsingLabel(labelId)
+    const projects = repo.findProjectsUsingLabel(userId, labelId)
     expect(projects).toHaveLength(1)
     expect(projects[0].project_id).toBe(projectId)
   })
@@ -820,52 +826,52 @@ describe('SettingsRepository', () => {
     repo = new SettingsRepository(db)
   })
 
-  it('gets seeded settings', () => {
-    const themeMode = repo.get('theme_mode')
+  it('gets seeded settings via global fallback', () => {
+    const themeMode = repo.get('testuser', 'theme_mode')
     expect(themeMode).toBe('dark')
   })
 
   it('gets all settings', () => {
-    const all = repo.getAll()
+    const all = repo.getAll('testuser')
     expect(all.length).toBeGreaterThanOrEqual(12)
   })
 
   it('sets and gets a value', () => {
-    repo.set('custom_key', 'custom_value')
-    expect(repo.get('custom_key')).toBe('custom_value')
+    repo.set('testuser', 'custom_key', 'custom_value')
+    expect(repo.get('testuser', 'custom_key')).toBe('custom_value')
   })
 
   it('upserts on set', () => {
-    repo.set('theme_mode', 'light')
-    expect(repo.get('theme_mode')).toBe('light')
+    repo.set('testuser', 'theme_mode', 'light')
+    expect(repo.get('testuser', 'theme_mode')).toBe('light')
   })
 
   it('gets multiple keys', () => {
-    const settings = repo.getMultiple(['theme_mode', 'sidebar_pinned'])
+    const settings = repo.getMultiple('testuser', ['theme_mode', 'sidebar_pinned'])
     expect(settings).toHaveLength(2)
   })
 
   it('sets multiple at once in a transaction', () => {
-    repo.setMultiple([
+    repo.setMultiple('testuser', [
       { key: 'a', value: '1' },
       { key: 'b', value: '2' }
     ])
-    expect(repo.get('a')).toBe('1')
-    expect(repo.get('b')).toBe('2')
+    expect(repo.get('testuser', 'a')).toBe('1')
+    expect(repo.get('testuser', 'b')).toBe('2')
   })
 
   it('deletes a setting', () => {
-    repo.set('temp', 'val')
-    expect(repo.delete('temp')).toBe(true)
-    expect(repo.get('temp')).toBeNull()
+    repo.set('testuser', 'temp', 'val')
+    expect(repo.delete('testuser', 'temp')).toBe(true)
+    expect(repo.get('testuser', 'temp')).toBeNull()
   })
 
   it('returns null for nonexistent key', () => {
-    expect(repo.get('nonexistent')).toBeNull()
+    expect(repo.get('testuser', 'nonexistent')).toBeNull()
   })
 
   it('returns empty array for empty keys list', () => {
-    expect(repo.getMultiple([])).toEqual([])
+    expect(repo.getMultiple('testuser', [])).toEqual([])
   })
 })
 
@@ -916,7 +922,7 @@ describe('ActivityLogRepository', () => {
     for (let i = 0; i < 5; i++) {
       repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: `action_${i}` })
     }
-    expect(repo.getRecent(3)).toHaveLength(3)
+    expect(repo.getRecent(userId, 3)).toHaveLength(3)
   })
 })
 

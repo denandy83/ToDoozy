@@ -174,10 +174,15 @@ export class TaskRepository {
       .all(taskId) as unknown as TaskLabel[]
   }
 
-  findAllTemplates(): Task[] {
+  findAllTemplates(userId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE is_template = 1 ORDER BY created_at ASC')
-      .all() as unknown as Task[]
+      .prepare(
+        `SELECT t.* FROM tasks t
+         INNER JOIN project_members pm ON pm.project_id = t.project_id
+         WHERE t.is_template = 1 AND pm.user_id = ?
+         ORDER BY t.created_at ASC`
+      )
+      .all(userId) as unknown as Task[]
   }
 
   saveAsTemplate(id: string, newId: string): Task | undefined {

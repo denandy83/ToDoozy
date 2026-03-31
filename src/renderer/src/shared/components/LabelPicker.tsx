@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import type { Label } from '../../../../shared/types'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useLabelStore } from '../stores/labelStore'
+import { useAuthStore } from '../stores/authStore'
 import { leastUsedLabelColor } from '../utils/labelColors'
 import { useToast } from './Toast'
 
@@ -28,6 +29,7 @@ export function LabelPicker({
   onAddGlobalLabel
 }: LabelPickerProps): React.JSX.Element {
   const { addToProject } = useLabelStore()
+  const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const { addToast } = useToast()
   const [newLabelMode, setNewLabelMode] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')
@@ -62,9 +64,9 @@ export function LabelPicker({
     if (globalLabels.length > 0) {
       setAllGlobalLabels(globalLabels)
     } else {
-      window.api.labels.findAll().then(setAllGlobalLabels).catch(() => {})
+      window.api.labels.findAll(userId).then(setAllGlobalLabels).catch(() => {})
     }
-  }, [globalLabels])
+  }, [globalLabels, userId])
 
   const handleAddGlobalLabel = useCallback(async (labelId: string) => {
     if (onAddGlobalLabel) {

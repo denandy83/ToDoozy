@@ -2,6 +2,11 @@ import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { Label, CreateLabelInput, UpdateLabelInput } from '../../../../shared/types'
+import { useAuthStore } from './authStore'
+
+function getUserId(): string {
+  return useAuthStore.getState().currentUser?.id ?? ''
+}
 
 export type LabelFilterMode = 'hide' | 'blur'
 
@@ -64,7 +69,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
 
   async hydrateAllLabels(): Promise<void> {
     try {
-      const labels = await window.api.labels.findAll()
+      const labels = await window.api.labels.findAll(getUserId())
       const labelMap: Record<string, Label> = {}
       for (const l of labels) {
         labelMap[l.id] = l
@@ -80,7 +85,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
     try {
       const label = await window.api.labels.create(input)
       // Re-hydrate all labels to get fresh order_index values
-      const allLabels = await window.api.labels.findAll()
+      const allLabels = await window.api.labels.findAll(getUserId())
       const labelMap: Record<string, Label> = {}
       for (const l of allLabels) {
         labelMap[l.id] = l

@@ -25,6 +25,7 @@ function ColorDot({ color, onChange }: { color: string; onChange: (c: string) =>
 }
 import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores/projectStore'
+import { useAuthStore } from '../../shared/stores/authStore'
 import { useToast } from '../../shared/components/Toast'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import { LABEL_COLORS, leastUsedLabelColor } from '../../shared/utils/labelColors'
@@ -33,6 +34,8 @@ import type { Label, LabelUsageInfo } from '../../../../shared/types'
 export function LabelSettingsContent(): React.JSX.Element {
   const currentProject = useProjectStore(selectCurrentProject)
   const projectId = currentProject?.id ?? ''
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const userId = currentUser?.id ?? ''
   const { createLabel, updateLabel, deleteLabel, removeFromProject, addToProject, reorderLabels, filterMode, setFilterMode } = useLabelStore()
   const { addToast } = useToast()
   const setSetting = useSettingsStore((s) => s.setSetting)
@@ -42,9 +45,9 @@ export function LabelSettingsContent(): React.JSX.Element {
   // Fetch all labels with usage info
   const [labelsWithUsage, setLabelsWithUsage] = useState<LabelUsageInfo[]>([])
   const refreshLabels = useCallback(async () => {
-    const all = await window.api.labels.findAllWithUsage()
+    const all = await window.api.labels.findAllWithUsage(userId)
     setLabelsWithUsage(all)
-  }, [])
+  }, [userId])
 
   useEffect(() => {
     refreshLabels()
@@ -84,7 +87,7 @@ export function LabelSettingsContent(): React.JSX.Element {
     const name = newName.trim()
     if (!name || !projectId) return
     // Check for existing global label
-    const existing = await window.api.labels.findByName(name)
+    const existing = await window.api.labels.findByName(userId, name)
     if (existing) {
       await addToProject(projectId, existing.id)
       addToast({ message: `Existing label added: ${existing.name}` })
@@ -94,7 +97,7 @@ export function LabelSettingsContent(): React.JSX.Element {
     setNewName('')
     await refreshLabels()
     // Pick next least-used color after creation
-    const updatedLabels = await window.api.labels.findAllWithUsage()
+    const updatedLabels = await window.api.labels.findAllWithUsage(userId)
     setNewColor(leastUsedLabelColor(updatedLabels))
     requestAnimationFrame(() => {
       addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -156,7 +159,7 @@ export function LabelSettingsContent(): React.JSX.Element {
       return
     }
 
-    const projects = await window.api.labels.findProjectsUsingLabel(id)
+    const projects = await window.api.labels.findProjectsUsingLabel(userId, id)
 
     if (projects.length === 0) {
       // Not in any project — just delete

@@ -49,16 +49,16 @@ export interface TasksAPI {
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   getLabels(taskId: string): Promise<TaskLabel[]>
   duplicate(id: string, newId: string): Promise<Task | null>
-  findAllTemplates(): Promise<Task[]>
+  findAllTemplates(userId: string): Promise<Task[]>
   saveAsTemplate(id: string, newId: string): Promise<Task | null>
   completeRecurring(taskId: string): Promise<{ id: string; dueDate: string } | null>
 }
 
 export interface LabelsAPI {
   findById(id: string): Promise<Label | null>
-  findAll(): Promise<Label[]>
+  findAll(userId: string): Promise<Label[]>
   findByProjectId(projectId: string): Promise<Label[]>
-  findByName(name: string): Promise<Label | null>
+  findByName(userId: string, name: string): Promise<Label | null>
   create(input: CreateLabelInput): Promise<Label>
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>
@@ -67,8 +67,8 @@ export interface LabelsAPI {
   findByTaskId(taskId: string): Promise<Label[]>
   findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
   reorder(labelIds: string[]): Promise<void>
-  findAllWithUsage(): Promise<LabelUsageInfo[]>
-  findProjectsUsingLabel(labelId: string): Promise<Array<{ project_id: string; project_name: string; task_count: number }>>
+  findAllWithUsage(userId: string): Promise<LabelUsageInfo[]>
+  findProjectsUsingLabel(userId: string, labelId: string): Promise<Array<{ project_id: string; project_name: string; task_count: number }>>
   findActiveLabelsForProject(projectId: string): Promise<Label[]>
 }
 
@@ -79,7 +79,7 @@ export interface ProjectsAPI {
   create(input: CreateProjectInput): Promise<Project>
   update(id: string, input: UpdateProjectInput): Promise<Project | null>
   delete(id: string): Promise<boolean>
-  list(): Promise<Project[]>
+  list(userId: string): Promise<Project[]>
   addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
   getMembers(projectId: string): Promise<ProjectMember[]>
@@ -113,23 +113,23 @@ export interface ActivityLogAPI {
   findByUserId(userId: string): Promise<ActivityLogEntry[]>
   create(input: CreateActivityLogInput): Promise<ActivityLogEntry>
   deleteByTaskId(taskId: string): Promise<number>
-  getRecent(limit: number): Promise<ActivityLogEntry[]>
+  getRecent(userId: string, limit: number): Promise<ActivityLogEntry[]>
 }
 
 export interface SettingsAPI {
-  get(key: string): Promise<string | null>
-  set(key: string, value: string | null): Promise<void>
-  getAll(): Promise<Setting[]>
-  getMultiple(keys: string[]): Promise<Setting[]>
-  setMultiple(settings: Setting[]): Promise<void>
-  delete(key: string): Promise<boolean>
+  get(userId: string, key: string): Promise<string | null>
+  set(userId: string, key: string, value: string | null): Promise<void>
+  getAll(userId: string): Promise<Setting[]>
+  getMultiple(userId: string, keys: string[]): Promise<Setting[]>
+  setMultiple(userId: string, settings: Setting[]): Promise<void>
+  delete(userId: string, key: string): Promise<boolean>
 }
 
 export interface ThemesAPI {
   findById(id: string): Promise<Theme | null>
-  list(): Promise<Theme[]>
-  listByMode(mode: string): Promise<Theme[]>
-  create(input: CreateThemeInput): Promise<Theme>
+  list(userId: string): Promise<Theme[]>
+  listByMode(mode: string, userId: string): Promise<Theme[]>
+  create(input: CreateThemeInput & { owner_id?: string }): Promise<Theme>
   update(id: string, input: UpdateThemeInput): Promise<Theme | null>
   delete(id: string): Promise<boolean>
   getConfig(id: string): Promise<ThemeConfig | null>
@@ -138,7 +138,7 @@ export interface ThemesAPI {
 export interface ProjectTemplatesAPI {
   findById(id: string): Promise<ProjectTemplate | null>
   findByOwnerId(ownerId: string): Promise<ProjectTemplate[]>
-  findAll(): Promise<ProjectTemplate[]>
+  findAll(userId: string): Promise<ProjectTemplate[]>
   create(input: CreateProjectTemplateInput): Promise<ProjectTemplate>
   update(id: string, input: UpdateProjectTemplateInput): Promise<ProjectTemplate | null>
   delete(id: string): Promise<boolean>

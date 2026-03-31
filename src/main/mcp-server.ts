@@ -549,7 +549,7 @@ function copyTemplateSubtasks(
     for (const sl of subtaskLabels) {
       let target = targetLabels.find((l) => l.name === sl.name)
       if (!target) {
-        const existing = repos.labels.findByName(sl.name)
+        const existing = repos.labels.findByName(getUser().id, sl.name)
         if (existing) {
           repos.labels.addToProject(projectId, existing.id)
           targetLabels.push(existing)
@@ -605,7 +605,7 @@ function deployTemplate(
   // Create or reuse global labels and link to project
   const labelMap: Record<string, string> = {}
   for (const l of data.labels) {
-    const existing = repos.labels.findByName(l.name)
+    const existing = repos.labels.findByName(getUser().id, l.name)
     if (existing) {
       repos.labels.addToProject(projectId, existing.id)
       labelMap[l.name] = existing.id
@@ -994,8 +994,9 @@ const handlers: Record<string, Handler> = {
 
   // ── Templates ──────────────────────────────────────────────────
   list_templates() {
-    const taskTemplates = repos.tasks.findAllTemplates()
-    const projectTemplates = repos.projectTemplates.findAll()
+    const user = getUser()
+    const taskTemplates = repos.tasks.findAllTemplates(user.id)
+    const projectTemplates = repos.projectTemplates.findByOwnerId(user.id)
     return { task_templates: taskTemplates, project_templates: projectTemplates }
   },
 
@@ -1030,7 +1031,7 @@ const handlers: Record<string, Handler> = {
       let target = targetLabels.find((l) => l.name === tl.name)
       if (!target) {
         // Check for existing global label by name
-        const existing = repos.labels.findByName(tl.name)
+        const existing = repos.labels.findByName(getUser().id, tl.name)
         if (existing) {
           repos.labels.addToProject(projectId, existing.id)
           targetLabels.push(existing)

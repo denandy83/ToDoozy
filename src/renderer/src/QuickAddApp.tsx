@@ -64,7 +64,7 @@ export default function QuickAddApp(): React.JSX.Element {
         const userProjects = await window.api.projects.getProjectsForUser(uid)
         setProjects(userProjects)
 
-        const settings = await window.api.settings.getAll()
+        const settings = await window.api.settings.getAll(uid)
         const settingsMap: Record<string, string | null> = {}
         for (const s of settings) {
           settingsMap[s.key] = s.value

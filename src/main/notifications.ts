@@ -36,10 +36,10 @@ function checkAndSendNotifications(): void {
     const db = getDatabase()
     const repos = createRepositories(db)
 
-    const enabled = repos.settings.get('notifications_enabled')
+    const enabled = repos.settings.get('', 'notifications_enabled')
     if (enabled === 'false') return
 
-    const leadTimeStr = repos.settings.get('notifications_lead_time') ?? '15'
+    const leadTimeStr = repos.settings.get('', 'notifications_lead_time') ?? '15'
     const leadMinutes = parseInt(leadTimeStr, 10)
     if (isNaN(leadMinutes) || leadMinutes <= 0) return
 

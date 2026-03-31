@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { X } from 'lucide-react'
 import {
   useLabelStore,
+  useAuthStore,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
   selectFilterMode
@@ -21,6 +22,7 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const { toggleLabelFilter, clearLabelFilters, setFilterMode, removeFromProject } = useLabelStore()
+  const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const { addToast } = useToast()
 
   const handleRemoveLabel = useCallback(async (label: Label, e: React.MouseEvent) => {
@@ -33,7 +35,7 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
     }
 
     // Count tasks in this project that have this label
-    const projects = await window.api.labels.findProjectsUsingLabel(label.id)
+    const projects = await window.api.labels.findProjectsUsingLabel(userId, label.id)
     const projectInfo = projects.find((p) => p.project_id === projectId)
     const count = projectInfo?.task_count ?? 0
 
@@ -51,7 +53,7 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
         { label: 'Cancel', variant: 'muted', onClick: () => {} }
       ]
     })
-  }, [projectId, removeFromProject, addToast])
+  }, [projectId, userId, removeFromProject, addToast])
 
   const handleToggleMode = useCallback(() => {
     const next: LabelFilterMode = filterMode === 'hide' ? 'blur' : 'hide'

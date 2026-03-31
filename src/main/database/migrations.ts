@@ -329,4 +329,24 @@ const migration_10: Migration = (db) => {
   db.exec(`UPDATE tasks SET recurrence_rule = NULL WHERE recurrence_rule IS NOT NULL`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10]
+const migration_11: Migration = (db) => {
+  // User-scope settings and themes for multi-user isolation
+  // Settings: add user_id column, make composite key (user_id, key)
+  db.exec(`
+    CREATE TABLE settings_new (
+      user_id TEXT NOT NULL DEFAULT '',
+      key TEXT NOT NULL,
+      value TEXT,
+      PRIMARY KEY (user_id, key)
+    );
+    INSERT INTO settings_new (user_id, key, value)
+      SELECT '', key, value FROM settings;
+    DROP TABLE settings;
+    ALTER TABLE settings_new RENAME TO settings;
+  `)
+
+  // Themes: add owner_id column (NULL = built-in/system theme)
+  db.exec(`ALTER TABLE themes ADD COLUMN owner_id TEXT`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11]

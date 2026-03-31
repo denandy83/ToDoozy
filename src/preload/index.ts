@@ -20,16 +20,16 @@ const api: TodoozyAPI = {
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId),
-    findAllTemplates: () => ipcRenderer.invoke('tasks:findAllTemplates'),
+    findAllTemplates: (userId) => ipcRenderer.invoke('tasks:findAllTemplates', userId),
     saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId),
     completeRecurring: (taskId) => ipcRenderer.invoke('tasks:completeRecurring', taskId)
   },
 
   labels: {
     findById: (id) => ipcRenderer.invoke('labels:findById', id),
-    findAll: () => ipcRenderer.invoke('labels:findAll'),
+    findAll: (userId) => ipcRenderer.invoke('labels:findAll', userId),
     findByProjectId: (projectId) => ipcRenderer.invoke('labels:findByProjectId', projectId),
-    findByName: (name) => ipcRenderer.invoke('labels:findByName', name),
+    findByName: (userId, name) => ipcRenderer.invoke('labels:findByName', userId, name),
     create: (input) => ipcRenderer.invoke('labels:create', input),
     update: (id, input) => ipcRenderer.invoke('labels:update', id, input),
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
@@ -41,9 +41,9 @@ const api: TodoozyAPI = {
     findTaskLabelsByProject: (projectId) =>
       ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId),
     reorder: (labelIds) => ipcRenderer.invoke('labels:reorder', labelIds),
-    findAllWithUsage: () => ipcRenderer.invoke('labels:findAllWithUsage'),
-    findProjectsUsingLabel: (labelId) =>
-      ipcRenderer.invoke('labels:findProjectsUsingLabel', labelId),
+    findAllWithUsage: (userId) => ipcRenderer.invoke('labels:findAllWithUsage', userId),
+    findProjectsUsingLabel: (userId, labelId) =>
+      ipcRenderer.invoke('labels:findProjectsUsingLabel', userId, labelId),
     findActiveLabelsForProject: (projectId) =>
       ipcRenderer.invoke('labels:findActiveLabelsForProject', projectId)
   },
@@ -55,7 +55,7 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('projects:create', input),
     update: (id, input) => ipcRenderer.invoke('projects:update', id, input),
     delete: (id) => ipcRenderer.invoke('projects:delete', id),
-    list: () => ipcRenderer.invoke('projects:list'),
+    list: (userId) => ipcRenderer.invoke('projects:list', userId),
     addMember: (projectId, userId, role, invitedBy) =>
       ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy),
     removeMember: (projectId, userId) =>
@@ -93,22 +93,22 @@ const api: TodoozyAPI = {
     findByUserId: (userId) => ipcRenderer.invoke('activityLog:findByUserId', userId),
     create: (input) => ipcRenderer.invoke('activityLog:create', input),
     deleteByTaskId: (taskId) => ipcRenderer.invoke('activityLog:deleteByTaskId', taskId),
-    getRecent: (limit) => ipcRenderer.invoke('activityLog:getRecent', limit)
+    getRecent: (userId, limit) => ipcRenderer.invoke('activityLog:getRecent', userId, limit)
   },
 
   settings: {
-    get: (key) => ipcRenderer.invoke('settings:get', key),
-    set: (key, value) => ipcRenderer.invoke('settings:set', key, value),
-    getAll: () => ipcRenderer.invoke('settings:getAll'),
-    getMultiple: (keys) => ipcRenderer.invoke('settings:getMultiple', keys),
-    setMultiple: (settings) => ipcRenderer.invoke('settings:setMultiple', settings),
-    delete: (key) => ipcRenderer.invoke('settings:delete', key)
+    get: (userId, key) => ipcRenderer.invoke('settings:get', userId, key),
+    set: (userId, key, value) => ipcRenderer.invoke('settings:set', userId, key, value),
+    getAll: (userId) => ipcRenderer.invoke('settings:getAll', userId),
+    getMultiple: (userId, keys) => ipcRenderer.invoke('settings:getMultiple', userId, keys),
+    setMultiple: (userId, settings) => ipcRenderer.invoke('settings:setMultiple', userId, settings),
+    delete: (userId, key) => ipcRenderer.invoke('settings:delete', userId, key)
   },
 
   themes: {
     findById: (id) => ipcRenderer.invoke('themes:findById', id),
-    list: () => ipcRenderer.invoke('themes:list'),
-    listByMode: (mode) => ipcRenderer.invoke('themes:listByMode', mode),
+    list: (userId) => ipcRenderer.invoke('themes:list', userId),
+    listByMode: (mode, userId) => ipcRenderer.invoke('themes:listByMode', mode, userId),
     create: (input) => ipcRenderer.invoke('themes:create', input),
     update: (id, input) => ipcRenderer.invoke('themes:update', id, input),
     delete: (id) => ipcRenderer.invoke('themes:delete', id),
@@ -118,7 +118,7 @@ const api: TodoozyAPI = {
   projectTemplates: {
     findById: (id) => ipcRenderer.invoke('projectTemplates:findById', id),
     findByOwnerId: (ownerId) => ipcRenderer.invoke('projectTemplates:findByOwnerId', ownerId),
-    findAll: () => ipcRenderer.invoke('projectTemplates:findAll'),
+    findAll: (userId) => ipcRenderer.invoke('projectTemplates:findAll', userId),
     create: (input) => ipcRenderer.invoke('projectTemplates:create', input),
     update: (id, input) => ipcRenderer.invoke('projectTemplates:update', id, input),
     delete: (id) => ipcRenderer.invoke('projectTemplates:delete', id)

@@ -9,9 +9,15 @@ export class LabelRepository {
     return this.db.prepare('SELECT * FROM labels WHERE id = ?').get(id) as unknown as Label | undefined
   }
 
-  /** Get all global labels */
-  findAll(): Label[] {
-    return this.db.prepare('SELECT * FROM labels ORDER BY order_index ASC').all() as unknown as Label[]
+  /** Get all labels accessible to a user (linked to any of their projects) */
+  findAllForUser(userId: string): Label[] {
+    return this.db.prepare(
+      `SELECT DISTINCT l.* FROM labels l
+       INNER JOIN project_labels pl ON pl.label_id = l.id
+       INNER JOIN project_members pm ON pm.project_id = pl.project_id
+       WHERE pm.user_id = ?
+       ORDER BY l.order_index ASC`
+    ).all(userId) as unknown as Label[]
   }
 
   /** Get labels linked to a specific project via project_labels junction */
@@ -26,11 +32,17 @@ export class LabelRepository {
       .all(projectId) as unknown as Label[]
   }
 
-  /** Find a global label by exact name (case-insensitive) */
-  findByName(name: string): Label | undefined {
+  /** Find a label by exact name scoped to user's projects (case-insensitive) */
+  findByName(userId: string, name: string): Label | undefined {
     return this.db
-      .prepare('SELECT * FROM labels WHERE LOWER(name) = LOWER(?)')
-      .get(name) as unknown as Label | undefined
+      .prepare(
+        `SELECT DISTINCT l.* FROM labels l
+         INNER JOIN project_labels pl ON pl.label_id = l.id
+         INNER JOIN project_members pm ON pm.project_id = pl.project_id
+         WHERE pm.user_id = ? AND LOWER(l.name) = LOWER(?)
+         LIMIT 1`
+      )
+      .get(userId, name) as unknown as Label | undefined
   }
 
   /** Create a new global label. If project_id is provided, also links to that project. */
@@ -137,23 +149,36 @@ export class LabelRepository {
       .all(projectId) as unknown as TaskLabelMapping[]
   }
 
-  /** Get all labels with usage counts (project count + task count) */
-  findAllWithUsage(): LabelUsageInfo[] {
+  /** Get all labels accessible to a user with usage counts */
+  findAllWithUsage(userId: string): LabelUsageInfo[] {
     return this.db
       .prepare(
         `SELECT l.*,
            COALESCE(pc.cnt, 0) as project_count,
            COALESCE(tc.cnt, 0) as task_count
          FROM labels l
-         LEFT JOIN (SELECT label_id, COUNT(*) as cnt FROM project_labels GROUP BY label_id) pc ON pc.label_id = l.id
-         LEFT JOIN (SELECT label_id, COUNT(*) as cnt FROM task_labels GROUP BY label_id) tc ON tc.label_id = l.id
+         INNER JOIN project_labels pl ON pl.label_id = l.id
+         INNER JOIN project_members pm ON pm.project_id = pl.project_id
+         LEFT JOIN (
+           SELECT label_id, COUNT(*) as cnt FROM project_labels
+           WHERE project_id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+           GROUP BY label_id
+         ) pc ON pc.label_id = l.id
+         LEFT JOIN (
+           SELECT tl.label_id, COUNT(*) as cnt FROM task_labels tl
+           INNER JOIN tasks t ON t.id = tl.task_id
+           WHERE t.project_id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+           GROUP BY tl.label_id
+         ) tc ON tc.label_id = l.id
+         WHERE pm.user_id = ?
+         GROUP BY l.id
          ORDER BY l.order_index ASC`
       )
-      .all() as unknown as LabelUsageInfo[]
+      .all(userId, userId, userId) as unknown as LabelUsageInfo[]
   }
 
-  /** Get projects that use a specific label, with task count per project */
-  findProjectsUsingLabel(labelId: string): Array<{ project_id: string; project_name: string; task_count: number }> {
+  /** Get projects (that the user has access to) that use a specific label, with task count per project */
+  findProjectsUsingLabel(userId: string, labelId: string): Array<{ project_id: string; project_name: string; task_count: number }> {
     return this.db
       .prepare(
         `SELECT pl.project_id, p.name as project_name,
@@ -162,10 +187,11 @@ export class LabelRepository {
             WHERE tl.label_id = ? AND t.project_id = pl.project_id) as task_count
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
-         WHERE pl.label_id = ?
+         INNER JOIN project_members pm ON pm.project_id = pl.project_id
+         WHERE pl.label_id = ? AND pm.user_id = ?
          ORDER BY p.name ASC`
       )
-      .all(labelId, labelId) as unknown as Array<{ project_id: string; project_name: string; task_count: number }>
+      .all(labelId, labelId, userId) as unknown as Array<{ project_id: string; project_name: string; task_count: number }>
   }
 
   /** Get labels assigned to active (non-archived) tasks in a project */

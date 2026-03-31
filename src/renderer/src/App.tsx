@@ -16,27 +16,24 @@ function App(): React.JSX.Element {
   const { hydrateStatuses } = useStatusStore()
   const { hydrateLabels } = useLabelStore()
   const { hydrateAllForProject } = useTaskStore()
-  const { hydrateSettings, hydrateThemes } = useSettingsStore()
+  const { setUserId: setSettingsUserId, hydrateSettings, hydrateThemes } = useSettingsStore()
   const { hydrateProjectTemplates } = useTemplateStore()
 
   useEffect(() => {
     initAuth()
   }, [initAuth])
 
-  // Hydrate settings and themes on mount
-  useEffect(() => {
-    hydrateSettings()
-    hydrateThemes()
-  }, [hydrateSettings, hydrateThemes])
-
-  // Hydrate projects when authenticated + set tray user ID
+  // Hydrate settings, themes, projects when authenticated
   useEffect(() => {
     if (isAuthenticated && currentUser) {
+      setSettingsUserId(currentUser.id)
+      hydrateSettings()
+      hydrateThemes()
       hydrateProjects(currentUser.id)
-      hydrateProjectTemplates()
+      hydrateProjectTemplates(currentUser.id)
       window.api.tray.setUserId(currentUser.id)
     }
-  }, [isAuthenticated, currentUser, hydrateProjects, hydrateProjectTemplates])
+  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {

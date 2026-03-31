@@ -13,7 +13,7 @@ interface TemplateState {
 }
 
 interface TemplateActions {
-  hydrateProjectTemplates(): Promise<void>
+  hydrateProjectTemplates(userId: string): Promise<void>
   createProjectTemplate(input: CreateProjectTemplateInput): Promise<ProjectTemplate>
   updateProjectTemplate(
     id: string,
@@ -31,10 +31,10 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
     loading: false,
     error: null,
 
-    async hydrateProjectTemplates(): Promise<void> {
+    async hydrateProjectTemplates(userId: string): Promise<void> {
       set({ loading: true, error: null })
       try {
-        const templates = await window.api.projectTemplates.findAll()
+        const templates = await window.api.projectTemplates.findAll(userId)
         const map: Record<string, ProjectTemplate> = {}
         for (const t of templates) {
           map[t.id] = t

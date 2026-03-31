@@ -8,24 +8,32 @@ export class ThemeRepository {
     return this.db.prepare('SELECT * FROM themes WHERE id = ?').get(id) as unknown as Theme | undefined
   }
 
-  list(): Theme[] {
+  list(userId?: string): Theme[] {
+    if (userId) {
+      return this.db.prepare('SELECT * FROM themes WHERE is_builtin = 1 OR owner_id = ? ORDER BY name ASC').all(userId) as unknown as Theme[]
+    }
     return this.db.prepare('SELECT * FROM themes ORDER BY name ASC').all() as unknown as Theme[]
   }
 
-  listByMode(mode: string): Theme[] {
+  listByMode(mode: string, userId?: string): Theme[] {
+    if (userId) {
+      return this.db
+        .prepare('SELECT * FROM themes WHERE mode = ? AND (is_builtin = 1 OR owner_id = ?) ORDER BY name ASC')
+        .all(mode, userId) as unknown as Theme[]
+    }
     return this.db
       .prepare('SELECT * FROM themes WHERE mode = ? ORDER BY name ASC')
       .all(mode) as unknown as Theme[]
   }
 
-  create(input: CreateThemeInput): Theme {
+  create(input: CreateThemeInput & { owner_id?: string }): Theme {
     const now = new Date().toISOString()
     this.db
       .prepare(
-        `INSERT INTO themes (id, name, mode, config, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO themes (id, name, mode, config, owner_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(input.id, input.name, input.mode, input.config, now, now)
+      .run(input.id, input.name, input.mode, input.config, input.owner_id ?? null, now, now)
     return this.findById(input.id)!
   }
 

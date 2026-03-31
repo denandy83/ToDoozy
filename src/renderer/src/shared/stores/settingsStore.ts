@@ -10,6 +10,7 @@ import type {
 } from '../../../../shared/types'
 
 interface SettingsState {
+  userId: string
   settings: Record<string, string | null>
   themes: Record<string, Theme>
   currentThemeId: string | null
@@ -18,6 +19,7 @@ interface SettingsState {
 }
 
 interface SettingsActions {
+  setUserId(userId: string): void
   hydrateSettings(): Promise<void>
   getSetting(key: string): string | null
   setSetting(key: string, value: string | null): Promise<void>
@@ -35,16 +37,22 @@ interface SettingsActions {
 export type SettingsStore = SettingsState & SettingsActions
 
 export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) => ({
+  userId: '',
   settings: {},
   themes: {},
   currentThemeId: null,
   loading: false,
   error: null,
 
+  setUserId(userId: string): void {
+    set({ userId })
+  },
+
   async hydrateSettings(): Promise<void> {
     set({ loading: true, error: null })
     try {
-      const settings = await window.api.settings.getAll()
+      const { userId } = get()
+      const settings = await window.api.settings.getAll(userId)
       const settingsMap: Record<string, string | null> = {}
       for (const setting of settings) {
         settingsMap[setting.key] = setting.value
@@ -64,7 +72,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async setSetting(key: string, value: string | null): Promise<void> {
     try {
-      await window.api.settings.set(key, value)
+      const { userId } = get()
+      await window.api.settings.set(userId, key, value)
       set((state) => ({
         settings: { ...state.settings, [key]: value }
       }))
@@ -77,7 +86,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async setMultipleSettings(settings: Setting[]): Promise<void> {
     try {
-      await window.api.settings.setMultiple(settings)
+      const { userId } = get()
+      await window.api.settings.setMultiple(userId, settings)
       set((state) => {
         const updated = { ...state.settings }
         for (const setting of settings) {
@@ -94,7 +104,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async deleteSetting(key: string): Promise<boolean> {
     try {
-      const result = await window.api.settings.delete(key)
+      const { userId } = get()
+      const result = await window.api.settings.delete(userId, key)
       if (result) {
         set((state) => {
           const { [key]: _, ...remaining } = state.settings
@@ -111,7 +122,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async hydrateThemes(): Promise<void> {
     try {
-      const themes = await window.api.themes.list()
+      const { userId } = get()
+      const themes = await window.api.themes.list(userId)
       const themeMap: Record<string, Theme> = {}
       for (const theme of themes) {
         themeMap[theme.id] = theme
@@ -125,7 +137,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async createTheme(input: CreateThemeInput): Promise<Theme> {
     try {
-      const theme = await window.api.themes.create(input)
+      const { userId } = get()
+      const theme = await window.api.themes.create({ ...input, owner_id: userId })
       set((state) => ({
         themes: { ...state.themes, [theme.id]: theme }
       }))

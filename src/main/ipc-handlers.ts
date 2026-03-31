@@ -203,8 +203,8 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.duplicate(id, newId) ?? null
   })
 
-  ipcMain.handle('tasks:findAllTemplates', () => {
-    return getRepos().tasks.findAllTemplates()
+  ipcMain.handle('tasks:findAllTemplates', (_e, userId: string) => {
+    return getRepos().tasks.findAllTemplates(userId)
   })
 
   ipcMain.handle('tasks:saveAsTemplate', (_e, id: string, newId: string) => {
@@ -220,16 +220,16 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.findById(id) ?? null
   })
 
-  ipcMain.handle('labels:findAll', () => {
-    return getRepos().labels.findAll()
+  ipcMain.handle('labels:findAll', (_e, userId: string) => {
+    return getRepos().labels.findAllForUser(userId)
   })
 
   ipcMain.handle('labels:findByProjectId', (_e, projectId: string) => {
     return getRepos().labels.findByProjectId(projectId)
   })
 
-  ipcMain.handle('labels:findByName', (_e, name: string) => {
-    return getRepos().labels.findByName(name) ?? null
+  ipcMain.handle('labels:findByName', (_e, userId: string, name: string) => {
+    return getRepos().labels.findByName(userId, name) ?? null
   })
 
   ipcMain.handle(
@@ -270,12 +270,12 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.reorder(labelIds)
   })
 
-  ipcMain.handle('labels:findAllWithUsage', () => {
-    return getRepos().labels.findAllWithUsage()
+  ipcMain.handle('labels:findAllWithUsage', (_e, userId: string) => {
+    return getRepos().labels.findAllWithUsage(userId)
   })
 
-  ipcMain.handle('labels:findProjectsUsingLabel', (_e, labelId: string) => {
-    return getRepos().labels.findProjectsUsingLabel(labelId)
+  ipcMain.handle('labels:findProjectsUsingLabel', (_e, userId: string, labelId: string) => {
+    return getRepos().labels.findProjectsUsingLabel(userId, labelId)
   })
 
   ipcMain.handle('labels:findActiveLabelsForProject', (_e, projectId: string) => {
@@ -313,8 +313,8 @@ export function registerIpcHandlers(): void {
     return getRepos().projects.delete(id)
   })
 
-  ipcMain.handle('projects:list', () => {
-    return getRepos().projects.list()
+  ipcMain.handle('projects:list', (_e, userId: string) => {
+    return getRepos().projects.getProjectsForUser(userId)
   })
 
   ipcMain.handle(
@@ -437,39 +437,39 @@ export function registerIpcHandlers(): void {
     return getRepos().activityLog.deleteByTaskId(taskId)
   })
 
-  ipcMain.handle('activityLog:getRecent', (_e, limit: number) => {
-    return getRepos().activityLog.getRecent(limit)
+  ipcMain.handle('activityLog:getRecent', (_e, userId: string, limit: number) => {
+    return getRepos().activityLog.getRecent(userId, limit)
   })
 
   // ── Settings ───────────────────────────────────────────────────────
-  ipcMain.handle('settings:get', (_e, key: string) => {
-    return getRepos().settings.get(key)
+  ipcMain.handle('settings:get', (_e, userId: string, key: string) => {
+    return getRepos().settings.get(userId, key)
   })
 
-  ipcMain.handle('settings:set', (_e, key: string, value: string | null) => {
-    return getRepos().settings.set(key, value)
+  ipcMain.handle('settings:set', (_e, userId: string, key: string, value: string | null) => {
+    return getRepos().settings.set(userId, key, value)
   })
 
-  ipcMain.handle('settings:getAll', () => {
-    return getRepos().settings.getAll()
+  ipcMain.handle('settings:getAll', (_e, userId: string) => {
+    return getRepos().settings.getAll(userId)
   })
 
   ipcMain.handle(
     'settings:getMultiple',
-    (_e, keys: string[]) => {
-      return getRepos().settings.getMultiple(keys)
+    (_e, userId: string, keys: string[]) => {
+      return getRepos().settings.getMultiple(userId, keys)
     }
   )
 
   ipcMain.handle(
     'settings:setMultiple',
-    (_e, settings: Parameters<Repositories['settings']['setMultiple']>[0]) => {
-      return getRepos().settings.setMultiple(settings)
+    (_e, userId: string, settings: Parameters<Repositories['settings']['setMultiple']>[1]) => {
+      return getRepos().settings.setMultiple(userId, settings)
     }
   )
 
-  ipcMain.handle('settings:delete', (_e, key: string) => {
-    return getRepos().settings.delete(key)
+  ipcMain.handle('settings:delete', (_e, userId: string, key: string) => {
+    return getRepos().settings.delete(userId, key)
   })
 
   // ── Themes ─────────────────────────────────────────────────────────
@@ -477,12 +477,12 @@ export function registerIpcHandlers(): void {
     return getRepos().themes.findById(id) ?? null
   })
 
-  ipcMain.handle('themes:list', () => {
-    return getRepos().themes.list()
+  ipcMain.handle('themes:list', (_e, userId: string) => {
+    return getRepos().themes.list(userId)
   })
 
-  ipcMain.handle('themes:listByMode', (_e, mode: string) => {
-    return getRepos().themes.listByMode(mode)
+  ipcMain.handle('themes:listByMode', (_e, mode: string, userId: string) => {
+    return getRepos().themes.listByMode(mode, userId)
   })
 
   ipcMain.handle(
@@ -516,8 +516,8 @@ export function registerIpcHandlers(): void {
     return getRepos().projectTemplates.findByOwnerId(ownerId)
   })
 
-  ipcMain.handle('projectTemplates:findAll', () => {
-    return getRepos().projectTemplates.findAll()
+  ipcMain.handle('projectTemplates:findAll', (_e, userId: string) => {
+    return getRepos().projectTemplates.findByOwnerId(userId)
   })
 
   ipcMain.handle(
@@ -569,7 +569,7 @@ export function registerIpcHandlers(): void {
       const result = registerQuickAddShortcut(accelerator)
       if (result.success) {
         // Persist to settings
-        getRepos().settings.set('quick_add_shortcut', accelerator)
+        getRepos().settings.set('', 'quick_add_shortcut', accelerator)
       }
       return result
     }
@@ -589,7 +589,7 @@ export function registerIpcHandlers(): void {
 
       const result = registerAppToggleShortcut(accelerator)
       if (result.success) {
-        getRepos().settings.set('app_toggle_shortcut', accelerator)
+        getRepos().settings.set('', 'app_toggle_shortcut', accelerator)
       }
       return result
     }

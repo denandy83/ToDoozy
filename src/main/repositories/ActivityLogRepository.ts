@@ -46,9 +46,15 @@ export class ActivityLogRepository {
     return Number(result.changes)
   }
 
-  getRecent(limit: number): ActivityLogEntry[] {
+  getRecent(userId: string, limit: number): ActivityLogEntry[] {
     return this.db
-      .prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?')
-      .all(limit) as unknown as ActivityLogEntry[]
+      .prepare(
+        `SELECT al.* FROM activity_log al
+         INNER JOIN tasks t ON t.id = al.task_id
+         INNER JOIN project_members pm ON pm.project_id = t.project_id
+         WHERE pm.user_id = ?
+         ORDER BY al.created_at DESC LIMIT ?`
+      )
+      .all(userId, limit) as unknown as ActivityLogEntry[]
   }
 }

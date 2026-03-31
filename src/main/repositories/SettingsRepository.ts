@@ -5,48 +5,70 @@ import type { Setting } from '../../shared/types'
 export class SettingsRepository {
   constructor(private db: DatabaseSync) {}
 
-  get(key: string): string | null {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+  get(userId: string, key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').get(userId, key) as
       | { value: string | null }
       | undefined
-    return row?.value ?? null
+    if (row) return row.value ?? null
+    // Fall back to global default (user_id = '')
+    const fallback = this.db.prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?').get('', key) as
+      | { value: string | null }
+      | undefined
+    return fallback?.value ?? null
   }
 
-  set(key: string, value: string | null): void {
+  set(userId: string, key: string, value: string | null): void {
     this.db
       .prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        `INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value`
       )
-      .run(key, value)
+      .run(userId, key, value)
   }
 
-  getAll(): Setting[] {
-    return this.db.prepare('SELECT * FROM settings ORDER BY key ASC').all() as unknown as Setting[]
+  getAll(userId: string): Setting[] {
+    // Get global defaults merged with user-specific overrides
+    return this.db.prepare(
+      `SELECT COALESCE(u.key, g.key) as key, COALESCE(u.value, g.value) as value
+       FROM settings g
+       LEFT JOIN settings u ON u.key = g.key AND u.user_id = ?
+       WHERE g.user_id = ''
+       UNION
+       SELECT key, value FROM settings WHERE user_id = ? AND key NOT IN (SELECT key FROM settings WHERE user_id = '')
+       ORDER BY key ASC`
+    ).all(userId, userId) as unknown as Setting[]
   }
 
-  getMultiple(keys: string[]): Setting[] {
+  getMultiple(userId: string, keys: string[]): Setting[] {
     if (keys.length === 0) return []
     const placeholders = keys.map(() => '?').join(', ')
     return this.db
-      .prepare(`SELECT * FROM settings WHERE key IN (${placeholders}) ORDER BY key ASC`)
-      .all(...keys) as unknown as Setting[]
+      .prepare(
+        `SELECT key, COALESCE(
+           (SELECT value FROM settings WHERE user_id = ? AND key = s.key),
+           s.value
+         ) as value
+         FROM settings s
+         WHERE s.user_id = '' AND s.key IN (${placeholders})
+         ORDER BY key ASC`
+      )
+      .all(userId, ...keys) as unknown as Setting[]
   }
 
-  setMultiple(settings: Setting[]): void {
+  setMultiple(userId: string, settings: Setting[]): void {
     withTransaction(this.db, () => {
       const stmt = this.db.prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        `INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value`
       )
       for (const setting of settings) {
-        stmt.run(setting.key, setting.value)
+        stmt.run(userId, setting.key, setting.value)
       }
     })
   }
 
-  delete(key: string): boolean {
-    const result = this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+  delete(userId: string, key: string): boolean {
+    const result = this.db.prepare('DELETE FROM settings WHERE user_id = ? AND key = ?').run(userId, key)
     return result.changes > 0
   }
 }
