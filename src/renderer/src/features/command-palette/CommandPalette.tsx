@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Search } from 'lucide-react'
+import { Search, Archive } from 'lucide-react'
 import { useFocusTrap } from '../../shared/hooks/useFocusTrap'
 import { useFocusRestore } from '../../shared/hooks/useFocusRestore'
 import { useCommandPaletteStore } from '../../shared/stores/commandPaletteStore'
@@ -10,12 +10,12 @@ import { useTaskStore } from '../../shared/stores/taskStore'
 import { useViewStore } from '../../shared/stores/viewStore'
 
 export function CommandPalette(): React.JSX.Element | null {
-  const { isOpen, query, selectedIndex, close, setQuery, setSelectedIndex } =
+  const { isOpen, query, selectedIndex, includeArchived, close, setQuery, setSelectedIndex, setIncludeArchived } =
     useCommandPaletteStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const results = useCommandPaletteSearch(query)
+  const results = useCommandPaletteSearch(query, includeArchived)
 
   useFocusRestore()
   useFocusTrap(containerRef, isOpen)
@@ -126,6 +126,21 @@ export function CommandPalette(): React.JSX.Element | null {
             autoComplete="off"
             spellCheck={false}
           />
+          <label
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 select-none"
+            title="Include archived tasks in search"
+          >
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+              className="accent-accent h-3 w-3 cursor-pointer"
+            />
+            <Archive size={12} className={includeArchived ? 'text-accent' : 'text-muted'} />
+            <span className={`text-[10px] font-bold uppercase tracking-wider ${includeArchived ? 'text-accent' : 'text-muted'}`}>
+              Archived
+            </span>
+          </label>
           <kbd className="rounded border border-border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
             Esc
           </kbd>

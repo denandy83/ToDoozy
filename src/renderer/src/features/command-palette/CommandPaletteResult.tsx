@@ -1,8 +1,9 @@
 import { useCallback } from 'react'
-import { Calendar } from 'lucide-react'
+import { Archive, Calendar } from 'lucide-react'
 import type { Task } from '../../../../shared/types'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useTaskStore } from '../../shared/stores/taskStore'
+import { useProjectStore } from '../../shared/stores/projectStore'
 
 const PRIORITY_COLORS: Record<number, string> = {
   0: '#888888',
@@ -35,6 +36,7 @@ export function CommandPaletteResult({
 }: CommandPaletteResultProps): React.JSX.Element {
   const status = useStatusStore((s) => s.statuses[task.status_id])
   const taskLabels = useTaskStore((s) => s.taskLabels[task.id] ?? [])
+  const project = useProjectStore((s) => s.projects[task.project_id])
 
   const handleClick = useCallback(() => {
     onSelect(task.id)
@@ -65,13 +67,23 @@ export function CommandPaletteResult({
         title={priorityLabel || 'No priority'}
       />
 
-      {/* Priority badge */}
-      {task.priority > 0 && (
-        <span
-          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent-fg"
-          style={{ backgroundColor: priorityColor }}
+      {/* Project indicator circle */}
+      {project && (
+        <div
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: project.color }}
+          title={project.name}
         >
-          {priorityLabel}
+          <span className="text-[7px] font-bold leading-none text-white">
+            {getProjectInitials(project.name)}
+          </span>
+        </div>
+      )}
+
+      {/* Archived icon */}
+      {task.is_archived === 1 && (
+        <span className="shrink-0 text-amber-500" title="Archived">
+          <Archive size={13} />
         </span>
       )}
 
@@ -149,4 +161,12 @@ function formatDueDate(dateStr: string): string {
   if (days <= 7) return `${days}d`
 
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function getProjectInitials(name: string): string {
+  const words = name.trim().split(/\s+/)
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase()
+  }
+  return name.slice(0, 2).toUpperCase()
 }

@@ -168,7 +168,7 @@ export function matchesHas(
   return false
 }
 
-export function useCommandPaletteSearch(query: string): Task[] {
+export function useCommandPaletteSearch(query: string, includeArchived = false): Task[] {
   const tasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const statuses = useStatusStore((s) => s.statuses)
@@ -179,7 +179,7 @@ export function useCommandPaletteSearch(query: string): Task[] {
 
     const parsed = parseQuery(query)
     const allTasks = Object.values(tasks).filter(
-      (t) => t.is_archived === 0 && t.is_template === 0
+      (t) => (includeArchived || t.is_archived === 0) && t.is_template === 0
     )
 
     const filtered = allTasks.filter((task) => {
@@ -229,5 +229,5 @@ export function useCommandPaletteSearch(query: string): Task[] {
     })
 
     return filtered.slice(0, MAX_RESULTS)
-  }, [query, tasks, taskLabels, statuses, labels])
+  }, [query, includeArchived, tasks, taskLabels, statuses, labels])
 }
