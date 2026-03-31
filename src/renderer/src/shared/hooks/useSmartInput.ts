@@ -20,6 +20,7 @@ export interface SmartInputState {
   selectedPriority: number | null
   selectedDate: string | null
   selectedProject: Project | null
+  referenceUrl: string | null
   popupState: PopupState | null
 }
 
@@ -33,12 +34,14 @@ export interface SmartInputActions {
   removePriority: () => void
   selectDate: (isoDate: string) => void
   removeDate: () => void
+  selectReferenceUrl: (url: string) => void
+  removeReferenceUrl: () => void
   selectProject: (project: Project) => void
   removeProject: () => void
   dismissPopup: () => void
   removeLastChip: () => void
   reset: () => void
-  getSubmitTitle: () => string
+  getSubmitData: () => { title: string; extractedReferenceUrl: string | null }
 }
 
 export type SmartInput = SmartInputState & SmartInputActions
@@ -48,6 +51,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
   const [attachedLabels, setAttachedLabels] = useState<Label[]>([])
   const [selectedPriority, setSelectedPriority] = useState<number | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [popupState, setPopupState] = useState<PopupState | null>(null)
   const suppressedPositionsRef = useRef<Set<number>>(new Set())
@@ -60,7 +64,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
       return
     }
     const operator = detectOperator(text, cursorPos, suppressedPositionsRef.current)
-    if (!operator) {
+    if (!operator || operator.type === 'r:') {
       setPopupState(null)
       return
     }
@@ -90,6 +94,17 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
   }, [])
 
   const handleInputChange = useCallback((value: string, cursorPos: number) => {
+    // Auto-capture r: operator on space — no popup needed
+    const rOp = detectOperator(value.slice(0, cursorPos - 1), cursorPos - 1, suppressedPositionsRef.current)
+    if (rOp && rOp.type === 'r:' && rOp.query.length > 0 && value[cursorPos - 1] === ' ') {
+      setReferenceUrl(rOp.query)
+      const cleaned = removeOperatorText(value, rOp.startIndex, cursorPos)
+      setInputValueRaw(cleaned)
+      inputValueRef.current = cleaned
+      suppressedPositionsRef.current = new Set()
+      setPopupState(null)
+      return
+    }
     setInputValueRaw(value)
     inputValueRef.current = value
     updatePopup(value, cursorPos)
@@ -159,6 +174,25 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setSelectedDate(null)
   }, [])
 
+  const selectReferenceUrl = useCallback((url: string) => {
+    if (!popupState?.operator) return
+    justSelectedRef.current = true
+    setReferenceUrl(url)
+    const newValue = removeOperatorText(
+      inputValueRef.current,
+      popupState.operator.startIndex,
+      popupState.operator.endIndex
+    )
+    setInputValueRaw(newValue)
+    inputValueRef.current = newValue
+    setPopupState(null)
+    suppressedPositionsRef.current = new Set()
+  }, [popupState])
+
+  const removeReferenceUrl = useCallback(() => {
+    setReferenceUrl(null)
+  }, [])
+
   const selectProject = useCallback((project: Project) => {
     if (!popupState?.operator) return
     justSelectedRef.current = true
@@ -202,13 +236,21 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setAttachedLabels([])
     setSelectedPriority(null)
     setSelectedDate(null)
+    setReferenceUrl(null)
     setSelectedProject(null)
     setPopupState(null)
     suppressedPositionsRef.current = new Set()
   }, [])
 
-  const getSubmitTitle = useCallback(() => {
-    return inputValueRef.current.trim()
+  const getSubmitData = useCallback(() => {
+    const text = inputValueRef.current
+    // Extract any pending r: operator before submit
+    const rMatch = text.match(/(^|\s)r:(\S+)/)
+    if (rMatch && rMatch[2]) {
+      const cleaned = text.slice(0, rMatch.index! + (rMatch[1] ? 1 : 0)) + text.slice(rMatch.index! + rMatch[0].length)
+      return { title: cleaned.replace(/  +/g, ' ').trim(), extractedReferenceUrl: rMatch[2] }
+    }
+    return { title: text.trim(), extractedReferenceUrl: null }
   }, [])
 
   return {
@@ -217,6 +259,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     selectedPriority,
     selectedDate,
     selectedProject,
+    referenceUrl,
     popupState,
     setInputValue,
     handleInputChange,
@@ -227,11 +270,13 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     removePriority,
     selectDate,
     removeDate,
+    selectReferenceUrl,
+    removeReferenceUrl,
     selectProject,
     removeProject,
     dismissPopup,
     removeLastChip,
     reset,
-    getSubmitTitle
+    getSubmitData
   }
 }

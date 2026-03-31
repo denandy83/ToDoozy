@@ -92,6 +92,31 @@ describe('detectOperator', () => {
     })
   })
 
+  it('detects r: at start', () => {
+    const result = detectOperator('r:https://example.com', 21, new Set())
+    expect(result).toEqual({
+      type: 'r:',
+      query: 'https://example.com',
+      startIndex: 0,
+      endIndex: 21
+    })
+  })
+
+  it('detects r: after space', () => {
+    const result = detectOperator('task r:https://link.co', 22, new Set())
+    expect(result).toEqual({
+      type: 'r:',
+      query: 'https://link.co',
+      startIndex: 5,
+      endIndex: 22
+    })
+  })
+
+  it('does not detect r: mid-word', () => {
+    const result = detectOperator('for:bar', 7, new Set())
+    expect(result).toBeNull()
+  })
+
   it('returns null when cursor is past operator text (space separates)', () => {
     const result = detectOperator('@work more', 10, new Set())
     expect(result).toBeNull()

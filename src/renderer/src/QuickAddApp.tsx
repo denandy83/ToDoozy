@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Calendar, X } from 'lucide-react'
+import { Calendar, X, AlignLeft, Link } from 'lucide-react'
 import type { Project, Label, ThemeConfig } from '../../shared/types'
 import { applyThemeConfig } from './shared/hooks/useThemeApplicator'
 import { useSmartInput } from './shared/hooks/useSmartInput'
@@ -25,7 +25,10 @@ export default function QuickAddApp(): React.JSX.Element {
   const [newTaskPosition, setNewTaskPosition] = useState<string>('top')
   const [dateFormat, setDateFormat] = useState<string>('dd/mm/yyyy')
   const [ready, setReady] = useState(false)
+  const [showDescription, setShowDescription] = useState(false)
+  const [description, setDescription] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
   const smart = useSmartInput(inputRef)
 
   // Auto-select default project once loaded
@@ -103,7 +106,7 @@ export default function QuickAddApp(): React.JSX.Element {
 
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    const trimmed = smart.getSubmitTitle()
+    const { title: trimmed, extractedReferenceUrl } = smart.getSubmitData()
     if (!trimmed || !userId || !selectedProjectId) return
 
     try {
@@ -123,11 +126,13 @@ export default function QuickAddApp(): React.JSX.Element {
         project_id: selectedProjectId,
         owner_id: userId,
         title: trimmed,
+        description: description.trim() || null,
         status_id: defaultStatus.id,
         order_index: orderIndex,
         is_in_my_day: addToMyDay ? 1 : 0,
         priority: smart.selectedPriority ?? 0,
-        due_date: smart.selectedDate
+        due_date: smart.selectedDate,
+        reference_url: extractedReferenceUrl || smart.referenceUrl
       })
 
       // Assign labels
@@ -138,11 +143,13 @@ export default function QuickAddApp(): React.JSX.Element {
       await window.api.quickadd.notifyTaskCreated()
 
       smart.reset()
+      setDescription('')
+      setShowDescription(false)
       await window.api.quickadd.hide()
     } catch (err) {
       console.error('Failed to create task:', err)
     }
-  }, [smart, userId, selectedProjectId, addToMyDay, newTaskPosition])
+  }, [smart, userId, selectedProjectId, addToMyDay, newTaskPosition, description])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -152,16 +159,22 @@ export default function QuickAddApp(): React.JSX.Element {
         e.preventDefault()
         handleSubmit()
       }
+      if (e.key === 'Tab' && showDescription) {
+        e.preventDefault()
+        descriptionRef.current?.focus()
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         smart.reset()
+        setDescription('')
+        setShowDescription(false)
         window.api.quickadd.hide()
       }
       if (e.key === 'Backspace' && smart.inputValue === '') {
         smart.removeLastChip()
       }
     },
-    [handleSubmit, smart]
+    [handleSubmit, smart, showDescription]
   )
 
   const handleChange = useCallback(
@@ -271,7 +284,7 @@ export default function QuickAddApp(): React.JSX.Element {
     return []
   }, [smart.popupState, projectLabels, projects])
 
-  const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null
+  const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.referenceUrl !== null
 
   if (!ready) {
     return <div className="w-screen bg-transparent" />
@@ -282,17 +295,35 @@ export default function QuickAddApp(): React.JSX.Element {
       <div className="relative w-full overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         {/* Title input */}
         <div className="px-4 py-3">
-          <input
-            ref={inputRef}
-            type="text"
-            value={smart.inputValue}
-            onChange={handleChange}
-            onSelect={handleSelect}
-            onKeyDown={handleKeyDown}
-            placeholder="Add a task..."
-            autoFocus
-            className="w-full bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:outline-none"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={smart.inputValue}
+              onChange={handleChange}
+              onSelect={handleSelect}
+              onKeyDown={handleKeyDown}
+              placeholder="Add a task..."
+              autoFocus
+              className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:outline-none"
+            />
+            <button
+              onClick={() => {
+                setShowDescription((prev) => {
+                  if (!prev) {
+                    setTimeout(() => descriptionRef.current?.focus(), 0)
+                  }
+                  return !prev
+                })
+              }}
+              className={`flex-shrink-0 rounded p-1 transition-colors ${showDescription ? 'bg-accent/15 text-accent' : 'text-muted/40 hover:text-muted'}`}
+              aria-label="Toggle description"
+              title="Add description"
+              tabIndex={0}
+            >
+              <AlignLeft size={14} />
+            </button>
+          </div>
           {hasChips && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
               {smart.attachedLabels.map((l) => (
@@ -328,6 +359,48 @@ export default function QuickAddApp(): React.JSX.Element {
                   </button>
                 </span>
               )}
+              {smart.referenceUrl && (
+                <span className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
+                  <Link size={10} className="flex-shrink-0" />
+                  <span className="truncate">{smart.referenceUrl}</span>
+                  <button
+                    onClick={smart.removeReferenceUrl}
+                    className="ml-0.5 flex-shrink-0 rounded-full p-0 hover:text-foreground"
+                    aria-label="Remove reference URL"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+
+          {showDescription && (
+            <div className="mt-2">
+              <textarea
+                ref={descriptionRef}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.metaKey) {
+                    e.preventDefault()
+                    handleSubmit()
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    inputRef.current?.focus()
+                  }
+                }}
+                placeholder="Description..."
+                rows={3}
+                className="w-full resize-none rounded-lg border border-border bg-foreground/3 px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:border-accent/30 focus:outline-none"
+              />
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-muted/40">
+                <span className="text-[9px] font-bold uppercase tracking-wider">⌘ + Enter</span>
+                <span>to add</span>
+                <span className="ml-1 text-[9px] font-bold uppercase tracking-wider">Esc</span>
+                <span>to go back</span>
+              </div>
             </div>
           )}
         </div>

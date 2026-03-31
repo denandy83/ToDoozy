@@ -51,7 +51,7 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
 
     const handleSubmit = useCallback(() => {
       if (smart.popupState) return // Let popup handle Enter
-      const title = smart.getSubmitTitle()
+      const { title } = smart.getSubmitData()
       if (!title) return
       onSubmit({
         title,
