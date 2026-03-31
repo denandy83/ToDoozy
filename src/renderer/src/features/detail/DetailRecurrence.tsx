@@ -91,22 +91,22 @@ export function DetailRecurrence({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape' && expanded) {
+      if (e.key === 'Escape' && expanded && !recurrenceRule) {
         e.stopPropagation()
         setExpanded(false)
       }
     },
-    [expanded]
+    [expanded, recurrenceRule]
   )
 
-  // Determine which preset is active
+  // Determine which preset is active (modifiers like afterCompletion/untilDate don't change the preset)
   const activePreset = !recurrenceRule
     ? 'None'
-    : config.unit === 'days' && config.interval === 1 && !config.afterCompletion && !config.untilDate
+    : config.unit === 'days' && config.interval === 1
       ? 'Daily'
-      : config.unit === 'weeks' && config.interval === 1 && !config.afterCompletion && !config.untilDate
+      : config.unit === 'weeks' && config.interval === 1
         ? 'Weekly'
-        : config.unit === 'months' && config.interval === 1 && !config.afterCompletion && !config.untilDate
+        : config.unit === 'months' && config.interval === 1
           ? 'Monthly'
           : null
 
@@ -120,11 +120,31 @@ export function DetailRecurrence({
   return (
     <div className="flex flex-col gap-2" onKeyDown={handleKeyDown}>
       {/* Preset buttons */}
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1" role="radiogroup">
         {PRESETS.map((preset) => (
           <button
             key={preset.label}
+            role="radio"
+            tabIndex={activePreset === preset.label ? 0 : -1}
+            aria-checked={activePreset === preset.label}
+            aria-pressed={activePreset === preset.label}
             onClick={() => handlePresetClick(preset.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault()
+                e.stopPropagation()
+                const btn = e.currentTarget as HTMLElement
+                const parent = btn.parentElement
+                if (!parent) return
+                const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
+                const idx = buttons.indexOf(btn)
+                const next = e.key === 'ArrowRight'
+                  ? buttons[(idx + 1) % buttons.length]
+                  : buttons[(idx - 1 + buttons.length) % buttons.length]
+                next.focus()
+                next.click()
+              }
+            }}
             className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
               activePreset === preset.label
                 ? 'bg-accent text-accent-fg'
@@ -135,7 +155,27 @@ export function DetailRecurrence({
           </button>
         ))}
         <button
+          role="radio"
+          tabIndex={expanded && activePreset === null ? 0 : -1}
+          aria-checked={expanded && activePreset === null}
+          aria-pressed={expanded && activePreset === null}
           onClick={handleCustomClick}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault()
+              e.stopPropagation()
+              const btn = e.currentTarget as HTMLElement
+              const parent = btn.parentElement
+              if (!parent) return
+              const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
+              const idx = buttons.indexOf(btn)
+              const next = e.key === 'ArrowRight'
+                ? buttons[(idx + 1) % buttons.length]
+                : buttons[(idx - 1 + buttons.length) % buttons.length]
+              next.focus()
+              next.click()
+            }
+          }}
           className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
             expanded && activePreset === null
               ? 'bg-accent text-accent-fg'
@@ -172,19 +212,6 @@ function RecurrencePicker({ config, onChange }: RecurrencePickerProps): React.JS
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = Math.max(1, parseInt(e.target.value, 10) || 1)
       onChange({ ...config, interval: val })
-    },
-    [config, onChange]
-  )
-
-  const handleIntervalKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        onChange({ ...config, interval: config.interval + 1 })
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        onChange({ ...config, interval: Math.max(1, config.interval - 1) })
-      }
     },
     [config, onChange]
   )
@@ -271,11 +298,11 @@ function RecurrencePicker({ config, onChange }: RecurrencePickerProps): React.JS
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Every</span>
         <input
-          type="number"
-          min={1}
+          type="text"
+          inputMode="numeric"
           value={config.interval}
           onChange={handleIntervalChange}
-          onKeyDown={handleIntervalKeyDown}
+          onFocus={(e) => e.target.select()}
           className="w-12 rounded border border-border bg-transparent px-1.5 py-0.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none"
         />
         <select
@@ -290,18 +317,7 @@ function RecurrencePicker({ config, onChange }: RecurrencePickerProps): React.JS
         </select>
       </div>
 
-      {/* Row 2: Unit-specific controls */}
-      {config.unit === 'weeks' && (
-        <WeekDayPicker selected={config.weekDays ?? []} onToggle={toggleWeekDay} />
-      )}
-      {config.unit === 'months' && (
-        <MonthPicker config={config} onChange={onChange} onModeChange={handleMonthModeChange} />
-      )}
-      {config.unit === 'years' && (
-        <YearPicker config={config} onChange={onChange} />
-      )}
-
-      {/* Row 3: Fixed / After completion */}
+      {/* Row 2: Fixed / After completion */}
       <div className="flex items-center gap-1">
         <button
           onClick={() => handleAfterCompletionToggle(false)}
@@ -320,6 +336,17 @@ function RecurrencePicker({ config, onChange }: RecurrencePickerProps): React.JS
           After completion
         </button>
       </div>
+
+      {/* Row 3: Unit-specific controls (hidden in after-completion mode — days are computed from completion date) */}
+      {!config.afterCompletion && config.unit === 'weeks' && (
+        <WeekDayPicker selected={config.weekDays ?? []} onToggle={toggleWeekDay} />
+      )}
+      {!config.afterCompletion && config.unit === 'months' && (
+        <MonthPicker config={config} onChange={onChange} onModeChange={handleMonthModeChange} />
+      )}
+      {!config.afterCompletion && config.unit === 'years' && (
+        <YearPicker config={config} onChange={onChange} />
+      )}
 
       {/* Row 4: Ends */}
       <div className="flex items-center gap-2">
@@ -419,14 +446,14 @@ function MonthPicker({ config, onChange, onModeChange }: MonthPickerProps): Reac
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Day</span>
           <input
-            type="number"
-            min={1}
-            max={31}
+            type="text"
+            inputMode="numeric"
             value={config.monthDay ?? getTodayDate()}
             onChange={(e) => {
               const val = Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1))
               onChange({ ...config, monthDay: val })
             }}
+            onFocus={(e) => e.target.select()}
             className="w-12 rounded border border-border bg-transparent px-1.5 py-0.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none"
           />
         </div>
@@ -489,14 +516,14 @@ function YearPicker({ config, onChange }: YearPickerProps): React.JSX.Element {
         ))}
       </select>
       <input
-        type="number"
-        min={1}
-        max={31}
+        type="text"
+        inputMode="numeric"
         value={config.yearDay ?? getTodayDate()}
         onChange={(e) => {
           const val = Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1))
           onChange({ ...config, yearDay: val })
         }}
+        onFocus={(e) => e.target.select()}
         className="w-12 rounded border border-border bg-transparent px-1.5 py-0.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none"
       />
     </div>
