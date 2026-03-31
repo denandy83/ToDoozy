@@ -50,7 +50,7 @@ interface TaskActions {
   hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
   navigateTask(id: string): void
-  selectTask(id: string, options?: { fromContextMenu?: boolean }): void
+  selectTask(id: string, options?: { fromContextMenu?: boolean; openPanel?: boolean }): void
   toggleTaskInSelection(id: string): void
   selectTaskRange(ids: string[]): void
   selectAllTasks(ids: string[]): void
@@ -493,9 +493,13 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
   },
 
-  selectTask(id: string, options?: { fromContextMenu?: boolean }): void {
-    const keepPanel = options?.fromContextMenu ? get().showDetailPanel : true
-    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: keepPanel })
+  selectTask(id: string, options?: { fromContextMenu?: boolean; openPanel?: boolean }): void {
+    const showPanel = options?.fromContextMenu
+      ? get().showDetailPanel
+      : options?.openPanel !== undefined
+        ? options.openPanel
+        : true
+    set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: showPanel })
   },
 
   toggleTaskInSelection(id: string): void {

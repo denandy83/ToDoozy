@@ -7,15 +7,15 @@ import { showQuickAddWindow } from './quick-add'
 import { getMainWindow } from './index'
 import type { Status } from '../shared/types'
 import type { TimerTrayState } from '../preload/index.d'
-import { classifyMyDayTasks, truncateTitle, type TrayTask } from './tray-utils'
+import { classifyMyDayTasks, truncateTitle, STATUS_ICONS, type TrayTask } from './tray-utils'
 
 
 let tray: Tray | null = null
 let currentUserId: string | null = null
 let timerState: TimerTrayState | null = null
 
-function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number; inProgressCount: number; openCount: number } {
-  if (!currentUserId) return { tasks: [], totalNonDone: 0, inProgressCount: 0, openCount: 0 }
+function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number } {
+  if (!currentUserId) return { tasks: [], totalNonDone: 0 }
 
   const db = getDatabase()
   const taskRepo = new TaskRepository(db)
@@ -99,7 +99,7 @@ function buildTimerMenu(): Menu {
 }
 
 function buildLeftClickMenu(): Menu {
-  const { tasks, totalNonDone, inProgressCount, openCount } = getMyDayTrayData()
+  const { tasks, totalNonDone } = getMyDayTrayData()
   const menuItems: Electron.MenuItemConstructorOptions[] = []
 
   menuItems.push({
@@ -117,52 +117,37 @@ function buildLeftClickMenu(): Menu {
       enabled: false
     })
   } else {
-    const inProgressTasks = tasks.filter((t) => t.bucket === 'in_progress')
-    const openTasks = tasks.filter((t) => t.bucket === 'not_started')
-
-    if (inProgressTasks.length > 0) {
+    if (totalNonDone > tasks.length) {
       menuItems.push({
-        label: `In Progress (${inProgressTasks.length}/${inProgressCount})`,
+        label: `Tasks: [${tasks.length}/${totalNonDone}]`,
         enabled: false
       })
-      for (const task of inProgressTasks) {
-        menuItems.push({
-          label: `  ${truncateTitle(task.title)}`,
-          click: (): void => navigateToTask(task.id)
-        })
-      }
     }
 
-    if (openTasks.length > 0) {
-      if (inProgressTasks.length > 0) {
+    let prevBucket: string | null = null
+    for (const task of tasks) {
+      if (prevBucket && prevBucket !== task.bucket) {
         menuItems.push({ type: 'separator' })
       }
+      prevBucket = task.bucket
+      const icon = STATUS_ICONS[task.bucket]
       menuItems.push({
-        label: `Not Started (${openTasks.length}/${openCount})`,
-        enabled: false
+        label: `${icon} ${truncateTitle(task.title)}`,
+        click: (): void => navigateToTask(task.id)
       })
-      for (const task of openTasks) {
-        menuItems.push({
-          label: `  ${truncateTitle(task.title)}`,
-          click: (): void => navigateToTask(task.id)
-        })
-      }
     }
 
-    const shownCount = inProgressTasks.length + openTasks.length
-    if (totalNonDone > shownCount) {
-      menuItems.push({ type: 'separator' })
-      menuItems.push({
-        label: 'View all in My Day...',
-        click: (): void => {
-          showMainWindow()
-          const mainWindow = getMainWindow()
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('tray:navigate-to-myday')
-          }
+    menuItems.push({ type: 'separator' })
+    menuItems.push({
+      label: 'Open My Day',
+      click: (): void => {
+        showMainWindow()
+        const mainWindow = getMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('tray:navigate-to-myday')
         }
-      })
-    }
+      }
+    })
   }
 
   return Menu.buildFromTemplate(menuItems)

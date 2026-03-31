@@ -55,3 +55,10 @@ Working file — entries written here during a session are processed into perman
 ## 2026-03-30 — Session end (git fallback)
 <!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
 - 3fbb5ed feat: implement Smart Recurrence Picker with structured rules and task cloning (#38) (2026-03-30) — files: 23
+
+## 2026-03-31 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 0c44196 fix: rank exact and prefix matches above substring in label/project autocomplete (2026-03-31) — files: 2
+- c1d43fe feat: add r: reference URL operator and description toggle to quick-add (2026-03-31) — files: 5
+- 95444c1 feat: add include-archived checkbox and project/archive indicators to Cmd+K search (2026-03-31) — files: 4
+- cc3bec1 feat: smart recurrence picker with structured rules, validation, and task cloning (#38) (2026-03-31) — files: 25

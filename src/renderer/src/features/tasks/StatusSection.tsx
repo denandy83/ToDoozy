@@ -22,6 +22,7 @@ interface StatusSectionProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  onOpenDetail?: (taskId: string) => void
   projectMap?: Record<string, Project>
   bucketName?: string
   bucketColor?: string
@@ -43,6 +44,7 @@ export function StatusSection({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
+  onOpenDetail,
   projectMap,
   bucketName,
   bucketColor,
@@ -122,6 +124,7 @@ export function StatusSection({
                 onAddLabel={onAddLabel}
                 onRemoveLabel={onRemoveLabel}
                 onCreateLabel={onCreateLabel}
+                onOpenDetail={onOpenDetail}
                 project={projectMap?.[task.project_id]}
                 statusIdOverride={mapStatusId ? mapStatusId(task.status_id) : undefined}
                 mapStatusId={mapStatusId}

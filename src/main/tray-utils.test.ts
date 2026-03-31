@@ -120,7 +120,7 @@ describe('classifyMyDayTasks', () => {
     expect(result.totalNonDone).toBe(0)
   })
 
-  it('classifies open and in-progress tasks', () => {
+  it('classifies tasks with not_started first, then in_progress', () => {
     const tasks = [
       makeTask({ id: 't1', status_id: 'in-prog', title: 'Working' }),
       makeTask({ id: 't2', status_id: 'default', title: 'Not started' })
@@ -128,27 +128,28 @@ describe('classifyMyDayTasks', () => {
     const result = classifyMyDayTasks(tasks, getStatus)
     expect(result.totalNonDone).toBe(2)
     expect(result.tasks).toHaveLength(2)
-    expect(result.tasks[0]).toEqual({ id: 't1', title: 'Working', bucket: 'in_progress' })
-    expect(result.tasks[1]).toEqual({ id: 't2', title: 'Not started', bucket: 'not_started' })
+    expect(result.tasks[0]).toEqual({ id: 't2', title: 'Not started', bucket: 'not_started' })
+    expect(result.tasks[1]).toEqual({ id: 't1', title: 'Working', bucket: 'in_progress' })
   })
 
-  it('limits to 3 per group', () => {
+  it('limits to 15 total tasks', () => {
     const tasks = [
-      ...Array.from({ length: 5 }, (_, i) =>
-        makeTask({ id: `ip-${i}`, status_id: 'in-prog', title: `IP ${i}`, order_index: i })
+      ...Array.from({ length: 10 }, (_, i) =>
+        makeTask({ id: `op-${i}`, status_id: 'default', title: `OP ${i}`, order_index: i })
       ),
-      ...Array.from({ length: 5 }, (_, i) =>
-        makeTask({ id: `op-${i}`, status_id: 'default', title: `OP ${i}`, order_index: i + 5 })
+      ...Array.from({ length: 10 }, (_, i) =>
+        makeTask({ id: `ip-${i}`, status_id: 'in-prog', title: `IP ${i}`, order_index: i + 10 })
       )
     ]
     const result = classifyMyDayTasks(tasks, getStatus)
-    expect(result.totalNonDone).toBe(10)
-    expect(result.tasks).toHaveLength(6) // 3 in-progress + 3 open
-    expect(result.tasks.filter((t) => t.bucket === 'in_progress')).toHaveLength(3)
-    expect(result.tasks.filter((t) => t.bucket === 'not_started')).toHaveLength(3)
+    expect(result.totalNonDone).toBe(20)
+    expect(result.tasks).toHaveLength(15)
+    // not_started first, then in_progress
+    expect(result.tasks.filter((t) => t.bucket === 'not_started')).toHaveLength(10)
+    expect(result.tasks.filter((t) => t.bucket === 'in_progress')).toHaveLength(5)
   })
 
-  it('handles fewer than 3 in one group without expanding the other', () => {
+  it('returns all tasks when under the limit', () => {
     const tasks = [
       makeTask({ id: 'ip-1', status_id: 'in-prog', title: 'IP 1' }),
       ...Array.from({ length: 5 }, (_, i) =>
@@ -157,9 +158,6 @@ describe('classifyMyDayTasks', () => {
     ]
     const result = classifyMyDayTasks(tasks, getStatus)
     expect(result.totalNonDone).toBe(6)
-    const ipTasks = result.tasks.filter((t) => t.bucket === 'in_progress')
-    const opTasks = result.tasks.filter((t) => t.bucket === 'not_started')
-    expect(ipTasks).toHaveLength(1)
-    expect(opTasks).toHaveLength(3)
+    expect(result.tasks).toHaveLength(6)
   })
 })

@@ -63,10 +63,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const [hiddenProjectIds, setHiddenProjectIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    if (defaultProject && !addTaskProjectId) {
+    if (defaultProject) {
       setAddTaskProjectId(defaultProject.id)
     }
-  }, [defaultProject, addTaskProjectId])
+  }, [defaultProject?.id])
 
   const addTaskProject = allProjects.find((p) => p.id === addTaskProjectId) ?? defaultProject
 
@@ -353,6 +353,12 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         }
         await cascade(taskId)
       }
+      // Re-focus container and scroll task into view after status change
+      requestAnimationFrame(() => {
+        containerRef.current?.focus()
+        const el = containerRef.current?.querySelector(`[data-task-id="${taskId}"]`)
+        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
     },
     [allStatuses, updateTask, newTaskPosition]
   )
@@ -371,6 +377,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     [setPendingDeleteTask]
   )
 
+  const clickOpensDetail = useSetting('click_opens_detail') ?? 'true'
+
   const handleSelectTask = useCallback(
     (taskId: string, e: React.MouseEvent) => {
       if (e.metaKey || e.ctrlKey) {
@@ -384,16 +392,28 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           const rangeIds = flatTasks.slice(lo, hi + 1).map((t) => t.id)
           selectTaskRange(rangeIds)
         } else {
-          selectTask(taskId)
+          selectTask(taskId, { openPanel: clickOpensDetail === 'true' })
         }
       } else {
-        selectTask(taskId)
-        requestAnimationFrame(() => {
-          document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
-        })
+        selectTask(taskId, { openPanel: clickOpensDetail === 'true' })
+        if (clickOpensDetail === 'true') {
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+          })
+        }
       }
     },
-    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
+    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange, clickOpensDetail]
+  )
+
+  const handleOpenDetail = useCallback(
+    (taskId: string) => {
+      selectTask(taskId, { openPanel: true })
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+      })
+    },
+    [selectTask]
   )
 
   const handleAddLabel = useCallback(
@@ -422,6 +442,13 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+
+    const scrollTaskIntoView = (taskId: string): void => {
+      requestAnimationFrame(() => {
+        const el = container.querySelector(`[data-task-id="${taskId}"]`)
+        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
+    }
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
@@ -467,7 +494,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         case 'ArrowDown': {
           e.preventDefault()
           const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-          if (flatTasks[nextIndex]) setCurrentTask(flatTasks[nextIndex].id)
+          if (flatTasks[nextIndex]) {
+            const id = flatTasks[nextIndex].id
+            setCurrentTask(id)
+            scrollTaskIntoView(id)
+          }
           break
         }
         case 'ArrowUp': {
@@ -476,7 +507,9 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
             setCurrentTask(null)
             addInputRef.current?.focus()
           } else {
-            setCurrentTask(flatTasks[currentIndex - 1].id)
+            const id = flatTasks[currentIndex - 1].id
+            setCurrentTask(id)
+            scrollTaskIntoView(id)
           }
           break
         }
@@ -494,22 +527,33 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
           break
         }
         case ' ': {
-          if (currentTaskId && !(e.target instanceof HTMLInputElement)) {
+          if (!(e.target instanceof HTMLInputElement)) {
             e.preventDefault()
-            const task = allTasks[currentTaskId]
-            if (task) {
-              const taskStatuses = Object.values(allStatuses)
-                .filter((s) => s.project_id === task.project_id)
-                .sort((a, b) => {
-                  if (a.is_default === 1 && b.is_default !== 1) return -1
-                  if (b.is_default === 1 && a.is_default !== 1) return 1
-                  if (a.is_done === 1 && b.is_done !== 1) return 1
-                  if (b.is_done === 1 && a.is_done !== 1) return -1
-                  return a.order_index - b.order_index
-                })
-              const idx = taskStatuses.findIndex((s) => s.id === task.status_id)
-              const nextStatus = taskStatuses[(idx + 1) % taskStatuses.length]
-              if (nextStatus) handleStatusChange(currentTaskId, nextStatus.id)
+            const tasksToUpdate = selectedTaskIds.size > 0 ? [...selectedTaskIds] : currentTaskId ? [currentTaskId] : []
+            if (tasksToUpdate.length > 0) {
+              const anchorId = currentTaskId ?? tasksToUpdate[0]
+              for (const taskId of tasksToUpdate) {
+                const task = allTasks[taskId]
+                if (task) {
+                  const taskStatuses = Object.values(allStatuses)
+                    .filter((s) => s.project_id === task.project_id)
+                    .sort((a, b) => {
+                      if (a.is_default === 1 && b.is_default !== 1) return -1
+                      if (b.is_default === 1 && a.is_default !== 1) return 1
+                      if (a.is_done === 1 && b.is_done !== 1) return 1
+                      if (b.is_done === 1 && a.is_done !== 1) return -1
+                      return a.order_index - b.order_index
+                    })
+                  const idx = taskStatuses.findIndex((s) => s.id === task.status_id)
+                  const nextStatus = taskStatuses[(idx + 1) % taskStatuses.length]
+                  if (nextStatus) handleStatusChange(taskId, nextStatus.id)
+                }
+              }
+              // Re-focus container and scroll anchor task into view after DOM update
+              requestAnimationFrame(() => {
+                containerRef.current?.focus()
+                if (anchorId) scrollTaskIntoView(anchorId)
+              })
             }
           }
           break
@@ -758,6 +802,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
                 onAddLabel={handleAddLabel}
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
+                onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
                 projectMap={projectMap}
                 bucketName={group.bucket.name}
                 bucketColor={group.bucket.color}

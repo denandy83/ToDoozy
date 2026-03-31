@@ -20,12 +20,20 @@ export function truncateTitle(title: string, maxLength = 40): string {
   return title.slice(0, maxLength - 1) + '\u2026'
 }
 
+const TRAY_MAX_TASKS = 15
+
+export const STATUS_ICONS: Record<TrayBucket, string> = {
+  not_started: '○',
+  in_progress: '◑',
+  done: '●'
+}
+
 export function classifyMyDayTasks(
   tasks: Task[],
   getStatus: (statusId: string) => Status | undefined
-): { tasks: TrayTask[]; totalNonDone: number; inProgressCount: number; openCount: number } {
+): { tasks: TrayTask[]; totalNonDone: number } {
+  const notStarted: Task[] = []
   const inProgress: Task[] = []
-  const open: Task[] = []
 
   for (const task of tasks) {
     if (task.parent_id) continue
@@ -34,24 +42,17 @@ export function classifyMyDayTasks(
     if (bucket === 'in_progress') {
       inProgress.push(task)
     } else {
-      open.push(task)
+      notStarted.push(task)
     }
   }
 
-  const totalNonDone = inProgress.length + open.length
+  const totalNonDone = notStarted.length + inProgress.length
 
-  const trayTasks: TrayTask[] = [
-    ...inProgress.slice(0, 3).map((t) => ({
-      id: t.id,
-      title: t.title,
-      bucket: 'in_progress' as const
-    })),
-    ...open.slice(0, 3).map((t) => ({
-      id: t.id,
-      title: t.title,
-      bucket: 'not_started' as const
-    }))
-  ]
+  // Flat list: not started first, then in progress, up to TRAY_MAX_TASKS
+  const ordered = [
+    ...notStarted.map((t) => ({ id: t.id, title: t.title, bucket: 'not_started' as const })),
+    ...inProgress.map((t) => ({ id: t.id, title: t.title, bucket: 'in_progress' as const }))
+  ].slice(0, TRAY_MAX_TASKS)
 
-  return { tasks: trayTasks, totalNonDone, inProgressCount: inProgress.length, openCount: open.length }
+  return { tasks: ordered, totalNonDone }
 }

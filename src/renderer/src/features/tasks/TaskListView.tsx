@@ -223,6 +223,12 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         }
         await cascade(taskId)
       }
+      // Re-focus container and scroll task into view after status change
+      requestAnimationFrame(() => {
+        containerRef.current?.focus()
+        const el = containerRef.current?.querySelector(`[data-task-id="${taskId}"]`)
+        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
     },
     [statuses, updateTask, newTaskPosition]
   )
@@ -241,6 +247,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     [setPendingDeleteTask]
   )
 
+  const clickOpensDetail = useSetting('click_opens_detail') ?? 'true'
+
   const handleSelectTask = useCallback(
     (taskId: string, e: React.MouseEvent) => {
       if (e.metaKey || e.ctrlKey) {
@@ -254,16 +262,28 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           const rangeIds = flatTasks.slice(lo, hi + 1).map((t) => t.id)
           selectTaskRange(rangeIds)
         } else {
-          selectTask(taskId)
+          selectTask(taskId, { openPanel: clickOpensDetail === 'true' })
         }
       } else {
-        selectTask(taskId)
-        requestAnimationFrame(() => {
-          document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
-        })
+        selectTask(taskId, { openPanel: clickOpensDetail === 'true' })
+        if (clickOpensDetail === 'true') {
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+          })
+        }
       }
     },
-    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange]
+    [flatTasks, lastSelectedTaskId, selectTask, toggleTaskInSelection, selectTaskRange, clickOpensDetail]
+  )
+
+  const handleOpenDetail = useCallback(
+    (taskId: string) => {
+      selectTask(taskId, { openPanel: true })
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-detail-title]')?.focus()
+      })
+    },
+    [selectTask]
   )
 
   const handleAddLabel = useCallback(
@@ -506,19 +526,28 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           break
         }
         case ' ': {
-          if (currentTaskId) {
-            e.preventDefault()
-            const task = allTasks[currentTaskId]
-            if (task) {
-              const sortedStatuses = [
-                ...statuses.filter((s) => s.is_default === 1),
-                ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
-                ...statuses.filter((s) => s.is_done === 1)
-              ]
-              const idx = sortedStatuses.findIndex((s) => s.id === task.status_id)
-              const nextStatus = sortedStatuses[(idx + 1) % sortedStatuses.length]
-              if (nextStatus) handleStatusChange(currentTaskId, nextStatus.id)
+          e.preventDefault()
+          const tasksToUpdate = selectedTaskIds.size > 0 ? [...selectedTaskIds] : currentTaskId ? [currentTaskId] : []
+          if (tasksToUpdate.length > 0) {
+            const sortedStatuses = [
+              ...statuses.filter((s) => s.is_default === 1),
+              ...statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1).sort((a, b) => a.order_index - b.order_index),
+              ...statuses.filter((s) => s.is_done === 1)
+            ]
+            const anchorId = currentTaskId ?? tasksToUpdate[0]
+            for (const taskId of tasksToUpdate) {
+              const task = allTasks[taskId]
+              if (task) {
+                const idx = sortedStatuses.findIndex((s) => s.id === task.status_id)
+                const nextStatus = sortedStatuses[(idx + 1) % sortedStatuses.length]
+                if (nextStatus) handleStatusChange(taskId, nextStatus.id)
+              }
             }
+            // Re-focus container and scroll anchor task into view after DOM update
+            requestAnimationFrame(() => {
+              containerRef.current?.focus()
+              if (anchorId) scrollTaskIntoView(anchorId)
+            })
           }
           break
         }
@@ -657,6 +686,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onAddLabel={handleAddLabel}
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
+                onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
               />
             )
           })}

@@ -385,6 +385,34 @@ function GeneralSettings(): React.JSX.Element {
           </button>
         </div>
       </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Click opens detail panel</p>
+          <p className="text-[10px] text-muted">Open the detail panel when clicking a task. When off, use double-click or Enter.</p>
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setSetting('click_opens_detail', 'true')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('click_opens_detail') ?? 'true') === 'true'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            On
+          </button>
+          <button
+            onClick={() => setSetting('click_opens_detail', 'false')}
+            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              (useSetting('click_opens_detail') ?? 'true') === 'false'
+                ? 'bg-accent/12 text-accent'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            Off
+          </button>
+        </div>
+      </div>
       <AutoArchiveSetting />
       <ShortcutRecorder />
       <AppToggleShortcutRecorder />

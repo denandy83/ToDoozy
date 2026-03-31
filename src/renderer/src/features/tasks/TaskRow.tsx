@@ -39,6 +39,7 @@ interface TaskRowProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  onOpenDetail?: (taskId: string) => void
   project?: Project
   statusIdOverride?: string
   mapStatusId?: (statusId: string) => string
@@ -62,6 +63,7 @@ export function TaskRow({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
+  onOpenDetail,
   project,
   statusIdOverride,
   mapStatusId
@@ -133,8 +135,12 @@ export function TaskRow({
   }, [])
 
   const handleDoubleClick = useCallback(() => {
-    setIsEditing(true)
-  }, [])
+    if (onOpenDetail) {
+      onOpenDetail(task.id)
+    } else {
+      setIsEditing(true)
+    }
+  }, [onOpenDetail, task.id])
 
   const saveTitle = useCallback(() => {
     const trimmed = editValue.trim()
@@ -538,6 +544,7 @@ export function TaskRow({
           onAddLabel={onAddLabel}
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
+          onOpenDetail={onOpenDetail}
           project={project}
           mapStatusId={mapStatusId}
         />
@@ -583,6 +590,7 @@ interface SubtaskListProps {
   onAddLabel: (taskId: string, labelId: string) => void
   onRemoveLabel: (taskId: string, labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  onOpenDetail?: (taskId: string) => void
   project?: Project
   mapStatusId?: (statusId: string) => string
 }
@@ -602,6 +610,7 @@ function SubtaskList({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
+  onOpenDetail,
   project,
   mapStatusId
 }: SubtaskListProps): React.JSX.Element {
@@ -711,6 +720,7 @@ function SubtaskList({
           onAddLabel={onAddLabel}
           onRemoveLabel={onRemoveLabel}
           onCreateLabel={onCreateLabel}
+          onOpenDetail={onOpenDetail}
           project={project}
           statusIdOverride={mapStatusId ? mapStatusId(child.status_id) : undefined}
           mapStatusId={mapStatusId}
