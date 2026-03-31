@@ -7,6 +7,12 @@ description: Add a new feature to ToDoozy. Use when the user wants to add a new 
 
 You are adding a new feature to ToDoozy. This skill defines the story through a structured interview, writes it to prd.json, and launches ralph to implement it autonomously.
 
+## Phase 0: Check scope.md
+
+Before starting, read `scope.md` in the project root. If it exists and covers the feature area, use that context instead of re-exploring. If it doesn't exist or doesn't cover this area, you'll create/update it during investigation.
+
+---
+
 ## Phase 1: Define the Story
 
 Invoke the `/grill-me` skill with the following prompt:
@@ -207,7 +213,14 @@ Add a session entry at the top of `DEVLOG.md`:
 **Decisions:** <any notable choices made during implementation>
 ```
 
-### 9f — Clear pending-changes.md entries
+### 9f — Update scope.md
+
+After implementation is complete, update `scope.md`:
+- Mark implemented items as done
+- If the feature revealed new codebase knowledge relevant to other scope items, update those
+- If all scope items are done, clear the file
+
+### 9g — Clear pending-changes.md entries
 
 After all docs are updated, remove the entries you just processed from `pending-changes.md` (keep the header and format instructions). Write the current HEAD commit hash to `.last-documented-commit`.
 

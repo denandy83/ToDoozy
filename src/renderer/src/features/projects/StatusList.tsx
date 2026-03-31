@@ -230,11 +230,6 @@ export function StatusList({
       addToast({ message: 'Cannot delete the default status', variant: 'danger' })
       return
     }
-    const middleStatuses = statuses.filter((s) => s.is_default !== 1 && s.is_done !== 1)
-    if (status.is_done !== 1 && status.is_default !== 1 && middleStatuses.length <= 1) {
-      addToast({ message: 'Must have at least one in-progress status', variant: 'danger' })
-      return
-    }
     if (status.is_done === 1) {
       addToast({ message: 'Cannot delete the done status', variant: 'danger' })
       return

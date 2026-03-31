@@ -62,3 +62,7 @@ Working file — entries written here during a session are processed into perman
 - c1d43fe feat: add r: reference URL operator and description toggle to quick-add (2026-03-31) — files: 5
 - 95444c1 feat: add include-archived checkbox and project/archive indicators to Cmd+K search (2026-03-31) — files: 4
 - cc3bec1 feat: smart recurrence picker with structured rules, validation, and task cloning (#38) (2026-03-31) — files: 25
+
+## 2026-03-31 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 5597ff5 fix: status cycling focus/scroll, click-opens-detail setting, My Day default project (2026-03-31) — files: 11

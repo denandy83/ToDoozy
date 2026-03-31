@@ -789,9 +789,7 @@ function MyDayIndicator({ visible, onToggle }: { visible: boolean; onToggle?: ()
 function StatusLabel({ statusId }: { statusId: string }): React.JSX.Element | null {
   const status = useStatusStore((s) => s.statuses[statusId])
   if (!status) return null
-  // Hide if it matches the bucket name (Not Started, In Progress, Done)
-  const name = status.name.toLowerCase()
-  if (status.is_default === 1 || status.is_done === 1 || name === 'in progress') return null
+  if (status.is_default === 1 || status.is_done === 1) return null
   return (
     <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">
       [{status.name}]

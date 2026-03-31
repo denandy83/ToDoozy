@@ -44,6 +44,15 @@ Never run migrations or destructive operations against the production database. 
 - `npm run test` — Run Vitest tests
 - `npm run lint` — ESLint check
 
+## Scope File (`scope.md`)
+When investigating bugs, planning features, or exploring the codebase for any multi-file change:
+1. **Write findings to `scope.md` as you go** — don't hold everything in context. List affected files, decisions, and what doesn't need changing.
+2. **Consult `scope.md` before exploring** — if a previous session already mapped the area, start from there instead of re-exploring.
+3. **Update `scope.md` after completing changes** — mark items as done, note what actually changed vs what was planned, remove stale sections.
+4. **Delete completed scopes** — once all items are done and committed, clear the file so it's ready for the next task.
+
+This prevents expensive re-exploration across sessions and keeps investigation costs proportional to the actual unknowns.
+
 ## Architecture Rules
 - Zero `any` types. Strict TypeScript. Every prop interface must be defined.
 - Feature-based folder structure under `src/renderer/src/features/`.

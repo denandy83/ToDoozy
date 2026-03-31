@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useToast } from '../../shared/components/Toast'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
@@ -45,6 +46,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const allStatuses = useStatusStore((s) => s.statuses)
+  const { addToast } = useToast()
   const layoutMode = useViewStore(selectLayoutMode)
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
@@ -328,13 +330,16 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       } else {
         update.completed_date = null
       }
-      // Position task at top or bottom of target status group based on setting
-      const allCurrentTasks = Object.values(useTaskStore.getState().tasks)
-      const targetTasks = allCurrentTasks.filter((t) => t.status_id === newStatusId && t.parent_id === null && t.id !== taskId)
-      if (targetTasks.length > 0) {
+      // Position task at top or bottom of target bucket based on setting
+      // In My Day, tasks from different projects share buckets, so match by bucket not status_id
+      const targetBucket = getBucketForStatus(newStatus)
+      const currentMyDayTasks = myDayTasks.filter(
+        (t) => t.id !== taskId && getBucketForTask(t, allStatuses) === targetBucket
+      )
+      if (currentMyDayTasks.length > 0) {
         update.order_index = newTaskPosition === 'bottom'
-          ? Math.max(...targetTasks.map((t) => t.order_index)) + 1
-          : Math.min(...targetTasks.map((t) => t.order_index)) - 1
+          ? Math.max(...currentMyDayTasks.map((t) => t.order_index)) + 1
+          : Math.min(...currentMyDayTasks.map((t) => t.order_index)) - 1
       } else {
         update.order_index = 0
       }
@@ -360,7 +365,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
     },
-    [allStatuses, updateTask, newTaskPosition]
+    [allStatuses, updateTask, newTaskPosition, myDayTasks]
   )
 
   const handleTitleChange = useCallback(
@@ -686,7 +691,16 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       // Handle synthetic bucket status IDs (from StatusButton cycling through buckets)
       if (newStatusId.startsWith('__bucket_')) {
         const bucketKey = newStatusId.replace('__bucket_', '') as BucketKey
-        const correctStatus = findProjectStatusForBucket(task.project_id, bucketKey, allStatuses)
+        const bucketOrder: BucketKey[] = ['not_started', 'in_progress', 'done']
+        // Find the first valid bucket starting from the requested one, wrapping around
+        const startIdx = bucketOrder.indexOf(bucketKey)
+        let correctStatus: ReturnType<typeof findProjectStatusForBucket> = undefined
+        for (let i = 0; i < bucketOrder.length; i++) {
+          const tryBucket = bucketOrder[(startIdx + i) % bucketOrder.length]
+          correctStatus = findProjectStatusForBucket(task.project_id, tryBucket, allStatuses)
+          if (correctStatus && correctStatus.id !== task.status_id) break
+          if (correctStatus && correctStatus.id === task.status_id) { correctStatus = undefined; continue }
+        }
         if (correctStatus && correctStatus.id !== task.status_id) {
           await handleStatusChange(taskId, correctStatus.id)
         }
@@ -706,7 +720,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       }
       await handleStatusChange(taskId, newStatusId)
     },
-    [allTasks, allStatuses, handleStatusChange]
+    [allTasks, allStatuses, handleStatusChange, addToast]
   )
 
 

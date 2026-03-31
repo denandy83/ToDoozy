@@ -7,10 +7,11 @@ description: Structured fix workflow for ToDoozy — handles both code bugs and 
 
 You are fixing an issue in ToDoozy, an Electron + React + TypeScript app with Zustand stores, SQLite via better-sqlite3, and IPC between main/renderer processes. This skill handles both code bugs and visual/UI issues. Rushing to a fix without understanding the problem wastes time — a methodical approach gets you there faster.
 
-## Before You Start: Read the Learnings
+## Before You Start: Read the Learnings and Scope
 
-Check whether this bug matches a known pattern before investigating from scratch:
+Check whether this bug matches a known pattern or has already been investigated:
 
+- Read `scope.md` in the project root — if it exists and covers the area you're about to investigate, start from there instead of re-exploring. If it doesn't cover your area, you'll update it during investigation.
 - Read `debug-learnings.md` in the project root — code bug patterns (Zustand re-renders, missing JOINs, hydration issues)
 - Read `ui-learnings.md` in the project root — visual fix patterns (spacing calculations, component sizing)
 - If the issue is visual, also read `ui-reference.md` — the design spec for colors, typography, spacing, components
@@ -131,6 +132,10 @@ Repeat as needed. Keep track of every diagnostic log you add — they all get re
 - Filtering → `LabelFilterBar`
 
 If someone rebuilt functionality that a shared component already handles, replacing it with the shared component is the fix.
+
+### Write Findings to scope.md
+
+As you investigate, write your findings to `scope.md` — affected files, what you've ruled out, your hypothesis, and blast radius. This prevents re-exploration if the fix takes multiple sessions or if related issues come up later.
 
 ### Form a Hypothesis
 
@@ -290,6 +295,13 @@ If the fix affects something the user interacts with directly (not an internal r
 ```
 
 Finally, write the current HEAD commit hash to `.last-documented-commit` to sync the Stop hook marker.
+
+### Update scope.md
+
+After the fix is merged, update `scope.md`:
+- Mark the fixed item as done
+- If scope.md only contained this one item, clear the file
+- If the fix revealed new information about the codebase that's relevant to remaining scope items, update those entries
 
 ---
 

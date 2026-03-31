@@ -482,7 +482,7 @@ function StepStatuses({ statuses, onChange }: StepStatusesProps): React.JSX.Elem
           <span className="text-[9px] font-bold uppercase tracking-wider text-muted/60">
             {s.is_default === 1 ? 'Default' : s.is_done === 1 ? 'Done' : ''}
           </span>
-          {s.is_default !== 1 && s.is_done !== 1 && statuses.filter((st) => st.is_default !== 1 && st.is_done !== 1).length > 1 && (
+          {s.is_default !== 1 && s.is_done !== 1 && (
             <button
               onClick={() => handleRemove(i)}
               className="rounded p-1 text-muted hover:bg-danger/10 hover:text-danger"

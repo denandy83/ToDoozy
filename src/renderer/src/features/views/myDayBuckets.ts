@@ -50,8 +50,7 @@ export function findProjectStatusForBucket(
     case 'done':
       return projectStatuses.find((s) => s.is_done === 1) ?? projectStatuses[projectStatuses.length - 1]
     case 'in_progress': {
-      const middle = projectStatuses.find((s) => s.is_default !== 1 && s.is_done !== 1)
-      return middle ?? projectStatuses.find((s) => s.is_default !== 1) ?? projectStatuses[0]
+      return projectStatuses.find((s) => s.is_default !== 1 && s.is_done !== 1)
     }
   }
 }

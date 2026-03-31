@@ -356,11 +356,15 @@ export function AppLayout(): React.JSX.Element {
       if (!task) return
       const allStatusMap = useStatusStore.getState().statuses
       const targetStatus = findProjectStatusForBucket(task.project_id, bucketKey as BucketKey, allStatusMap)
-      if (targetStatus && targetStatus.id !== task.status_id) {
+      if (!targetStatus) {
+        addToast({ message: 'This project has no in-progress status' })
+        return
+      }
+      if (targetStatus.id !== task.status_id) {
         await handleDndStatusChange(taskId, targetStatus.id)
       }
     },
-    [tasks, handleDndStatusChange]
+    [tasks, handleDndStatusChange, addToast]
   )
 
   const handleCalendarDayDrop = useCallback(
