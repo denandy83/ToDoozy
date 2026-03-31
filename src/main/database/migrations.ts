@@ -323,4 +323,10 @@ const migration_9: Migration = (db) => {
   db.exec(`ALTER TABLE tasks ADD COLUMN reference_url TEXT`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9]
+const migration_10: Migration = (db) => {
+  // Story #38: Smart Recurrence Picker — clear all existing recurrence_rule values
+  // Old format ('daily', 'weekly', 'monthly', 'every:3 days') is not worth migrating
+  db.exec(`UPDATE tasks SET recurrence_rule = NULL WHERE recurrence_rule IS NOT NULL`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10]

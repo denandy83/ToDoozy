@@ -241,13 +241,13 @@ const tools: ToolDef[] = [
   },
   {
     name: 'set_task_recurrence',
-    description: 'Set or clear the recurrence rule of a task',
+    description: 'Set or clear the recurrence rule of a task. Uses canonical format: "every:N:unit[:details][|until:YYYY-MM-DD]". Examples: "every:1:days", "every:2:weeks:mon,wed", "every:1:months:15", "every:1:months:3rd:tue", "every:1:years:3:30". Use "every!" prefix for after-completion mode: "every!:3:days". Empty string to clear.',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: str('Task ID'),
         recurrence_rule: str(
-          'Recurrence rule (e.g. "daily", "weekly", "monthly"), or empty string to clear'
+          'Canonical recurrence rule (e.g. "every:1:days", "every:2:weeks:mon,wed", "every!:1:months:15|until:2026-12-31"), or empty string to clear'
         )
       },
       required: ['task_id', 'recurrence_rule']

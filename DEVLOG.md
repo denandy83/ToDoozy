@@ -4,6 +4,25 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-03-31 — Smart Recurrence Picker (Story #38)
+
+**Stories implemented:** #38
+**Branch:** ralph/feature-38-smart-recurrence
+**What was built:** Complete recurrence system — structured picker UI with interval/unit/day selection, Fixed vs After-completion modes, end dates, live preview. Backend completion logic clones recurring tasks with next due date. Task row repeat icon. Context menu integration. Shared recurrenceUtils.ts with 46 tests. UX polish: removed arrow spinners, fixed escape behavior, tab focuses active preset, arrow keys cycle presets, layout reorder for mode toggle.
+**Decisions:** Canonical string storage format over RRULE (simpler, sufficient for personal task manager). After-completion mode hides day pickers (irrelevant). Presets expand picker pre-filled rather than being final answers. One-time migration clears all old recurrence rules.
+
+---
+
+## 2026-03-30 — Due Date Notifications (Story #37) + Calendar View Fixes
+
+**Session type:** Feature implementation + bug fixes
+
+**What was built:** Native macOS due date notifications (Story #37) that fire 15 minutes before a task's due time. Also fixed notification timezone bug, calendar view polish (tooltips, week numbers, My Day tasks, status sorting, drag support), and osascript dev fallback.
+
+**Commits:** d3edc4b, 3ff0855, 72d0cbb
+
+---
+
 ## 2026-03-30 — Template Wizard Due Date Offsets (Story #36)
 
 **Session type:** Feature implementation

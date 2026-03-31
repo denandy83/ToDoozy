@@ -9,6 +9,12 @@ import type {
   TaskLabelMapping
 } from '../../../../shared/types'
 
+interface RecurringCloneResult {
+  taskId: string
+  dueDate: string
+  projectId: string
+}
+
 interface TaskState {
   tasks: Record<string, Task>
   taskLabels: Record<string, Label[]>
@@ -20,6 +26,7 @@ interface TaskState {
   pendingDeleteTaskId: string | null
   pendingBulkDeleteTaskIds: string[] | null
   movingTaskId: string | null
+  lastRecurringClone: RecurringCloneResult | null
   loading: boolean
   error: string | null
 }
@@ -59,6 +66,7 @@ interface TaskActions {
   setPendingDeleteTask(taskId: string | null): void
   setMovingTask(taskId: string | null): void
   clearError(): void
+  clearLastRecurringClone(): void
 }
 
 export type TaskStore = TaskState & TaskActions
@@ -74,6 +82,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   pendingDeleteTaskId: null,
   pendingBulkDeleteTaskIds: null,
   movingTaskId: null,
+  lastRecurringClone: null,
   loading: false,
   error: null,
 
@@ -204,6 +213,42 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
               }
               return { tasks: updated }
             })
+          }
+        }
+
+        // Check if a recurring task was moved to done status → create clone
+        if (input.status_id && task.recurrence_rule) {
+          const status = await window.api.statuses.findById(input.status_id)
+          if (status && status.is_done === 1) {
+            try {
+              const result = await window.api.tasks.completeRecurring(task.id)
+              if (result) {
+                // Load the new task into the store
+                const newTask = await window.api.tasks.findById(result.id)
+                if (newTask) {
+                  set((state) => ({
+                    tasks: { ...state.tasks, [newTask.id]: newTask },
+                    lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id }
+                  }))
+                  // Also load subtasks of the new task
+                  const subtasks = await window.api.tasks.findSubtasks(result.id)
+                  if (subtasks.length > 0) {
+                    set((state) => {
+                      const updated = { ...state.tasks }
+                      for (const st of subtasks) updated[st.id] = st
+                      return { tasks: updated }
+                    })
+                  }
+                  // Load labels for the new task
+                  const labels = await window.api.labels.findByTaskId(result.id)
+                  set((state) => ({
+                    taskLabels: { ...state.taskLabels, [result.id]: labels }
+                  }))
+                }
+              }
+            } catch (err) {
+              console.error('Failed to create recurring task clone:', err)
+            }
           }
         }
 
@@ -632,6 +677,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   clearError(): void {
     set({ error: null })
+  },
+
+  clearLastRecurringClone(): void {
+    set({ lastRecurringClone: null })
   }
 }), shallow)
 

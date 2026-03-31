@@ -247,7 +247,14 @@ export function DetailPanel(): React.JSX.Element | null {
   }
 
   const handleRecurrenceChange = (rule: string | null): void => {
-    updateTask(task.id, { recurrence_rule: rule })
+    const updates: Record<string, string | null> = { recurrence_rule: rule }
+    // Auto-set due date to today if setting recurrence on a task without a due date
+    if (rule && !task.due_date) {
+      const today = new Date()
+      const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      updates.due_date = iso
+    }
+    updateTask(task.id, updates)
   }
 
   const handleSnooze = (date: string): void => {

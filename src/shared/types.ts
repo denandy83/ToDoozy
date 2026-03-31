@@ -327,3 +327,17 @@ export interface UpdateProjectTemplateInput {
   color?: string
   data?: string
 }
+
+// ── Recurrence ──────────────────────────────────────────────────────
+
+export interface RecurrenceConfig {
+  interval: number // 1+
+  unit: 'days' | 'weeks' | 'months' | 'years'
+  weekDays?: string[] // for weeks: ['mon', 'wed', 'fri']
+  monthDay?: number // for months: 1-31
+  monthOrdinal?: { nth: '1st' | '2nd' | '3rd' | '4th' | 'last'; day: string } // for months: ordinal weekday
+  yearMonth?: number // for years: 1-12
+  yearDay?: number // for years: 1-31
+  afterCompletion: boolean
+  untilDate?: string // ISO date YYYY-MM-DD
+}

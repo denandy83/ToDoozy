@@ -23,7 +23,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete
 
 ### Task Fields
-- Title (autosave 1s), Status (dynamic from project), Priority (5 levels), Labels, Due date + optional time, Reference URL, Recurrence (None/Daily/Weekly/Monthly/Custom), Snooze presets
+- Title (autosave 1s), Status (dynamic from project), Priority (5 levels), Labels, Due date + optional time, Reference URL, Smart Recurrence (structured picker with validation + preview), Snooze presets
 - `is_in_my_day`, `is_archived`, `is_template`, `parent_id`, `sort_order` flags
 - `completed_date` auto-set; `snoozed_until` for snooze feature
 - **Status:** Complete
@@ -130,10 +130,23 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Task deletion cascades to file cleanup
 - **Status:** Complete (2026-03-22)
 
-### Recurrence
-- None/Daily/Weekly/Monthly/Custom options
-- Stored in `recurrence` field; next occurrence auto-created on completion
-- **Status:** Complete
+### Smart Recurrence Picker
+- Structured picker replaces free-text input: Every [N] [days/weeks/months/years]
+- Presets (Daily/Weekly/Monthly) expand picker pre-filled with today as reference
+- Weekly: 7 day-of-week toggle buttons (M T W T F S S)
+- Monthly: "On day [N]" or "On the [1st-last] [weekday]" (ordinal mode)
+- Yearly: month dropdown + day input
+- Fixed / After completion toggle (after-completion hides day pickers)
+- Optional end date via "Ends: On date" with date picker
+- Live preview line in accent color: "→ Every 2 weeks on Mon, Wed (next: Apr 14)"
+- Completing a recurring task auto-creates a clone with next due date, reset subtasks, and copied labels
+- Toast notification on clone creation with "Go to task" action
+- Task row shows repeat icon (↻) with tooltip showing human-readable rule
+- Context menu presets with smart defaults + "Custom..." to open detail panel
+- Setting recurrence on a dateless task auto-sets due date to today
+- Canonical storage format: `every:N:unit[:details][|until:YYYY-MM-DD]`
+- Shared `recurrenceUtils.ts` with parse, serialize, describe, getNextOccurrence, isValid
+- **Status:** Complete (2026-03-31)
 
 ### Snooze
 - Presets: Later today, Tomorrow, Next week, Custom

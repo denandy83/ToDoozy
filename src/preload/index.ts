@@ -21,7 +21,8 @@ const api: TodoozyAPI = {
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId),
     findAllTemplates: () => ipcRenderer.invoke('tasks:findAllTemplates'),
-    saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId)
+    saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId),
+    completeRecurring: (taskId) => ipcRenderer.invoke('tasks:completeRecurring', taskId)
   },
 
   labels: {

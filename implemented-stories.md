@@ -265,3 +265,39 @@
 - **Acceptance Criteria:** ? button in sidebar opens help modal, Shortcuts shown in 4 sections, Help tab in Settings with full docs, ? keyboard shortcut opens modal, Escape closes modal.
 - **Passes:** true
 - **Implemented:** 2026-03-30
+
+---
+
+### #34 — Task Reference URL
+- **Description:** Add a single reference URL field to each task, displayed directly below the title in the task detail panel. Clickable link with auto https:// prefix, X button to clear, 1s debounce autosave.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Reference URL field below title, 1s debounce autosave, clickable with auto https:// prefix, X button clears, keyboard accessible in Tab order, persists in SQLite, works in project views and My Day.
+- **Passes:** true
+- **Implemented:** 2026-03-30
+
+---
+
+### #35 — Calendar View
+- **Description:** Cross-project Calendar view showing all tasks organized by due date. Monthly grid and weekly layout with toggle. Sidebar navigation with ⌘2 shortcut. Click/drag/context menu interactions. Today highlighted, overdue in red.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Calendar in sidebar with ⌘2, monthly grid with project color indicators, weekly view with day columns, toggle persists, click opens detail panel, drag updates due_date, today highlighted, overdue in red, empty state, works with detail panel/context menu/keyboard shortcuts.
+- **Passes:** true
+- **Implemented:** 2026-03-30
+
+---
+
+### #36 — Template Wizard — Relative Due Date Offsets
+- **Description:** When saving a project as a template, the wizard asks whether to include due dates as relative offsets. When deploying, compute actual due dates from a deploy date.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Save wizard shows due dates step, toggle controls offset inclusion, deploy wizard shows due dates step, deploy date picker defaults to today, preview shows computed dates, correct due_date on created tasks, subtasks carry offsets, backward compat, tasks without due dates skipped.
+- **Passes:** true
+- **Implemented:** 2026-03-30
+
+---
+
+### #37 — Due Date Notifications
+- **Description:** Native macOS notifications that fire when a task's due date+time approaches. Configurable lead time, 1-minute warning, click-to-navigate. Settings toggle and lead time dropdown.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Native notification at configurable lead time, 1-minute warning, only tasks with time component, click focuses app and navigates to task, settings toggle, lead time dropdown, no notifications for completed/archived/template tasks, no duplicates.
+- **Passes:** true
+- **Implemented:** 2026-03-30

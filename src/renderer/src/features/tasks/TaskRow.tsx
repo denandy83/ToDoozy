@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2, ExternalLink } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2, ExternalLink, Repeat } from 'lucide-react'
+import { describeRecurrence } from '../../../../shared/recurrenceUtils'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { useSortable } from '@dnd-kit/sortable'
 import { StatusButton } from '../../shared/components/StatusButton'
@@ -445,6 +446,16 @@ export function TaskRow({
             {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
             {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
           </span>
+        )}
+
+        {/* Recurrence indicator */}
+        {task.recurrence_rule && (
+          <div className="group/recur relative flex-shrink-0">
+            <Repeat size={12} strokeWidth={1.5} className="text-muted" />
+            <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover/recur:opacity-100">
+              {describeRecurrence(task.recurrence_rule)}
+            </div>
+          </div>
         )}
 
         {/* Priority badge */}

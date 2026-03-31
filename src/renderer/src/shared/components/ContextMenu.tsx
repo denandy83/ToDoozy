@@ -201,7 +201,21 @@ export function ContextMenu(): React.JSX.Element | null {
         <PrioritySubmenu task={task} openLeft={openLeft} onPriorityChange={(p) => handleAction(() => updateTask(task.id, { priority: p }))} />
       </FlyoutItem>
       <FlyoutItem id="recurrence" icon={<Repeat size={14} />} label="Recurrence" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
-        <RecurrenceSubmenu task={task} openLeft={openLeft} onRecurrenceChange={(r) => handleAction(() => updateTask(task.id, { recurrence_rule: r }))} />
+        <RecurrenceSubmenu
+          task={task}
+          openLeft={openLeft}
+          onRecurrenceChange={(r) => handleAction(() => {
+            const updates: Record<string, string | null> = { recurrence_rule: r }
+            if (r && !task.due_date) {
+              const today = new Date()
+              updates.due_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+            }
+            updateTask(task.id, updates)
+          })}
+          onCustom={() => handleAction(() => {
+            useTaskStore.getState().selectTask(task.id)
+          })}
+        />
       </FlyoutItem>
       <FlyoutItem id="labels" icon={<Tag size={14} />} label="Labels" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <LabelsSubmenu

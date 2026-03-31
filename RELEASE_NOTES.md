@@ -4,8 +4,15 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-03-31
+
+- **Smart Recurrence Picker** — The recurrence input is now a structured picker instead of a free-text field. Choose interval, unit (days/weeks/months/years), specific days, Fixed or After-completion mode, and an optional end date. A live preview shows the human-readable rule and next occurrence. Completing a recurring task now automatically creates a clone with the next due date. Task rows show a repeat icon with tooltip.
+
 ## 2026-03-30
 
+- **Due date notifications** — Tasks with a due date and time now trigger native macOS notifications 15 minutes before the due time. Click the notification to jump straight to the task.
+- **Fix: Notification timezone handling** — Notifications now fire at the correct local time regardless of timezone.
+- **Fix: Calendar view polish** — Improved tooltips, week numbers, My Day task display, status sorting, and drag-and-drop in the calendar view.
 - **Task reference URL** — Add a reference URL to any task. The URL appears as a clickable link icon on task rows and as an editable field in the detail panel. URLs without a protocol automatically get `https://` prepended. The field autosaves after 1 second, and you can clear it with the X button.
 - **Calendar View** — A new Calendar view in the sidebar (⌘2) shows all tasks organized by their due date. Toggle between monthly grid and weekly layout. Navigate with arrow buttons. Today is highlighted, overdue tasks show in red. Click a task to open the detail panel, or drag it to a different day to update the due date.
 - **Template Wizard — Relative Due Date Offsets** — When saving a project as a template, the wizard now offers to preserve due dates as relative offsets (e.g., "5 days after deploy"). When you deploy the template, pick a start date and all task due dates are computed automatically.
