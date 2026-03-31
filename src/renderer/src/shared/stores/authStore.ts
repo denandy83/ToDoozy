@@ -207,7 +207,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         provider: 'google',
         options: {
           skipBrowserRedirect: true,
-          redirectTo: 'https://znmgsyjkaftbnhtlcxrm.supabase.co'
+          redirectTo: (await window.api.auth.getSupabaseConfig()).url
         }
       })
 

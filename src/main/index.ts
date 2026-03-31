@@ -1,4 +1,3 @@
-import { config } from 'dotenv'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { app, shell, BrowserWindow, globalShortcut } from 'electron'
@@ -10,9 +9,6 @@ import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
 import { startNotificationChecker, stopNotificationChecker } from './notifications'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
-
-// Load .env from project root (2 levels up from out/main)
-config({ path: join(__dirname, '../../.env') })
 
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false

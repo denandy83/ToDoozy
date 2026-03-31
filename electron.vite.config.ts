@@ -1,14 +1,21 @@
 import { resolve } from 'path'
+import { config } from 'dotenv'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// Load .env for build-time injection
+config()
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    define: {
+      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL ?? ''),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY ?? '')
+    },
     build: {
       rollupOptions: {
-        external: ['better-sqlite3'],
         input: {
           index: resolve('src/main/index.ts'),
           'mcp-server': resolve('src/main/mcp-server.ts')
