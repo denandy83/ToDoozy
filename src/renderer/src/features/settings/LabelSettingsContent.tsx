@@ -27,6 +27,7 @@ import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores/projectStore'
 import { useToast } from '../../shared/components/Toast'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
+import { LABEL_COLORS, leastUsedLabelColor } from '../../shared/utils/labelColors'
 import type { Label, LabelUsageInfo } from '../../../../shared/types'
 
 export function LabelSettingsContent(): React.JSX.Element {
@@ -51,7 +52,14 @@ export function LabelSettingsContent(): React.JSX.Element {
 
   const [showAddInput, setShowAddInput] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newColor, setNewColor] = useState('#6366f1')
+  const [newColor, setNewColor] = useState(() => leastUsedLabelColor(labelsWithUsage))
+  const [colorInitialized, setColorInitialized] = useState(false)
+  useEffect(() => {
+    if (labelsWithUsage.length > 0 && !colorInitialized) {
+      setNewColor(leastUsedLabelColor(labelsWithUsage))
+      setColorInitialized(true)
+    }
+  }, [labelsWithUsage, colorInitialized])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState('')
@@ -85,6 +93,9 @@ export function LabelSettingsContent(): React.JSX.Element {
     }
     setNewName('')
     await refreshLabels()
+    // Pick next least-used color after creation
+    const updatedLabels = await window.api.labels.findAllWithUsage()
+    setNewColor(leastUsedLabelColor(updatedLabels))
     requestAnimationFrame(() => {
       addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       addInputRef.current?.focus()
@@ -333,10 +344,6 @@ export function LabelSettingsContent(): React.JSX.Element {
   )
 }
 
-const LABEL_COLORS = [
-  '#888888', '#ef4444', '#f59e0b', '#22c55e',
-  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'
-]
 
 interface SortableLabelRowProps {
   label: LabelUsageInfo

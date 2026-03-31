@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import type { Label } from '../../../../shared/types'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useLabelStore } from '../stores/labelStore'
+import { leastUsedLabelColor } from '../utils/labelColors'
 import { useToast } from './Toast'
 
 interface LabelPickerProps {
@@ -30,7 +31,7 @@ export function LabelPicker({
   const { addToast } = useToast()
   const [newLabelMode, setNewLabelMode] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')
-  const [newLabelColor, setNewLabelColor] = useState('#6366f1')
+  const [newLabelColor, setNewLabelColor] = useState(() => leastUsedLabelColor(allLabels))
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
@@ -83,9 +84,9 @@ export function LabelPicker({
     if (!trimmed) return
     onCreateLabel(trimmed, newLabelColor)
     setNewLabelName('')
-    setNewLabelColor('#6366f1')
+    setNewLabelColor(leastUsedLabelColor([...allLabels, { color: newLabelColor } as Label]))
     setNewLabelMode(false)
-  }, [newLabelName, newLabelColor, onCreateLabel])
+  }, [newLabelName, newLabelColor, onCreateLabel, allLabels])
 
   const filteredLabels = allLabels.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase()))
 
