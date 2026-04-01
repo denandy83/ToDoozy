@@ -301,3 +301,12 @@
 - **Acceptance Criteria:** Native notification at configurable lead time, 1-minute warning, only tasks with time component, click focuses app and navigates to task, settings toggle, lead time dropdown, no notifications for completed/archived/template tasks, no duplicates.
 - **Passes:** true
 - **Implemented:** 2026-03-30
+
+---
+
+### #38 — Smart Recurrence Picker
+- **Description:** Structured recurrence picker replacing free-text input. Canonical storage format, shared utility functions, preset buttons, conditional picker rows, live preview, task completion clone logic, task row indicator, context menu updates, MCP updates.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Preset expansion, number input, unit dropdown, weekday toggles, month options, year options, fixed/after-completion toggle, end date picker, live preview, escape collapse, recurring task cloning, end date enforcement, toast with navigation, repeat icon with tooltip, context menu presets, auto-set due date, MCP format update, migration clears old values, full test coverage, keyboard navigation, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-01
