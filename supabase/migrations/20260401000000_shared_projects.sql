@@ -54,7 +54,6 @@ CREATE POLICY "Owner can add members"
     project_id IN (
       SELECT project_id FROM shared_project_members WHERE user_id = auth.uid() AND role = 'owner'
     )
-    OR user_id = auth.uid()  -- Allow self-insert on invite acceptance
   );
 
 CREATE POLICY "Owner can remove members"
@@ -98,6 +97,31 @@ CREATE POLICY "Invite can be accepted"
   USING (auth.uid() IS NOT NULL)
   WITH CHECK (status = 'accepted' AND accepted_by = auth.uid());
 
+-- ── Shared Statuses ─────────────────────────────────────────────────
+
+CREATE TABLE shared_statuses (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT DEFAULT '#888888',
+  icon TEXT DEFAULT 'circle',
+  order_index INTEGER DEFAULT 0,
+  is_done INTEGER DEFAULT 0,
+  is_default INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE shared_statuses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Members can view shared statuses"
+  ON shared_statuses FOR SELECT
+  USING (project_id IN (SELECT project_id FROM shared_project_members WHERE user_id = auth.uid()));
+
+CREATE POLICY "Owner can manage shared statuses"
+  ON shared_statuses FOR ALL
+  USING (project_id IN (SELECT project_id FROM shared_project_members WHERE user_id = auth.uid() AND role = 'owner'));
+
 -- ── Shared Tasks ────────────────────────────────────────────────────
 
 CREATE TABLE shared_tasks (
@@ -107,10 +131,10 @@ CREATE TABLE shared_tasks (
   assigned_to UUID,
   title TEXT NOT NULL,
   description TEXT,
-  status_id UUID NOT NULL,
+  status_id UUID NOT NULL REFERENCES shared_statuses(id),
   priority INTEGER DEFAULT 0,
   due_date TEXT,
-  parent_id UUID,
+  parent_id UUID REFERENCES shared_tasks(id) ON DELETE CASCADE,
   order_index INTEGER DEFAULT 0,
   is_template INTEGER DEFAULT 0,
   is_archived INTEGER DEFAULT 0,
@@ -140,36 +164,11 @@ CREATE POLICY "Members can delete shared tasks"
   ON shared_tasks FOR DELETE
   USING (project_id IN (SELECT project_id FROM shared_project_members WHERE user_id = auth.uid()));
 
--- ── Shared Statuses ─────────────────────────────────────────────────
-
-CREATE TABLE shared_statuses (
-  id UUID PRIMARY KEY,
-  project_id UUID NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  color TEXT DEFAULT '#888888',
-  icon TEXT DEFAULT 'circle',
-  order_index INTEGER DEFAULT 0,
-  is_done INTEGER DEFAULT 0,
-  is_default INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-ALTER TABLE shared_statuses ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Members can view shared statuses"
-  ON shared_statuses FOR SELECT
-  USING (project_id IN (SELECT project_id FROM shared_project_members WHERE user_id = auth.uid()));
-
-CREATE POLICY "Owner can manage shared statuses"
-  ON shared_statuses FOR ALL
-  USING (project_id IN (SELECT project_id FROM shared_project_members WHERE user_id = auth.uid() AND role = 'owner'));
-
 -- ── Shared Activity Log ─────────────────────────────────────────────
 
 CREATE TABLE shared_activity_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id UUID NOT NULL,
+  task_id UUID NOT NULL REFERENCES shared_tasks(id) ON DELETE CASCADE,
   user_id UUID NOT NULL,
   project_id UUID NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
   action TEXT NOT NULL,
@@ -204,3 +203,60 @@ ALTER PUBLICATION supabase_realtime ADD TABLE shared_tasks;
 ALTER PUBLICATION supabase_realtime ADD TABLE shared_statuses;
 ALTER PUBLICATION supabase_realtime ADD TABLE shared_project_members;
 ALTER PUBLICATION supabase_realtime ADD TABLE shared_activity_log;
+
+-- ── Secure Invite Acceptance Function ──────────────────────────────
+-- Runs as SECURITY DEFINER so it can insert into shared_project_members
+-- without the caller needing direct INSERT permission.
+
+CREATE OR REPLACE FUNCTION accept_invite(invite_token UUID)
+RETURNS UUID AS $$
+DECLARE
+  v_project_id UUID;
+  v_status TEXT;
+  v_expires_at TIMESTAMPTZ;
+BEGIN
+  -- Validate the invite
+  SELECT project_id, status, expires_at
+  INTO v_project_id, v_status, v_expires_at
+  FROM shared_project_invites
+  WHERE token = invite_token;
+
+  IF v_project_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid invite token';
+  END IF;
+  IF v_status != 'pending' THEN
+    RAISE EXCEPTION 'Invite already used';
+  END IF;
+  IF v_expires_at < now() THEN
+    -- Auto-mark as expired
+    UPDATE shared_project_invites SET status = 'expired' WHERE token = invite_token;
+    RAISE EXCEPTION 'Invite expired';
+  END IF;
+
+  -- Add user as member
+  INSERT INTO shared_project_members (project_id, user_id, role)
+  VALUES (v_project_id, auth.uid(), 'member')
+  ON CONFLICT (project_id, user_id) DO NOTHING;
+
+  -- Mark invite as accepted
+  UPDATE shared_project_invites
+  SET status = 'accepted', accepted_by = auth.uid()
+  WHERE token = invite_token;
+
+  RETURN v_project_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ── Expired Invite Cleanup Function ────────────────────────────────
+
+CREATE OR REPLACE FUNCTION cleanup_expired_invites()
+RETURNS void AS $$
+BEGIN
+  UPDATE shared_project_invites
+  SET status = 'expired'
+  WHERE status = 'pending' AND expires_at < now();
+
+  DELETE FROM shared_project_invites
+  WHERE status = 'expired' AND expires_at < now() - INTERVAL '1 day';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

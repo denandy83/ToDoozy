@@ -347,32 +347,18 @@ export async function validateInviteToken(token: string): Promise<{
 export async function acceptInvite(token: string, userId: string): Promise<string> {
   const supabase = await getSupabase()
 
-  // Update invite status
-  const { data: invite, error: inviteError } = await supabase
-    .from('shared_project_invites')
-    .update({ status: 'accepted', accepted_by: userId })
-    .eq('token', token)
-    .eq('status', 'pending')
-    .select('project_id')
-    .single()
+  // Use server-side function that validates the invite and adds the member atomically
+  const { data: projectId, error } = await supabase.rpc('accept_invite', {
+    invite_token: token
+  })
 
-  if (inviteError || !invite) throw new Error('Failed to accept invite')
-
-  // Add as member
-  const { error: memberError } = await supabase
-    .from('shared_project_members')
-    .insert({
-      project_id: invite.project_id,
-      user_id: userId,
-      role: 'member'
-    })
-
-  if (memberError && !memberError.message.includes('duplicate')) throw memberError
+  if (error) throw new Error(error.message)
+  if (!projectId) throw new Error('Failed to accept invite')
 
   // Sync project data down to local
-  await syncProjectDown(invite.project_id, userId)
+  await syncProjectDown(projectId, userId)
 
-  return invite.project_id
+  return projectId
 }
 
 /**
