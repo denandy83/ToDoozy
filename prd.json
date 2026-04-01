@@ -23,6 +23,26 @@
       ],
       "passes": false,
       "tested": false
+    },
+    {
+      "id": "41",
+      "title": "Versioned Release Notes on Supabase",
+      "description": "Migrate the in-app What's New from local SQLite to a Supabase release_notes table with one row per version. The app fetches release notes from Supabase on launch and caches them locally so offline users still see content. The /fix and /feature skills write release notes to Supabase instead of local SQLite. The update dialog (story #40) pulls from the same table to show per-version notes. whats_new_seen stays local per-user.\n\n## Supabase Table\nCreate a release_notes table in Supabase:\n```sql\nCREATE TABLE release_notes (\n  version TEXT PRIMARY KEY,\n  content TEXT NOT NULL,\n  published_at TIMESTAMPTZ DEFAULT now()\n);\n```\nNo RLS needed — release notes are public to all authenticated users. Add a SELECT policy for authenticated users.\n\n## Write Flow\nThe /fix and /feature skills upsert to the release_notes table for the current version (from package.json) after each fix/feature is confirmed. The MCP set_whats_new tool is updated to write per-version to Supabase instead of local SQLite. Each upsert sends the full content for that version (not appending — replace the whole content for the version row).\n\n## Read Flow\nOn app launch (after auth), fetch all rows from release_notes ordered by published_at DESC. Concatenate them into the markdown format the WhatsNewContent component expects (## vX.Y.Z header + bullets for each row). Cache the result in the local whats_new setting so offline users see the last-fetched content. The WhatsNewContent component reads from the local cache as before — no changes needed to the renderer component.\n\n## Notification Dot\nwhats_new_seen stays in local SQLite per-user. Compares the first ## vX.Y.Z header in the cached content against the stored value. No changes needed — already works with version headers after the format migration.\n\n## Update Dialog Integration\nStory #40's update dialog fetches the single row matching the offered version from release_notes to display per-version notes. Falls back to GitHub Release body if Supabase fetch fails.\n\n## Main Process Changes\n- Add a ReleaseNotesService (or method in existing service) that:\n  - Fetches all release notes from Supabase on launch\n  - Concatenates into markdown and writes to local whats_new setting\n  - Provides a method to fetch notes for a specific version (for update dialog)\n- Add IPC handler for fetching release notes for a specific version\n- The launch fetch should be non-blocking — app loads normally, notes update in background\n\n## Skill Updates\n- /fix skill: after writing to CHANGELOG.md, also upsert to Supabase release_notes for the current package.json version. Remove the local SQLite whats_new write.\n- /feature skill: same — upsert to Supabase release_notes instead of local SQLite.\n- MCP set_whats_new tool: update to write to Supabase release_notes table. Accept version parameter (default to current package.json version).\n\n## Files to Create\n- src/main/services/ReleaseNotesService.ts — Supabase fetch, cache to local settings, per-version fetch\n\n## Files to Modify\n- src/main/index.ts — initialize ReleaseNotesService on launch after auth\n- src/main/ipc-handlers.ts — add release-notes IPC handlers\n- src/preload/index.ts and src/preload/index.d.ts — add bridge methods\n- src/main/mcp-server.ts — update set_whats_new tool to write to Supabase\n- .claude/commands/fix.md — update changelog section to write to Supabase\n- .claude/commands/feature.md — update docs phase to write to Supabase\n- CLAUDE.md — update in-app What's New instructions\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Supabase release_notes table exists with version, content, published_at columns",
+        "/fix and /feature skills upsert release notes to Supabase for the current package.json version",
+        "MCP set_whats_new tool writes to Supabase release_notes table instead of local SQLite",
+        "App fetches all release notes from Supabase on launch and caches locally",
+        "What's New tab displays all versions (most recent first) from the local cache",
+        "Offline users see the last-fetched release notes",
+        "whats_new_seen remains in local SQLite per-user",
+        "Notification dot works correctly with version-based headers",
+        "Update dialog (story #40) can fetch notes for a specific version from the same table",
+        "npm run typecheck passes with zero errors"
+      ],
+      "passes": false,
+      "tested": false
     }
   ]
 }
