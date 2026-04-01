@@ -19,14 +19,15 @@ import { TimerSettingsContent } from './TimerSettingsContent'
 import { NotificationsSettingsContent } from './NotificationsSettingsContent'
 import { HelpSettingsContent } from '../help/HelpSettingsContent'
 import type { Project } from '../../../../shared/types'
+import { MemberSettings } from '../collaboration/MemberSettings'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'help'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'members' | 'help'
 
 interface UnifiedSettingsModalProps {
   open: boolean
   onClose: () => void
   projectId: string | null
-  initialTab?: Tab
+  initialTab?: string
 }
 
 export function UnifiedSettingsModal({
@@ -35,7 +36,7 @@ export function UnifiedSettingsModal({
   projectId,
   initialTab
 }: UnifiedSettingsModalProps): React.JSX.Element | null {
-  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? 'general')
+  const [activeTab, setActiveTab] = useState<Tab>((initialTab as Tab) ?? 'general')
   const projects = useProjectStore(selectAllProjects)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId)
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
@@ -64,7 +65,7 @@ export function UnifiedSettingsModal({
 
   useEffect(() => {
     if (open && initialTab) {
-      setActiveTab(initialTab)
+      setActiveTab(initialTab as Tab)
     }
   }, [open, initialTab])
 
@@ -160,6 +161,7 @@ export function UnifiedSettingsModal({
     { key: 'mcp', label: 'MCP' },
     { key: 'timer', label: 'Timer' },
     { key: 'notifications', label: 'Notifications' },
+    ...(selectedProject?.is_shared === 1 ? [{ key: 'members' as const, label: 'Members' }] : []),
     { key: 'help', label: 'Help' }
   ]
 
@@ -233,6 +235,9 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'notifications' && (
             <NotificationsSettingsContent />
+          )}
+          {activeTab === 'members' && selectedProject && (
+            <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
           )}
           {activeTab === 'help' && (
             <HelpSettingsContent />
@@ -413,9 +418,57 @@ function GeneralSettings(): React.JSX.Element {
           </button>
         </div>
       </div>
+
+      <LaunchAtLoginSetting />
       <AutoArchiveSetting />
       <ShortcutRecorder />
       <AppToggleShortcutRecorder />
+    </div>
+  )
+}
+
+function LaunchAtLoginSetting(): React.JSX.Element {
+  const [openAtLogin, setOpenAtLogin] = useState(false)
+
+  useEffect(() => {
+    window.api.app.getLoginItemSettings().then((settings) => {
+      setOpenAtLogin(settings.openAtLogin)
+    })
+  }, [])
+
+  const toggle = (value: boolean): void => {
+    setOpenAtLogin(value)
+    window.api.app.setLoginItemSettings(value)
+  }
+
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-light text-foreground">Launch at login</p>
+        <p className="text-[10px] text-muted">Start ToDoozy automatically when you log into your Mac</p>
+      </div>
+      <div className="flex rounded-lg border border-border overflow-hidden">
+        <button
+          onClick={() => toggle(true)}
+          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+            openAtLogin
+              ? 'bg-accent/12 text-accent'
+              : 'text-muted hover:bg-foreground/6'
+          }`}
+        >
+          On
+        </button>
+        <button
+          onClick={() => toggle(false)}
+          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+            !openAtLogin
+              ? 'bg-accent/12 text-accent'
+              : 'text-muted hover:bg-foreground/6'
+          }`}
+        >
+          Off
+        </button>
+      </div>
     </div>
   )
 }

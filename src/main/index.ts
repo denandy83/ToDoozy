@@ -27,7 +27,9 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    icon: join(__dirname, '../../resources/icon.png'),
+    icon: app.isPackaged
+      ? join(process.resourcesPath, 'icon.png')
+      : join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -160,6 +162,38 @@ function loadAndRegisterAppToggleShortcut(): void {
   }
 }
 
+// Register todoozy:// protocol for deep links (invite flow)
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('todoozy', process.execPath, [process.argv[1]])
+  }
+} else {
+  app.setAsDefaultProtocolClient('todoozy')
+}
+
+let pendingInviteToken: string | null = null
+
+function handleDeepLink(url: string): void {
+  const match = url.match(/^todoozy:\/\/invite\/([a-f0-9-]+)$/i)
+  if (match) {
+    const token = match[1]
+    const win = mainWindow ?? BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      win.show()
+      win.focus()
+      win.webContents.send('invite:received', token)
+    } else {
+      pendingInviteToken = token
+    }
+  }
+}
+
+// Handle deep link on macOS (app already running)
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  handleDeepLink(url)
+})
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.todoozy')
 
@@ -176,8 +210,23 @@ app.whenReady().then(() => {
   loadAndRegisterAppToggleShortcut()
   startNotificationChecker()
 
+  // Handle deep link from cold start
+  const deepLinkUrl = process.argv.find((arg) => arg.startsWith('todoozy://'))
+  if (deepLinkUrl) {
+    setTimeout(() => handleDeepLink(deepLinkUrl), 1000)
+  }
+
+  // Send pending invite token after window loads
+  if (pendingInviteToken && mainWindow) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      if (pendingInviteToken) {
+        mainWindow?.webContents.send('invite:received', pendingInviteToken)
+        pendingInviteToken = null
+      }
+    })
+  }
+
   // Poll for external database changes (e.g., MCP server writing tasks)
-  // fs.watch is unreliable on macOS for WAL files, so we poll the modified time instead
   const baseDbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
   const dbPath = baseDbPath + '-wal'
   let lastMtime = 0

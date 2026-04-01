@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
 import { useStatusStore } from './shared/stores/statusStore'
@@ -9,6 +9,9 @@ import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
+import { InviteDialog } from './features/collaboration/InviteDialog'
+import { validateInviteToken, acceptInvite, subscribeToProject } from './services/SyncService'
+import { useViewStore } from './shared/stores/viewStore'
 
 function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
@@ -118,6 +121,51 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [isAuthenticated])
 
+  // ── Invite deep link handling ─────────────────────────────────────
+  const [inviteState, setInviteState] = useState<{
+    token: string
+    projectName: string
+    ownerName: string
+    expired: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return
+    const unsub = window.api.onInviteReceived(async (token) => {
+      try {
+        const result = await validateInviteToken(token)
+        if (!result) {
+          setInviteState({ token, projectName: '', ownerName: '', expired: true })
+          return
+        }
+        setInviteState({
+          token,
+          projectName: result.projectName,
+          ownerName: result.ownerName,
+          expired: !result.valid
+        })
+      } catch (err) {
+        console.error('Failed to validate invite:', err)
+      }
+    })
+    return unsub
+  }, [isAuthenticated, currentUser])
+
+  const handleAcceptInvite = async (): Promise<void> => {
+    if (!inviteState || !currentUser) return
+    try {
+      const projectId = await acceptInvite(inviteState.token, currentUser.id)
+      await hydrateProjects(currentUser.id)
+      await subscribeToProject(projectId)
+      // Navigate to the newly joined project
+      useViewStore.setState({ currentView: 'project', selectedProjectId: projectId })
+      setInviteState(null)
+    } catch (err) {
+      console.error('Failed to accept invite:', err)
+      setInviteState(null)
+    }
+  }
+
   if (loading) {
     return <SplashScreen />
   }
@@ -126,7 +174,20 @@ function App(): React.JSX.Element {
     return <LoginScreen />
   }
 
-  return <AppLayout />
+  return (
+    <>
+      <AppLayout />
+      {inviteState && (
+        <InviteDialog
+          projectName={inviteState.projectName}
+          ownerName={inviteState.ownerName}
+          expired={inviteState.expired}
+          onAccept={handleAcceptInvite}
+          onDecline={() => setInviteState(null)}
+        />
+      )}
+    </>
+  )
 }
 
 function SplashScreen(): React.JSX.Element {

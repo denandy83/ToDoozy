@@ -18,6 +18,7 @@ export interface Project {
   icon: string
   owner_id: string
   is_default: number
+  is_shared: number
   sidebar_order: number
   created_at: string
   updated_at: string
@@ -158,6 +159,7 @@ export interface UpdateProjectInput {
   icon?: string
   sidebar_order?: number
   is_default?: number
+  is_shared?: number
 }
 
 export interface CreateStatusInput {
@@ -340,4 +342,59 @@ export interface RecurrenceConfig {
   yearDay?: number // for years: 1-31
   afterCompletion: boolean
   untilDate?: string // ISO date YYYY-MM-DD
+}
+
+// ── Collaboration ──────────────────────────────────────────────────
+
+export type ProjectRole = 'owner' | 'member'
+export type InviteStatus = 'pending' | 'accepted' | 'expired'
+export type SyncOperation = 'INSERT' | 'UPDATE' | 'DELETE'
+
+export interface Notification {
+  id: string
+  type: string
+  message: string
+  task_id: string | null
+  project_id: string | null
+  from_user_id: string | null
+  read: number
+  created_at: string
+}
+
+export interface CreateNotificationInput {
+  id: string
+  type: string
+  message: string
+  task_id?: string | null
+  project_id?: string | null
+  from_user_id?: string | null
+}
+
+export interface SyncQueueEntry {
+  id: string
+  table_name: string
+  row_id: string
+  operation: SyncOperation
+  payload: string // JSON
+  created_at: string
+}
+
+export interface SharedProjectInvite {
+  token: string
+  project_id: string
+  project_name: string
+  owner_name: string
+  created_by: string
+  expires_at: string
+  accepted_by: string | null
+  status: InviteStatus
+}
+
+export interface SharedProjectMember {
+  project_id: string
+  user_id: string
+  role: ProjectRole
+  joined_at: string
+  email: string
+  display_name: string | null
 }

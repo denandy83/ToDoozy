@@ -210,17 +210,46 @@ const api: TodoozyAPI = {
       return () => {
         ipcRenderer.removeListener('notification:navigate-to-task', handler)
       }
-    }
+    },
+    findAll: (limit) => ipcRenderer.invoke('notifications:findAll', limit),
+    findUnread: () => ipcRenderer.invoke('notifications:findUnread'),
+    getUnreadCount: () => ipcRenderer.invoke('notifications:getUnreadCount'),
+    create: (input) => ipcRenderer.invoke('notifications:create', input),
+    markAsRead: (id) => ipcRenderer.invoke('notifications:markAsRead', id),
+    markAllAsRead: () => ipcRenderer.invoke('notifications:markAllAsRead'),
+    deleteNotification: (id) => ipcRenderer.invoke('notifications:deleteNotification', id)
+  },
+
+  sync: {
+    getQueue: () => ipcRenderer.invoke('sync:getQueue'),
+    enqueue: (tableName, rowId, operation, payload) =>
+      ipcRenderer.invoke('sync:enqueue', tableName, rowId, operation, payload),
+    dequeue: (id) => ipcRenderer.invoke('sync:dequeue', id),
+    clear: () => ipcRenderer.invoke('sync:clear'),
+    count: () => ipcRenderer.invoke('sync:count')
   },
 
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
   },
 
+  app: {
+    getLoginItemSettings: () => ipcRenderer.invoke('app:getLoginItemSettings'),
+    setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin)
+  },
+
   onTasksChanged: (callback) => {
     ipcRenderer.on('tasks-changed', callback)
     return () => {
       ipcRenderer.removeListener('tasks-changed', callback)
+    }
+  },
+
+  onInviteReceived: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, token: string): void => callback(token)
+    ipcRenderer.on('invite:received', handler)
+    return () => {
+      ipcRenderer.removeListener('invite:received', handler)
     }
   }
 }

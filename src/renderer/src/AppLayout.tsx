@@ -8,7 +8,7 @@ import {
   type Modifier
 } from '@dnd-kit/core'
 import { getEventCoordinates } from '@dnd-kit/utilities'
-import { LayoutList, Columns3, LayoutTemplate, Trash2 } from 'lucide-react'
+import { LayoutList, Columns3, LayoutTemplate, Trash2, Share2 } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -44,11 +44,16 @@ import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../sh
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
 import { shouldForceDelete } from './shared/utils/shiftDelete'
 import { closeTopPopup } from './shared/utils/popupStack'
+import { NotificationBell, NotificationPanel, MemberAvatars } from './features/collaboration'
+import { useNotificationStore } from './shared/stores/notificationStore'
+import { uploadProjectToSupabase, subscribeToProject } from './services/SyncService'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [projectMembers, setProjectMembers] = useState<Array<{ user_id: string; email: string; display_name: string | null; role: string }>>([])
 
   // Apply current theme CSS variables
   useThemeApplicator()
@@ -153,6 +158,36 @@ export function AppLayout(): React.JSX.Element {
   const sidebarExpanded = useViewStore((s) => s.sidebarExpanded)
   const { addToast } = useToast()
   const lastRecurringClone = useTaskStore((s) => s.lastRecurringClone)
+
+  // Hydrate notifications on mount
+  const hydrateNotifications = useNotificationStore((s) => s.hydrate)
+  useEffect(() => {
+    hydrateNotifications()
+  }, [hydrateNotifications])
+
+  // Load shared project members when project changes
+  useEffect(() => {
+    if (selectedProject?.is_shared === 1) {
+      window.api.projects.getMembers(selectedProject.id).then(async (rawMembers) => {
+        const enriched = await Promise.all(
+          rawMembers.map(async (m) => {
+            const user = await window.api.users.findById(m.user_id)
+            return {
+              user_id: m.user_id,
+              email: user?.email ?? 'unknown',
+              display_name: user?.display_name ?? null,
+              role: m.role
+            }
+          })
+        )
+        setProjectMembers(enriched)
+      })
+      // Subscribe to Realtime
+      subscribeToProject(selectedProject.id)
+    } else {
+      setProjectMembers([])
+    }
+  }, [selectedProject?.id, selectedProject?.is_shared])
 
   // Show toast when a recurring task clone is created
   useEffect(() => {
@@ -620,6 +655,23 @@ export function AppLayout(): React.JSX.Element {
     setEditingProjectName(false)
   }, [projectNameValue, selectedProject, updateProject])
 
+  // Handle share project
+  const handleShareProject = useCallback(async () => {
+    if (!selectedProject || !currentUser) return
+    try {
+      await uploadProjectToSupabase(selectedProject.id, currentUser.id)
+      await updateProject(selectedProject.id, { is_shared: 1 })
+      const { generateInviteLink } = await import('./services/SyncService')
+      const link = await generateInviteLink(selectedProject.id, currentUser.id)
+      await navigator.clipboard.writeText(link)
+      await subscribeToProject(selectedProject.id)
+      addToast({ message: 'Project shared! Invite link copied to clipboard.' })
+    } catch (err) {
+      console.error('Failed to share project:', err)
+      addToast({ message: 'Failed to share project. Check your connection.' })
+    }
+  }, [selectedProject, currentUser, updateProject, addToast])
+
   const [saveTemplateWizard, setSaveTemplateWizard] = useState<ProjectTemplate | null>(null)
 
   const handleSaveProjectAsTemplate = useCallback(() => {
@@ -809,9 +861,26 @@ export function AppLayout(): React.JSX.Element {
 
             {currentView === 'project' && selectedProject && (
               <>
+                {/* Share / Member avatars */}
+                {selectedProject.is_shared === 1 ? (
+                  <MemberAvatars
+                    members={projectMembers}
+                    currentUserId={currentUser?.id ?? ''}
+                    onClickAvatars={() => { setSettingsOpen(true); setSettingsInitialTab('members') }}
+                  />
+                ) : (
+                  <button
+                    onClick={handleShareProject}
+                    className="ml-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                    title="Share project"
+                    aria-label="Share project"
+                  >
+                    <Share2 size={16} />
+                  </button>
+                )}
                 <button
                   onClick={handleSaveProjectAsTemplate}
-                  className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
                   title="Save as Project Template"
                   aria-label="Save as Project Template"
                 >
@@ -832,7 +901,7 @@ export function AppLayout(): React.JSX.Element {
               </>
             )}
 
-            {/* Layout toggle */}
+            {/* Layout toggle + notifications */}
             {(currentView === 'my-day' || currentView === 'project') && (
               <div className="ml-auto flex items-center gap-2">
                 <button
@@ -850,6 +919,17 @@ export function AppLayout(): React.JSX.Element {
                     {layoutMode === 'list' ? 'Kanban' : 'List'}
                   </span>
                 </button>
+                <div className="relative">
+                  <NotificationBell />
+                  <NotificationPanel />
+                </div>
+              </div>
+            )}
+            {/* Show notification bell on non-project views too */}
+            {currentView !== 'my-day' && currentView !== 'project' && (
+              <div className="relative ml-auto">
+                <NotificationBell />
+                <NotificationPanel />
               </div>
             )}
           </header>
@@ -885,8 +965,9 @@ export function AppLayout(): React.JSX.Element {
         <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
         <UnifiedSettingsModal
           open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => { setSettingsOpen(false); setSettingsInitialTab(undefined) }}
           projectId={selectedProject?.id ?? null}
+          initialTab={settingsInitialTab}
         />
 
         {/* Toast notifications */}

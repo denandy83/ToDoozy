@@ -597,13 +597,10 @@ export function registerIpcHandlers(): void {
 
   // ── MCP ───────────────────────────────────────────────────────────
   ipcMain.handle('mcp:getInfo', () => {
-    const serverPath = join(app.getPath('exe'), '..', '..', 'Resources', 'app', 'out', 'main', 'mcp-server.js')
-    // In development, use the project directory
-    const devServerPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
-    const actualPath = existsSync(devServerPath) ? devServerPath : serverPath
+    // app.getAppPath() returns app.asar in packaged builds, project root in dev
+    const actualPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
 
     // Use the real Electron binary with ELECTRON_RUN_AS_NODE=1 so node:sqlite built-in is available
-    // In dev, resolve via require('electron') which points to the actual binary, not the cli.js wrapper
     const devElectronBin = join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
     const actualElectron = existsSync(devElectronBin) ? devElectronBin : app.getPath('exe')
 
@@ -702,6 +699,69 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('shell:openExternal', (_e, url: string) => {
     return shell.openExternal(url)
+  })
+
+  // ── Launch at Login ─────────────────────────────────────────────────
+
+  ipcMain.handle('app:getLoginItemSettings', () => {
+    return app.getLoginItemSettings()
+  })
+
+  ipcMain.handle('app:setLoginItemSettings', (_e, openAtLogin: boolean) => {
+    app.setLoginItemSettings({ openAtLogin })
+  })
+
+  // ── Notifications ──────────────────────────────────────────────────
+  ipcMain.handle('notifications:findAll', (_e, limit?: number) => {
+    return getRepos().notifications.findAll(limit)
+  })
+
+  ipcMain.handle('notifications:findUnread', () => {
+    return getRepos().notifications.findUnread()
+  })
+
+  ipcMain.handle('notifications:getUnreadCount', () => {
+    return getRepos().notifications.getUnreadCount()
+  })
+
+  ipcMain.handle(
+    'notifications:create',
+    (_e, input: Parameters<Repositories['notifications']['create']>[0]) => {
+      return getRepos().notifications.create(input)
+    }
+  )
+
+  ipcMain.handle('notifications:markAsRead', (_e, id: string) => {
+    return getRepos().notifications.markAsRead(id)
+  })
+
+  ipcMain.handle('notifications:markAllAsRead', () => {
+    return getRepos().notifications.markAllAsRead()
+  })
+
+  ipcMain.handle('notifications:deleteNotification', (_e, id: string) => {
+    return getRepos().notifications.delete(id)
+  })
+
+  // ── Sync Queue ────────────────────────────────────────────────────
+  ipcMain.handle('sync:getQueue', () => {
+    return getRepos().syncQueue.findAll()
+  })
+
+  ipcMain.handle('sync:enqueue', (_e, tableName: string, rowId: string, operation: string, payload: string) => {
+    return getRepos().syncQueue.enqueue(tableName, rowId, operation as 'INSERT' | 'UPDATE' | 'DELETE', payload)
+  })
+
+  ipcMain.handle('sync:dequeue', (_e, id: string) => {
+    return getRepos().syncQueue.dequeue(id)
+  })
+
+  ipcMain.handle('sync:clear', () => {
+    return getRepos().syncQueue.clear()
+  })
+
+  ipcMain.handle('sync:count', () => {
+    return getRepos().syncQueue.count()
   })
 
   ipcMain.handle('fs:showOpenDialog', async () => {

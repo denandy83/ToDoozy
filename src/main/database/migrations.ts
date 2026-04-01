@@ -349,4 +349,44 @@ const migration_11: Migration = (db) => {
   db.exec(`ALTER TABLE themes ADD COLUMN owner_id TEXT`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11]
+const migration_12: Migration = (db) => {
+  // Story #39: Project Collaboration — local tables for notifications, sync queue, and is_shared flag
+
+  // Add is_shared column to projects
+  db.exec(`ALTER TABLE projects ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0`)
+
+  // Notifications table — local notifications for task assignments etc.
+  db.exec(`
+    CREATE TABLE notifications (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      task_id TEXT,
+      project_id TEXT,
+      from_user_id TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `)
+
+  // Sync queue — queues offline changes for shared projects
+  db.exec(`
+    CREATE TABLE sync_queue (
+      id TEXT PRIMARY KEY,
+      table_name TEXT NOT NULL,
+      row_id TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+      payload TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `)
+
+  // Index for efficient notification queries
+  db.exec(`CREATE INDEX idx_notifications_read ON notifications(read)`)
+  db.exec(`CREATE INDEX idx_notifications_project ON notifications(project_id)`)
+  db.exec(`CREATE INDEX idx_sync_queue_created ON sync_queue(created_at)`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12]

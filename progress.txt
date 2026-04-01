@@ -1,26 +1,42 @@
 # Ralph Progress Log
-Started: Mon Mar 30 22:22:55 CEST 2026
+Started: Wed Apr  1 15:14:08 CEST 2026
 ---
 
-## Story #38 — Smart Recurrence Picker
-**Status:** passes=true, tested=true
+## Story #39: Project Collaboration — 2026-04-01
 
-**What was built:**
-- Shared recurrence utility (src/shared/recurrenceUtils.ts) with parse, serialize, describe, getNextOccurrence, isValidRecurrence
-- RecurrenceConfig type in shared/types.ts
-- Migration_10 to clear all old-format recurrence_rule values
-- Structured recurrence picker UI replacing free-text input: preset buttons (None/Daily/Weekly/Monthly), expandable picker with interval/unit/weekday toggles/month options/year options, Fixed/After completion toggle, end date with DatePicker, live preview with next occurrence
-- completeRecurringTask in TaskRepository: clones task with next due date, copies labels and subtasks, resets statuses
-- IPC handler + preload bridge for task:complete-recurring
-- Task store detects done-status on recurring tasks and auto-clones, stores lastRecurringClone for toast
-- AppLayout watches lastRecurringClone and shows toast with "Go to task" action
-- TaskRow shows Repeat icon with tooltip for recurring tasks
-- Context menu uses new canonical format; "Custom..." opens detail panel
-- Auto-sets due_date to today when recurrence applied to task without due date
-- MCP server tool description updated with canonical format documentation
-- 46 tests covering all recurrence utility functions
+### What was built
+Full project collaboration feature: sharing personal projects via Supabase, invite links, real-time sync, member management, notifications, and task assignment.
 
-**Decisions:**
-- Used store field `lastRecurringClone` + AppLayout useEffect for toast instead of trying to call useToast from the store
-- "Custom..." in context menu opens the detail panel by selecting the task (simplest approach; focusing field index 6 would require more plumbing)
-- Kept weekday order as Mon-Sun in the picker (standard European order) but sun is still index 0 in WEEK_DAYS array for compatibility
+### Architecture decisions
+- **SyncService in renderer**: Since the authenticated Supabase client lives in the renderer process, all Supabase interactions (write-through, Realtime subscriptions, invite management) are handled there. SQLite operations stay in main via IPC.
+- **Hybrid sync model**: Personal projects stay local-only. Shared projects write-through to both SQLite and Supabase Postgres. Offline edits queue locally in `sync_queue` table.
+- **Labels sync by name**: Labels are personal (each user has own colors). Only label names are synced via `label_names` JSON array on shared_tasks. Missing labels are auto-created locally.
+- **Supabase RLS**: All shared tables have Row Level Security enforcing project membership via `shared_project_members`.
+- **Deep links**: `todoozy://invite/{token}` registered via `app.setAsDefaultProtocolClient()` with `open-url` handler on macOS.
+
+### Files created
+- `supabase/migrations/20260401000000_shared_projects.sql` — Supabase schema + RLS policies
+- `src/main/repositories/NotificationRepository.ts` — local notification CRUD
+- `src/main/repositories/SyncQueueRepository.ts` — offline sync queue
+- `src/renderer/src/services/SyncService.ts` — write-through, Realtime, invite management
+- `src/renderer/src/shared/stores/notificationStore.ts` — notification state
+- `src/renderer/src/shared/stores/syncStore.ts` — sync status state
+- `src/renderer/src/features/collaboration/` — MemberAvatars, InviteDialog, NotificationBell, NotificationPanel, MemberSettings, AssigneePicker
+- Test files for new repositories
+
+### Files modified
+- `src/shared/types.ts` — added collaboration types (Notification, SyncQueueEntry, SharedProjectInvite, etc.)
+- `src/main/database/migrations.ts` — migration 12: notifications, sync_queue, is_shared
+- `src/main/repositories/index.ts` — registered new repositories
+- `src/main/repositories/ProjectRepository.ts` — handle is_shared column
+- `src/main/ipc-handlers.ts` — notification and sync queue handlers
+- `src/main/index.ts` — todoozy:// protocol registration, deep link handling
+- `src/preload/index.ts` + `index.d.ts` — notifications, sync, invite APIs
+- `src/renderer/src/AppLayout.tsx` — share button, member avatars, notification bell
+- `src/renderer/src/App.tsx` — invite dialog flow
+- `src/renderer/src/features/sidebar/Sidebar.tsx` — shared project indicator icon
+- `src/renderer/src/features/settings/UnifiedSettingsModal.tsx` — Members tab
+
+### Test results
+- 372/372 tests passing (15 new tests for NotificationRepository and SyncQueueRepository)
+- npm run typecheck: zero errors

@@ -11,6 +11,8 @@ import { ThemeRepository } from './ThemeRepository'
 import { SettingsRepository } from './SettingsRepository'
 import { ActivityLogRepository } from './ActivityLogRepository'
 import { AttachmentRepository } from './AttachmentRepository'
+import { NotificationRepository } from './NotificationRepository'
+import { SyncQueueRepository } from './SyncQueueRepository'
 import { createRepositories } from './index'
 
 function createTestDb(): DatabaseSync {
@@ -62,6 +64,8 @@ describe('createRepositories', () => {
     expect(repos.settings).toBeInstanceOf(SettingsRepository)
     expect(repos.activityLog).toBeInstanceOf(ActivityLogRepository)
     expect(repos.attachments).toBeInstanceOf(AttachmentRepository)
+    expect(repos.notifications).toBeInstanceOf(NotificationRepository)
+    expect(repos.syncQueue).toBeInstanceOf(SyncQueueRepository)
     db.close()
   })
 })

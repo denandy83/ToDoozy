@@ -29,7 +29,11 @@ import type {
   ProjectTemplate,
   CreateProjectTemplateInput,
   UpdateProjectTemplateInput,
-  Attachment
+  Attachment,
+  Notification,
+  CreateNotificationInput,
+  SyncQueueEntry,
+  SyncOperation
 } from '../shared/types'
 
 export interface TasksAPI {
@@ -220,10 +224,30 @@ export interface TrayAPI {
 
 export interface NotificationsAPI {
   onNavigateToTask(callback: (taskId: string, projectId: string) => void): () => void
+  findAll(limit?: number): Promise<Notification[]>
+  findUnread(): Promise<Notification[]>
+  getUnreadCount(): Promise<number>
+  create(input: CreateNotificationInput): Promise<Notification>
+  markAsRead(id: string): Promise<boolean>
+  markAllAsRead(): Promise<number>
+  deleteNotification(id: string): Promise<boolean>
+}
+
+export interface SyncAPI {
+  getQueue(): Promise<SyncQueueEntry[]>
+  enqueue(tableName: string, rowId: string, operation: SyncOperation, payload: string): Promise<SyncQueueEntry>
+  dequeue(id: string): Promise<boolean>
+  clear(): Promise<number>
+  count(): Promise<number>
 }
 
 export interface ShellAPI {
   openExternal(url: string): Promise<void>
+}
+
+export interface AppAPI {
+  getLoginItemSettings(): Promise<{ openAtLogin: boolean }>
+  setLoginItemSettings(openAtLogin: boolean): Promise<void>
 }
 
 export interface TodoozyAPI {
@@ -245,8 +269,11 @@ export interface TodoozyAPI {
   mcp: McpAPI
   timer: TimerAPI
   notifications: NotificationsAPI
+  sync: SyncAPI
   shell: ShellAPI
+  app: AppAPI
   onTasksChanged(callback: () => void): () => void
+  onInviteReceived(callback: (token: string) => void): () => void
 }
 
 declare global {

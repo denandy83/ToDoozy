@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { withTransaction } from '../database'
+import { withTransaction } from '../database/transaction'
 import type {
   Project,
   ProjectMember,
@@ -76,6 +76,10 @@ export class ProjectRepository {
     if (input.is_default !== undefined) {
       sets.push('is_default = ?')
       values.push(String(input.is_default))
+    }
+    if (input.is_shared !== undefined) {
+      sets.push('is_shared = ?')
+      values.push(String(input.is_shared))
     }
 
     values.push(id)

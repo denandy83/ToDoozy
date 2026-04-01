@@ -9,6 +9,8 @@ import { SettingsRepository } from './SettingsRepository'
 import { ActivityLogRepository } from './ActivityLogRepository'
 import { ProjectTemplateRepository } from './ProjectTemplateRepository'
 import { AttachmentRepository } from './AttachmentRepository'
+import { NotificationRepository } from './NotificationRepository'
+import { SyncQueueRepository } from './SyncQueueRepository'
 
 export interface Repositories {
   users: UserRepository
@@ -21,6 +23,8 @@ export interface Repositories {
   activityLog: ActivityLogRepository
   projectTemplates: ProjectTemplateRepository
   attachments: AttachmentRepository
+  notifications: NotificationRepository
+  syncQueue: SyncQueueRepository
 }
 
 export function createRepositories(db: DatabaseSync): Repositories {
@@ -34,7 +38,9 @@ export function createRepositories(db: DatabaseSync): Repositories {
     settings: new SettingsRepository(db),
     activityLog: new ActivityLogRepository(db),
     projectTemplates: new ProjectTemplateRepository(db),
-    attachments: new AttachmentRepository(db)
+    attachments: new AttachmentRepository(db),
+    notifications: new NotificationRepository(db),
+    syncQueue: new SyncQueueRepository(db)
   }
 }
 
@@ -48,5 +54,7 @@ export {
   SettingsRepository,
   ActivityLogRepository,
   ProjectTemplateRepository,
-  AttachmentRepository
+  AttachmentRepository,
+  NotificationRepository,
+  SyncQueueRepository
 }

@@ -14,7 +14,8 @@ import {
   Settings,
   ChevronDown,
   ChevronUp,
-  HelpCircle
+  HelpCircle,
+  Users
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
@@ -487,6 +488,9 @@ function ProjectNavItem({
           <span className="flex-1 truncate text-[13px] font-light tracking-tight">
             {project.name}
           </span>
+          {project.is_shared === 1 && (
+            <Users size={12} className="flex-shrink-0 text-muted/50" />
+          )}
           {count > 0 && (
             <span
               className={`text-[10px] font-bold tabular-nums ${
