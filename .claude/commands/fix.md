@@ -277,28 +277,27 @@ Append an entry to `pending-changes.md` using the full format so a cold session 
 **Commit:** <commit hash from the squash merge>
 ```
 
-Then append to `CHANGELOG.md` under today's date (create the heading if it doesn't exist):
+Then append to `CHANGELOG.md` under the current version heading (read version from `package.json`; create the heading if it doesn't exist):
 
 ```markdown
-## YYYY-MM-DD
+## vX.Y.Z
 
-### Fixed
 - **<Short title>** — <User-facing description of what was broken and what the fix does>
 ```
 
-If the fix affects something the user interacts with directly (not an internal refactor), also add a bullet to today's entry in `RELEASE_NOTES.md`:
+If the fix affects something the user interacts with directly (not an internal refactor), also add a bullet to the current version entry in `RELEASE_NOTES.md`:
 
 ```markdown
-## YYYY-MM-DD
+## vX.Y.Z
 
 - **Fix: <short title>** — <What changed for the user>
 ```
 
-Update the in-app "What's New" in Settings → Help by writing the `whats_new` global setting (user_id `''`) in the SQLite database. Append a bullet for today's fix. Use plain text, one line per item, date header on the first line. Replace the value if it already has today's date; append if it's a new day.
+Update the in-app "What's New" by writing the `whats_new` global setting (user_id `''`) in the SQLite database. Append a bullet under the current version header. All items are flat bullets under `## vX.Y.Z` — no category sub-headers.
 
 ```bash
 DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<date header + all bullets>');"
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<version header + all bullets>');"
 ```
 
 Finally, write the current HEAD commit hash to `.last-documented-commit` to sync the Stop hook marker.

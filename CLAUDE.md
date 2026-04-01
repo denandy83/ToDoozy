@@ -137,13 +137,23 @@ The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It
 - `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
 
 ### In-App "What's New" (Settings → What's New)
-The "What's New" tab in Settings displays a full changelog powered by the `whats_new` global setting (user_id = `''`). The content uses the same markdown format as `CHANGELOG.md`: `## date` headers, `### category` headers (Fixed, Added, Removed, Internal), and `- **Title** — Description` bullets. Most recent date first. After processing pending docs, write the full `CHANGELOG.md` content (minus the title/intro lines) to this setting. Use the MCP `set_whats_new` tool, or write directly to SQLite:
+The "What's New" tab in Settings displays a version-based changelog powered by the `whats_new` global setting (user_id = `''`). The content uses versioned markdown format: `## vX.Y.Z` headers and `- **Title** — Description` bullets. No category sub-headers (Fixed/Added/Removed/Internal) — all items are flat under the version header. Most recent version first. After processing pending docs, write the content to this setting. Use the MCP `set_whats_new` tool, or write directly to SQLite:
 ```bash
 DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-CONTENT=$(sed '1,5d' CHANGELOG.md | sed "s/'/''/g")
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '$CONTENT');"
+CONTENT='## v1.1.0
+- **Feature name** — What it does
+- **Fix name** — What was fixed'
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '$(echo "$CONTENT" | sed "s/'/''/g")');"
 ```
-A notification dot appears on the tab when new content is available (compares the first `## date` header against the user's `whats_new_seen` setting). The `/fix` and `/feature` skills must also update this setting after each fix/feature is confirmed.
+A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). The `/fix` and `/feature` skills must also update this setting after each fix/feature is confirmed.
+
+### Version Format
+All documentation (CHANGELOG.md, RELEASE_NOTES.md, in-app What's New) uses **version headers** (`## vX.Y.Z`) instead of date headers. The version comes from `package.json`. Bump the version when cutting a release:
+- **Patch** (1.0.1): bug fixes only
+- **Minor** (1.1.0): new features (may include fixes)
+- **Major** (2.0.0): breaking changes
+
+Within a version section, items are flat bullets — no category sub-headers. Each bullet is `- **Title** — Description`.
 
 ## Issue Tracking via ToDoozy MCP
 When you encounter a bug, improvement idea, or feature request that is NOT being fixed right now, create a task in the user's ToDoozy app via MCP tools. Use the Personal project (`1b8d1825-8f5f-48da-b1d3-1dd2e4554d85`) and assign the appropriate labels:
