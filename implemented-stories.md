@@ -310,3 +310,12 @@
 - **Acceptance Criteria:** Preset expansion, number input, unit dropdown, weekday toggles, month options, year options, fixed/after-completion toggle, end date picker, live preview, escape collapse, recurring task cloning, end date enforcement, toast with navigation, repeat icon with tooltip, context menu presets, auto-set due date, MCP format update, migration clears old values, full test coverage, keyboard navigation, typecheck passes.
 - **Passes:** true
 - **Implemented:** 2026-04-01
+
+---
+
+### #39 — Project Collaboration
+- **Description:** Enable real-time collaboration on projects between ToDoozy users. Projects are personal/local by default and become shared when the owner generates an invite link. Shared project data syncs through Supabase Postgres with Realtime subscriptions.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Owner can share projects with invite links, real-time sync via Supabase, member management, task assignment, notifications, offline support, RLS enforcement.
+- **Passes:** true
+- **Implemented:** 2026-04-01
