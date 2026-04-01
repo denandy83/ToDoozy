@@ -14,6 +14,30 @@ function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
 }
 
+// Sync task changes to Supabase for shared projects
+async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
+  try {
+    const project = await window.api.projects.findById(task.project_id)
+    console.log('[TaskStore] syncIfShared:', { taskId: task.id, operation, is_shared: project?.is_shared })
+    if (!project || project.is_shared !== 1) return
+    const { syncTaskChange } = await import('../../services/SyncService')
+    let labelData: Array<{ name: string; color: string }> | undefined
+    if (operation !== 'DELETE') {
+      const taskLabels = await window.api.tasks.getLabels(task.id)
+      labelData = []
+      for (const tl of taskLabels) {
+        const label = await window.api.labels.findById(tl.label_id)
+        if (label) labelData.push({ name: label.name, color: label.color })
+      }
+    }
+    console.log('[TaskStore] Syncing to Supabase...')
+    await syncTaskChange(task, operation, labelData)
+    console.log('[TaskStore] Sync complete')
+  } catch (err) {
+    console.error('[TaskStore] Failed to sync task to Supabase:', err)
+  }
+}
+
 interface RecurringCloneResult {
   taskId: string
   dueDate: string
@@ -191,6 +215,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       set((state) => ({
         tasks: { ...state.tasks, [task.id]: task }
       }))
+      syncIfShared(task, 'INSERT')
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create task'
@@ -269,6 +294,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             }
           }
         }
+        syncIfShared(task, 'UPDATE')
       }
       return task
     } catch (err) {
@@ -280,6 +306,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async deleteTask(id: string): Promise<boolean> {
     try {
+      // Capture task before deletion for sync
+      const taskToDelete = get().tasks[id]
+
       // Collect task IDs to clean up attachment files before DB cascade
       const idsForCleanup: string[] = [id]
       const collectChildIds = (parentId: string): void => {
@@ -330,6 +359,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
           }
         })
+        if (taskToDelete) syncIfShared(taskToDelete, 'DELETE')
       }
       return result
     } catch (err) {

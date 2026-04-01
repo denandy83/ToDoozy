@@ -159,6 +159,37 @@ export function McpSettingsContent(): React.JSX.Element {
             </ol>
           </div>
 
+          {/* Gemini */}
+          <div className="flex flex-col gap-2 rounded border border-border bg-background px-4 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Gemini (Google AI Studio)</p>
+            <ol className="flex list-decimal flex-col gap-1 pl-4 text-[12px] font-light text-foreground/80">
+              <li>Open Google AI Studio &gt; Settings &gt; MCP Servers</li>
+              <li>Click &quot;Add MCP Server&quot; and paste this JSON config:</li>
+            </ol>
+            <div className="flex items-center gap-2">
+              <pre className="flex-1 select-all overflow-x-auto whitespace-pre rounded bg-surface px-2 py-1 font-mono text-[11px] text-fg-secondary">
+{`{
+  "command": "${command}",
+  "args": ["${serverPath}"],
+  "env": { "ELECTRON_RUN_AS_NODE": "1" }
+}`}
+              </pre>
+              <button
+                onClick={() => {
+                  const block = `{\n  "command": "${command}",\n  "args": ["${serverPath}"],\n  "env": { "ELECTRON_RUN_AS_NODE": "1" }\n}`
+                  navigator.clipboard.writeText(block)
+                }}
+                className="flex-shrink-0 self-start rounded p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                title="Copy config"
+              >
+                <Copy size={12} />
+              </button>
+            </div>
+            <ol className="flex list-decimal flex-col gap-1 pl-4 text-[12px] font-light text-foreground/80" start={3}>
+              <li>Save and the server should connect automatically</li>
+            </ol>
+          </div>
+
           {/* Other clients */}
           <div className="flex flex-col gap-2 rounded border border-border bg-background px-4 py-3">
             <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Other MCP Clients</p>

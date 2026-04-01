@@ -220,7 +220,16 @@ After implementation is complete, update `scope.md`:
 - If the feature revealed new codebase knowledge relevant to other scope items, update those
 - If all scope items are done, clear the file
 
-### 9g — Clear pending-changes.md entries
+### 9g — Update in-app "What's New"
+
+Update the `whats_new` global setting (user_id `''`) in the SQLite database with a plain-text summary of today's user-facing changes. One line per item, date header on the first line. Replace the full value each time.
+
+```bash
+DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<date header + all bullets>');"
+```
+
+### 9h — Clear pending-changes.md entries
 
 After all docs are updated, remove the entries you just processed from `pending-changes.md` (keep the header and format instructions). Write the current HEAD commit hash to `.last-documented-commit`.
 

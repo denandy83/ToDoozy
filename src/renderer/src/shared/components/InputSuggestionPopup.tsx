@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, Plus } from 'lucide-react'
-import type { Label, Project } from '../../../../shared/types'
+import type { Label, Project, Status } from '../../../../shared/types'
 import type { PriorityOption, DateOption } from '../hooks/smartInputParser'
 
 export interface LabelSuggestion {
@@ -30,7 +30,12 @@ export interface ProjectSuggestion {
   project: Project
 }
 
-export type SuggestionData = LabelSuggestion | LabelCreateSuggestion | PrioritySuggestion | DateSuggestion | ProjectSuggestion
+export interface StatusSuggestion {
+  type: 'status'
+  status: Status
+}
+
+export type SuggestionData = LabelSuggestion | LabelCreateSuggestion | PrioritySuggestion | DateSuggestion | ProjectSuggestion | StatusSuggestion
 
 export interface InputSuggestionPopupProps {
   items: Array<{

@@ -10,6 +10,13 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: resources/iconTemplate.png
+    to: iconTemplate.png
+  - from: resources/iconTemplate@2x.png
+    to: iconTemplate@2x.png
+  - from: resources/icon.png
+    to: icon.png
 mac:
   icon: resources/icon.png
   entitlements: build/entitlements.mac.plist

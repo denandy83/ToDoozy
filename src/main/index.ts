@@ -10,6 +10,11 @@ import { SettingsRepository } from './repositories/SettingsRepository'
 import { startNotificationChecker, stopNotificationChecker } from './notifications'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
 
+// Override userData path if TODOOZY_USER_DATA is set — allows running multiple independent instances
+if (process.env.TODOOZY_USER_DATA) {
+  app.setPath('userData', process.env.TODOOZY_USER_DATA)
+}
+
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let currentShortcut: string | null = null

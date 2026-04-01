@@ -29,7 +29,7 @@ export interface DateOption {
   formatted: string // dd/mm/yyyy
 }
 
-export type OperatorType = '@' | 'p:' | 'd:' | 'r:' | '/'
+export type OperatorType = '@' | 'p:' | 'd:' | 'r:' | '/' | 's:'
 
 export interface ActiveOperator {
   type: OperatorType
@@ -83,7 +83,8 @@ export function detectOperator(
   const patterns: Array<{ prefix: string; type: OperatorType }> = [
     { prefix: 'p:', type: 'p:' },
     { prefix: 'd:', type: 'd:' },
-    { prefix: 'r:', type: 'r:' }
+    { prefix: 'r:', type: 'r:' },
+    { prefix: 's:', type: 's:' }
   ]
 
   for (const { prefix, type } of patterns) {

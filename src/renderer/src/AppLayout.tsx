@@ -8,7 +8,7 @@ import {
   type Modifier
 } from '@dnd-kit/core'
 import { getEventCoordinates } from '@dnd-kit/utilities'
-import { LayoutList, Columns3, LayoutTemplate, Trash2, Share2 } from 'lucide-react'
+import { LayoutList, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -46,7 +46,7 @@ import { shouldForceDelete } from './shared/utils/shiftDelete'
 import { closeTopPopup } from './shared/utils/popupStack'
 import { NotificationBell, NotificationPanel, MemberAvatars } from './features/collaboration'
 import { useNotificationStore } from './shared/stores/notificationStore'
-import { uploadProjectToSupabase, subscribeToProject } from './services/SyncService'
+import { uploadProjectToSupabase, subscribeToProject, setRealtimeCallback, getSharedProjectMembers } from './services/SyncService'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -166,28 +166,125 @@ export function AppLayout(): React.JSX.Element {
   }, [hydrateNotifications])
 
   // Load shared project members when project changes
+  const loadMembers = useCallback(async (projectId: string) => {
+    try {
+      const members = await getSharedProjectMembers(projectId)
+      setProjectMembers(members.map((m) => ({
+        user_id: m.user_id,
+        email: m.email,
+        display_name: m.display_name,
+        role: m.role
+      })))
+    } catch {
+      // Fallback to local members
+      const rawMembers = await window.api.projects.getMembers(projectId)
+      const enriched = await Promise.all(
+        rawMembers.map(async (m) => {
+          const user = await window.api.users.findById(m.user_id)
+          return {
+            user_id: m.user_id,
+            email: user?.email ?? 'unknown',
+            display_name: user?.display_name ?? null,
+            role: m.role
+          }
+        })
+      )
+      setProjectMembers(enriched)
+    }
+  }, [])
+
   useEffect(() => {
     if (selectedProject?.is_shared === 1) {
-      window.api.projects.getMembers(selectedProject.id).then(async (rawMembers) => {
-        const enriched = await Promise.all(
-          rawMembers.map(async (m) => {
-            const user = await window.api.users.findById(m.user_id)
-            return {
-              user_id: m.user_id,
-              email: user?.email ?? 'unknown',
-              display_name: user?.display_name ?? null,
-              role: m.role
-            }
-          })
-        )
-        setProjectMembers(enriched)
-      })
-      // Subscribe to Realtime
+      loadMembers(selectedProject.id)
       subscribeToProject(selectedProject.id)
+      setRealtimeCallback(async (table: string, event: string, payload: Record<string, unknown>) => {
+        const userId = currentUser?.id
+        if (!userId || !selectedProject) return
+
+        if (table === 'member') {
+          if (event === 'DELETE' && payload?.user_id === userId) {
+            setRemovedFromProject({ id: selectedProject.id, name: selectedProject.name })
+          } else {
+            loadMembers(selectedProject.id)
+          }
+        }
+
+        if (table === 'task') {
+          if (event === 'DELETE' && payload?.id) {
+            // Delete locally
+            await window.api.tasks.delete(payload.id as string).catch(() => {})
+          } else if ((event === 'INSERT' || event === 'UPDATE') && payload?.id) {
+            // Upsert locally — check if exists
+            const existing = await window.api.tasks.findById(payload.id as string)
+            if (existing) {
+              await window.api.tasks.update(payload.id as string, {
+                title: payload.title as string,
+                description: payload.description as string | null,
+                status_id: payload.status_id as string,
+                priority: payload.priority as number,
+                due_date: payload.due_date as string | null,
+                parent_id: payload.parent_id as string | null,
+                order_index: payload.order_index as number,
+                assigned_to: payload.assigned_to as string | null,
+                is_archived: payload.is_archived as number,
+                completed_date: payload.completed_date as string | null,
+                recurrence_rule: payload.recurrence_rule as string | null,
+                reference_url: payload.reference_url as string | null
+              })
+            } else {
+              // Ensure owner user record exists for FK
+              const ownerId = payload.owner_id as string
+              const localOwner = await window.api.users.findById(ownerId)
+              if (!localOwner) {
+                await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+              }
+              await window.api.tasks.create({
+                id: payload.id as string,
+                project_id: payload.project_id as string,
+                owner_id: ownerId,
+                title: payload.title as string,
+                description: payload.description as string | null,
+                status_id: payload.status_id as string,
+                priority: payload.priority as number,
+                due_date: payload.due_date as string | null,
+                parent_id: payload.parent_id as string | null,
+                order_index: payload.order_index as number,
+                assigned_to: payload.assigned_to as string | null,
+                is_template: (payload.is_template as number) ?? 0,
+                is_archived: (payload.is_archived as number) ?? 0,
+                completed_date: payload.completed_date as string | null,
+                recurrence_rule: payload.recurrence_rule as string | null,
+                reference_url: payload.reference_url as string | null
+              })
+            }
+            // Sync labels from payload
+            if (payload.label_names) {
+              const parsed: Array<string | { name: string; color: string }> = JSON.parse(payload.label_names as string)
+              for (const entry of parsed) {
+                const name = typeof entry === 'string' ? entry : entry.name
+                const color = typeof entry === 'string' ? '#888888' : entry.color
+                let label = await window.api.labels.findByName(userId, name)
+                if (!label) {
+                  label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
+                  await window.api.labels.addToProject(selectedProject.id, label.id).catch(() => {})
+                }
+                await window.api.tasks.addLabel(payload.id as string, label.id).catch(() => {})
+              }
+            }
+          }
+          // Refresh task store
+          useTaskStore.getState().hydrateAllForProject(selectedProject.id, userId)
+        }
+
+        if (table === 'status') {
+          // Full status re-sync is fine — statuses are few
+          useStatusStore.getState().hydrateStatuses(selectedProject.id)
+        }
+      })
     } else {
       setProjectMembers([])
     }
-  }, [selectedProject?.id, selectedProject?.is_shared])
+  }, [selectedProject?.id, selectedProject?.is_shared, loadMembers])
 
   // Show toast when a recurring task clone is created
   useEffect(() => {
@@ -672,6 +769,69 @@ export function AppLayout(): React.JSX.Element {
     }
   }, [selectedProject, currentUser, updateProject, addToast])
 
+  // Handle generating a new invite link for an already-shared project
+  const handleGenerateInviteLink = useCallback(async () => {
+    if (!selectedProject || !currentUser) return
+    try {
+      const { generateInviteLink } = await import('./services/SyncService')
+      const link = await generateInviteLink(selectedProject.id, currentUser.id)
+      await navigator.clipboard.writeText(link)
+      addToast({ message: 'Invite link copied to clipboard (expires in 15 min).' })
+    } catch (err) {
+      console.error('Failed to generate invite link:', err)
+      addToast({ message: 'Failed to generate invite link.' })
+    }
+  }, [selectedProject, currentUser, addToast])
+
+  const [removedFromProject, setRemovedFromProject] = useState<{ id: string; name: string } | null>(null)
+  const [shareMenuOpen, setShareMenuOpen] = useState(false)
+  const [emailInviteInput, setEmailInviteInput] = useState('')
+  const [showEmailInput, setShowEmailInput] = useState(false)
+  const [showUnshareConfirm, setShowUnshareConfirm] = useState(false)
+
+  const handleUnshareProject = useCallback(async () => {
+    if (!selectedProject || !currentUser) return
+    try {
+      const { removeProjectFromSupabase, unsubscribeFromProject: unsub } = await import('./services/SyncService')
+      await removeProjectFromSupabase(selectedProject.id)
+      await unsub(selectedProject.id)
+      await updateProject(selectedProject.id, { is_shared: 0 })
+      setShareMenuOpen(false)
+      setShowUnshareConfirm(false)
+      addToast({ message: 'Project unshared. All members have been removed.' })
+    } catch (err) {
+      console.error('Failed to unshare project:', err)
+      addToast({ message: 'Failed to unshare project.' })
+    }
+  }, [selectedProject, currentUser, updateProject, addToast])
+
+  const handleEmailInviteFromHeader = useCallback(async () => {
+    if (!selectedProject || !currentUser || !emailInviteInput.trim()) return
+    const email = emailInviteInput.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      addToast({ message: 'Please enter a valid email address' })
+      return
+    }
+    try {
+      const { generateInviteLink } = await import('./services/SyncService')
+      // If not shared yet, share first
+      if (selectedProject.is_shared !== 1) {
+        const { uploadProjectToSupabase, subscribeToProject } = await import('./services/SyncService')
+        await uploadProjectToSupabase(selectedProject.id)
+        await updateProject(selectedProject.id, { is_shared: 1 })
+        await subscribeToProject(selectedProject.id)
+      }
+      await generateInviteLink(selectedProject.id, currentUser.id, email)
+      setEmailInviteInput('')
+      setShowEmailInput(false)
+      setShareMenuOpen(false)
+      addToast({ message: `Invite sent to ${email}. They'll see it when they open ToDoozy.` })
+    } catch (err) {
+      console.error('Failed to send email invite:', err)
+      addToast({ message: 'Failed to send invite' })
+    }
+  }, [selectedProject, currentUser, emailInviteInput, updateProject, addToast])
+
   const [saveTemplateWizard, setSaveTemplateWizard] = useState<ProjectTemplate | null>(null)
 
   const handleSaveProjectAsTemplate = useCallback(() => {
@@ -862,22 +1022,109 @@ export function AppLayout(): React.JSX.Element {
             {currentView === 'project' && selectedProject && (
               <>
                 {/* Share / Member avatars */}
-                {selectedProject.is_shared === 1 ? (
+                {selectedProject.is_shared === 1 && (
                   <MemberAvatars
                     members={projectMembers}
                     currentUserId={currentUser?.id ?? ''}
-                    onClickAvatars={() => { setSettingsOpen(true); setSettingsInitialTab('members') }}
+                    onClickAvatars={() => { setSettingsOpen(true); setSettingsInitialTab('projects') }}
                   />
-                ) : (
+                )}
+                <div className="relative ml-1">
                   <button
-                    onClick={handleShareProject}
-                    className="ml-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                    onClick={() => { setShareMenuOpen(!shareMenuOpen); setShowEmailInput(false) }}
+                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
                     title="Share project"
                     aria-label="Share project"
                   >
                     <Share2 size={16} />
                   </button>
-                )}
+                  {shareMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => { setShareMenuOpen(false); setShowEmailInput(false) }} />
+                      <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-surface p-1 shadow-lg">
+                        {showEmailInput ? (
+                          <div className="flex flex-col gap-1.5 p-2">
+                            <input
+                              type="email"
+                              value={emailInviteInput}
+                              onChange={(e) => setEmailInviteInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleEmailInviteFromHeader()
+                                if (e.key === 'Escape') { e.stopPropagation(); setShowEmailInput(false) }
+                              }}
+                              placeholder="Email address"
+                              autoFocus
+                              className="rounded border border-border bg-background px-2.5 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+                            />
+                            <button
+                              onClick={handleEmailInviteFromHeader}
+                              disabled={!emailInviteInput.trim()}
+                              className="rounded bg-accent px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+                            >
+                              Send Invite
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setShowEmailInput(true)}
+                              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-[12px] font-light text-foreground transition-colors hover:bg-foreground/6"
+                            >
+                              <UserPlus size={14} className="text-muted" />
+                              Invite member by email
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (selectedProject.is_shared !== 1) {
+                                  await handleShareProject()
+                                } else {
+                                  await handleGenerateInviteLink()
+                                }
+                                setShareMenuOpen(false)
+                              }}
+                              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-[12px] font-light text-foreground transition-colors hover:bg-foreground/6"
+                            >
+                              <Link size={14} className="text-muted" />
+                              {selectedProject.is_shared === 1 ? 'Copy invite link' : 'Create invite link'}
+                            </button>
+                            {selectedProject.is_shared === 1 && selectedProject.owner_id === currentUser?.id && (
+                              <>
+                                <div className="my-1 border-t border-border" />
+                                {showUnshareConfirm ? (
+                                  <div className="flex flex-col gap-1.5 p-2">
+                                    <p className="text-[11px] font-light text-muted">Remove all members?</p>
+                                    <div className="flex gap-1.5">
+                                      <button
+                                        onClick={() => setShowUnshareConfirm(false)}
+                                        className="flex-1 rounded px-2 py-1.5 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        onClick={handleUnshareProject}
+                                        className="flex-1 rounded bg-danger px-2 py-1.5 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/90"
+                                      >
+                                        Unshare
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setShowUnshareConfirm(true)}
+                                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-[12px] font-light text-danger transition-colors hover:bg-danger/10"
+                                  >
+                                    <Unlink size={14} />
+                                    Unshare project
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button
                   onClick={handleSaveProjectAsTemplate}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
@@ -969,6 +1216,83 @@ export function AppLayout(): React.JSX.Element {
           projectId={selectedProject?.id ?? null}
           initialTab={settingsInitialTab}
         />
+
+        {/* Removed from shared project dialog */}
+        {removedFromProject && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+            <div className="w-80 rounded-lg border border-border bg-surface p-5 shadow-xl">
+              <h3 className="text-sm font-light text-foreground">
+                You were removed from <span className="font-medium">{removedFromProject.name}</span>
+              </h3>
+              <p className="mt-2 text-[11px] text-muted">
+                The owner unshared the project or removed you. Would you like to keep a local copy?
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (!currentUser) return
+                    // Keep local copy with new UUID
+                    const oldId = removedFromProject.id
+                    const project = await window.api.projects.findById(oldId)
+                    if (project) {
+                      const newId = crypto.randomUUID()
+                      await window.api.projects.create({
+                        id: newId,
+                        name: `${project.name} (local copy)`,
+                        description: project.description,
+                        color: project.color,
+                        icon: project.icon,
+                        owner_id: currentUser.id,
+                        is_default: 0
+                      })
+                      await window.api.projects.addMember(newId, currentUser.id, 'owner')
+                      // Copy statuses
+                      const statuses = await window.api.statuses.findByProjectId(oldId)
+                      const statusMap: Record<string, string> = {}
+                      for (const s of statuses) {
+                        const nid = crypto.randomUUID()
+                        statusMap[s.id] = nid
+                        await window.api.statuses.create({ id: nid, project_id: newId, name: s.name, color: s.color, icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default })
+                      }
+                      // Copy tasks
+                      const tasks = await window.api.tasks.findByProjectId(oldId)
+                      const taskMap: Record<string, string> = {}
+                      for (const t of tasks) {
+                        const nid = crypto.randomUUID()
+                        taskMap[t.id] = nid
+                        await window.api.tasks.create({ id: nid, project_id: newId, owner_id: currentUser.id, title: t.title, description: t.description, status_id: statusMap[t.status_id] ?? t.status_id, priority: t.priority, due_date: t.due_date, parent_id: null, order_index: t.order_index, assigned_to: null, is_template: t.is_template, is_archived: t.is_archived, completed_date: t.completed_date, recurrence_rule: t.recurrence_rule, reference_url: t.reference_url })
+                      }
+                      for (const t of tasks) {
+                        if (t.parent_id && taskMap[t.parent_id]) {
+                          await window.api.tasks.update(taskMap[t.id], { parent_id: taskMap[t.parent_id] })
+                        }
+                      }
+                      await window.api.projects.delete(oldId)
+                    }
+                    await useProjectStore.getState().hydrateProjects(currentUser.id)
+                    setRemovedFromProject(null)
+                    addToast({ message: 'A local copy has been kept.' })
+                  }}
+                  className="flex-1 rounded-md border border-border px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6"
+                >
+                  Keep Copy
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!currentUser) return
+                    await window.api.projects.delete(removedFromProject.id)
+                    await useProjectStore.getState().hydrateProjects(currentUser.id)
+                    setRemovedFromProject(null)
+                    addToast({ message: 'Project deleted.' })
+                  }}
+                  className="flex-1 rounded-md bg-danger px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/90"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Toast notifications */}
         <ToastContainer />

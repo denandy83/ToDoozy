@@ -81,7 +81,8 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
     >
       <div
         ref={containerRef}
-        className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl motion-safe:animate-in motion-safe:slide-in-from-top-2 motion-safe:duration-150"
+        tabIndex={-1}
+        className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl focus:outline-none motion-safe:animate-in motion-safe:slide-in-from-top-2 motion-safe:duration-150"
         onKeyDown={handleKeyDown}
       >
         {/* Header */}

@@ -790,6 +790,8 @@ function StatusLabel({ statusId }: { statusId: string }): React.JSX.Element | nu
   const status = useStatusStore((s) => s.statuses[statusId])
   if (!status) return null
   if (status.is_default === 1 || status.is_done === 1) return null
+  // Hide when name matches the My Day "In Progress" bucket — it's redundant
+  if (status.name.toLowerCase() === 'in progress') return null
   return (
     <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">
       [{status.name}]

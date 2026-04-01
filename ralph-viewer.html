@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ralph Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --dim: #484f58; --accent: #58a6ff;
+    --green: #3fb950; --orange: #f0883e; --purple: #d2a8ff;
+    --red: #f85149; --yellow: #e3b341;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:14px; padding:20px; }
+  h1 { font-size:24px; font-weight:300; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent); margin-bottom:4px; }
+  .subtitle { color:var(--dim); font-size:12px; margin-bottom:24px; }
+  .subtitle .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; animation:pulse 2s infinite; }
+  .dot.live { background:var(--green); }
+  .dot.done { background:var(--dim); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* Summary cards */
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:24px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  .card .label { font-size:10px; text-transform:uppercase; letter-spacing:0.15em; color:var(--dim); margin-bottom:6px; }
+  .card .value { font-size:28px; font-weight:300; }
+  .card .detail { font-size:11px; color:var(--dim); margin-top:4px; }
+  .card.accent .value { color:var(--accent); }
+  .card.green .value { color:var(--green); }
+  .card.orange .value { color:var(--orange); }
+  .card.purple .value { color:var(--purple); }
+
+  /* Iterations */
+  .iteration { background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; overflow:hidden; }
+  .iter-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; cursor:pointer; }
+  .iter-header:hover { background:#1c2128; }
+  .iter-title { font-size:15px; font-weight:600; }
+  .iter-meta { font-size:11px; color:var(--dim); display:flex; gap:16px; }
+  .iter-body { display:none; padding:0; }
+  .iter-body.open { display:block; }
+
+  /* Timeline */
+  .timeline { padding:12px 18px; }
+  .tl-entry { display:flex; gap:12px; padding:6px 0; border-bottom:1px solid #21262d; }
+  .tl-entry:last-child { border-bottom:none; }
+  .tl-icon { width:28px; height:28px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+  .tl-icon.think { background:#8b5cf620; color:var(--purple); }
+  .tl-icon.tool { background:#58a6ff20; color:var(--accent); }
+  .tl-icon.text { background:#3fb95020; color:var(--green); }
+  .tl-content { flex:1; min-width:0; }
+  .tl-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--dim); }
+  .tl-text { font-size:13px; margin-top:2px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+  .tl-text.dim { color:var(--dim); font-style:italic; }
+
+  /* Tool bar chart */
+  .tool-bars { padding:14px 18px; border-bottom:1px solid var(--border); }
+  .tool-bar-row { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .tool-bar-name { width:70px; font-size:11px; text-align:right; color:var(--dim); font-weight:600; text-transform:uppercase; }
+  .tool-bar-track { flex:1; height:18px; background:#21262d; border-radius:3px; overflow:hidden; }
+  .tool-bar-fill { height:100%; border-radius:3px; display:flex; align-items:center; padding-left:6px; font-size:10px; font-weight:600; color:#fff; }
+  .tool-bar-count { width:30px; font-size:11px; color:var(--dim); text-align:right; }
+
+  .stories-list { padding:14px 18px; border-bottom:1px solid var(--border); }
+  .story-chip { display:inline-block; background:var(--green); color:#0d1117; font-size:11px; font-weight:700; padding:3px 10px; border-radius:12px; margin:2px 4px 2px 0; }
+
+  .token-info { padding:10px 18px; font-size:11px; color:var(--dim); display:flex; gap:16px; flex-wrap:wrap; }
+  .token-info span { white-space:nowrap; }
+
+  #error { color:var(--red); padding:12px; display:none; }
+  .collapsed-hint { font-size:11px; color:var(--dim); padding:0 18px 10px; }
+</style>
+</head>
+<body>
+
+<h1>Ralph Dashboard</h1>
+<div class="subtitle" id="subtitle"><span class="dot live"></span>Loading...</div>
+
+<div class="cards" id="cards"></div>
+<div id="iterations"></div>
+<div id="error"></div>
+
+<script>
+const TOOL_COLORS = {
+  Read:'#58a6ff', Edit:'#f0883e', Write:'#e3b341', Bash:'#3fb950',
+  Grep:'#d2a8ff', Glob:'#bc8cff', Agent:'#f778ba', TodoWrite:'#79c0ff', ToolSearch:'#484f58'
+};
+
+function parseLog(text) {
+  const result = { startLine:'', iterations:[], completed:false, completedAt:'' };
+
+  // Header line
+  const startMatch = text.match(/^Ralph started at (.+)/m);
+  if (startMatch) result.startLine = startMatch[1];
+
+  // Split into iteration sections
+  const iterRegex = /={50,}\n\s+Iteration (\d+) of (\d+) \((\w+)\) - (.+?)\n={50,}/g;
+  const headers = [];
+  let m;
+  while ((m = iterRegex.exec(text)) !== null) {
+    headers.push({ idx: m.index, num: +m[1], total: +m[2], tool: m[3], time: m[4], end: iterRegex.lastIndex });
+  }
+
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i];
+    const bodyEnd = i+1 < headers.length ? headers[i+1].idx : text.length;
+    const body = text.slice(h.end, bodyEnd);
+
+    const iter = { num:h.num, total:h.total, time:h.time, tools:{}, toolOrder:[], thinkings:[], texts:[], stories:[], tokens:{input:0,output:0,cacheRead:0,cacheCreate:0}, timeline:[] };
+
+    // Parse JSON blocks
+    const jsonRegex = /\{[\s\S]*?"model"[\s\S]*?"content"[\s\S]*?\}\s*\}/g;
+    let jm;
+    // Simpler approach: find content arrays
+    const thinkRegex = /"thinking":\s*"((?:[^"\\]|\\.)*)"/g;
+    while ((jm = thinkRegex.exec(body)) !== null) {
+      const t = jm[1].replace(/\\n/g,'\n').replace(/\\"/g,'"').replace(/\\\\/g,'\\');
+      if (t.trim()) {
+        iter.thinkings.push(t);
+        iter.timeline.push({type:'think', text:t});
+      }
+    }
+
+    const toolRegex = /"type":\s*"tool_use"[\s\S]*?"name":\s*"(\w+)"[\s\S]*?"input":\s*(\{[^}]*(?:\{[^}]*\}[^}]*)*\})/g;
+    while ((jm = toolRegex.exec(body)) !== null) {
+      const name = jm[1];
+      iter.tools[name] = (iter.tools[name]||0) + 1;
+      if (!iter.toolOrder.includes(name)) iter.toolOrder.push(name);
+
+      let desc = '';
+      try {
+        const inp = JSON.parse(jm[2]);
+        if (inp.description) desc = inp.description;
+        else if (inp.file_path) desc = inp.file_path.split('/').slice(-2).join('/');
+        else if (inp.command) desc = inp.command.substring(0,80);
+        else if (inp.pattern) desc = inp.pattern;
+        else if (inp.prompt) desc = inp.prompt.substring(0,80);
+      } catch(e) { desc = name; }
+      iter.timeline.push({type:'tool', label:name, text:desc});
+    }
+
+    const textRegex = /"type":\s*"text",\s*"text":\s*"((?:[^"\\]|\\.)*)"/g;
+    while ((jm = textRegex.exec(body)) !== null) {
+      const t = jm[1].replace(/\\n/g,'\n').replace(/\\"/g,'"').replace(/\\\\/g,'\\');
+      if (t.trim()) {
+        iter.texts.push(t);
+        iter.timeline.push({type:'text', text:t});
+      }
+    }
+
+    // Tokens (deduplicate by counting unique message IDs)
+    const inputTokens = [...body.matchAll(/"input_tokens":\s*(\d+)/g)].map(m=>+m[1]);
+    const outputTokens = [...body.matchAll(/"output_tokens":\s*(\d+)/g)].map(m=>+m[1]);
+    const cacheRead = [...body.matchAll(/"cache_read_input_tokens":\s*(\d+)/g)].map(m=>+m[1]);
+    const cacheCreate = [...body.matchAll(/"cache_creation_input_tokens":\s*(\d+)/g)].map(m=>+m[1]);
+    iter.tokens.input = inputTokens.reduce((a,b)=>a+b,0);
+    iter.tokens.output = outputTokens.reduce((a,b)=>a+b,0);
+    iter.tokens.cacheRead = cacheRead.reduce((a,b)=>a+b,0);
+    iter.tokens.cacheCreate = cacheCreate.reduce((a,b)=>a+b,0);
+
+    // Stories completed (look for story references)
+    const storyMatches = body.match(/Story #(\d+)/gi) || [];
+    const storyNums = [...new Set(storyMatches.map(s => s.match(/\d+/)[0]))];
+    iter.stories = storyNums;
+
+    // Check for COMPLETE
+    if (body.includes('<promise>COMPLETE</promise>')) {
+      const compMatch = body.match(/Completed at iteration.*$/m);
+      if (compMatch) result.completedAt = compMatch[0];
+      result.completed = true;
+    }
+
+    result.iterations.push(iter);
+  }
+
+  // Non-iteration content (like the final summary)
+  const lastHeader = headers[headers.length-1];
+  if (lastHeader) {
+    const trailing = text.slice(lastHeader.end);
+    const storyTitles = [...trailing.matchAll(/Story #(\d+)\s*[-–—]\s*(.+?)(?:\n|$)/g)];
+    if (storyTitles.length) {
+      result.storyNames = storyTitles.map(m => ({num:m[1], name:m[2].trim()}));
+    }
+  }
+
+  return result;
+}
+
+function fmt(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function renderToolBars(tools, toolOrder, max) {
+  return toolOrder.map(name => {
+    const count = tools[name];
+    const pct = Math.max(3, (count/max)*100);
+    const color = TOOL_COLORS[name] || '#8b949e';
+    return `<div class="tool-bar-row">
+      <span class="tool-bar-name">${name}</span>
+      <div class="tool-bar-track"><div class="tool-bar-fill" style="width:${pct}%;background:${color}">${count>2?count:''}</div></div>
+      <span class="tool-bar-count">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderTimeline(timeline, collapsed) {
+  const items = collapsed ? timeline.slice(0,15) : timeline;
+  const html = items.map(e => {
+    const iconClass = e.type === 'think' ? 'think' : e.type === 'tool' ? 'tool' : 'text';
+    const icon = e.type === 'think' ? '💭' : e.type === 'tool' ? '🔧' : '💬';
+    const label = e.type === 'think' ? 'Thinking' : e.type === 'tool' ? e.label : 'Output';
+    const text = (e.text||'').substring(0, 300);
+    const dimClass = e.type === 'think' ? ' dim' : '';
+    return `<div class="tl-entry">
+      <div class="tl-icon ${iconClass}">${icon}</div>
+      <div class="tl-content">
+        <div class="tl-label">${label}</div>
+        <div class="tl-text${dimClass}">${escapeHtml(text)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const more = collapsed && timeline.length > 15
+    ? `<div class="collapsed-hint">${timeline.length - 15} more entries — click header to expand</div>` : '';
+  return html + more;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function render(data) {
+  const totalTools = data.iterations.reduce((s,i) => s + Object.values(i.tools).reduce((a,b)=>a+b,0), 0);
+  const totalOutput = data.iterations.reduce((s,i) => s + i.tokens.output, 0);
+  const totalCache = data.iterations.reduce((s,i) => s + i.tokens.cacheRead, 0);
+  const allStories = [...new Set(data.iterations.flatMap(i => i.stories))];
+  const duration = data.iterations.length > 0
+    ? timeDiff(data.iterations[0].time, data.completedAt || data.iterations[data.iterations.length-1].time)
+    : '—';
+
+  document.getElementById('subtitle').innerHTML = data.completed
+    ? `<span class="dot done"></span>${data.completedAt || 'Run complete'}`
+    : `<span class="dot live"></span>Running — auto-refresh every 5s`;
+
+  document.getElementById('cards').innerHTML = `
+    <div class="card accent"><div class="label">Iterations</div><div class="value">${data.iterations.length}</div><div class="detail">of ${data.iterations[0]?.total || '?'} max</div></div>
+    <div class="card green"><div class="label">Stories Done</div><div class="value">${allStories.length}</div><div class="detail">${allStories.map(s=>'#'+s).join(', ') || 'none yet'}</div></div>
+    <div class="card orange"><div class="label">Tool Calls</div><div class="value">${totalTools}</div><div class="detail">across all iterations</div></div>
+    <div class="card purple"><div class="label">Output Tokens</div><div class="value">${fmt(totalOutput)}</div><div class="detail">${fmt(totalCache)} cache read</div></div>
+    <div class="card"><div class="label">Duration</div><div class="value">${duration}</div><div class="detail">${data.startLine || ''}</div></div>
+    <div class="card ${data.completed ? 'green' : 'accent'}"><div class="label">Status</div><div class="value" style="font-size:20px">${data.completed ? 'COMPLETE' : 'RUNNING'}</div></div>
+  `;
+
+  const itersHtml = data.iterations.map((iter, idx) => {
+    const toolCount = Object.values(iter.tools).reduce((a,b)=>a+b,0);
+    const maxTool = Math.max(...Object.values(iter.tools), 1);
+    const isLast = idx === data.iterations.length - 1;
+    const open = isLast;
+    const storyLabel = iter.stories.length ? iter.stories.map(s => `#${s}`).join(', ') : '';
+
+    return `<div class="iteration">
+      <div class="iter-header" onclick="this.nextElementSibling.classList.toggle('open')">
+        <div>
+          <span class="iter-title">Iteration ${iter.num}</span>
+          ${storyLabel ? `<span style="margin-left:10px;font-size:12px;color:var(--green)">Story ${storyLabel}</span>` : ''}
+        </div>
+        <div class="iter-meta">
+          <span>🔧 ${toolCount} tools</span>
+          <span>💬 ${iter.texts.length} outputs</span>
+          <span>📤 ${fmt(iter.tokens.output)} out</span>
+          <span>${iter.time}</span>
+        </div>
+      </div>
+      <div class="iter-body${open ? ' open' : ''}">
+        <div class="tool-bars">${renderToolBars(iter.tools, iter.toolOrder, maxTool)}</div>
+        ${iter.stories.length ? `<div class="stories-list">${iter.stories.map(s => `<span class="story-chip">Story #${s}</span>`).join('')}</div>` : ''}
+        <div class="token-info">
+          <span>Input: ${fmt(iter.tokens.input)}</span>
+          <span>Output: ${fmt(iter.tokens.output)}</span>
+          <span>Cache read: ${fmt(iter.tokens.cacheRead)}</span>
+          <span>Cache create: ${fmt(iter.tokens.cacheCreate)}</span>
+        </div>
+        <div class="timeline">${renderTimeline(iter.timeline, !open)}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('iterations').innerHTML = itersHtml;
+}
+
+function timeDiff(startStr, endStr) {
+  try {
+    // Parse "Mon Mar 30 13:34:21 CEST 2026" style
+    const parse = s => {
+      const m = s.match(/(\d{2}):(\d{2}):(\d{2})/);
+      return m ? (+m[1]*3600 + +m[2]*60 + +m[3]) : 0;
+    };
+    const s = parse(startStr);
+    const e = parse(endStr);
+    if (!s || !e) return '—';
+    let diff = e - s;
+    if (diff < 0) diff += 86400;
+    const mins = Math.floor(diff/60);
+    const secs = diff % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  } catch { return '—'; }
+}
+
+let lastContent = '';
+async function refresh() {
+  try {
+    const resp = await fetch('/ralph.log?_=' + Date.now());
+    const text = await resp.text();
+    if (text !== lastContent) {
+      lastContent = text;
+      const data = parseLog(text);
+      render(data);
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+  } catch(e) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = 'Fetch error: ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

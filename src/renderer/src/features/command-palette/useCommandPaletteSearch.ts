@@ -168,14 +168,33 @@ export function matchesHas(
   return false
 }
 
-export function useCommandPaletteSearch(query: string, includeArchived = false): Task[] {
+export interface ExternalFilters {
+  priorityValues?: number[]
+  labelIds?: string[]
+  projectIds?: string[]
+  dueDates?: string[]
+  statusIds?: string[]
+}
+
+export function useCommandPaletteSearch(
+  query: string,
+  includeArchived = false,
+  externalFilters?: ExternalFilters
+): Task[] {
   const tasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const statuses = useStatusStore((s) => s.statuses)
   const labels = useLabelStore((s) => s.labels)
 
   return useMemo(() => {
-    if (!query.trim()) return []
+    const hasChips = externalFilters && (
+      externalFilters.priorityValues?.length ||
+      externalFilters.labelIds?.length ||
+      externalFilters.projectIds?.length ||
+      externalFilters.dueDates?.length ||
+      externalFilters.statusIds?.length
+    )
+    if (!query.trim() && !hasChips) return []
 
     const parsed = parseQuery(query)
     const allTasks = Object.values(tasks).filter(
@@ -191,12 +210,17 @@ export function useCommandPaletteSearch(query: string, includeArchived = false):
         }
       }
 
-      // Priority filter
+      // Priority filter (typed)
       if (parsed.priorityFilters.length > 0 && !matchesPriority(task, parsed.priorityFilters)) {
         return false
       }
 
-      // Label filter
+      // Priority filter (chip)
+      if (externalFilters?.priorityValues?.length) {
+        if (!externalFilters.priorityValues.includes(task.priority)) return false
+      }
+
+      // Label filter (typed)
       if (parsed.labelFilters.length > 0) {
         const tLabels = taskLabels[task.id] ?? []
         if (!matchesLabel(tLabels, parsed.labelFilters)) {
@@ -204,14 +228,37 @@ export function useCommandPaletteSearch(query: string, includeArchived = false):
         }
       }
 
-      // Status filter
+      // Label filter (chip - by ID)
+      if (externalFilters?.labelIds?.length) {
+        const tLabels = taskLabels[task.id] ?? []
+        const tLabelIds = new Set(tLabels.map((l) => l.id))
+        if (!externalFilters.labelIds.some((id) => tLabelIds.has(id))) return false
+      }
+
+      // Project filter (chip)
+      if (externalFilters?.projectIds?.length) {
+        if (!externalFilters.projectIds.includes(task.project_id)) return false
+      }
+
+      // Status filter (typed)
       if (parsed.statusFilters.length > 0 && !matchesStatus(task, parsed.statusFilters, statuses)) {
         return false
       }
 
-      // Due filter
+      // Status filter (chip - by ID)
+      if (externalFilters?.statusIds?.length) {
+        if (!externalFilters.statusIds.includes(task.status_id)) return false
+      }
+
+      // Due filter (typed)
       if (parsed.dueFilters.length > 0 && !matchesDue(task, parsed.dueFilters)) {
         return false
+      }
+
+      // Due filter (chip - exact date)
+      if (externalFilters?.dueDates?.length) {
+        if (!task.due_date) return false
+        if (!externalFilters.dueDates.some((d) => task.due_date!.startsWith(d))) return false
       }
 
       // Has filter
@@ -229,5 +276,5 @@ export function useCommandPaletteSearch(query: string, includeArchived = false):
     })
 
     return filtered.slice(0, MAX_RESULTS)
-  }, [query, includeArchived, tasks, taskLabels, statuses, labels])
+  }, [query, includeArchived, externalFilters, tasks, taskLabels, statuses, labels])
 }

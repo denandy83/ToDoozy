@@ -49,6 +49,9 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const [loading, setLoading] = useState(true)
   const [copiedLink, setCopiedLink] = useState(false)
   const [confirmUnshare, setConfirmUnshare] = useState(false)
+  const [emailInviteValue, setEmailInviteValue] = useState('')
+  const [sendingEmailInvite, setSendingEmailInvite] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
 
   const isOwner = project.owner_id === currentUser?.id
   const isShared = project.is_shared === 1
@@ -89,6 +92,32 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
     }
   }
 
+  const handleEmailInvite = async (): Promise<void> => {
+    if (!currentUser || !emailInviteValue.trim()) return
+    const email = emailInviteValue.trim().toLowerCase()
+    // Basic email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      onToast('Please enter a valid email address')
+      return
+    }
+    // Check if already a member
+    if (members.some((m) => m.email.toLowerCase() === email)) {
+      onToast('This person is already a member')
+      return
+    }
+    setSendingEmailInvite(true)
+    try {
+      await generateInviteLink(project.id, currentUser.id, email)
+      setEmailInviteValue('')
+      onToast(`Invite sent to ${email}. They'll see it when they open ToDoozy.`)
+    } catch (err) {
+      console.error('Failed to send email invite:', err)
+      onToast('Failed to send invite')
+    } finally {
+      setSendingEmailInvite(false)
+    }
+  }
+
   const handleRemoveMember = async (userId: string): Promise<void> => {
     try {
       await removeSharedMember(project.id, userId)
@@ -100,14 +129,88 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
     }
   }
 
-  const handleLeaveProject = async (): Promise<void> => {
+  const handleLeaveProject = async (keepLocal: boolean): Promise<void> => {
     if (!currentUser) return
     try {
       await removeSharedMember(project.id, currentUser.id)
       await unsubscribeFromProject(project.id)
-      // Keep local copy (project stays but becomes unshared)
-      await updateProject(project.id, { is_shared: 0 })
-      onToast('You left the project. A local copy has been kept.')
+      if (keepLocal) {
+        // Create a new local project with a fresh UUID so it can't collide with the shared original
+        const newId = crypto.randomUUID()
+        await window.api.projects.create({
+          id: newId,
+          name: `${project.name} (local copy)`,
+          description: project.description,
+          color: project.color,
+          icon: project.icon,
+          owner_id: currentUser.id,
+          is_default: 0
+        })
+        await window.api.projects.addMember(newId, currentUser.id, 'owner')
+        // Copy statuses to new project
+        const statuses = await window.api.statuses.findByProjectId(project.id)
+        const statusIdMap: Record<string, string> = {}
+        for (const s of statuses) {
+          const newStatusId = crypto.randomUUID()
+          statusIdMap[s.id] = newStatusId
+          await window.api.statuses.create({
+            id: newStatusId,
+            project_id: newId,
+            name: s.name,
+            color: s.color,
+            icon: s.icon,
+            order_index: s.order_index,
+            is_done: s.is_done,
+            is_default: s.is_default
+          })
+        }
+        // Copy tasks to new project (remap status IDs and parent IDs)
+        const tasks = await window.api.tasks.findByProjectId(project.id)
+        const taskIdMap: Record<string, string> = {}
+        // First pass: create all tasks without parent_id
+        for (const t of tasks) {
+          const newTaskId = crypto.randomUUID()
+          taskIdMap[t.id] = newTaskId
+          await window.api.tasks.create({
+            id: newTaskId,
+            project_id: newId,
+            owner_id: currentUser.id,
+            title: t.title,
+            description: t.description,
+            status_id: statusIdMap[t.status_id] ?? t.status_id,
+            priority: t.priority,
+            due_date: t.due_date,
+            parent_id: null,
+            order_index: t.order_index,
+            assigned_to: null,
+            is_template: t.is_template,
+            is_archived: t.is_archived,
+            completed_date: t.completed_date,
+            recurrence_rule: t.recurrence_rule,
+            reference_url: t.reference_url
+          })
+          // Copy labels
+          const labels = await window.api.tasks.getLabels(t.id)
+          for (const l of labels) {
+            await window.api.tasks.addLabel(newTaskId, l.label_id).catch(() => {})
+          }
+        }
+        // Second pass: set parent_id for subtasks
+        for (const t of tasks) {
+          if (t.parent_id && taskIdMap[t.parent_id]) {
+            await window.api.tasks.update(taskIdMap[t.id], { parent_id: taskIdMap[t.parent_id] })
+          }
+        }
+        // Delete the old shared project locally
+        await window.api.projects.delete(project.id)
+        onToast('You left the project. A local copy has been kept.')
+      } else {
+        await window.api.projects.delete(project.id)
+        onToast('You left the project.')
+      }
+      const { hydrateProjects } = useProjectStore.getState()
+      await hydrateProjects(currentUser.id)
+      setShowLeaveConfirm(false)
     } catch (err) {
       console.error('Failed to leave project:', err)
       onToast('Failed to leave project')
@@ -149,15 +252,38 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
 
   return (
     <div className="space-y-4">
-      {/* Generate Invite Link */}
+      {/* Invite by Email */}
       {isOwner && (
-        <button
-          onClick={handleGenerateInvite}
-          className="flex w-full items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6"
-        >
-          {copiedLink ? <Check size={14} className="text-green-500" /> : <UserPlus size={14} />}
-          {copiedLink ? 'Link Copied!' : 'Generate Invite Link'}
-        </button>
+        <div className="space-y-2">
+          <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+            Invite
+          </h4>
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={emailInviteValue}
+              onChange={(e) => setEmailInviteValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleEmailInvite() }}
+              placeholder="Email address"
+              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+            />
+            <button
+              onClick={handleEmailInvite}
+              disabled={!emailInviteValue.trim() || sendingEmailInvite}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+            >
+              <UserPlus size={14} />
+              Invite
+            </button>
+          </div>
+          <button
+            onClick={handleGenerateInvite}
+            className="flex w-full items-center gap-2 rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+          >
+            {copiedLink ? <Check size={14} className="text-green-500" /> : <UserPlus size={14} />}
+            {copiedLink ? 'Link Copied!' : 'Or copy invite link'}
+          </button>
+        </div>
       )}
 
       {/* Member List */}
@@ -204,13 +330,41 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
       {/* Leave / Unshare */}
       <div className="border-t border-border pt-4">
         {!isOwner && (
-          <button
-            onClick={handleLeaveProject}
-            className="flex w-full items-center gap-2 rounded-lg px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10"
-          >
-            <LogOut size={14} />
-            Leave Project
-          </button>
+          showLeaveConfirm ? (
+            <div className="space-y-2">
+              <p className="text-sm font-light text-muted">
+                Keep a local copy of this project?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleLeaveProject(true)}
+                  className="flex-1 rounded-md border border-border px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6"
+                >
+                  Keep Copy
+                </button>
+                <button
+                  onClick={() => handleLeaveProject(false)}
+                  className="flex-1 rounded-md bg-danger px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/90"
+                >
+                  Delete
+                </button>
+              </div>
+              <button
+                onClick={() => setShowLeaveConfirm(false)}
+                className="w-full text-center text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowLeaveConfirm(true)}
+              className="flex w-full items-center gap-2 rounded-lg px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10"
+            >
+              <LogOut size={14} />
+              Leave Project
+            </button>
+          )
         )}
         {isOwner && (
           <>

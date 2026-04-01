@@ -212,9 +212,6 @@ export function ContextMenu(): React.JSX.Element | null {
             }
             updateTask(task.id, updates)
           })}
-          onCustom={() => handleAction(() => {
-            useTaskStore.getState().selectTask(task.id)
-          })}
         />
       </FlyoutItem>
       <FlyoutItem id="labels" icon={<Tag size={14} />} label="Labels" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>

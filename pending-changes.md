@@ -8,15 +8,6 @@ Working file — entries written here during a session are processed into perman
 - The `SessionEnd` hook appends a fallback entry with git metadata
 - At session start, if `.docs-pending` exists, Claude processes all entries below into CHANGELOG.md, RELEASE_NOTES.md, FEATURES.md, README.md, DEVLOG.md — then clears this file
 
-## 2026-03-31 — Feature: Smart Recurrence Picker
-**What it does:** Users can set structured recurrence rules with a picker instead of typing free text. Completing a recurring task auto-creates a clone with the next due date.
-**Why it was built:** The old custom recurrence input accepted any text with no validation or feedback. Users had no way to know if their entry would work.
-**How to use it:** Open a task's detail panel, click any recurrence preset (Daily/Weekly/Monthly) or Custom to expand the picker. Set interval, unit, specific days, mode (Fixed/After completion), and optional end date. Live preview confirms the rule.
-**Technical summary:** New `recurrenceUtils.ts` shared utility. Replaced `DetailRecurrence.tsx` with structured picker. `completeRecurringTask()` in TaskRepository clones tasks in a transaction. New IPC handler + preload bridge. Task row repeat icon. Context menu smart defaults + "Custom...". Migration clears old rules.
-**Acceptance criteria met:** All 24 criteria verified.
-**Affected views/components:** DetailRecurrence, TaskRow, ContextMenu, ContextMenuSubmenus, TaskRepository, taskStore, AppLayout (toast), mcp-server
-**Commit:** 3fbb5ed, d1a0f1c
-
 **Entry format — Fix:**
 ```
 ## YYYY-MM-DD — Fix: <short title>
@@ -52,17 +43,3 @@ Working file — entries written here during a session are processed into perman
 
 <!-- entries below this line are added automatically -->
 
-## 2026-03-30 — Session end (git fallback)
-<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
-- 3fbb5ed feat: implement Smart Recurrence Picker with structured rules and task cloning (#38) (2026-03-30) — files: 23
-
-## 2026-03-31 — Session end (git fallback)
-<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
-- 0c44196 fix: rank exact and prefix matches above substring in label/project autocomplete (2026-03-31) — files: 2
-- c1d43fe feat: add r: reference URL operator and description toggle to quick-add (2026-03-31) — files: 5
-- 95444c1 feat: add include-archived checkbox and project/archive indicators to Cmd+K search (2026-03-31) — files: 4
-- cc3bec1 feat: smart recurrence picker with structured rules, validation, and task cloning (#38) (2026-03-31) — files: 25
-
-## 2026-03-31 — Session end (git fallback)
-<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
-- 5597ff5 fix: status cycling focus/scroll, click-opens-detail setting, My Day default project (2026-03-31) — files: 11

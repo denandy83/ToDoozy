@@ -173,8 +173,17 @@ function buildRightClickMenu(): Menu {
   ])
 }
 
+function getResourcePath(filename: string): string {
+  if (app.isPackaged) {
+    // extraResources copies files to Contents/Resources/
+    return join(process.resourcesPath, filename)
+  }
+  // In dev, __dirname is out/main/, resources is at project root
+  return join(__dirname, '../../resources', filename)
+}
+
 export function createTray(): void {
-  const iconPath = join(__dirname, '../../resources/iconTemplate.png')
+  const iconPath = getResourcePath('iconTemplate.png')
   const icon = nativeImage.createFromPath(iconPath)
   icon.setTemplateImage(true)
 

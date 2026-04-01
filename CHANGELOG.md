@@ -4,10 +4,37 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## 2026-04-01
+
+### Fixed
+- **Tray icon missing in built app** — Icon template PNGs weren't being included in the packaged app. Added `extraResources` to electron-builder config and updated path resolution to use `process.resourcesPath`. (tray.ts, electron-builder.yml)
+- **Built app crash on launch (code signing)** — Ad-hoc code signing produced mismatched Team IDs between the main binary and Electron Framework. Added codesign step to CLAUDE.md build instructions.
+- **MCP server crash in built app** — The MCP server's bundled JS shared a chunk with the main process that imported `electron`, causing `MODULE_NOT_FOUND` when running with `ELECTRON_RUN_AS_NODE=1`. Extracted `withTransaction` into its own module to break the dependency chain.
+- **MCP server path wrong in built app** — Server path pointed to non-existent `app/out/main/` instead of `app.asar/out/main/`. Fixed to use `app.getAppPath()`.
+- **My Day redundant status label** — Tasks with status "In Progress" no longer show `[In Progress]` text in the In Progress bucket. Other non-default statuses still show their label.
+
+### Added
+- **Launch at login** — New "Launch at login" toggle in Settings > General. Uses Electron's `app.setLoginItemSettings()` API.
+- **Gemini MCP instructions** — Added Google AI Studio setup instructions to the MCP settings panel.
+- **Command palette inline operators** — CMD+K now supports `p:`, `@`, `/`, `d:`, `s:` operators with interactive popup suggestions. Selections become filter chips that combine with text search.
+
+### Removed
+- **Custom recurrence button** — Removed non-functional "Custom" button from recurrence picker and context menu.
+
 ## 2026-03-31
+
+### Fixed
+- **Autocomplete ranking** — Exact and prefix matches now rank above substring matches in label and project autocomplete. (0c44196)
+- **Status cycling focus/scroll** — Fixed focus loss and scroll jumping when cycling task status; fixed click-opens-detail setting; fixed My Day default project assignment. (5597ff5)
+- **Label color defaults** — New labels now default to the least-used color from the palette instead of always picking the first. (2883f5f)
+- **In-progress status and My Day positioning** — Removed mandatory in-progress status requirement; fixed done tasks positioning incorrectly in My Day view. (eabe194)
 
 ### Added
 - **Smart Recurrence Picker** — Replaced free-text custom recurrence with structured picker. Interval + unit selector, day-of-week toggles for weekly, day/ordinal picker for monthly, month+day for yearly. Fixed/After-completion toggle, optional end date. Live preview with next occurrence. Completing recurring tasks auto-clones with next due date and reset subtasks. Task row repeat icon with tooltip. Context menu smart defaults + "Custom..." option. (3fbb5ed, d1a0f1c)
+- **Reference URL in quick-add** — The `r:` operator in quick-add and smart input now sets a reference URL on the new task. Description toggle added to quick-add window. (c1d43fe)
+- **Cmd+K archive search** — Command palette now has an "include archived" checkbox; results show project name and archive indicators. (95444c1)
+- **Distribution-ready build packaging** — Production build pipeline for macOS (DMG + ZIP), electron-builder config, code signing instructions. (5eacf7b)
+- **Multi-user data isolation** — All data is now scoped per authenticated user, enabling safe multi-user access on the same database. (73a64e1)
 
 ## 2026-03-30
 

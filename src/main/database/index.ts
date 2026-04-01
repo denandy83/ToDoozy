@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
 import { migrations } from './migrations'
+import { withTransaction } from './transaction'
 
 let db: DatabaseSync | null = null
 
@@ -57,17 +58,7 @@ function getCurrentVersion(database: DatabaseSync): number {
   return row?.version ?? 0
 }
 
-export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
-  db.exec('BEGIN')
-  try {
-    const result = fn()
-    db.exec('COMMIT')
-    return result
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
-  }
-}
+export { withTransaction } from './transaction'
 
 export function closeDatabase(): void {
   if (db) {

@@ -91,10 +91,9 @@ interface RecurrenceSubmenuProps {
   task: Task
   openLeft: boolean
   onRecurrenceChange: (rule: string | null) => void
-  onCustom?: () => void
 }
 
-export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange, onCustom }: RecurrenceSubmenuProps): React.JSX.Element {
+export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange }: RecurrenceSubmenuProps): React.JSX.Element {
   const todayDay = getTodayWeekDay()
   const todayDate = getTodayDate()
   const options: Array<{ value: string | null; label: string }> = [
@@ -116,13 +115,6 @@ export function RecurrenceSubmenu({ task, openLeft, onRecurrenceChange, onCustom
           {task.recurrence_rule === opt.value && <Check size={14} className="text-accent" />}
         </button>
       ))}
-      <div className="mx-2 my-1 border-t border-border" />
-      <button
-        onClick={onCustom}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-      >
-        Custom…
-      </button>
     </SubmenuContainer>
   )
 }

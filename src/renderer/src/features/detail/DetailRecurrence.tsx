@@ -79,16 +79,6 @@ export function DetailRecurrence({
     [onRecurrenceChange, updateAndEmit]
   )
 
-  const handleCustomClick = useCallback(() => {
-    if (!expanded) {
-      setExpanded(true)
-      if (!recurrenceRule) {
-        const newConfig: RecurrenceConfig = { interval: 1, unit: 'days', afterCompletion: false }
-        updateAndEmit(newConfig)
-      }
-    }
-  }, [expanded, recurrenceRule, updateAndEmit])
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape' && expanded && !recurrenceRule) {
@@ -154,36 +144,6 @@ export function DetailRecurrence({
             {preset.label}
           </button>
         ))}
-        <button
-          role="radio"
-          tabIndex={expanded && activePreset === null ? 0 : -1}
-          aria-checked={expanded && activePreset === null}
-          aria-pressed={expanded && activePreset === null}
-          onClick={handleCustomClick}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-              e.preventDefault()
-              e.stopPropagation()
-              const btn = e.currentTarget as HTMLElement
-              const parent = btn.parentElement
-              if (!parent) return
-              const buttons = Array.from(parent.querySelectorAll<HTMLElement>('button[role="radio"]'))
-              const idx = buttons.indexOf(btn)
-              const next = e.key === 'ArrowRight'
-                ? buttons[(idx + 1) % buttons.length]
-                : buttons[(idx - 1 + buttons.length) % buttons.length]
-              next.focus()
-              next.click()
-            }
-          }}
-          className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
-            expanded && activePreset === null
-              ? 'bg-accent text-accent-fg'
-              : 'text-muted hover:bg-foreground/6'
-          }`}
-        >
-          Custom
-        </button>
       </div>
 
       {/* Expanded picker */}

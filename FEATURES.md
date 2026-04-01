@@ -195,13 +195,17 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - `@label` — assign or create label; popup suggests matching labels
 - `p:priority` — set priority (e.g., `p:high`, `p:urgent`)
 - `d:date` — set due date (e.g., `d:today`, `d:tomorrow`, `d:monday`, `d:Jan 15`)
+- `r:url` — attach a reference URL (e.g., `r:https://github.com/...`)
 - Popup suggestions for labels and priorities as user types
+- Autocomplete ranks exact and prefix matches above substring matches
 - **Status:** Complete
 
 ### Command Palette
 - Cmd+K modal; substring match by default
 - Operators: `p:high`, `l:work`, `s:done`, `due:today`, `has:subtasks` (combinable)
 - Results show priority dot, badge, title, labels, status, due date
+- "Include archived" checkbox to search across archived tasks
+- Results show project name and archive indicator badges
 - Max 12 results; click to select and open detail panel
 - Escape closes
 - **Status:** Complete
@@ -332,6 +336,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ### Global Quick-Add Window
 - Cmd+Shift+Space (configurable) opens frameless floating window from anywhere on macOS
 - Creates task in My Day; closes on submit, Escape, or blur
+- Supports all smart input operators including `r:url` for reference URLs
+- Description toggle for adding notes inline
 - Refreshes project list and settings on every focus
 - Window destroyed on close and recreated fresh; waits for theme confirmation before showing (no flash)
 - **Status:** Complete
@@ -419,6 +425,22 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Eliminates native compilation requirements and Electron rebuild issues
 - 32 files changed across repositories, migrations, and IPC handlers
 - **Status:** Complete (2026-03-28, commit aee3cc6)
+
+---
+
+## Distribution & Packaging
+
+### macOS Build
+- Production build via `npm run dist:mac` produces DMG + ZIP in `dist/`
+- electron-builder configuration for macOS arm64
+- Ad-hoc code signing required after build: `codesign --force --deep --sign - dist/mac-arm64/ToDoozy.app`
+- **Status:** Complete (2026-03-31)
+
+### Multi-User Data Isolation
+- All data (tasks, projects, labels, statuses, settings) is scoped per authenticated user via `user_id` columns
+- Multiple users can share the same database without data leakage
+- Repositories filter all queries by the current authenticated user
+- **Status:** Complete (2026-03-31)
 
 ---
 

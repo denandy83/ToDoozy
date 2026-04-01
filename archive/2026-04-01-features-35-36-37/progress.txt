@@ -1,0 +1,26 @@
+# Ralph Progress Log
+Started: Mon Mar 30 22:22:55 CEST 2026
+---
+
+## Story #38 — Smart Recurrence Picker
+**Status:** passes=true, tested=true
+
+**What was built:**
+- Shared recurrence utility (src/shared/recurrenceUtils.ts) with parse, serialize, describe, getNextOccurrence, isValidRecurrence
+- RecurrenceConfig type in shared/types.ts
+- Migration_10 to clear all old-format recurrence_rule values
+- Structured recurrence picker UI replacing free-text input: preset buttons (None/Daily/Weekly/Monthly), expandable picker with interval/unit/weekday toggles/month options/year options, Fixed/After completion toggle, end date with DatePicker, live preview with next occurrence
+- completeRecurringTask in TaskRepository: clones task with next due date, copies labels and subtasks, resets statuses
+- IPC handler + preload bridge for task:complete-recurring
+- Task store detects done-status on recurring tasks and auto-clones, stores lastRecurringClone for toast
+- AppLayout watches lastRecurringClone and shows toast with "Go to task" action
+- TaskRow shows Repeat icon with tooltip for recurring tasks
+- Context menu uses new canonical format; "Custom..." opens detail panel
+- Auto-sets due_date to today when recurrence applied to task without due date
+- MCP server tool description updated with canonical format documentation
+- 46 tests covering all recurrence utility functions
+
+**Decisions:**
+- Used store field `lastRecurringClone` + AppLayout useEffect for toast instead of trying to call useToast from the store
+- "Custom..." in context menu opens the detail panel by selecting the task (simplest approach; focusing field index 6 would require more plumbing)
+- Kept weekday order as Mon-Sun in the picker (standard European order) but sun is still index 0 in WEEK_DAYS array for compatibility

@@ -43,6 +43,18 @@ Never run migrations or destructive operations against the production database. 
 - `npm run typecheck` — TypeScript type checking
 - `npm run test` — Run Vitest tests
 - `npm run lint` — ESLint check
+- `npm run dist:mac` — Build macOS distributable (DMG + ZIP in `dist/`)
+
+## Distribution Build
+After `npm run dist:mac`, the app must be re-signed before it will launch on macOS:
+```bash
+codesign --force --deep --sign - dist/mac-arm64/ToDoozy.app
+```
+If installing to `/Applications`, re-sign there instead:
+```bash
+codesign --force --deep --sign - /Applications/ToDoozy.app
+```
+Without this step, macOS rejects the app at launch due to mismatched ad-hoc code signatures between the main binary and Electron Framework. The DMG itself also needs re-signing if you plan to redistribute it after this fix — rebuild with `npm run dist:mac` and sign the `.app` inside `dist/mac-arm64/` **before** distributing.
 
 ## Scope File (`scope.md`)
 When investigating bugs, planning features, or exploring the codebase for any multi-file change:
@@ -106,6 +118,7 @@ At the start of every session (or when resuming after a new day), check if `.doc
    - Update `FEATURES.md` for any new features (add or update the relevant section)
    - Update `README.md` feature table if significant new features were added
    - Append a summary entry to `DEVLOG.md`
+   - Update the in-app "What's New" setting (see below)
 3. Clear the processed entries from `pending-changes.md` (keep the file header/format section)
 4. Write the current HEAD commit hash to `.last-documented-commit`
 5. Delete `.docs-pending`
@@ -122,6 +135,15 @@ The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It
 - `RELEASE_NOTES.md` — user-facing daily release notes. Append after every user-visible change.
 - `pending-changes.md` — working file, session-scoped. Written by /fix and /feature skills + SessionEnd hook. Cleared after processing.
 - `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
+
+### In-App "What's New" (Settings → What's New)
+The "What's New" tab in Settings displays a full changelog powered by the `whats_new` global setting (user_id = `''`). The content uses the same markdown format as `CHANGELOG.md`: `## date` headers, `### category` headers (Fixed, Added, Removed, Internal), and `- **Title** — Description` bullets. Most recent date first. After processing pending docs, write the full `CHANGELOG.md` content (minus the title/intro lines) to this setting. Use the MCP `set_whats_new` tool, or write directly to SQLite:
+```bash
+DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
+CONTENT=$(sed '1,5d' CHANGELOG.md | sed "s/'/''/g")
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '$CONTENT');"
+```
+A notification dot appears on the tab when new content is available (compares the first `## date` header against the user's `whats_new_seen` setting). The `/fix` and `/feature` skills must also update this setting after each fix/feature is confirmed.
 
 ## Issue Tracking via ToDoozy MCP
 When you encounter a bug, improvement idea, or feature request that is NOT being fixed right now, create a task in the user's ToDoozy app via MCP tools. Use the Personal project (`1b8d1825-8f5f-48da-b1d3-1dd2e4554d85`) and assign the appropriate labels:

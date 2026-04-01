@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { withTransaction } from '../database'
+import { withTransaction } from '../database/transaction'
 import type { Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
 
 export class StatusRepository {

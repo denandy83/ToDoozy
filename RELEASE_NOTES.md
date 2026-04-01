@@ -4,9 +4,25 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-04-01
+
+- **Launch at login** — Toggle in Settings > General to start ToDoozy automatically when you log into your Mac.
+- **Command palette smart filters** — The search palette (CMD+K) now supports inline shortcuts: type `p:` for priority, `@` for labels, `/` for projects, `d:` for dates, or `s:` for statuses. Selections appear as filter chips that combine with text search. Press Backspace on empty input to remove the last chip.
+- **Gemini MCP setup** — MCP settings now include Google AI Studio (Gemini) instructions alongside Claude Code and Claude Desktop.
+- **Tray icon fix** — The system tray icon now appears correctly in the installed/packaged app.
+- **MCP server fix** — The MCP server now works correctly in the built app for Claude Desktop and other MCP clients.
+
 ## 2026-03-31
 
 - **Smart Recurrence Picker** — The recurrence input is now a structured picker instead of a free-text field. Choose interval, unit (days/weeks/months/years), specific days, Fixed or After-completion mode, and an optional end date. A live preview shows the human-readable rule and next occurrence. Completing a recurring task now automatically creates a clone with the next due date. Task rows show a repeat icon with tooltip.
+- **Reference URL in quick-add** — Use the `r:` operator in quick-add or any task input to attach a reference URL inline. The quick-add window also now has a description toggle for adding notes.
+- **Cmd+K archive search** — The command palette now includes an "include archived" checkbox so you can search across archived tasks. Results show project names and archive indicators for clarity.
+- **Distribution-ready build** — ToDoozy can now be built as a standalone macOS app (DMG + ZIP) for distribution. See the README for build and code-signing instructions.
+- **Multi-user data isolation** — All tasks, projects, labels, and settings are now scoped per user. Multiple users can safely share the same database without seeing each other's data.
+- **Fix: Autocomplete ranking** — Exact and prefix matches now appear above substring matches in label and project autocomplete dropdowns.
+- **Fix: Status cycling** — Fixed focus loss and scroll jumping when cycling task status via keyboard. Also fixed the click-opens-detail setting and My Day default project assignment.
+- **Fix: Label color defaults** — New labels now default to the least-used color from the palette.
+- **Fix: In-progress status** — Removed the mandatory in-progress status requirement and fixed done task positioning in My Day.
 
 ## 2026-03-30
 

@@ -1,0 +1,25 @@
+{
+  "project": "ToDoozy",
+  "branchName": "ralph/feature-34-reference-url",
+  "stories": [
+    {
+      "id": "34",
+      "title": "Task Reference URL",
+      "description": "Add a single reference URL field to each task, displayed directly below the title in the task detail panel.\n\n**Database:**\n- Add `reference_url TEXT` column to `tasks` table via migration\n\n**Detail Panel UI:**\n- Below the title (data-detail-field=\"0\"), add a reference URL field (data-detail-field between title and status)\n- Empty state: subtle \"Add reference...\" placeholder text, same style as other muted placeholders\n- With URL: display as clickable link (truncated to domain + path), with an X button to clear\n- Click the link \u2192 opens in default browser via shell.openExternal\n- URLs without http:// or https:// prefix are auto-prefixed with https:// when opened (so www.google.com works)\n- Auto-save with 1s debounce (same pattern as title and description)\n- In the Tab order between title and status\n\n**Edge cases:**\n- Very long URLs: truncated display with ellipsis, full URL shown on hover (title attribute or CSS tooltip)\n- Invalid/non-URL text: stored as-is but not clickable (no underline, no click handler)\n- Empty string after clearing: stored as null\n\n**Keyboard:**\n- Tab from title \u2192 reference URL field \u2192 status\n- Enter in the field: blur (same as title)\n- Escape: blur without saving\n\nBefore marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test \u2014 all existing and new tests must pass. Run npm run typecheck \u2014 zero errors.",
+      "spec_section": "N/A",
+      "acceptance_criteria": [
+        "Task detail panel shows a reference URL field below the title",
+        "Typing a URL saves it to the task with 1s debounce autosave",
+        "Clicking a saved URL opens it in the default browser",
+        "URLs without http/https prefix are auto-prefixed with https:// when opened",
+        "X button clears the URL",
+        "Field is keyboard-accessible and in the Tab order between title and status",
+        "URL persists across app restarts (stored in SQLite via reference_url column)",
+        "Works in both project views and My Day"
+      ],
+      "passes": false,
+      "tested": false,
+      "verified": false
+    }
+  ]
+}

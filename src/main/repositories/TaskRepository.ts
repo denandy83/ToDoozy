@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
-import { withTransaction } from '../database'
+import { withTransaction } from '../database/transaction'
 import { parseRecurrence, getNextOccurrence } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {

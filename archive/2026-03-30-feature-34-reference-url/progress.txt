@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: Mon Mar 30 12:44:51 CEST 2026
+---
+
+## Story #34 — Task Reference URL
+- Added `reference_url TEXT` column via migration_9
+- Created DetailReferenceUrl component with edit/display/clear states
+- Added shell:openExternal IPC channel (preload bridge + main handler)
+- Integrated into DetailPanel between title (field 0) and status (field 2), renumbered all field indices
+- URLs without protocol auto-prefixed with https:// when opened
+- Invalid text (no dots, has spaces) stored but not clickable
+- Escape in the field reverts unsaved changes and blurs
+- Fixed 3 test files that needed the new `reference_url: null` in their Task mock factories
+- All 252 tests pass, typecheck clean

@@ -1,0 +1,19 @@
+# Ralph Progress Log
+Started: Wed Mar 25 15:29:50 CET 2026
+---
+
+## 2026-03-25 — Story #33: In-App Help & Keyboard Shortcuts
+
+**Status:** Implemented
+
+**What was built:**
+- `KeyboardShortcutsModal.tsx` — centered modal with 4 shortcut sections (Navigation, Tasks, Detail Panel, Global). Reads `app_toggle_shortcut` from settings so configurable shortcuts always reflect current config.
+- `HelpSettingsContent.tsx` — comprehensive Help tab with full feature documentation (tasks, subtasks, projects, labels, priorities, kanban, pomodoro, attachments, MCP, smart input, shortcuts table).
+- Sidebar footer: added `?` (HelpCircle) button as its own row, with `onHelp` prop.
+- UnifiedSettingsModal: added `'help'` tab, renders HelpSettingsContent.
+- AppLayout: added `helpOpen` state, global `?` key listener (skips when focused in inputs/textareas/contenteditable), passes `onHelp` to Sidebar, renders KeyboardShortcutsModal.
+
+**Decisions:**
+- Previous session had committed only metadata (prd.json + implemented-stories.md) without the actual feature files — rebuilt from scratch.
+- Pending docs from .docs-pending were session-end fallback entries, all already captured in CHANGELOG/RELEASE_NOTES — cleared without re-documenting.
+- Pre-existing test failures (smartInputParser, shortcut-utils, worktree repo tests) unrelated to this feature. No new tests needed (UI components only).

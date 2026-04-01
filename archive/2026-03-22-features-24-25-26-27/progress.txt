@@ -1,0 +1,105 @@
+# Ralph Progress Log
+Started: Sat Mar 21 11:11:37 CET 2026
+---
+
+## Story #24: macOS Tray Icon
+- Generated monochrome template icons (iconTemplate.png 16x16, iconTemplate@2x.png 32x32) from app icon using Pillow
+- Created `src/main/tray.ts` for tray icon management (left-click menu with My Day tasks, right-click context menu, badge count)
+- Extracted pure utility functions to `src/main/tray-utils.ts` for testability (getBucketForStatus, truncateTitle, classifyMyDayTasks)
+- Added IPC handlers: `tray:setUserId`, `tray:refresh` — renderer sets user ID on auth, refreshes badge on task store changes
+- Added preload bridge: `TrayAPI` with setUserId, refresh, onNavigateToTask, onNavigateToMyDay
+- Tray left-click shows Quick Add Task + up to 3 in-progress + up to 3 open My Day tasks; "View all in My Day..." if more exist
+- Tray right-click: Open ToDoozy, Add Task, Quit ToDoozy
+- Window close hides to tray (was already implemented); Cmd+Q quits; dock icon re-opens
+- Clicking a task in tray navigates to My Day and selects that task
+- 15 unit tests for tray-utils, all passing
+- Pre-existing test failures: better-sqlite3 node version mismatch (54 repo tests), 3 parser/shortcut tests — not introduced by this story
+
+## Story #25: Task Templates & Project Templates
+- Added migration_5: `project_templates` table (id, name, color, owner_id, data JSON, timestamps)
+- Created `ProjectTemplateRepository` with CRUD (findById, findByOwnerId, findAll, create, update, delete)
+- Added `saveAsTemplate` to TaskRepository: copies task + subtasks + labels as template, strips dates/snooze/completion, resets statuses to default
+- Added `findAllTemplates` to TaskRepository: global (cross-project) template query
+- Types: `ProjectTemplate`, `ProjectTemplateData`, `ProjectTemplateTask`, create/update inputs
+- IPC handlers: `tasks:findAllTemplates`, `tasks:saveAsTemplate`, full `projectTemplates:*` CRUD
+- Preload bridge: `TasksAPI.findAllTemplates/saveAsTemplate`, `ProjectTemplatesAPI` interface
+- Created `useTemplateStore` Zustand store for project template state, hydrated on auth
+- Context menu: "Save as Template" option (LayoutTemplate icon) before Duplicate
+- Project header: LayoutTemplate icon button next to project name for "Save as Project Template"
+- TemplatesView: two sections (Task Templates, Project Templates) with search bar filtering both
+- Task template actions: Use (with project picker modal), Edit (opens detail panel), Delete
+- Project template actions: Deploy (wizard), Delete
+- UseTemplateModal: project picker with color dots, creates task+subtasks in target project, auto-creates missing labels
+- DeployProjectTemplateWizard: 5-step wizard (Name & Color → Statuses → Labels → Tasks → Review & Create)
+  - Each step is editable (add/remove/rename statuses, labels, tasks)
+  - Creates real project with all statuses, labels, tasks, memberships
+  - Navigates to new project after creation
+- Detail panel: shows "Template" header when editing templates; hides due date, snooze, status, completed date, activity log for templates
+- Templates are now global (loaded via `findAllTemplates` across all projects)
+- Typecheck: zero errors
+- Tests: same 5 pass / 4 fail as before (pre-existing better-sqlite3 issue)
+
+## Story #26: MCP Server for AI Integration
+- Created standalone MCP server at `src/main/mcp-server.ts` using @modelcontextprotocol/sdk with stdio transport
+- 35 MCP tools implemented: all task CRUD, metadata setters, My Day, subtasks, projects, labels, statuses, search, templates
+- MCP server talks directly to the same SQLite database (`~/Library/Application Support/todoozy/todoozy.db`)
+- Added `TaskRepository.search()` method with dynamic SQL filters (project, status, priority, label, due date, keyword)
+- Updated `electron.vite.config.ts` for multi-entry build (outputs both `index.js` and `mcp-server.js`)
+- Added MCP settings tab to UnifiedSettingsModal with enable/disable toggle, server path display, and Copy Config button
+- Added IPC handler `mcp:getInfo` and preload bridge for MCP settings
+- 7 new tests for TaskRepository.search() — all pass
+- Typecheck: zero errors
+- Tests: 254 pass, 3 pre-existing failures (shortcut-utils, smartInputParser)
+- Decision: `electron-vite rebuild-native` was already broken before changes (pre-existing env issue)
+
+## Story #27: Rich Text Editor with Tiptap
+- Replaced textarea + markdown preview in DetailDescription.tsx with Tiptap WYSIWYG editor
+- Installed: @tiptap/react, @tiptap/starter-kit, @tiptap/extension-link, @tiptap/extension-image, @tiptap/extension-task-list, @tiptap/extension-task-item, @tiptap/extension-placeholder, tiptap-markdown
+- Created 4 editor components: TiptapEditor, EditorToolbar (fixed toolbar), BubbleToolbar (floating inline), SlashCommandMenu, LinkPopover
+- Fixed toolbar: heading dropdown (H1/H2/H3), bullet/numbered/checklist, code block, horizontal rule, image, attach file (greyed out)
+- Floating bubble menu on text selection: bold, italic, strikethrough, inline code, link
+- Slash commands: type / to open menu with all block types, arrow keys navigate, Enter selects, Escape dismisses
+- Link editing: Cmd+K inserts/edits link when editor focused, opens command palette otherwise; clicking link shows popover with edit/remove
+- Auto-link detection via tiptap link extension with autolink: true
+- Image paste: base64 encoding with 10MB limit
+- Checklist: interactive checkboxes stored as - [ ] / - [x] in markdown
+- Code blocks: monospace font, no syntax highlighting; Cmd+Enter exits
+- 1-second autosave debounce + flush on blur
+- Escape blurs the editor
+- Stores markdown in DB via tiptap-markdown (serialize on save, parse on load) — no migration needed
+- Updated AppLayout Cmd+K handler to skip when tiptap editor is focused
+- Added comprehensive Tiptap CSS styles to main.css
+- Typecheck: zero errors
+- Tests: 254 pass, 3 pre-existing failures unchanged
+
+## Story #28 — Global App Toggle Shortcut (2026-03-21)
+- Added DEFAULT_APP_TOGGLE_SHORTCUT (Cmd+Shift+B) to shortcut-utils.ts
+- Added registerAppToggleShortcut() mirroring quick-add pattern in main/index.ts
+- Added app-toggle:updateShortcut IPC handler with same reserved shortcut validation
+- Exposed appToggle.updateShortcut on preload bridge
+- Refactored ShortcutRecorder into generic ShortcutRecorderBase with props for reuse
+- Added AppToggleShortcutRecorder to Settings > General
+- Toggle behavior: focused → hide to tray; not focused → show/restore/focus
+- Auth check: shortcut only works with active auth session
+
+## Story #29: Pomodoro Timer
+- Created `src/renderer/src/shared/stores/timerStore.ts` — Zustand store managing all timer state (work/break phases, repetitions, perpetual mode)
+- Timer store tracks: isRunning, isPaused, phase (work/break), workSeconds/breakSeconds, currentRep/totalReps, perpetual mode, notification settings
+- Created `src/renderer/src/shared/hooks/useTimerSettings.ts` — reads timer config from settings store (presets, break duration, repetition, notifications)
+- Created `src/renderer/src/shared/components/TimerPlayButton.tsx` — play button + popup for starting timers on task hover
+- Play button appears after task title in TaskRow; when repetition mode off, starts default timer immediately; when on, shows popup for rep count
+- Added `TimerSubmenu` to context menu — right-click → Start Timer flyout with all configured presets
+- Added `TimerSettingsContent.tsx` — Settings > Timer tab with: presets CRUD, default timer, break duration, auto-break, repetition mode, perpetual mode, sound/notification toggles
+- Added Timer tab to UnifiedSettingsModal
+- Extended preload bridge with `TimerAPI`: updateTimer, clearTimer, minimizeToTray, navigateToTask, onPause/onResume/onStop
+- Added IPC handlers: timer:updateTimer, timer:clearTimer, timer:minimizeToTray, timer:navigateToTask
+- Updated tray.ts to support timer mode: shows countdown in menu bar, timer menu with Pause/Resume/Stop controls, hides normal My Day menu during timer
+- Timer completion: plays Web Audio API bell sound (configurable), shows system notification (clickable to navigate to task), logs focus session to activity log
+- Break timer auto-starts after work timer completes (configurable)
+- Repetition mode cycles work-break for N reps; perpetual mode runs until manually stopped
+- Auto-moves task to first in-progress status when timer starts (if task was in not-started state)
+- Wired up tray timer controls (pause/resume/stop) to renderer via IPC events in App.tsx
+- Default presets: 10 min, 25 min, 50 min; custom presets addable/removable in settings
+- Timer state is in-memory only (not persisted across app restarts)
+- Wrote 14 tests for timer store (formatTimeRemaining, DEFAULT_TIMER_PRESETS, store lifecycle)
+- All new and existing tests pass, zero typecheck errors

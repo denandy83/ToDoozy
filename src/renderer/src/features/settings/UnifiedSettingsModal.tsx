@@ -21,7 +21,7 @@ import { HelpSettingsContent } from '../help/HelpSettingsContent'
 import type { Project } from '../../../../shared/types'
 import { MemberSettings } from '../collaboration/MemberSettings'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'members' | 'help'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'whatsnew' | 'help'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -161,7 +161,7 @@ export function UnifiedSettingsModal({
     { key: 'mcp', label: 'MCP' },
     { key: 'timer', label: 'Timer' },
     { key: 'notifications', label: 'Notifications' },
-    ...(selectedProject?.is_shared === 1 ? [{ key: 'members' as const, label: 'Members' }] : []),
+    { key: 'whatsnew', label: "What's New" },
     { key: 'help', label: 'Help' }
   ]
 
@@ -181,13 +181,14 @@ export function UnifiedSettingsModal({
             <button
               key={tab.key}
               onClick={() => handleTabChange(tab.key)}
-              className={`rounded-lg px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              className={`relative rounded-lg px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest transition-colors ${
                 activeTab === tab.key
                   ? 'bg-accent/12 text-accent'
                   : 'text-muted hover:bg-foreground/6'
               }`}
             >
               {tab.label}
+              {tab.key === 'whatsnew' && <WhatsNewDot />}
             </button>
           ))}
 
@@ -236,8 +237,8 @@ export function UnifiedSettingsModal({
           {activeTab === 'notifications' && (
             <NotificationsSettingsContent />
           )}
-          {activeTab === 'members' && selectedProject && (
-            <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
+          {activeTab === 'whatsnew' && (
+            <WhatsNewContent />
           )}
           {activeTab === 'help' && (
             <HelpSettingsContent />
@@ -423,6 +424,176 @@ function GeneralSettings(): React.JSX.Element {
       <AutoArchiveSetting />
       <ShortcutRecorder />
       <AppToggleShortcutRecorder />
+    </div>
+  )
+}
+
+function WhatsNewDot(): React.JSX.Element | null {
+  const whatsNew = useSetting('whats_new') ?? ''
+  const lastSeen = useSetting('whats_new_seen') ?? ''
+
+  if (!whatsNew) return null
+  // Compare the first ## date header to see if there's new content
+  const firstHeader = whatsNew.split('\n').find((l) => l.startsWith('## ')) ?? ''
+  if (lastSeen === firstHeader) return null
+
+  return (
+    <span className="absolute right-1 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full bg-accent" />
+  )
+}
+
+function WhatsNewContent(): React.JSX.Element {
+  const whatsNew = useSetting('whats_new') ?? ''
+  const { setSetting } = useSettingsStore()
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
+
+  // Mark as seen when the tab is viewed
+  useEffect(() => {
+    if (whatsNew) {
+      const firstLine = whatsNew.split('\n').find((l) => l.startsWith('## ')) ?? ''
+      setSetting('whats_new_seen', firstLine)
+    }
+  }, [whatsNew, setSetting])
+
+  // Parse markdown-style changelog into structured sections
+  const sections = useMemo(() => {
+    if (!whatsNew) return []
+    const result: Array<{
+      date: string
+      categories: Array<{ name: string; items: Array<{ title: string; desc: string }> }>
+    }> = []
+
+    let currentSection: (typeof result)[0] | null = null
+    let currentCategory: { name: string; items: Array<{ title: string; desc: string }> } | null = null
+
+    for (const line of whatsNew.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === '---') continue
+
+      // ## Date header
+      if (trimmed.startsWith('## ')) {
+        if (currentCategory && currentSection) currentSection.categories.push(currentCategory)
+        if (currentSection) result.push(currentSection)
+        currentSection = { date: trimmed.slice(3).trim(), categories: [] }
+        currentCategory = null
+        continue
+      }
+
+      // ### Category header (Fixed, Added, Removed, Internal)
+      if (trimmed.startsWith('### ')) {
+        if (currentCategory && currentSection) currentSection.categories.push(currentCategory)
+        currentCategory = { name: trimmed.slice(4).trim(), items: [] }
+        continue
+      }
+
+      // - **Title** — Description
+      if (trimmed.startsWith('- ') && currentCategory) {
+        const content = trimmed.slice(2)
+        const boldMatch = content.match(/^\*\*(.+?)\*\*\s*[—–-]\s*(.+)$/)
+        if (boldMatch) {
+          currentCategory.items.push({ title: boldMatch[1], desc: boldMatch[2] })
+        } else {
+          currentCategory.items.push({ title: content.replace(/\*\*/g, ''), desc: '' })
+        }
+      }
+    }
+
+    if (currentCategory && currentSection) currentSection.categories.push(currentCategory)
+    if (currentSection) result.push(currentSection)
+
+    return result
+  }, [whatsNew])
+
+  const categoryColors: Record<string, string> = {
+    Added: '#6366f1',
+    Fixed: '#22c55e',
+    Removed: '#ef4444',
+    Internal: '#888888'
+  }
+
+  const categoryOrder: Record<string, number> = { Added: 0, Fixed: 1, Removed: 2, Internal: 3 }
+
+  // Collect all unique category names across sections
+  const allCategories = useMemo(() => {
+    const cats = new Set<string>()
+    for (const s of sections) {
+      for (const c of s.categories) cats.add(c.name)
+    }
+    return [...cats].sort((a, b) => (categoryOrder[a] ?? 9) - (categoryOrder[b] ?? 9))
+  }, [sections])
+
+  // Filter sections: only show categories matching activeFilter, skip empty date sections
+  const filteredSections = useMemo(() => {
+    if (!activeFilter) return sections
+    return sections
+      .map((s) => ({
+        ...s,
+        categories: s.categories.filter((c) => c.name === activeFilter)
+      }))
+      .filter((s) => s.categories.length > 0)
+  }, [sections, activeFilter])
+
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{"What's New"}</p>
+
+      {/* Category filter bar */}
+      {allCategories.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          <button
+            onClick={() => setActiveFilter(null)}
+            className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+              activeFilter === null
+                ? 'bg-accent text-accent-fg'
+                : 'text-muted hover:bg-foreground/6'
+            }`}
+          >
+            All
+          </button>
+          {allCategories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveFilter(activeFilter === cat ? null : cat)}
+              className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                activeFilter === cat
+                  ? 'text-white'
+                  : 'text-muted hover:bg-foreground/6'
+              }`}
+              style={activeFilter === cat ? { backgroundColor: categoryColors[cat] ?? '#888' } : undefined}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filteredSections.length > 0 ? (
+        filteredSections.map((section) => (
+          <div key={section.date} className="flex flex-col gap-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent">
+              {section.date}
+            </p>
+            {[...section.categories].sort((a, b) => (categoryOrder[a.name] ?? 9) - (categoryOrder[b.name] ?? 9)).map((cat) => (
+              <div key={cat.name} className="flex flex-col gap-1">
+                <p
+                  className="text-[9px] font-bold uppercase tracking-wider"
+                  style={{ color: categoryColors[cat.name] ?? 'var(--muted)' }}
+                >
+                  {cat.name}
+                </p>
+                {cat.items.map((item, j) => (
+                  <div key={j} className="flex flex-col gap-0.5 py-1.5 border-b border-border/30 last:border-0">
+                    <p className="text-sm font-medium text-foreground">{item.title}</p>
+                    {item.desc && <p className="text-sm font-light text-muted">{item.desc}</p>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ))
+      ) : (
+        <p className="text-sm font-light text-muted">No updates yet.</p>
+      )}
     </div>
   )
 }
@@ -789,6 +960,11 @@ function ProjectsTab({
               </SortableContext>
             </DndContext>
           </div>
+
+          {/* Members — only for shared projects */}
+          {selectedProject.is_shared === 1 && (
+            <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
+          )}
 
           {/* Delete — always last */}
           <ProjectDeleteSection

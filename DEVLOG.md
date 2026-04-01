@@ -4,6 +4,43 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-04-01 — Build fixes, launch-at-login, command palette operators
+
+**Session type:** Bug fixes + feature enhancements
+
+**What was built:**
+- **Tray icon fix** — Icon template PNGs added via `extraResources` in electron-builder; path resolution updated to `process.resourcesPath` for packaged builds.
+- **MCP server fix** — Broke the `electron` dependency chain by extracting `withTransaction` into `database/transaction.ts` so the MCP server's bundled chunk no longer imports Electron. Also fixed server path to use `app.getAppPath()`.
+- **Launch at login** — New IPC handler + preload bridge for `app.setLoginItemSettings()`, UI toggle in General settings.
+- **Gemini MCP instructions** — Added to McpSettingsContent alongside existing Claude Code/Desktop instructions.
+- **Command palette inline operators** — Integrated `detectOperator` from smart input parser into CMD+K. Supports `p:`, `@`, `/`, `d:`, `s:` with popup suggestions and filter chips. Added `ExternalFilters` interface to search hook.
+- **Removed custom recurrence** — Stripped non-functional "Custom" button from detail panel and context menu.
+- **My Day status label** — Hide `[In Progress]` label when it matches the bucket name.
+- **Codesign docs** — Added `codesign --force --deep --sign -` step to CLAUDE.md build instructions.
+
+---
+
+## 2026-03-31 — Features, fixes, and distribution packaging
+
+**Session type:** Feature implementation + bug fixes + infrastructure
+
+**What was built:**
+- **Smart Recurrence Picker (Story #38)** — Structured picker UI, backend cloning logic, context menu integration, 46 tests.
+- **Reference URL in quick-add** — `r:` operator for smart input; description toggle in quick-add window.
+- **Cmd+K archive search** — "Include archived" checkbox and project/archive indicators in command palette results.
+- **Distribution-ready build packaging** — electron-builder config for macOS DMG + ZIP, code signing instructions.
+- **Multi-user data isolation** — All data scoped per authenticated user via `user_id` columns across all repositories.
+
+**Fixes:**
+- Autocomplete ranking: exact/prefix matches above substring (0c44196)
+- Status cycling focus/scroll, click-opens-detail setting, My Day default project (5597ff5)
+- Default new label color to least-used from palette (2883f5f)
+- Removed mandatory in-progress status, fixed My Day done task positioning (eabe194)
+
+**Commits:** 3fbb5ed, 0c44196, c1d43fe, 95444c1, cc3bec1, 5597ff5, 5eacf7b, 73a64e1, 2883f5f, eabe194
+
+---
+
 ## 2026-03-31 — Smart Recurrence Picker (Story #38)
 
 **Stories implemented:** #38

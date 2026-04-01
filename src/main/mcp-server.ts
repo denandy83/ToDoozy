@@ -515,6 +515,20 @@ const tools: ToolDef[] = [
       },
       required: ['template_id']
     }
+  },
+
+  // Settings — What's New
+  {
+    name: 'set_whats_new',
+    description:
+      'Update the in-app "What\'s New" changelog shown in Settings. Content should be markdown-formatted: ## date headers, ### category headers (Fixed, Added, Removed, Internal), and - **Title** — Description bullet items. Most recent date first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        content: str('Markdown changelog content (## dates, ### categories, - **Title** — desc)')
+      },
+      required: ['content']
+    }
   }
 ]
 
@@ -1075,6 +1089,14 @@ const handlers: Record<string, Handler> = {
 
     deployTemplate(data, projectId, user.id)
     return project
+  },
+
+  // ── Settings — What's New ────────────────────────────────────────
+  set_whats_new(args) {
+    const content = requireStr(args, 'content')
+    // Write as global setting (user_id = '' for all users)
+    repos.settings.set('', 'whats_new', content)
+    return { success: true, content }
   }
 }
 

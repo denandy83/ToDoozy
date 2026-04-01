@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { withTransaction } from '../database'
+import { withTransaction } from '../database/transaction'
 import type { Setting } from '../../shared/types'
 
 export class SettingsRepository {
