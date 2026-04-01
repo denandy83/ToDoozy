@@ -444,6 +444,32 @@ export async function declineInvite(token: string): Promise<void> {
 }
 
 /**
+ * Discover shared projects the user is a member of in Supabase
+ * but doesn't have locally. Returns project IDs to sync down.
+ */
+export async function discoverRemoteMemberships(_userId: string): Promise<string[]> {
+  const supabase = await getSupabase()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return []
+
+  const { data: memberships, error } = await supabase
+    .from('shared_project_members')
+    .select('project_id')
+    .eq('user_id', session.user.id)
+
+  if (error || !memberships) return []
+
+  const missingIds: string[] = []
+  for (const m of memberships) {
+    const local = await window.api.projects.findById(m.project_id)
+    if (!local) {
+      missingIds.push(m.project_id)
+    }
+  }
+  return missingIds
+}
+
+/**
  * Sync all shared project data from Supabase to local SQLite.
  */
 export async function syncProjectDown(projectId: string, userId: string): Promise<void> {

@@ -38,18 +38,19 @@ function App(): React.JSX.Element {
     }
   }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
 
-  // On startup, sync all shared projects from Supabase
+  // On startup, sync all shared projects from Supabase + discover missing ones
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return
     const syncShared = async (): Promise<void> => {
       try {
-        const { syncProjectDown: syncDown, subscribeToProject: subProject } = await import('./services/SyncService')
+        const { syncProjectDown: syncDown, subscribeToProject: subProject, discoverRemoteMemberships } = await import('./services/SyncService')
+
+        // Sync existing local shared projects
         const projects = useProjectStore.getState().projects
         for (const p of Object.values(projects)) {
           if (p.is_shared === 1) {
             await syncDown(p.id, currentUser.id).catch((err) => {
               console.warn(`[Startup] Failed to sync shared project ${p.name}:`, err)
-              // If project no longer exists in Supabase, mark as unshared
               if (String(err).includes('not found')) {
                 window.api.projects.update(p.id, { is_shared: 0 })
               }
@@ -57,14 +58,26 @@ function App(): React.JSX.Element {
             subProject(p.id)
           }
         }
+
+        // Discover projects we're a member of in Supabase but don't have locally
+        const missingIds = await discoverRemoteMemberships(currentUser.id)
+        if (missingIds.length > 0) {
+          for (const pid of missingIds) {
+            await syncDown(pid, currentUser.id).catch((err) =>
+              console.warn(`[Startup] Failed to sync discovered project ${pid}:`, err)
+            )
+            subProject(pid)
+          }
+          // Rehydrate projects to show newly discovered ones
+          await hydrateProjects(currentUser.id)
+        }
       } catch (err) {
         console.error('[Startup] Failed to sync shared projects:', err)
       }
     }
-    // Small delay to ensure projects are hydrated first
     const timeout = setTimeout(syncShared, 2000)
     return () => clearTimeout(timeout)
-  }, [isAuthenticated, currentUser])
+  }, [isAuthenticated, currentUser, hydrateProjects])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
@@ -269,6 +282,9 @@ function App(): React.JSX.Element {
       showNextInvite()
     } catch (err) {
       console.error('Failed to accept invite:', err)
+      // Show error — don't silently dismiss
+      setInviteState((prev) => prev ? { ...prev, expired: false } : null)
+      alert(`Failed to join project: ${err instanceof Error ? err.message : 'Unknown error'}. Try logging out and back in.`)
       showNextInvite()
     }
   }
