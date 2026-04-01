@@ -114,6 +114,15 @@ export class ProjectRepository {
       .run(projectId, userId, role, invitedBy ?? null, new Date().toISOString())
   }
 
+  updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): void {
+    const sets: string[] = []
+    const values: (string | null)[] = []
+    if (updates.display_color !== undefined) { sets.push('display_color = ?'); values.push(updates.display_color) }
+    if (updates.display_initials !== undefined) { sets.push('display_initials = ?'); values.push(updates.display_initials) }
+    if (sets.length === 0) return
+    this.db.prepare(`UPDATE project_members SET ${sets.join(', ')} WHERE project_id = ? AND user_id = ?`).run(...values, projectId, userId)
+  }
+
   removeMember(projectId: string, userId: string): boolean {
     const result = this.db
       .prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?')

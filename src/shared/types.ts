@@ -30,6 +30,8 @@ export interface ProjectMember {
   role: string
   invited_by: string | null
   joined_at: string
+  display_color: string | null
+  display_initials: string | null
 }
 
 export interface Status {

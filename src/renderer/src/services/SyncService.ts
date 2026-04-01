@@ -527,58 +527,74 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
   }
 
-  // Sync tasks
-  const { data: tasks } = await supabase
+  // Sync tasks — create new, update existing, delete removed
+  const { data: remoteTasks } = await supabase
     .from('shared_tasks')
     .select('*')
     .eq('project_id', projectId)
 
-  if (tasks) {
-    for (const task of tasks) {
+  const remoteTaskIds = new Set<string>()
+
+  if (remoteTasks) {
+    for (const task of remoteTasks) {
+      remoteTaskIds.add(task.id)
       const existing = await window.api.tasks.findById(task.id)
-      if (!existing) {
+      const taskData = {
+        title: task.title,
+        description: task.description,
+        status_id: task.status_id,
+        priority: task.priority,
+        due_date: task.due_date,
+        parent_id: task.parent_id,
+        order_index: task.order_index,
+        assigned_to: task.assigned_to,
+        is_archived: task.is_archived,
+        completed_date: task.completed_date,
+        recurrence_rule: task.recurrence_rule,
+        reference_url: task.reference_url
+      }
+
+      if (existing) {
+        // Update existing task with remote data
+        await window.api.tasks.update(task.id, taskData)
+      } else {
+        // Ensure owner user record exists for FK
+        const ownerId = task.owner_id as string
+        const localOwner = await window.api.users.findById(ownerId)
+        if (!localOwner) {
+          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+        }
         await window.api.tasks.create({
           id: task.id,
           project_id: task.project_id,
           owner_id: task.owner_id,
-          title: task.title,
-          description: task.description,
-          status_id: task.status_id,
-          priority: task.priority,
-          due_date: task.due_date,
-          parent_id: task.parent_id,
-          order_index: task.order_index,
-          assigned_to: task.assigned_to,
           is_template: task.is_template,
-          is_archived: task.is_archived,
-          completed_date: task.completed_date,
-          recurrence_rule: task.recurrence_rule,
-          reference_url: task.reference_url
+          ...taskData
         })
       }
 
-      // Auto-create labels from label_names and associate with project
+      // Sync labels
       if (task.label_names) {
         const parsed: Array<string | { name: string; color: string }> = JSON.parse(task.label_names)
         for (const entry of parsed) {
-          // Support both old format (string) and new format ({name, color})
           const name = typeof entry === 'string' ? entry : entry.name
           const color = typeof entry === 'string' ? '#888888' : entry.color
-          // Find existing label by name for this user, or create with the sharer's color
           let label = await window.api.labels.findByName(userId, name)
           if (!label) {
-            label = await window.api.labels.create({
-              id: crypto.randomUUID(),
-              name,
-              color
-            })
+            label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
           }
-          // Ensure label is associated with this project
           await window.api.labels.addToProject(projectId, label.id).catch(() => {})
-          // Assign label to task
           await window.api.tasks.addLabel(task.id, label.id).catch(() => {})
         }
       }
+    }
+  }
+
+  // Delete local tasks that no longer exist in Supabase
+  const localTasks = await window.api.tasks.findByProjectId(projectId)
+  for (const lt of localTasks) {
+    if (!remoteTaskIds.has(lt.id)) {
+      await window.api.tasks.delete(lt.id).catch(() => {})
     }
   }
 

@@ -60,6 +60,8 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy),
     removeMember: (projectId, userId) =>
       ipcRenderer.invoke('projects:removeMember', projectId, userId),
+    updateMember: (projectId, userId, updates) =>
+      ipcRenderer.invoke('projects:updateMember', projectId, userId, updates),
     getMembers: (projectId) => ipcRenderer.invoke('projects:getMembers', projectId),
     getProjectsForUser: (userId) => ipcRenderer.invoke('projects:getProjectsForUser', userId),
     updateSidebarOrder: (updates) =>

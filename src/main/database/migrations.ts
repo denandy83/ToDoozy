@@ -389,4 +389,10 @@ const migration_12: Migration = (db) => {
   db.exec(`CREATE INDEX idx_sync_queue_created ON sync_queue(created_at)`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12]
+const migration_13: Migration = (db) => {
+  // Add customizable display properties to project members
+  db.exec(`ALTER TABLE project_members ADD COLUMN display_color TEXT`)
+  db.exec(`ALTER TABLE project_members ADD COLUMN display_initials TEXT`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13]

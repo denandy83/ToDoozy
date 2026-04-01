@@ -46,7 +46,7 @@ import { shouldForceDelete } from './shared/utils/shiftDelete'
 import { closeTopPopup } from './shared/utils/popupStack'
 import { NotificationBell, NotificationPanel, MemberAvatars } from './features/collaboration'
 import { useNotificationStore } from './shared/stores/notificationStore'
-import { uploadProjectToSupabase, subscribeToProject, setRealtimeCallback, getSharedProjectMembers } from './services/SyncService'
+import { uploadProjectToSupabase, subscribeToProject, setRealtimeCallback, getSharedProjectMembers, unsubscribeFromProject } from './services/SyncService'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -197,13 +197,18 @@ export function AppLayout(): React.JSX.Element {
     if (selectedProject?.is_shared === 1) {
       loadMembers(selectedProject.id)
       subscribeToProject(selectedProject.id)
+      let removedFlag = false
       setRealtimeCallback(async (table: string, event: string, payload: Record<string, unknown>) => {
         const userId = currentUser?.id
-        if (!userId || !selectedProject) return
+        if (!userId || !selectedProject || removedFlag) return
 
         if (table === 'member') {
           if (event === 'DELETE' && payload?.user_id === userId) {
+            // Set flag immediately to block all subsequent events in this batch
+            removedFlag = true
+            unsubscribeFromProject(selectedProject.id)
             setRemovedFromProject({ id: selectedProject.id, name: selectedProject.name })
+            return
           } else {
             loadMembers(selectedProject.id)
           }
@@ -284,6 +289,13 @@ export function AppLayout(): React.JSX.Element {
     } else {
       setProjectMembers([])
     }
+
+    // Poll members every 10s as fallback for missed Realtime events
+    let interval: ReturnType<typeof setInterval> | undefined
+    if (selectedProject?.is_shared === 1) {
+      interval = setInterval(() => loadMembers(selectedProject.id), 10_000)
+    }
+    return () => { if (interval) clearInterval(interval) }
   }, [selectedProject?.id, selectedProject?.is_shared, loadMembers])
 
   // Show toast when a recurring task clone is created
@@ -1026,6 +1038,7 @@ export function AppLayout(): React.JSX.Element {
                   <MemberAvatars
                     members={projectMembers}
                     currentUserId={currentUser?.id ?? ''}
+                    projectId={selectedProject.id}
                     onClickAvatars={() => { setSettingsOpen(true); setSettingsInitialTab('projects') }}
                   />
                 )}
@@ -1254,6 +1267,11 @@ export function AppLayout(): React.JSX.Element {
                         statusMap[s.id] = nid
                         await window.api.statuses.create({ id: nid, project_id: newId, name: s.name, color: s.color, icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default })
                       }
+                      // Copy labels to new project
+                      const oldLabels = await window.api.labels.findByProjectId(oldId)
+                      for (const l of oldLabels) {
+                        await window.api.labels.addToProject(newId, l.id).catch(() => {})
+                      }
                       // Copy tasks
                       const tasks = await window.api.tasks.findByProjectId(oldId)
                       const taskMap: Record<string, string> = {}
@@ -1261,6 +1279,11 @@ export function AppLayout(): React.JSX.Element {
                         const nid = crypto.randomUUID()
                         taskMap[t.id] = nid
                         await window.api.tasks.create({ id: nid, project_id: newId, owner_id: currentUser.id, title: t.title, description: t.description, status_id: statusMap[t.status_id] ?? t.status_id, priority: t.priority, due_date: t.due_date, parent_id: null, order_index: t.order_index, assigned_to: null, is_template: t.is_template, is_archived: t.is_archived, completed_date: t.completed_date, recurrence_rule: t.recurrence_rule, reference_url: t.reference_url })
+                        // Copy task labels
+                        const taskLabels = await window.api.tasks.getLabels(t.id)
+                        for (const tl of taskLabels) {
+                          await window.api.tasks.addLabel(nid, tl.label_id).catch(() => {})
+                        }
                       }
                       for (const t of tasks) {
                         if (t.parent_id && taskMap[t.parent_id]) {

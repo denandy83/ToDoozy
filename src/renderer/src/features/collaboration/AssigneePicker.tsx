@@ -4,31 +4,12 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { UserCircle, X } from 'lucide-react'
-import type { ProjectMember } from '../../../../shared/types'
+import { useMemberDisplay, useProjectMemberDisplays } from '../../shared/hooks/useMemberDisplay'
 
 interface AssigneePickerProps {
   projectId: string
   currentAssignee: string | null
   onAssign: (userId: string | null) => void
-}
-
-const AVATAR_COLORS = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
-  '#f97316', '#eab308', '#22c55e', '#14b8a6'
-]
-
-function getInitials(displayName: string | null, email: string): string {
-  if (displayName) {
-    const parts = displayName.split(' ').filter(Boolean)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-    return parts[0]?.slice(0, 2).toUpperCase() ?? '?'
-  }
-  return email.slice(0, 2).toUpperCase()
-}
-
-interface MemberWithProfile extends ProjectMember {
-  email: string
-  display_name: string | null
 }
 
 export function AssigneePicker({
@@ -37,26 +18,7 @@ export function AssigneePicker({
   onAssign
 }: AssigneePickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const [members, setMembers] = useState<MemberWithProfile[]>([])
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const load = async (): Promise<void> => {
-      const rawMembers = await window.api.projects.getMembers(projectId)
-      // Enrich with user info
-      const enriched: MemberWithProfile[] = []
-      for (const m of rawMembers) {
-        const user = await window.api.users.findById(m.user_id)
-        enriched.push({
-          ...m,
-          email: user?.email ?? 'unknown',
-          display_name: user?.display_name ?? null
-        })
-      }
-      setMembers(enriched)
-    }
-    if (open) load()
-  }, [projectId, open])
 
   // Close on click outside
   useEffect(() => {
@@ -83,20 +45,33 @@ export function AssigneePicker({
     return () => window.removeEventListener('keydown', handler, true)
   }, [open])
 
-  const assignedMember = members.find((m) => m.user_id === currentAssignee)
+  const assignedDisplay = useMemberDisplay(projectId, currentAssignee ?? '')
+  const allDisplays = useProjectMemberDisplays(projectId)
 
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-        title={currentAssignee ? `Assigned to ${assignedMember?.display_name ?? assignedMember?.email ?? 'someone'}` : 'Assign'}
+        className="flex items-center gap-2 rounded-md px-2 py-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+        title={currentAssignee ? `Assigned to ${assignedDisplay.display_name ?? assignedDisplay.email}` : 'Assign to member'}
       >
-        <UserCircle size={14} />
-        {currentAssignee && assignedMember && (
-          <span className="text-[10px] font-bold uppercase tracking-widest">
-            {getInitials(assignedMember.display_name, assignedMember.email)}
-          </span>
+        {currentAssignee ? (
+          <>
+            <div
+              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold uppercase text-white"
+              style={{ backgroundColor: assignedDisplay.color }}
+            >
+              {assignedDisplay.initials}
+            </div>
+            <span className="text-[12px] font-light text-foreground">
+              {assignedDisplay.display_name ?? assignedDisplay.email}
+            </span>
+          </>
+        ) : (
+          <>
+            <UserCircle size={14} />
+            <span className="text-[12px] font-light">Unassigned</span>
+          </>
         )}
       </button>
 
@@ -108,7 +83,6 @@ export function AssigneePicker({
             </h4>
           </div>
           <div className="max-h-48 overflow-y-auto py-1">
-            {/* Unassign option */}
             {currentAssignee && (
               <button
                 onClick={() => { onAssign(null); setOpen(false) }}
@@ -118,26 +92,26 @@ export function AssigneePicker({
                 <span className="text-[13px] font-light text-muted">Unassign</span>
               </button>
             )}
-            {members.map((member, index) => (
+            {Array.from(allDisplays.entries()).map(([userId, d]) => (
               <button
-                key={member.user_id}
-                onClick={() => { onAssign(member.user_id); setOpen(false) }}
+                key={userId}
+                onClick={() => { onAssign(userId); setOpen(false) }}
                 className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-foreground/6 ${
-                  member.user_id === currentAssignee ? 'bg-accent/8' : ''
+                  userId === currentAssignee ? 'bg-accent/8' : ''
                 }`}
               >
                 <div
                   className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold uppercase text-white"
-                  style={{ backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length] }}
+                  style={{ backgroundColor: d.color }}
                 >
-                  {getInitials(member.display_name, member.email)}
+                  {d.initials}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-light text-foreground">
-                    {member.display_name ?? member.email}
+                    {d.display_name ?? d.email}
                   </p>
-                  {member.display_name && (
-                    <p className="truncate text-[10px] text-muted">{member.email}</p>
+                  {d.display_name && (
+                    <p className="truncate text-[10px] text-muted">{d.email}</p>
                   )}
                 </div>
               </button>

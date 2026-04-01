@@ -529,11 +529,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   selectTask(id: string, options?: { fromContextMenu?: boolean; openPanel?: boolean }): void {
+    const currentlyOpen = get().showDetailPanel
     const showPanel = options?.fromContextMenu
-      ? get().showDetailPanel
-      : options?.openPanel !== undefined
-        ? options.openPanel
-        : true
+      ? currentlyOpen
+      : currentlyOpen || (options?.openPanel ?? true)
     set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: showPanel })
   },
 

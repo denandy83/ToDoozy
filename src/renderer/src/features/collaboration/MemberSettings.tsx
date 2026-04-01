@@ -7,6 +7,8 @@ import { UserPlus, LogOut, Unlink, Trash2, Check } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import type { Project } from '../../../../shared/types'
+import { getAvatarColor, getAvatarInitials, AVATAR_PALETTE } from '../../../../shared/avatarUtils'
+import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import {
   generateInviteLink,
   removeSharedMember,
@@ -26,20 +28,8 @@ interface MemberDisplay {
   display_name: string | null
   role: string
   joined_at: string
-}
-
-const AVATAR_COLORS = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
-  '#f97316', '#eab308', '#22c55e', '#14b8a6'
-]
-
-function getInitials(displayName: string | null, email: string): string {
-  if (displayName) {
-    const parts = displayName.split(' ').filter(Boolean)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-    return parts[0]?.slice(0, 2).toUpperCase() ?? '?'
-  }
-  return email.slice(0, 2).toUpperCase()
+  display_color: string | null
+  display_initials: string | null
 }
 
 export function MemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
@@ -52,6 +42,19 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const [emailInviteValue, setEmailInviteValue] = useState('')
   const [sendingEmailInvite, setSendingEmailInvite] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
+  const [editColor, setEditColor] = useState('')
+  const [editInitials, setEditInitials] = useState('')
+
+  const handleSaveMemberDisplay = async (userId: string): Promise<void> => {
+    const color = editColor || null
+    const initials = editInitials.trim() || null
+    await window.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
+    setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
+    invalidateMemberDisplay(project.id)
+    setEditingMemberId(null)
+    onToast('Member appearance updated')
+  }
 
   const isOwner = project.owner_id === currentUser?.id
   const isShared = project.is_shared === 1
@@ -63,9 +66,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
     }
     try {
       const data = await getSharedProjectMembers(project.id)
+      // Enrich with local display overrides
+      const localMembers = await window.api.projects.getMembers(project.id)
+      const localMap = new Map(localMembers.map((lm) => [lm.user_id, lm]))
       setMembers(data.map((m) => ({
         ...m,
-        joined_at: m.joined_at
+        joined_at: m.joined_at,
+        display_color: localMap.get(m.user_id)?.display_color ?? null,
+        display_initials: localMap.get(m.user_id)?.display_initials ?? null
       })))
     } catch (err) {
       console.error('Failed to load members:', err)
@@ -163,6 +171,11 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
             is_done: s.is_done,
             is_default: s.is_default
           })
+        }
+        // Copy labels to new project
+        const oldLabels = await window.api.labels.findByProjectId(project.id)
+        for (const l of oldLabels) {
+          await window.api.labels.addToProject(newId, l.id).catch(() => {})
         }
         // Copy tasks to new project (remap status IDs and parent IDs)
         const tasks = await window.api.tasks.findByProjectId(project.id)
@@ -291,37 +304,108 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
         <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
           Members ({members.length})
         </h4>
-        {members.map((member, index) => (
-          <div
-            key={member.user_id}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-foreground/6"
-          >
-            <div
-              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase tracking-wider text-white"
-              style={{ backgroundColor: AVATAR_COLORS[index % AVATAR_COLORS.length] }}
-            >
-              {getInitials(member.display_name, member.email)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="truncate text-[13px] font-light text-foreground">
-                {member.display_name ?? member.email}
-              </p>
-              {member.display_name && (
-                <p className="truncate text-[10px] text-muted">{member.email}</p>
+        {members.map((member) => (
+          <div key={member.user_id} className="space-y-1">
+            <div className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-foreground/6">
+              <button
+                onClick={() => {
+                  if (editingMemberId === member.user_id) {
+                    setEditingMemberId(null)
+                  } else {
+                    setEditingMemberId(member.user_id)
+                    setEditColor(member.display_color ?? '')
+                    setEditInitials(member.display_initials ?? '')
+                  }
+                }}
+                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase tracking-wider text-white transition-opacity hover:opacity-80"
+                style={{ backgroundColor: getAvatarColor(member.user_id, member.display_color) }}
+                title="Click to customize"
+              >
+                {getAvatarInitials(member.display_name, member.email, member.display_initials)}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-[13px] font-light text-foreground">
+                  {member.display_name ?? member.email}
+                </p>
+                {member.display_name && (
+                  <p className="truncate text-[10px] text-muted">{member.email}</p>
+                )}
+              </div>
+              <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
+                {member.role}
+              </span>
+              {isOwner && member.user_id !== currentUser?.id && (
+                <button
+                  onClick={() => handleRemoveMember(member.user_id)}
+                  className="rounded p-1 text-muted transition-colors hover:bg-danger/10 hover:text-danger"
+                  title="Remove member"
+                >
+                  <Trash2 size={14} />
+                </button>
               )}
             </div>
-            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
-              {member.role}
-            </span>
-            {/* Remove button — owner can remove anyone except self, members see nothing */}
-            {isOwner && member.user_id !== currentUser?.id && (
-              <button
-                onClick={() => handleRemoveMember(member.user_id)}
-                className="rounded p-1 text-muted transition-colors hover:bg-danger/10 hover:text-danger"
-                title="Remove member"
+            {/* Edit avatar appearance */}
+            {editingMemberId === member.user_id && (
+              <div
+                ref={(el) => { if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50) }}
+                className="ml-12 flex flex-col gap-2 rounded-lg border border-border bg-background p-3"
               >
-                <Trash2 size={14} />
-              </button>
+                <div>
+                  <p className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-muted">Color</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AVATAR_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setEditColor(c)}
+                        className={`h-5 w-5 rounded-full transition-transform ${editColor === c ? 'scale-125 ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : 'hover:scale-110'}`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                    {editColor && (
+                      <button
+                        onClick={() => setEditColor('')}
+                        className="flex h-5 items-center px-1.5 rounded text-[8px] font-bold uppercase tracking-wider text-muted hover:bg-foreground/6"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-muted">Initials</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editInitials}
+                      onChange={(e) => setEditInitials(e.target.value.slice(0, 3))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveMemberDisplay(member.user_id) }}
+                      placeholder={getAvatarInitials(member.display_name, member.email)}
+                      maxLength={3}
+                      className="w-16 rounded border border-border bg-surface px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
+                    />
+                    <div
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold uppercase text-white"
+                      style={{ backgroundColor: editColor || getAvatarColor(member.user_id) }}
+                    >
+                      {editInitials || getAvatarInitials(member.display_name, member.email)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    onClick={() => setEditingMemberId(null)}
+                    className="rounded px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-muted hover:bg-foreground/6"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSaveMemberDisplay(member.user_id)}
+                    className="rounded bg-accent px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-white hover:bg-accent/90"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         ))}

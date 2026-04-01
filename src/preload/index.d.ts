@@ -86,6 +86,7 @@ export interface ProjectsAPI {
   list(userId: string): Promise<Project[]>
   addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
+  updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): Promise<void>
   getMembers(projectId: string): Promise<ProjectMember[]>
   getProjectsForUser(userId: string): Promise<Project[]>
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>

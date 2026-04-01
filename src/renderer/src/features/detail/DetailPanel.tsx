@@ -18,6 +18,7 @@ import { DetailActivityLog } from './DetailActivityLog'
 import { DetailAttachments } from './DetailAttachments'
 import { DetailSubtasks } from './DetailSubtasks'
 import { PriorityIndicator } from '../../shared/components/PriorityIndicator'
+import { AssigneePicker } from '../collaboration/AssigneePicker'
 import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
 import { formatDate } from '../../shared/utils/dateFormat'
@@ -484,6 +485,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
   }, [position])
 
   const isTemplate = task.is_template === 1
+  const project = useProjectStore((s) => task.project_id ? s.projects[task.project_id] : undefined)
 
   const sections: React.ReactNode[] = [
     <DetailTitle key="title" title={task.title} onTitleChange={props.onTitleChange} />,
@@ -498,7 +500,16 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     <Section key="priority" label="Priority" fieldIndex={3}>
       <PriorityIndicator currentPriority={task.priority} onPriorityChange={props.onPriorityChange} />
     </Section>,
-    <Section key="labels" label="Labels" fieldIndex={4}>
+    project?.is_shared === 1 ? (
+      <Section key="assignee" label="Assignee" fieldIndex={4}>
+        <AssigneePicker
+          projectId={task.project_id}
+          currentAssignee={task.assigned_to}
+          onAssign={(userId) => useTaskStore.getState().updateTask(task.id, { assigned_to: userId })}
+        />
+      </Section>
+    ) : null,
+    <Section key="labels" label="Labels" fieldIndex={5}>
       <DetailLabels assignedLabels={taskLabels} allLabels={allLabels} onAddLabel={props.onAddLabel} onRemoveLabel={props.onRemoveLabel} onCreateLabel={props.onCreateLabel} projectId={task.project_id} />
     </Section>,
     !isTemplate ? (

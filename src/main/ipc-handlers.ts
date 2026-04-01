@@ -328,6 +328,10 @@ export function registerIpcHandlers(): void {
     return getRepos().projects.removeMember(projectId, userId)
   })
 
+  ipcMain.handle('projects:updateMember', (_e, projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }) => {
+    return getRepos().projects.updateMember(projectId, userId, updates)
+  })
+
   ipcMain.handle('projects:getMembers', (_e, projectId: string) => {
     return getRepos().projects.getMembers(projectId)
   })

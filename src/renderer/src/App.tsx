@@ -38,6 +38,34 @@ function App(): React.JSX.Element {
     }
   }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
 
+  // On startup, sync all shared projects from Supabase
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return
+    const syncShared = async (): Promise<void> => {
+      try {
+        const { syncProjectDown: syncDown, subscribeToProject: subProject } = await import('./services/SyncService')
+        const projects = useProjectStore.getState().projects
+        for (const p of Object.values(projects)) {
+          if (p.is_shared === 1) {
+            await syncDown(p.id, currentUser.id).catch((err) => {
+              console.warn(`[Startup] Failed to sync shared project ${p.name}:`, err)
+              // If project no longer exists in Supabase, mark as unshared
+              if (String(err).includes('not found')) {
+                window.api.projects.update(p.id, { is_shared: 0 })
+              }
+            })
+            subProject(p.id)
+          }
+        }
+      } catch (err) {
+        console.error('[Startup] Failed to sync shared projects:', err)
+      }
+    }
+    // Small delay to ensure projects are hydrated first
+    const timeout = setTimeout(syncShared, 2000)
+    return () => clearTimeout(timeout)
+  }, [isAuthenticated, currentUser])
+
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
     if (currentProjectId && currentUser) {
