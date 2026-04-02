@@ -22,7 +22,8 @@
         "npm run typecheck passes with zero errors"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     },
     {
       "id": "41",
@@ -42,7 +43,8 @@
         "npm run typecheck passes with zero errors"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     }
   ]
 }

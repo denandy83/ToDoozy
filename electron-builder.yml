@@ -39,6 +39,6 @@ linux:
   category: Utility
 publish:
   provider: github
-  owner: todoozy
-  repo: todoozy
+  owner: denandy83
+  repo: ToDoozy
 npmRebuild: false
