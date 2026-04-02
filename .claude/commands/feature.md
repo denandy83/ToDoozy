@@ -184,10 +184,10 @@ For each verified story, append a full entry to `pending-changes.md` so a cold s
 
 ### 9b — Update RELEASE_NOTES.md
 
-Open `RELEASE_NOTES.md`. Under today's date heading (create it if it doesn't exist, at the top), add a bullet for each new feature:
+Open `RELEASE_NOTES.md`. Under the current version heading (read version from `package.json`; create it if it doesn't exist, at the top), add a bullet for each new feature:
 
 ```markdown
-## YYYY-MM-DD
+## vX.Y.Z
 
 - **Feature title** — User-facing description of what this enables.
 ```
@@ -222,11 +222,11 @@ After implementation is complete, update `scope.md`:
 
 ### 9g — Update in-app "What's New"
 
-Update the `whats_new` global setting (user_id `''`) in the SQLite database with a plain-text summary of today's user-facing changes. One line per item, date header on the first line. Replace the full value each time.
+Update the `whats_new` global setting (user_id `''`) in the SQLite database with all user-facing changes under the current version header (read version from `package.json`). All items are flat bullets under `## vX.Y.Z` — no category sub-headers. Replace the full value each time.
 
 ```bash
 DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<date header + all bullets>');"
+sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<version header + all bullets>');"
 ```
 
 ### 9h — Clear pending-changes.md entries

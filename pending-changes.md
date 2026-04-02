@@ -42,4 +42,3 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
-

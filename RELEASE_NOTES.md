@@ -4,6 +4,16 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.0.0
+
+- **Auto-Update Mechanism** — The app now checks for updates automatically on launch and every 4 hours. When an update is available, a dialog shows the new version and release notes with options to Install & Restart or dismiss. A download progress bar tracks the update. You can also manually check for updates in Settings.
+
+## 2026-04-01 (cont.)
+
+- **Collaboration UX polish** — Consistent avatars across all views, inline task assignment in shared projects, and improved real-time sync so collaborator changes appear instantly.
+- **Remote membership discovery** — The app now discovers shared project memberships on startup and shows clear error messages if invite acceptance fails.
+- **Full real-time task sync** — Changes by collaborators in shared projects now sync immediately across all connected clients.
+
 ## 2026-04-01
 
 - **Launch at login** — Toggle in Settings > General to start ToDoozy automatically when you log into your Mac.

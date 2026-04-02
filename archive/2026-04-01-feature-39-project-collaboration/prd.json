@@ -21,9 +21,8 @@
         "macOS platform only",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": true,
-      "tested": true,
-      "verified": true
+      "passes": false,
+      "tested": false
     },
     {
       "id": "41",
@@ -42,9 +41,8 @@
         "Update dialog (story #40) can fetch notes for a specific version from the same table",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": true,
-      "tested": true,
-      "verified": true
+      "passes": false,
+      "tested": false
     }
   ]
 }

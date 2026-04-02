@@ -444,6 +444,21 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ---
 
+## Auto-Update
+
+### Auto-Update Mechanism
+- Uses electron-updater with GitHub Releases as the update provider
+- Checks for updates on app launch (background, non-blocking) and every 4 hours
+- Manual check via Settings > Updates > "Check for Updates" button
+- Update-available dialog shows current version, new version, release notes, and Install & Restart / Not Now buttons
+- Download progress bar with percentage during update download
+- Dismissed updates only re-prompt on next launch or manual check (not on periodic checks)
+- Settings displays current app version from `app.getVersion()`
+- macOS platform only
+- **Status:** Complete (2026-04-02, Story #40)
+
+---
+
 ## Known Issues / Status Notes
 
 - Story #31 (Tab focus management): `passes: true`, `tested: false` — implementation complete, awaiting user verification

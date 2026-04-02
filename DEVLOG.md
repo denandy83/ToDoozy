@@ -4,6 +4,26 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-04-02 — Auto-Update Mechanism (Story #40)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Auto-Update Mechanism** — Integrated electron-updater with GitHub Releases as the update provider. Created UpdateService in main process with event handling for checking, download progress, and installation. Added UpdateDialog component, UpdateSettings section, and Zustand updateStore. App checks on launch and every 4 hours; manual check available in Settings. Dismissed versions only re-prompt on launch or manual check.
+
+---
+
+## 2026-04-01 (cont.) — Collaboration UX polish & real-time sync
+
+**Session type:** Feature enhancements + bug fixes
+
+**What was built:**
+- **Remote membership discovery** — App discovers remote project memberships on startup and surfaces errors on failed invite acceptance.
+- **Collaboration UX** — Avatar consistency across views, inline task assignment for shared projects, and real-time sync polish across 17 files.
+- **Full real-time task sync** — Wired up complete real-time sync for shared projects across 59 files. Collaborator changes now reflect immediately.
+
+---
+
 ## 2026-04-01 — Build fixes, launch-at-login, command palette operators
 
 **Session type:** Bug fixes + feature enhancements

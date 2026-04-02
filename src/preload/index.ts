@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { TodoozyAPI } from './index.d'
+import type { TodoozyAPI, UpdateStatus } from './index.d'
 
 const api: TodoozyAPI = {
   tasks: {
@@ -238,6 +238,27 @@ const api: TodoozyAPI = {
   app: {
     getLoginItemSettings: () => ipcRenderer.invoke('app:getLoginItemSettings'),
     setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin)
+  },
+
+  releaseNotes: {
+    sync: () => ipcRenderer.invoke('releaseNotes:sync'),
+    fetchVersion: (version) => ipcRenderer.invoke('releaseNotes:fetchVersion', version)
+  },
+
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    dismiss: (version) => ipcRenderer.invoke('updater:dismiss', version),
+    getStatus: () => ipcRenderer.invoke('updater:getStatus'),
+    getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+    onStatus: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
+      ipcRenderer.on('updater:status', handler)
+      return () => {
+        ipcRenderer.removeListener('updater:status', handler)
+      }
+    }
   },
 
   onTasksChanged: (callback) => {

@@ -7,8 +7,10 @@ import { useTaskStore } from './shared/stores/taskStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
+import { useUpdateStore } from './shared/stores/updateStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
+import { UpdateDialog } from './shared/components/UpdateDialog'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
 import { useViewStore } from './shared/stores/viewStore'
@@ -25,6 +27,14 @@ function App(): React.JSX.Element {
   useEffect(() => {
     initAuth()
   }, [initAuth])
+
+  // Initialize updater (app-level, not per-user)
+  useEffect(() => {
+    const initUpdate = useUpdateStore.getState().init()
+    return () => {
+      initUpdate.then((unsub) => unsub())
+    }
+  }, [])
 
   // Hydrate settings, themes, projects when authenticated
   useEffect(() => {
@@ -300,6 +310,7 @@ function App(): React.JSX.Element {
   return (
     <>
       <AppLayout />
+      <UpdateDialog />
       {inviteState && (
         <InviteDialog
           projectName={inviteState.projectName}
