@@ -433,15 +433,25 @@ function GeneralSettings(): React.JSX.Element {
   )
 }
 
+function parseChangelog(content: string): string {
+  const lines = content.split('\n')
+  const startIdx = lines.findIndex((l) => l.startsWith('## '))
+  return startIdx >= 0 ? lines.slice(startIdx).join('\n') : content
+}
+
 function useChangelog(): string {
   const [changelog, setChangelog] = useState('')
   useEffect(() => {
+    // Load cached data immediately
     window.api.app.getChangelog().then((content) => {
-      // Strip the title and intro lines (first 5 lines)
-      const lines = content.split('\n')
-      const startIdx = lines.findIndex((l) => l.startsWith('## '))
-      setChangelog(startIdx >= 0 ? lines.slice(startIdx).join('\n') : content)
+      setChangelog(parseChangelog(content))
     })
+    // Also trigger a fresh sync and re-read — picks up new releases after app update
+    window.api.releaseNotes.sync().then(() => {
+      window.api.app.getChangelog().then((content) => {
+        setChangelog(parseChangelog(content))
+      })
+    }).catch(() => {})
   }, [])
   return changelog
 }

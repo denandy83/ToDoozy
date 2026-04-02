@@ -715,10 +715,16 @@ export function registerIpcHandlers(): void {
     app.setLoginItemSettings({ openAtLogin })
   })
 
-  ipcMain.handle('app:getChangelog', () => {
+  ipcMain.handle('app:getChangelog', async () => {
     try {
       const cached = getRepos().settings.get('', 'whats_new')
       if (cached) return cached
+    } catch { /* fall through */ }
+    // No cache yet — sync from GitHub and return the result
+    try {
+      const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
+      await syncReleaseNotes()
+      return getRepos().settings.get('', 'whats_new') ?? ''
     } catch { /* fall through */ }
     return ''
   })
