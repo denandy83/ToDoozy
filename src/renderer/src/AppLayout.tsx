@@ -47,6 +47,7 @@ import { closeTopPopup } from './shared/utils/popupStack'
 import { NotificationBell, NotificationPanel, MemberAvatars } from './features/collaboration'
 import { useNotificationStore } from './shared/stores/notificationStore'
 import { uploadProjectToSupabase, subscribeToProject, setRealtimeCallback, getSharedProjectMembers, unsubscribeFromProject } from './services/SyncService'
+import { invalidateMemberDisplay } from './shared/hooks/useMemberDisplay'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -219,7 +220,8 @@ export function AppLayout(): React.JSX.Element {
             setRemovedFromProject({ id: selectedProject.id, name: selectedProject.name })
             return
           } else {
-            loadMembers(selectedProject.id)
+            await loadMembers(selectedProject.id)
+            invalidateMemberDisplay(selectedProject.id)
           }
         }
 
