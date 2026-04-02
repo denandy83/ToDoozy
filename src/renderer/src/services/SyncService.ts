@@ -7,7 +7,7 @@ import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import type { Task, Status, SyncOperation } from '../../../shared/types'
 
-type RealtimeCallback = (event: string, table: string, payload: Record<string, unknown>) => void
+type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
 let channels: Map<string, RealtimeChannel> = new Map()
 let onChangeCallback: RealtimeCallback | null = null

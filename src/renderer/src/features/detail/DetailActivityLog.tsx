@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ActivityLogEntry } from '../../../../shared/types'
 
@@ -71,10 +71,36 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
     setExpanded((prev) => !prev)
   }, [])
 
+  const focusStats = useMemo(() => {
+    let minutes = 0
+    let sessions = 0
+    for (const e of entries) {
+      const match = e.action.match(/^Completed (\d+) min focus session$/)
+      if (match) {
+        minutes += parseInt(match[1], 10)
+        sessions++
+      }
+    }
+    return { minutes, sessions }
+  }, [entries])
+
   const ChevIcon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-3">
+      {/* Total time spent — not focusable, outside tab order */}
+      {focusStats.sessions > 0 && (
+        <div className="flex flex-col gap-0.5" tabIndex={-1}>
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Time Spent</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-foreground">
+            {focusStats.minutes >= 60
+              ? `${Math.floor(focusStats.minutes / 60)}h ${focusStats.minutes % 60 > 0 ? `${focusStats.minutes % 60}m` : ''}`
+              : `${focusStats.minutes}m`}
+            {` spent in ${focusStats.sessions} session${focusStats.sessions !== 1 ? 's' : ''}`}
+          </span>
+        </div>
+      )}
+
       <button
         onClick={toggle}
         className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted transition-colors hover:text-foreground"

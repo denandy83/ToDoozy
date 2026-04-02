@@ -190,10 +190,25 @@ export function createTray(): void {
   tray = new Tray(icon)
   tray.setToolTip('ToDoozy')
 
+  // Delay single-click menu so double-click can cancel it and open the window instead
+  let clickTimer: ReturnType<typeof setTimeout> | null = null
+
   tray.on('click', () => {
-    if (!tray) return
-    const menu = timerState ? buildTimerMenu() : buildLeftClickMenu()
-    tray.popUpContextMenu(menu)
+    if (clickTimer) return // ignore — already waiting for potential double-click
+    clickTimer = setTimeout(() => {
+      clickTimer = null
+      if (!tray) return
+      const menu = timerState ? buildTimerMenu() : buildLeftClickMenu()
+      tray.popUpContextMenu(menu)
+    }, 150)
+  })
+
+  tray.on('double-click', () => {
+    if (clickTimer) {
+      clearTimeout(clickTimer)
+      clickTimer = null
+    }
+    showMainWindow()
   })
 
   tray.on('right-click', () => {

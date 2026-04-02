@@ -251,6 +251,15 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_perpetual" defaultValue="false" />
       </div>
 
+      {/* Minimize on start */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Minimize on start</p>
+          <p className="text-[10px] text-muted">Minimize the window to tray when starting a timer</p>
+        </div>
+        <ToggleButton settingKey="timer_minimize_on_start" defaultValue="true" />
+      </div>
+
       {/* Sound */}
       <div className="flex items-center justify-between">
         <div>

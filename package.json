@@ -1,6 +1,6 @@
 {
   "name": "todoozy",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A collaborative, keyboard-driven, AI-native task manager",
   "main": "./out/main/index.js",
   "scripts": {

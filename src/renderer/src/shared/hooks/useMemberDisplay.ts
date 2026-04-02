@@ -10,16 +10,23 @@ interface MemberDisplayData {
 
 // Global cache: projectId -> userId -> display data
 const cache = new Map<string, Map<string, MemberDisplayData>>()
-const loadingProjects = new Set<string>()
 const listeners = new Set<() => void>()
+// Track pending reload requests — if a load is in progress and another is requested,
+// the project ID is queued here so it reloads again after the current one finishes.
+let pendingReload: string | null = null
+let activeLoad: string | null = null
 
 function notify(): void {
   for (const fn of listeners) fn()
 }
 
 async function loadProjectMembers(projectId: string): Promise<void> {
-  if (loadingProjects.has(projectId)) return
-  loadingProjects.add(projectId)
+  // If already loading this project, queue a reload instead of skipping
+  if (activeLoad === projectId) {
+    pendingReload = projectId
+    return
+  }
+  activeLoad = projectId
   try {
     const members = await window.api.projects.getMembers(projectId)
     const memberMap = new Map<string, MemberDisplayData>()
@@ -35,7 +42,12 @@ async function loadProjectMembers(projectId: string): Promise<void> {
     cache.set(projectId, memberMap)
     notify()
   } finally {
-    loadingProjects.delete(projectId)
+    activeLoad = null
+    // If a reload was requested while we were loading, do it now
+    if (pendingReload === projectId) {
+      pendingReload = null
+      loadProjectMembers(projectId)
+    }
   }
 }
 

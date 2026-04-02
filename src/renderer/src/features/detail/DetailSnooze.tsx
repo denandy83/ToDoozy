@@ -1,5 +1,4 @@
 import { useCallback } from 'react'
-import { Bell } from 'lucide-react'
 import { getSnoozePresets } from '../../shared/utils/snooze'
 
 interface DetailSnoozeProps {
@@ -28,7 +27,6 @@ export function DetailSnooze({ currentDueDate, onSnooze }: DetailSnoozeProps): R
 
   return (
     <div className="flex flex-wrap items-center gap-1" onKeyDown={handleContainerKeyDown}>
-      <Bell size={14} className="mr-1 text-muted" />
       {presets.map((preset) => (
         <button
           key={preset.label}

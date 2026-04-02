@@ -74,7 +74,7 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
           return (
             <span
               key={label.id}
-              className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+              className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold tracking-wider transition-all cursor-pointer"
               style={{
                 backgroundColor: isActive ? `${label.color}30` : `${label.color}15`,
                 color: label.color,

@@ -1,5 +1,6 @@
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
+import { useSettingsStore } from './settingsStore'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -126,7 +127,10 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
 
     startTickInterval()
     syncTrayTimer(get())
-    window.api.timer?.minimizeToTray()
+    const minimizeSetting = useSettingsStore.getState().settings['timer_minimize_on_start'] ?? 'true'
+    if (minimizeSetting === 'true') {
+      window.api.timer?.minimizeToTray()
+    }
   },
 
   pause(): void {
@@ -143,6 +147,15 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
 
   stop(): void {
     clearTickInterval()
+    // Log elapsed time before resetting
+    const state = get()
+    if (state.isRunning && state.taskId && cachedUserId && state.phase === 'work') {
+      const elapsedSeconds = state.workSeconds - state.remainingSeconds
+      const minutes = Math.round(elapsedSeconds / 60)
+      if (minutes > 0) {
+        logFocusSession(state.taskId, cachedUserId, minutes)
+      }
+    }
     cachedUserId = null
     set(initialState)
     syncTrayTimer(initialState)
