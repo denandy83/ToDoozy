@@ -28,6 +28,10 @@ export class UserRepository {
     const sets: string[] = ['updated_at = ?']
     const values: (string | null)[] = [now]
 
+    if (input.email !== undefined) {
+      sets.push('email = ?')
+      values.push(input.email)
+    }
     if (input.display_name !== undefined) {
       sets.push('display_name = ?')
       values.push(input.display_name)

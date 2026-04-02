@@ -139,6 +139,7 @@ export interface CreateUserInput {
 }
 
 export interface UpdateUserInput {
+  email?: string
   display_name?: string | null
   avatar_url?: string | null
 }

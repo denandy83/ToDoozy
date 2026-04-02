@@ -486,25 +486,25 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   // Ensure the project owner's user record exists locally with real profile data
   const localOwner = await window.api.users.findById(project.owner_id)
-  if (!localOwner || localOwner.email === 'shared-user') {
-    const { data: ownerProfile } = await supabase
-      .from('user_profiles')
-      .select('email, display_name, avatar_url')
-      .eq('id', project.owner_id)
-      .single()
+  const { data: ownerProfile } = await supabase
+    .from('user_profiles')
+    .select('email, display_name, avatar_url')
+    .eq('id', project.owner_id)
+    .single()
 
-    if (localOwner && localOwner.email === 'shared-user') {
-      // Replace placeholder with real data
-      await window.api.users.delete(project.owner_id).catch(() => {})
-    }
-    if (!localOwner || localOwner.email === 'shared-user') {
-      await window.api.users.create({
-        id: project.owner_id,
-        email: ownerProfile?.email ?? 'shared-user',
-        display_name: ownerProfile?.display_name ?? null,
-        avatar_url: ownerProfile?.avatar_url ?? null
-      }).catch(() => { /* already exists */ })
-    }
+  if (!localOwner) {
+    await window.api.users.create({
+      id: project.owner_id,
+      email: ownerProfile?.email ?? 'shared-user',
+      display_name: ownerProfile?.display_name ?? null,
+      avatar_url: ownerProfile?.avatar_url ?? null
+    }).catch(() => { /* already exists */ })
+  } else if (localOwner.email === 'shared-user' && ownerProfile) {
+    await window.api.users.update(project.owner_id, {
+      email: ownerProfile.email,
+      display_name: ownerProfile.display_name,
+      avatar_url: ownerProfile.avatar_url
+    })
   }
 
   // Create local project if not exists
@@ -657,11 +657,13 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
           .single()
 
         if (profile) {
-          if (localUser && localUser.email === 'shared-user') {
-            // Replace placeholder with real data
-            await window.api.users.delete(member.user_id).catch(() => {})
-          }
-          if (!localUser || localUser.email === 'shared-user') {
+          if (localUser) {
+            await window.api.users.update(member.user_id, {
+              email: profile.email,
+              display_name: profile.display_name,
+              avatar_url: profile.avatar_url
+            })
+          } else {
             await window.api.users.create({
               id: member.user_id,
               email: profile.email,
