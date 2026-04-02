@@ -19,6 +19,8 @@ extraResources:
     to: icon.png
   - from: CHANGELOG.md
     to: CHANGELOG.md
+  - from: resources/release-notes.md
+    to: release-notes.md
 mac:
   icon: resources/icon.png
   entitlements: build/entitlements.mac.plist

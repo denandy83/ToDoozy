@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { app, shell, BrowserWindow, globalShortcut } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase } from './database'
@@ -218,8 +218,26 @@ app.whenReady().then(() => {
   startNotificationChecker()
   initUpdater()
 
-  // Initialize release notes service and sync from Supabase (non-blocking)
+  // Initialize release notes service — seed from bundled file, then sync from GitHub
   initReleaseNotes(getDatabase())
+  {
+    // Seed cache from bundled release notes if it doesn't contain the current version
+    const { SettingsRepository } = require('./repositories/SettingsRepository') as typeof import('./repositories/SettingsRepository')
+    const repo = new SettingsRepository(getDatabase())
+    const cached = repo.get('', 'whats_new') ?? ''
+    const currentVersion = `## v${app.getVersion()}`
+    if (!cached.includes(currentVersion)) {
+      const bundledPath = app.isPackaged
+        ? join(process.resourcesPath, 'release-notes.md')
+        : join(app.getAppPath(), 'resources', 'release-notes.md')
+      try {
+        const bundled = readFileSync(bundledPath, 'utf-8')
+        if (bundled.includes(currentVersion)) {
+          repo.set('', 'whats_new', bundled)
+        }
+      } catch { /* bundled file may not exist in dev */ }
+    }
+  }
   syncReleaseNotes().catch((err) => console.error('Release notes sync failed:', err))
 
   // Handle deep link from cold start
