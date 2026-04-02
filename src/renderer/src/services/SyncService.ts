@@ -72,7 +72,13 @@ export async function subscribeToProject(projectId: string): Promise<void> {
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )
-    .subscribe()
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`[Realtime] Subscribed to project ${projectId}`)
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.warn(`[Realtime] Project subscription failed for ${projectId}:`, status)
+      }
+    })
 
   channels.set(projectId, channel)
 }
@@ -354,27 +360,52 @@ export async function subscribeToInvites(
   onInvite: (invite: { token: string }) => void
 ): Promise<() => void> {
   const supabase = await getSupabase()
-  const channel = supabase
-    .channel(`invites:${email}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'shared_project_invites',
-        filter: `target_email=eq.${email.toLowerCase().trim()}`
-      },
-      (payload) => {
-        const invite = payload.new as { token: string; status: string }
-        if (invite.status === 'pending') {
-          onInvite({ token: invite.token })
+  let channel: RealtimeChannel | null = null
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null
+  let cancelled = false
+
+  const createChannel = (): RealtimeChannel => {
+    return supabase
+      .channel(`invites:${email}:${Date.now()}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'shared_project_invites',
+          filter: `target_email=eq.${email.toLowerCase().trim()}`
+        },
+        (payload) => {
+          const invite = payload.new as { token: string; status: string }
+          if (invite.status === 'pending') {
+            onInvite({ token: invite.token })
+          }
+        }
+      )
+  }
+
+  const subscribe = (attempt: number): void => {
+    if (cancelled) return
+    channel = createChannel()
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[Invites] Realtime subscription connected')
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.warn(`[Invites] Subscription failed (attempt ${attempt}):`, status)
+        if (channel) supabase.removeChannel(channel)
+        if (!cancelled && attempt < 5) {
+          retryTimeout = setTimeout(() => subscribe(attempt + 1), 3000 * attempt)
         }
       }
-    )
-    .subscribe()
+    })
+  }
+
+  subscribe(1)
 
   return () => {
-    supabase.removeChannel(channel)
+    cancelled = true
+    if (retryTimeout) clearTimeout(retryTimeout)
+    if (channel) supabase.removeChannel(channel)
   }
 }
 

@@ -245,7 +245,7 @@ function App(): React.JSX.Element {
     }
     check()
 
-    // Subscribe to real-time invite notifications
+    // Subscribe to real-time invite notifications (retries on failure)
     let unsubscribe: (() => void) | undefined
     subscribeToInvites(currentUser.email, async (invite) => {
       const result = await validateInviteToken(invite.token)
@@ -256,25 +256,8 @@ function App(): React.JSX.Element {
       unsubscribe = unsub
     })
 
-    // Poll for invites as fallback (Realtime may not connect if session was slow to establish)
-    const pollInterval = setInterval(async () => {
-      try {
-        const invites = await checkPendingInvites(currentUser.email)
-        if (invites.length > 0 && !inviteShowingRef.current) {
-          const [first, ...rest] = invites
-          handleNewInvite(first.token, first.projectName, first.ownerEmail)
-          setPendingInviteQueue(rest.map((i) => ({
-            token: i.token,
-            projectName: i.projectName,
-            ownerName: i.ownerEmail
-          })))
-        }
-      } catch { /* ignore polling errors */ }
-    }, 30_000)
-
     return () => {
       unsubscribe?.()
-      clearInterval(pollInterval)
     }
   }, [isAuthenticated, currentUser?.email])
 
