@@ -41,8 +41,8 @@
         "Update dialog (story #40) can fetch notes for a specific version from the same table",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     }
   ]
 }

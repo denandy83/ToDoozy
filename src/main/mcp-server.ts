@@ -10,9 +10,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createRepositories } from './repositories'
 import type { ProjectTemplateData, ProjectTemplateTask } from '../shared/types'
 
@@ -51,6 +52,48 @@ db.exec('PRAGMA foreign_keys = ON')
 
 const repos = createRepositories(db)
 
+// ── Supabase Client (for release notes) ─────────────────────────────
+
+function loadEnvFile(): Record<string, string> {
+  const envVars: Record<string, string> = {}
+  // Try loading .env from project root (dev) or app directory
+  const candidates = [
+    join(process.cwd(), '.env'),
+    join(__dirname, '../../.env'),
+    join(__dirname, '../../../.env')
+  ]
+  for (const envPath of candidates) {
+    if (existsSync(envPath)) {
+      const content = readFileSync(envPath, 'utf8')
+      for (const line of content.split('\n')) {
+        const match = line.match(/^([A-Z_]+)=(.+)$/)
+        if (match) envVars[match[1]] = match[2].trim()
+      }
+      break
+    }
+  }
+  return envVars
+}
+
+let supabaseClient: SupabaseClient | null = null
+
+function getSupabaseClient(): SupabaseClient | null {
+  if (supabaseClient) return supabaseClient
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_ANON_KEY
+  if (url && key) {
+    supabaseClient = createClient(url, key)
+    return supabaseClient
+  }
+  // Try loading from .env file
+  const env = loadEnvFile()
+  if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
+    supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY)
+    return supabaseClient
+  }
+  return null
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function getUser(): { id: string } {
@@ -88,6 +131,23 @@ function optStr(args: Record<string, unknown>, key: string): string | undefined 
 function optNum(args: Record<string, unknown>, key: string): number | undefined {
   const val = args[key]
   return val !== undefined && val !== null ? Number(val) : undefined
+}
+
+function readPackageVersion(): string {
+  const candidates = [
+    join(process.cwd(), 'package.json'),
+    join(__dirname, '../../package.json'),
+    join(__dirname, '../../../package.json')
+  ]
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      try {
+        const pkg = JSON.parse(readFileSync(p, 'utf8'))
+        return `v${pkg.version}`
+      } catch { /* ignore */ }
+    }
+  }
+  return 'v0.0.0'
 }
 
 // ── Schema Helpers ──────────────────────────────────────────────────
@@ -517,15 +577,16 @@ const tools: ToolDef[] = [
     }
   },
 
-  // Settings — What's New
+  // Settings — What's New (writes to Supabase release_notes table)
   {
     name: 'set_whats_new',
     description:
-      'Update the in-app "What\'s New" changelog shown in Settings. Content should be markdown-formatted: ## date headers, ### category headers (Fixed, Added, Removed, Internal), and - **Title** — Description bullet items. Most recent date first.',
+      'Update the in-app "What\'s New" release notes for a specific version. Writes to Supabase release_notes table and updates local cache. Content should be flat bullet items: - **Title** — Description. No ## headers needed — the version is specified separately.',
     inputSchema: {
       type: 'object',
       properties: {
-        content: str('Markdown changelog content (## dates, ### categories, - **Title** — desc)')
+        version: str('Version string (e.g., "v1.0.0"). Defaults to current package.json version if omitted.'),
+        content: str('Release notes content for this version (- **Title** — Description bullets)')
       },
       required: ['content']
     }
@@ -1091,12 +1152,41 @@ const handlers: Record<string, Handler> = {
     return project
   },
 
-  // ── Settings — What's New ────────────────────────────────────────
-  set_whats_new(args) {
+  // ── Settings — What's New (Supabase) ─────────────────────────────
+  async set_whats_new(args) {
     const content = requireStr(args, 'content')
-    // Write as global setting (user_id = '' for all users)
-    repos.settings.set('', 'whats_new', content)
-    return { success: true, content }
+    const version = optStr(args, 'version') ?? readPackageVersion()
+
+    const client = getSupabaseClient()
+    if (client) {
+      const { error } = await client
+        .from('release_notes')
+        .upsert({ version, content, published_at: new Date().toISOString() }, { onConflict: 'version' })
+
+      if (error) {
+        // Fall back to local SQLite
+        process.stderr.write(`Supabase upsert failed: ${error.message}\n`)
+        repos.settings.set('', 'whats_new', `## ${version}\n${content}`)
+        return { success: true, content, version, storage: 'local-fallback', error: error.message }
+      }
+
+      // Sync all versions to local cache
+      const { data } = await client
+        .from('release_notes')
+        .select('version, content')
+        .order('published_at', { ascending: false })
+
+      if (data && data.length > 0) {
+        const markdown = data.map((row: { version: string; content: string }) => `## ${row.version}\n${row.content}`).join('\n\n')
+        repos.settings.set('', 'whats_new', markdown)
+      }
+
+      return { success: true, content, version, storage: 'supabase' }
+    }
+
+    // No Supabase — write locally only
+    repos.settings.set('', 'whats_new', `## ${version}\n${content}`)
+    return { success: true, content, version, storage: 'local-only' }
   }
 }
 
@@ -1114,7 +1204,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const handler = handlers[name]
   if (!handler) return fail(`Unknown tool: ${name}`)
   try {
-    const result = handler(args ?? {})
+    const result = await Promise.resolve(handler(args ?? {}))
     return ok(result)
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e))

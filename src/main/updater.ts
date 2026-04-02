@@ -1,5 +1,6 @@
 import { autoUpdater, type UpdateInfo, type ProgressInfo } from 'electron-updater'
 import { BrowserWindow, ipcMain } from 'electron'
+import { fetchVersionNotes } from './services/ReleaseNotesService'
 
 export type UpdateStatus =
   | { state: 'idle' }
@@ -50,7 +51,7 @@ export function initUpdater(): void {
   autoUpdater.on('update-available', (info: UpdateInfo) => {
     checkInProgress = false
     const version = info.version
-    const releaseNotes = extractReleaseNotes(info)
+    const ghReleaseNotes = extractReleaseNotes(info)
 
     // If user dismissed this version on a periodic check, don't show again
     // (only remind on launch or manual check)
@@ -59,7 +60,14 @@ export function initUpdater(): void {
       return
     }
 
-    broadcastStatus({ state: 'available', version, releaseNotes })
+    // Try fetching release notes from Supabase first, fall back to GitHub Release body
+    fetchVersionNotes(version)
+      .then((supabaseNotes) => {
+        broadcastStatus({ state: 'available', version, releaseNotes: supabaseNotes || ghReleaseNotes })
+      })
+      .catch(() => {
+        broadcastStatus({ state: 'available', version, releaseNotes: ghReleaseNotes })
+      })
   })
 
   autoUpdater.on('update-not-available', () => {

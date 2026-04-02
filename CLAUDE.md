@@ -137,15 +137,15 @@ The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It
 - `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
 
 ### In-App "What's New" (Settings → What's New)
-The "What's New" tab in Settings displays a version-based changelog powered by the `whats_new` global setting (user_id = `''`). The content uses versioned markdown format: `## vX.Y.Z` headers and `- **Title** — Description` bullets. No category sub-headers (Fixed/Added/Removed/Internal) — all items are flat under the version header. Most recent version first. After processing pending docs, write the content to this setting. Use the MCP `set_whats_new` tool, or write directly to SQLite:
-```bash
-DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-CONTENT='## v1.1.0
-- **Feature name** — What it does
-- **Fix name** — What was fixed'
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '$(echo "$CONTENT" | sed "s/'/''/g")');"
+The "What's New" tab in Settings displays a version-based changelog powered by the Supabase `release_notes` table. Each row has a `version` (PK), `content` (bullet items), and `published_at` timestamp. On app launch, all rows are fetched, concatenated into `## vX.Y.Z` + bullets markdown, and cached in the local `whats_new` setting for offline access.
+
+To update release notes, use the MCP `set_whats_new` tool with a `version` parameter:
 ```
-A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). The `/fix` and `/feature` skills must also update this setting after each fix/feature is confirmed.
+MCP tool: set_whats_new({ version: "v1.0.0", content: "- **Feature name** — What it does\n- **Fix name** — What was fixed" })
+```
+The tool upserts to Supabase and syncs the local cache. Content should be flat bullet items only (no `## vX.Y.Z` header — the version parameter handles that). If Supabase is unavailable, falls back to local SQLite.
+
+A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` stays in local SQLite per-user. The `/fix` and `/feature` skills must also call `set_whats_new` after each fix/feature is confirmed.
 
 ### Version Format
 All documentation (CHANGELOG.md, RELEASE_NOTES.md, in-app What's New) uses **version headers** (`## vX.Y.Z`) instead of date headers. The version comes from `package.json`. Bump the version when cutting a release:

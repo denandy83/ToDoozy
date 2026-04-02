@@ -768,6 +768,17 @@ export function registerIpcHandlers(): void {
     return getRepos().syncQueue.count()
   })
 
+  // ── Release Notes ──────────────────────────────────────────────────
+  ipcMain.handle('releaseNotes:sync', async () => {
+    const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
+    return syncReleaseNotes()
+  })
+
+  ipcMain.handle('releaseNotes:fetchVersion', async (_e, version: string) => {
+    const { fetchVersionNotes } = await import('./services/ReleaseNotesService')
+    return fetchVersionNotes(version)
+  })
+
   ipcMain.handle('fs:showOpenDialog', async () => {
     const win = getMainWindow()
     if (!win) return { canceled: true, filePaths: [] }

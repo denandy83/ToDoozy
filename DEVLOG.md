@@ -4,6 +4,15 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-04-02 — Auto-Update Mechanism (Story #40)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Auto-Update Mechanism** — Integrated electron-updater with GitHub Releases as the update provider. Created UpdateService in main process with event handling for checking, download progress, and installation. Added UpdateDialog component, UpdateSettings section, and Zustand updateStore. App checks on launch and every 4 hours; manual check available in Settings. Dismissed versions only re-prompt on launch or manual check.
+
+---
+
 ## 2026-04-01 (cont.) — Collaboration UX polish & real-time sync
 
 **Session type:** Feature enhancements + bug fixes

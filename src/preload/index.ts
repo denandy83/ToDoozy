@@ -240,6 +240,11 @@ const api: TodoozyAPI = {
     setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin)
   },
 
+  releaseNotes: {
+    sync: () => ipcRenderer.invoke('releaseNotes:sync'),
+    fetchVersion: (version) => ipcRenderer.invoke('releaseNotes:fetchVersion', version)
+  },
+
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),

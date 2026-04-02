@@ -251,6 +251,11 @@ export interface AppAPI {
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
 }
 
+export interface ReleaseNotesAPI {
+  sync(): Promise<void>
+  fetchVersion(version: string): Promise<string | null>
+}
+
 export type UpdateStatus =
   | { state: 'idle' }
   | { state: 'checking' }
@@ -292,6 +297,7 @@ export interface TodoozyAPI {
   sync: SyncAPI
   shell: ShellAPI
   app: AppAPI
+  releaseNotes: ReleaseNotesAPI
   updater: UpdaterAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void

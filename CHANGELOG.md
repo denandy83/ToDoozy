@@ -4,6 +4,10 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.0.0
+
+- **Auto-Update Mechanism** — Added Sparkle-style auto-update system using electron-updater with GitHub Releases as the update provider. App checks for updates on launch and every 4 hours. Update dialog shows version number, release notes, and Install & Restart / Not Now buttons. Download progress bar during update download. Settings page displays current version with manual Check for Updates button.
+
 ## 2026-04-01 (cont.)
 
 ### Fixed

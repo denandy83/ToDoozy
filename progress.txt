@@ -1,3 +1,28 @@
 # Ralph Progress Log
 Started: Wed Apr  1 22:33:29 UTC 2026
 ---
+
+## Story #40 — Auto-Update Mechanism ✅
+- Installed electron-updater, configured GitHub Releases publish provider
+- Created UpdateService (src/main/updater.ts) — wraps autoUpdater with IPC bridge
+- Created UpdateDialog (modal with download progress, release notes, error/retry)
+- Created UpdateSettingsContent (Settings > Updates tab with version + check button)
+- Created updateStore (Zustand) for renderer-side state management
+- Added updater API to preload bridge (check, download, install, dismiss, getStatus, getVersion, onStatus)
+- Checks: on launch (5s delay), every 4 hours, manual from Settings
+- Dismissed versions only re-shown on launch or manual check (not periodic)
+- Typecheck: zero errors. Tests: 372 passed. Dev server compiles.
+- Also processed pending docs from previous session (collaboration UX entries)
+
+## Story #41 — Versioned Release Notes on Supabase ✅
+- Created Supabase `release_notes` table (version PK, content, published_at) with RLS policies for authenticated + anon
+- Created ReleaseNotesService (src/main/services/ReleaseNotesService.ts) — fetches from Supabase, caches locally, upserts per-version
+- Added IPC handlers (releaseNotes:sync, releaseNotes:fetchVersion) and preload bridge (ReleaseNotesAPI)
+- Updated MCP set_whats_new tool to write to Supabase with version parameter, falls back to local SQLite
+- MCP server now loads .env file for Supabase credentials and supports async handlers
+- Initialized ReleaseNotesService on app launch (non-blocking sync from Supabase)
+- Updated updater to fetch per-version notes from Supabase for update dialog, falls back to GitHub Release body
+- Updated CLAUDE.md with new Supabase-based What's New instructions
+- Seeded release_notes table with v1.0.0 content
+- whats_new_seen stays in local SQLite per-user (unchanged)
+- Typecheck: zero errors. Tests: 377 passed (5 new). Dev server compiles.

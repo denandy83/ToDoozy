@@ -109,5 +109,6 @@ npm run build
 | **Due dates in rows** | Due dates display inline on task rows with overdue styling |
 | **Copy tasks** | Cmd+C copies selected task titles; multiple as bulleted markdown list |
 | **Reference URLs** | Attach an external URL to any task; clickable icon in task rows, editable in detail panel, `r:` in smart input |
+| **Auto-update** | Sparkle-style auto-update via electron-updater with GitHub Releases, download progress, and manual check |
 | **Distribution build** | Production macOS build (DMG + ZIP) via electron-builder with code signing |
 | **Multi-user isolation** | All data scoped per authenticated user for safe multi-user database sharing |
