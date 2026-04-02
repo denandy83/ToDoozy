@@ -21,8 +21,8 @@
         "macOS platform only",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     },
     {
       "id": "41",

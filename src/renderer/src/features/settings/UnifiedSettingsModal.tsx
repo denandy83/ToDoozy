@@ -18,10 +18,11 @@ import { McpSettingsContent } from './McpSettingsContent'
 import { TimerSettingsContent } from './TimerSettingsContent'
 import { NotificationsSettingsContent } from './NotificationsSettingsContent'
 import { HelpSettingsContent } from '../help/HelpSettingsContent'
+import { UpdateSettingsContent } from './UpdateSettingsContent'
 import type { Project } from '../../../../shared/types'
 import { MemberSettings } from '../collaboration/MemberSettings'
 
-type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'whatsnew' | 'help'
+type Tab = 'general' | 'projects' | 'themes' | 'priorities' | 'labels' | 'mcp' | 'timer' | 'notifications' | 'updates' | 'whatsnew' | 'help'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -161,6 +162,7 @@ export function UnifiedSettingsModal({
     { key: 'mcp', label: 'MCP' },
     { key: 'timer', label: 'Timer' },
     { key: 'notifications', label: 'Notifications' },
+    { key: 'updates', label: 'Updates' },
     { key: 'whatsnew', label: "What's New" },
     { key: 'help', label: 'Help' }
   ]
@@ -236,6 +238,9 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'notifications' && (
             <NotificationsSettingsContent />
+          )}
+          {activeTab === 'updates' && (
+            <UpdateSettingsContent />
           )}
           {activeTab === 'whatsnew' && (
             <WhatsNewContent />

@@ -8,6 +8,7 @@ import { showQuickAddWindow } from './quick-add'
 import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
 import { startNotificationChecker, stopNotificationChecker } from './notifications'
+import { initUpdater, stopUpdater } from './updater'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
 
 // Override userData path if TODOOZY_USER_DATA is set — allows running multiple independent instances
@@ -214,6 +215,7 @@ app.whenReady().then(() => {
   loadAndRegisterShortcut()
   loadAndRegisterAppToggleShortcut()
   startNotificationChecker()
+  initUpdater()
 
   // Handle deep link from cold start
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith('todoozy://'))
@@ -279,6 +281,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   stopNotificationChecker()
+  stopUpdater()
   destroyTray()
   closeDatabase()
 })

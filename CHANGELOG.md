@@ -4,6 +4,15 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## 2026-04-01 (cont.)
+
+### Fixed
+- **Remote membership discovery on startup** — App now discovers remote project memberships on startup, and shows proper error messages when invite acceptance fails. (2be9304)
+- **Full real-time task sync for shared projects** — Wired up complete real-time sync so changes by collaborators in shared projects are reflected immediately. (09b3b16)
+
+### Added
+- **Collaboration UX improvements** — Avatar consistency across views, inline task assignment for shared projects, and real-time sync polish. (c6d7eb0)
+
 ## 2026-04-01
 
 ### Fixed

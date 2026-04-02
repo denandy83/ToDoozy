@@ -4,6 +4,12 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## 2026-04-01 (cont.)
+
+- **Collaboration UX polish** — Consistent avatars across all views, inline task assignment in shared projects, and improved real-time sync so collaborator changes appear instantly.
+- **Remote membership discovery** — The app now discovers shared project memberships on startup and shows clear error messages if invite acceptance fails.
+- **Full real-time task sync** — Changes by collaborators in shared projects now sync immediately across all connected clients.
+
 ## 2026-04-01
 
 - **Launch at login** — Toggle in Settings > General to start ToDoozy automatically when you log into your Mac.

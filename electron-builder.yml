@@ -17,6 +17,8 @@ extraResources:
     to: iconTemplate@2x.png
   - from: resources/icon.png
     to: icon.png
+  - from: CHANGELOG.md
+    to: CHANGELOG.md
 mac:
   icon: resources/icon.png
   entitlements: build/entitlements.mac.plist
@@ -35,4 +37,8 @@ linux:
     - deb
   maintainer: todoozy
   category: Utility
+publish:
+  provider: github
+  owner: todoozy
+  repo: todoozy
 npmRebuild: false

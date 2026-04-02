@@ -251,6 +251,25 @@ export interface AppAPI {
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
 }
 
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; releaseNotes: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number; bytesPerSecond: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+
+export interface UpdaterAPI {
+  check(): Promise<void>
+  download(): Promise<void>
+  install(): Promise<void>
+  dismiss(version: string): Promise<void>
+  getStatus(): Promise<UpdateStatus>
+  getVersion(): Promise<string>
+  onStatus(callback: (status: UpdateStatus) => void): () => void
+}
+
 export interface TodoozyAPI {
   tasks: TasksAPI
   labels: LabelsAPI
@@ -273,6 +292,7 @@ export interface TodoozyAPI {
   sync: SyncAPI
   shell: ShellAPI
   app: AppAPI
+  updater: UpdaterAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void
 }
