@@ -293,12 +293,9 @@ If the fix affects something the user interacts with directly (not an internal r
 - **Fix: <short title>** — <What changed for the user>
 ```
 
-Update the in-app "What's New" by writing the `whats_new` global setting (user_id `''`) in the SQLite database. Append a bullet under the current version header. All items are flat bullets under `## vX.Y.Z` — no category sub-headers.
+The in-app "What's New" is populated from GitHub releases at build time (bundled into `resources/release-notes.md`) and refreshed from the GitHub API at runtime. You do NOT need to update it manually — it will be included automatically when the next release is created.
 
-```bash
-DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<version header + all bullets>');"
-```
+If the fix changes user-facing behavior documented in HELP.md, update both `HELP.md` and the `HELP_SECTIONS` data in `src/renderer/src/features/help/HelpSettingsContent.tsx` to keep the in-app help in sync.
 
 Finally, write the current HEAD commit hash to `.last-documented-commit` to sync the Stop hook marker.
 

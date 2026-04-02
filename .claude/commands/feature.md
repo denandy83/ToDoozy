@@ -220,14 +220,9 @@ After implementation is complete, update `scope.md`:
 - If the feature revealed new codebase knowledge relevant to other scope items, update those
 - If all scope items are done, clear the file
 
-### 9g — Update in-app "What's New"
+### 9g — In-app "What's New" (no manual action needed)
 
-Update the `whats_new` global setting (user_id `''`) in the SQLite database with all user-facing changes under the current version header (read version from `package.json`). All items are flat bullets under `## vX.Y.Z` — no category sub-headers. Replace the full value each time.
-
-```bash
-DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
-sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<version header + all bullets>');"
-```
+The in-app "What's New" tab is populated from GitHub releases at build time (bundled into `resources/release-notes.md`) and refreshed from the GitHub API at runtime. You do NOT need to update it manually — it is included automatically when the GitHub release is created. Just ensure the release notes on GitHub are complete.
 
 ### 9h — Update HELP.md
 

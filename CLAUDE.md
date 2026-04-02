@@ -137,15 +137,16 @@ The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It
 - `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
 
 ### In-App "What's New" (Settings → What's New)
-The "What's New" tab in Settings displays a version-based changelog powered by the Supabase `release_notes` table. Each row has a `version` (PK), `content` (bullet items), and `published_at` timestamp. On app launch, all rows are fetched, concatenated into `## vX.Y.Z` + bullets markdown, and cached in the local `whats_new` setting for offline access.
+The "What's New" tab displays release notes from GitHub releases. The data flow:
 
-To update release notes, use the MCP `set_whats_new` tool with a `version` parameter:
-```
-MCP tool: set_whats_new({ version: "v1.0.0", content: "- **Feature name** — What it does\n- **Fix name** — What was fixed" })
-```
-The tool upserts to Supabase and syncs the local cache. Content should be flat bullet items only (no `## vX.Y.Z` header — the version parameter handles that). If Supabase is unavailable, falls back to local SQLite.
+1. **Build time**: `scripts/bundle-release-notes.sh` fetches all releases via `gh` CLI and writes `resources/release-notes.md`. This file is bundled into the app as an extra resource.
+2. **App launch**: If the DB cache (`whats_new` setting) doesn't contain the current version (`## vX.Y.Z`), it's seeded from the bundled file immediately (no network needed).
+3. **Background sync**: `syncReleaseNotes()` fetches from the GitHub API and updates the DB cache. If the API is unavailable (rate-limited, offline), the bundled/cached data is used.
+4. **Tab open**: The renderer triggers a fresh sync and re-reads the cache, so new releases appear even if the background sync hasn't completed yet.
 
-A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` stays in local SQLite per-user. The `/fix` and `/feature` skills must also call `set_whats_new` after each fix/feature is confirmed.
+**No manual action needed** — release notes appear in the app automatically when a GitHub release is created. The `/fix` and `/feature` skills do NOT need to update What's New. Just ensure the GitHub release notes are complete when creating a release.
+
+A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` stays in local SQLite per-user.
 
 ### Version Format
 All documentation (CHANGELOG.md, RELEASE_NOTES.md, in-app What's New) uses **version headers** (`## vX.Y.Z`) instead of date headers. The version comes from `package.json`. Bump the version when cutting a release:
