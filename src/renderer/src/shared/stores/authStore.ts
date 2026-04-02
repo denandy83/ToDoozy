@@ -297,24 +297,10 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       })
 
       if (error || !data.session || !data.user) {
-        // Session invalid or expired — try offline fallback
-        console.warn('Session restore failed, checking offline fallback:', error?.message)
-
-        // Try to find a local user from a previous session
-        const users = await window.api.users.list()
-        if (users.length > 0) {
-          // Offline mode: use the most recent local user
-          set({
-            currentUser: users[0],
-            isAuthenticated: true,
-            isOffline: true,
-            loading: false
-          })
-          return
-        }
-
+        // Session invalid or expired — clear stale session and force re-login
+        console.warn('Session restore failed:', error?.message)
         await window.api.auth.clearSession()
-        set({ loading: false })
+        set({ loading: false, error: 'Session expired — please log in again' })
         return
       }
 

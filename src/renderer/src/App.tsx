@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
 import { useStatusStore } from './shared/stores/statusStore'
@@ -181,6 +181,8 @@ function App(): React.JSX.Element {
     expired: boolean
   } | null>(null)
 
+  const inviteShowingRef = useRef(false)
+
   // Queue for multiple pending invites
   const [pendingInviteQueue, setPendingInviteQueue] = useState<Array<{
     token: string
@@ -215,6 +217,7 @@ function App(): React.JSX.Element {
     if (!isAuthenticated || !currentUser?.email) return
 
     const handleNewInvite = async (token: string, projectName: string, ownerEmail: string): Promise<void> => {
+      inviteShowingRef.current = true
       setInviteState({
         token,
         projectName,
@@ -245,7 +248,6 @@ function App(): React.JSX.Element {
     // Subscribe to real-time invite notifications
     let unsubscribe: (() => void) | undefined
     subscribeToInvites(currentUser.email, async (invite) => {
-      // Validate the invite to get project details
       const result = await validateInviteToken(invite.token)
       if (result && result.valid) {
         handleNewInvite(invite.token, result.projectName, result.ownerName)
@@ -254,8 +256,25 @@ function App(): React.JSX.Element {
       unsubscribe = unsub
     })
 
+    // Poll for invites as fallback (Realtime may not connect if session was slow to establish)
+    const pollInterval = setInterval(async () => {
+      try {
+        const invites = await checkPendingInvites(currentUser.email)
+        if (invites.length > 0 && !inviteShowingRef.current) {
+          const [first, ...rest] = invites
+          handleNewInvite(first.token, first.projectName, first.ownerEmail)
+          setPendingInviteQueue(rest.map((i) => ({
+            token: i.token,
+            projectName: i.projectName,
+            ownerName: i.ownerEmail
+          })))
+        }
+      } catch { /* ignore polling errors */ }
+    }, 30_000)
+
     return () => {
       unsubscribe?.()
+      clearInterval(pollInterval)
     }
   }, [isAuthenticated, currentUser?.email])
 
@@ -266,6 +285,7 @@ function App(): React.JSX.Element {
       setPendingInviteQueue(rest)
     } else {
       setInviteState(null)
+      inviteShowingRef.current = false
     }
   }
 

@@ -175,6 +175,15 @@ export function AppLayout(): React.JSX.Element {
         display_name: m.display_name,
         role: m.role
       })))
+      // Sync display customizations to local DB so avatars render correctly
+      for (const m of members) {
+        if (m.display_color || m.display_initials) {
+          await window.api.projects.updateMember(projectId, m.user_id, {
+            display_color: m.display_color,
+            display_initials: m.display_initials
+          }).catch(() => {})
+        }
+      }
     } catch {
       // Fallback to local members
       const rawMembers = await window.api.projects.getMembers(projectId)

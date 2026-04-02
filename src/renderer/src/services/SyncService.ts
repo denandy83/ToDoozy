@@ -753,27 +753,29 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   joined_at: string
   email: string
   display_name: string | null
+  display_color: string | null
+  display_initials: string | null
 }>> {
   const supabase = await getSupabase()
 
   const { data, error } = await supabase
     .from('shared_project_members')
-    .select('user_id, role, joined_at')
+    .select('user_id, role, joined_at, display_color, display_initials')
     .eq('project_id', projectId)
 
   if (error || !data) return []
 
-  // Get user profiles from auth
   const members: Array<{
     user_id: string
     role: string
     joined_at: string
     email: string
     display_name: string | null
+    display_color: string | null
+    display_initials: string | null
   }> = []
 
   for (const member of data) {
-    // Try Supabase profile first, fall back to local user
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('email, display_name')
@@ -786,7 +788,9 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
         role: member.role,
         joined_at: member.joined_at,
         email: profile.email,
-        display_name: profile.display_name
+        display_name: profile.display_name,
+        display_color: member.display_color ?? null,
+        display_initials: member.display_initials ?? null
       })
     } else {
       const localUser = await window.api.users.findById(member.user_id)
@@ -795,7 +799,9 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
         role: member.role,
         joined_at: member.joined_at,
         email: localUser?.email ?? 'unknown',
-        display_name: localUser?.display_name ?? null
+        display_name: localUser?.display_name ?? null,
+        display_color: member.display_color ?? null,
+        display_initials: member.display_initials ?? null
       })
     }
   }
