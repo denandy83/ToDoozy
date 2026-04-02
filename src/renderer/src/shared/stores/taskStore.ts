@@ -14,6 +14,19 @@ function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
 }
 
+function logTaskActivity(taskId: string, action: string, oldValue: string | null, newValue: string | null): void {
+  const userId = getUserId()
+  if (!userId) return
+  window.api.activityLog.create({
+    id: crypto.randomUUID(),
+    task_id: taskId,
+    user_id: userId,
+    action,
+    old_value: oldValue,
+    new_value: newValue
+  }).catch(() => {})
+}
+
 // Sync task changes to Supabase for shared projects
 async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
   try {
@@ -216,6 +229,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         tasks: { ...state.tasks, [task.id]: task }
       }))
       syncIfShared(task, 'INSERT')
+      logTaskActivity(task.id, 'created', null, null)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create task'
@@ -226,11 +240,51 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<Task | null> {
     try {
+      const oldTask = get().tasks[id]
       const task = await window.api.tasks.update(id, input)
       if (task) {
         set((state) => ({
           tasks: { ...state.tasks, [task.id]: task }
         }))
+
+        // Log activity for each changed field
+        if (oldTask) {
+          if (input.title !== undefined && input.title !== oldTask.title) {
+            logTaskActivity(id, 'title_changed', oldTask.title, input.title)
+          }
+          if (input.status_id !== undefined && input.status_id !== oldTask.status_id) {
+            const [oldStatus, newStatus] = await Promise.all([
+              window.api.statuses.findById(oldTask.status_id),
+              window.api.statuses.findById(input.status_id)
+            ])
+            logTaskActivity(id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
+          }
+          if (input.priority !== undefined && input.priority !== oldTask.priority) {
+            const names = ['None', 'Low', 'Normal', 'High', 'Urgent']
+            logTaskActivity(id, 'priority_changed', names[oldTask.priority] ?? '', names[input.priority] ?? '')
+          }
+          if (input.due_date !== undefined && input.due_date !== oldTask.due_date) {
+            logTaskActivity(id, 'due_date_changed', oldTask.due_date ?? '', input.due_date ?? '')
+          }
+          if (input.is_archived !== undefined && input.is_archived !== oldTask.is_archived) {
+            logTaskActivity(id, input.is_archived === 1 ? 'archived' : 'unarchived', null, null)
+          }
+          if (input.assigned_to !== undefined && input.assigned_to !== oldTask.assigned_to) {
+            logTaskActivity(id, 'assigned', oldTask.assigned_to ?? '', input.assigned_to ?? 'unassigned')
+          }
+          if (input.recurrence_rule !== undefined && input.recurrence_rule !== oldTask.recurrence_rule) {
+            logTaskActivity(id, 'recurrence_changed', oldTask.recurrence_rule ?? '', input.recurrence_rule ?? '')
+          }
+          if (input.reference_url !== undefined && input.reference_url !== oldTask.reference_url) {
+            logTaskActivity(id, 'reference_url_changed', oldTask.reference_url ?? '', input.reference_url ?? '')
+          }
+          if (input.is_in_my_day !== undefined && input.is_in_my_day !== oldTask.is_in_my_day) {
+            logTaskActivity(id, input.is_in_my_day === 1 ? 'pinned_to_my_day' : 'unpinned_from_my_day', null, null)
+          }
+          if (input.project_id !== undefined && input.project_id !== oldTask.project_id) {
+            logTaskActivity(id, 'moved_to_project', oldTask.project_id, input.project_id)
+          }
+        }
 
         // Cascade archive/unarchive to subtasks in store
         if (input.is_archived !== undefined) {
@@ -308,6 +362,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       // Capture task before deletion for sync
       const taskToDelete = get().tasks[id]
+      if (taskToDelete) logTaskActivity(id, 'deleted', taskToDelete.title, null)
 
       // Collect task IDs to clean up attachment files before DB cascade
       const idsForCleanup: string[] = [id]
@@ -453,6 +508,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           expandedTaskIds: newExpanded
         }
       })
+      logTaskActivity(task.id, 'created', null, null)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create subtask'
@@ -465,6 +521,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       await window.api.tasks.addLabel(taskId, labelId)
       await get().hydrateTaskLabels(taskId)
+      const labels = get().taskLabels[taskId] ?? []
+      const added = labels.find((l) => l.id === labelId)
+      logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
       set({ error: message })
@@ -474,8 +533,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async removeLabel(taskId: string, labelId: string): Promise<boolean> {
     try {
+      const labels = get().taskLabels[taskId] ?? []
+      const removed = labels.find((l) => l.id === labelId)
       const result = await window.api.tasks.removeLabel(taskId, labelId)
       await get().hydrateTaskLabels(taskId)
+      if (result) logTaskActivity(taskId, 'label_removed', removed?.name ?? labelId, null)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label'

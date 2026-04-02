@@ -821,6 +821,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
                 bucketName={group.bucket.name}
                 bucketColor={group.bucket.color}
                 mapStatusId={mapStatusToBucketId}
+                hideAssignee
               />
             )
           })}

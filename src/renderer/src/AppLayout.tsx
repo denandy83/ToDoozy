@@ -54,6 +54,8 @@ export function AppLayout(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   const [helpOpen, setHelpOpen] = useState(false)
+  const helpOpenRef = useRef(false)
+  helpOpenRef.current = helpOpen
   const [projectMembers, setProjectMembers] = useState<Array<{ user_id: string; email: string; display_name: string | null; role: string }>>([])
 
   // Apply current theme CSS variables
@@ -273,17 +275,22 @@ export function AppLayout(): React.JSX.Element {
                 reference_url: payload.reference_url as string | null
               })
             }
-            // Sync labels from payload
+            // Sync labels from payload (check project labels first to avoid duplicates)
             if (payload.label_names) {
+              const projLabels = await window.api.labels.findByProjectId(selectedProject.id)
+              const projLabelsByName = new Map(projLabels.map((l: { name: string; id: string }) => [l.name.toLowerCase(), l]))
               const parsed: Array<string | { name: string; color: string }> = JSON.parse(payload.label_names as string)
               for (const entry of parsed) {
                 const name = typeof entry === 'string' ? entry : entry.name
                 const color = typeof entry === 'string' ? '#888888' : entry.color
-                let label = await window.api.labels.findByName(userId, name)
+                let label = projLabelsByName.get(name.toLowerCase()) as Awaited<ReturnType<typeof window.api.labels.findByName>> | undefined
+                if (!label) {
+                  label = await window.api.labels.findByName(userId, name)
+                }
                 if (!label) {
                   label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
-                  await window.api.labels.addToProject(selectedProject.id, label.id).catch(() => {})
                 }
+                await window.api.labels.addToProject(selectedProject.id, label.id).catch(() => {})
                 await window.api.tasks.addLabel(payload.id as string, label.id).catch(() => {})
               }
             }
@@ -607,6 +614,13 @@ export function AppLayout(): React.JSX.Element {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      // Close keyboard shortcuts modal first if open
+      if (helpOpenRef.current) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        setHelpOpen(false)
+        return
+      }
       if (closeTopPopup()) {
         e.preventDefault()
         e.stopImmediatePropagation()

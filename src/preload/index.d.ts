@@ -249,6 +249,7 @@ export interface ShellAPI {
 export interface AppAPI {
   getLoginItemSettings(): Promise<{ openAtLogin: boolean }>
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
+  getChangelog(): Promise<string>
 }
 
 export interface ReleaseNotesAPI {

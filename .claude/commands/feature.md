@@ -229,7 +229,11 @@ DB_PATH="$HOME/Library/Application Support/todoozy/todoozy.db"
 sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO settings (user_id, key, value) VALUES ('', 'whats_new', '<version header + all bullets>');"
 ```
 
-### 9h — Clear pending-changes.md entries
+### 9h — Update HELP.md
+
+Update `HELP.md` (the end-user guide) with documentation for any new user-facing feature. Match the existing style: `## Section` headers with descriptive paragraphs. If the feature fits in an existing section, add to it. If it's a new area, add a new section in a logical location. Also update the corresponding help data in `src/renderer/src/features/help/HelpSettingsContent.tsx` — add entries to the `HELP_SECTIONS` array and shortcut data as needed so the in-app help stays in sync.
+
+### 9i — Clear pending-changes.md entries
 
 After all docs are updated, remove the entries you just processed from `pending-changes.md` (keep the header and format instructions). Write the current HEAD commit hash to `.last-documented-commit`.
 

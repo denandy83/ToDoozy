@@ -25,6 +25,7 @@ The app has three areas:
 - `@work` — assigns the label "work" (creates it if it doesn't exist)
 - `p:high` — sets priority to High (options: low, normal, high, urgent)
 - `d:today` — sets due date to today (also: tomorrow, monday, Jan 15, etc.)
+- `r:https://...` — attaches a reference URL to the task
 
 **From anywhere on your Mac:**
 - Press **Cmd+Shift+Space** to open the quick-add window (works even when ToDoozy is hidden)
@@ -104,8 +105,9 @@ Click any task to open the detail panel on the right (or bottom — configurable
 - **Priority** — click None/Low/Normal/High/Urgent
 - **Labels** — click "+ Add" to pick or create labels
 - **Due date** — click the date field; optionally set a time
-- **Recurrence** — repeat daily, weekly, monthly, or custom schedule
-- **Snooze** — hide the task until later today, tomorrow, next week, or a custom date/time
+- **Recurrence** — repeat daily, weekly, monthly, or custom schedule (see Recurrence section below)
+- **Snooze** — hide the task until later (see Snooze section below)
+- **Reference URL** — attach a link to a related webpage, ticket, or document
 - **Description** — full rich text editor (see below)
 - **Attachments** — attach files from your Mac (requires iCloud setup)
 - **Subtasks** — add, check off, and reorder subtasks
@@ -173,6 +175,18 @@ Click any result to open the task in the detail panel.
 
 ---
 
+## Calendar View
+
+Click the **Calendar** icon in the sidebar to see all tasks with due dates across every project.
+
+- Toggle between **month** and **week** view using the header controls
+- Use the arrow buttons to navigate between months or weeks; click **Today** to jump back
+- Click any day to see its tasks
+- Drag tasks between days to change their due date
+- Tasks without due dates do not appear in the calendar
+
+---
+
 ## Kanban View
 
 Press **Cmd+L** to switch between list and kanban view in any project.
@@ -217,6 +231,60 @@ Go to **Settings → Themes** to change the app's appearance.
 
 ---
 
+## Archiving
+
+### Auto-archive
+Enable in **Settings → General**. Completed tasks are automatically archived after a configurable delay (e.g., 3 days). Auto-archive only applies to **local projects** — shared projects are excluded to avoid conflicts between users with different settings.
+
+### Manual archive
+Right-click a task → **Archive**, or toggle archive in the detail panel. In shared projects, manually archiving a task moves it to the archive for **all members**. Archiving a parent task also archives its subtasks.
+
+### Restoring tasks
+Go to the **Archive** view in the sidebar. Click the restore button on any task to unarchive it. In shared projects, restoring a task makes it visible to all members again.
+
+### Shared projects and archiving
+Tasks in shared projects can only be archived manually, never automatically. Archived shared tasks appear in every member's archive and can be restored by any member.
+
+When a project is **deleted**, all its tasks — including archived ones — are permanently removed. When a shared project is **unshared** and kept locally, all archived tasks are preserved in the local copy with their archive status intact.
+
+---
+
+## Recurrence
+
+Open the task detail panel → click the **Recurrence** field to set a repeating schedule.
+
+**Built-in frequencies:** Daily, Weekly, Monthly, Yearly.
+
+**Custom schedules:** Create advanced patterns like "every 2 weeks on Monday" or "every 3rd of the month." You can set an end date or an "after N occurrences" limit.
+
+**After-completion mode:** Choose "after completion" to count from when you actually finish the task rather than the original due date. Useful for tasks that slip.
+
+When you complete a recurring task, a new occurrence is created automatically with the next due date. The completed task stays in your history.
+
+---
+
+## Snooze
+
+Right-click a task → **Snooze**, or use the snooze button in the detail panel. The task disappears from your list until the snooze time arrives.
+
+**Preset options:**
+- **Later Today** — 3 hours from now
+- **Tomorrow** — 9 AM tomorrow
+- **Next Week** — Monday at 9 AM
+- **Custom** — pick any date and time
+
+When a snoozed task wakes up, it reappears in your task list and shows a notification. If it was pinned to My Day, it returns there too.
+
+---
+
+## Sharing Projects
+
+Open project settings → **Share** to invite other users by email.
+
+Shared projects sync in real-time — all members see task changes, status updates, and member avatars instantly. Each member can customize their avatar color and initials in project settings.
+
+---
+
 ## Pomodoro Timer
 
 To start a timer on a task:
@@ -240,6 +308,17 @@ To attach files to a task:
 Files appear as cards below the description. Click to open in the default app. Hover to reveal a remove button.
 
 Files are stored locally and synced to iCloud Drive for access from other devices.
+
+---
+
+## Auto-Update
+
+ToDoozy checks for updates automatically every 4 hours and on launch.
+
+- Go to **Settings → Updates** to check manually
+- When an update is available, a banner shows the version and release notes
+- Click **Download** to start downloading, then **Install & Restart** to apply
+- If you don't install immediately, the update installs automatically when you quit the app
 
 ---
 

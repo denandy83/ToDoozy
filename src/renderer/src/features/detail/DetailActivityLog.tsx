@@ -6,8 +6,36 @@ interface DetailActivityLogProps {
   taskId: string
 }
 
+interface UserInfo {
+  display_name: string | null
+  email: string
+}
+
+// Module-level user cache to avoid repeated lookups across re-renders
+const userCache = new Map<string, UserInfo>()
+
+async function resolveUser(userId: string): Promise<UserInfo> {
+  const cached = userCache.get(userId)
+  if (cached) return cached
+  try {
+    const user = await window.api.users.findById(userId)
+    const info: UserInfo = { display_name: user?.display_name ?? null, email: user?.email ?? 'unknown' }
+    userCache.set(userId, info)
+    return info
+  } catch {
+    return { display_name: null, email: 'unknown' }
+  }
+}
+
+function formatUserName(info: UserInfo): string {
+  if (info.display_name) return info.display_name
+  const localPart = info.email.split('@')[0]
+  return localPart ?? 'unknown'
+}
+
 export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX.Element {
   const [entries, setEntries] = useState<ActivityLogEntry[]>([])
+  const [userMap, setUserMap] = useState<Map<string, UserInfo>>(new Map())
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -17,9 +45,16 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
       setLoading(true)
       try {
         const result = await window.api.activityLog.findByTaskId(taskId)
-        if (!cancelled) {
-          setEntries(result)
+        if (cancelled) return
+        setEntries(result)
+
+        // Resolve unique user IDs
+        const userIds = [...new Set(result.map((e) => e.user_id).filter(Boolean))]
+        const resolved = new Map<string, UserInfo>()
+        for (const uid of userIds) {
+          resolved.set(uid, await resolveUser(uid))
         }
+        if (!cancelled) setUserMap(resolved)
       } catch (err) {
         console.error('Failed to load activity log:', err)
       } finally {
@@ -56,7 +91,7 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
             <p className="text-[10px] text-muted/60">No activity recorded</p>
           )}
           {entries.map((entry) => (
-            <ActivityEntry key={entry.id} entry={entry} />
+            <ActivityEntry key={entry.id} entry={entry} userName={entry.user_id ? formatUserName(userMap.get(entry.user_id) ?? { display_name: null, email: 'unknown' }) : null} />
           ))}
         </div>
       )}
@@ -66,9 +101,10 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
 
 interface ActivityEntryProps {
   entry: ActivityLogEntry
+  userName: string | null
 }
 
-function ActivityEntry({ entry }: ActivityEntryProps): React.JSX.Element {
+function ActivityEntry({ entry, userName }: ActivityEntryProps): React.JSX.Element {
   const date = new Date(entry.created_at)
   const timeStr = date.toLocaleString(undefined, {
     month: 'short',
@@ -85,6 +121,9 @@ function ActivityEntry({ entry }: ActivityEntryProps): React.JSX.Element {
         </span>
         <span className="text-[10px] text-muted/60">{timeStr}</span>
       </div>
+      {userName && (
+        <span className="text-[10px] text-muted/60">by {userName}</span>
+      )}
       {(entry.old_value || entry.new_value) && (
         <div className="mt-0.5 text-[10px] text-muted/80">
           {entry.old_value && (

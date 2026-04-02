@@ -433,8 +433,21 @@ function GeneralSettings(): React.JSX.Element {
   )
 }
 
+function useChangelog(): string {
+  const [changelog, setChangelog] = useState('')
+  useEffect(() => {
+    window.api.app.getChangelog().then((content) => {
+      // Strip the title and intro lines (first 5 lines)
+      const lines = content.split('\n')
+      const startIdx = lines.findIndex((l) => l.startsWith('## '))
+      setChangelog(startIdx >= 0 ? lines.slice(startIdx).join('\n') : content)
+    })
+  }, [])
+  return changelog
+}
+
 function WhatsNewDot(): React.JSX.Element | null {
-  const whatsNew = useSetting('whats_new') ?? ''
+  const whatsNew = useChangelog()
   const lastSeen = useSetting('whats_new_seen') ?? ''
 
   if (!whatsNew) return null
@@ -448,7 +461,7 @@ function WhatsNewDot(): React.JSX.Element | null {
 }
 
 function WhatsNewContent(): React.JSX.Element {
-  const whatsNew = useSetting('whats_new') ?? ''
+  const whatsNew = useChangelog()
   const { setSetting } = useSettingsStore()
 
   // Mark as seen when the tab is viewed

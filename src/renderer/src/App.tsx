@@ -157,9 +157,12 @@ function App(): React.JSX.Element {
       const now = Date.now()
       const allTasks = useTaskStore.getState().tasks
       const { updateTask: doUpdate } = useTaskStore.getState()
+      const allProjects = useProjectStore.getState().projects
 
       for (const task of Object.values(allTasks)) {
         if (task.is_archived === 1 || !task.completed_date) continue
+        // Never auto-archive tasks in shared projects — users have different settings
+        if (allProjects[task.project_id]?.is_shared === 1) continue
         const completedAt = new Date(task.completed_date).getTime()
         if (now - completedAt >= thresholdMs) {
           await doUpdate(task.id, { is_archived: 1 })

@@ -27,6 +27,7 @@ interface StatusSectionProps {
   bucketName?: string
   bucketColor?: string
   mapStatusId?: (statusId: string) => string
+  hideAssignee?: boolean
 }
 
 export function StatusSection({
@@ -48,7 +49,8 @@ export function StatusSection({
   projectMap,
   bucketName,
   bucketColor,
-  mapStatusId
+  mapStatusId,
+  hideAssignee
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -128,6 +130,7 @@ export function StatusSection({
                 project={projectMap?.[task.project_id]}
                 statusIdOverride={mapStatusId ? mapStatusId(task.status_id) : undefined}
                 mapStatusId={mapStatusId}
+                hideAssignee={hideAssignee}
               />
               )
             })}

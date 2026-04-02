@@ -237,7 +237,8 @@ const api: TodoozyAPI = {
 
   app: {
     getLoginItemSettings: () => ipcRenderer.invoke('app:getLoginItemSettings'),
-    setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin)
+    setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin),
+    getChangelog: () => ipcRenderer.invoke('app:getChangelog')
   },
 
   releaseNotes: {

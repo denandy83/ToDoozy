@@ -3,7 +3,6 @@ import { X, PanelBottom, PanelRight, AlertTriangle } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
 import { useLabelsByProject } from '../../shared/stores'
-import { useAuthStore } from '../../shared/stores'
 import { useProjectStore } from '../../shared/stores'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
@@ -26,7 +25,6 @@ import { formatDate } from '../../shared/utils/dateFormat'
 export function DetailPanel(): React.JSX.Element | null {
   const task = useTaskStore(selectCurrentTask)
   const { updateTask, setCurrentTask, addLabel, removeLabel, hydrateTaskLabels } = useTaskStore()
-  const currentUser = useAuthStore((s) => s.currentUser)
   const position = useViewStore((s) => s.detailPanelPosition)
   const panelSize = useViewStore((s) => s.detailPanelSize)
   const setPanelSize = useViewStore((s) => s.setDetailPanelSize)
@@ -215,7 +213,6 @@ export function DetailPanel(): React.JSX.Element | null {
 
   const handleTitleChange = (title: string): void => {
     updateTask(task.id, { title })
-    logActivity('title_changed', task.title, title)
   }
 
   const handleStatusChange = (statusId: string): void => {
@@ -227,24 +224,19 @@ export function DetailPanel(): React.JSX.Element | null {
       update.completed_date = null
     }
     updateTask(task.id, update)
-    const oldStatus = statuses.find((s) => s.id === task.status_id)
-    logActivity('status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
   }
 
   const handleToggleArchive = (): void => {
     const newVal = task.is_archived === 1 ? 0 : 1
     updateTask(task.id, { is_archived: newVal })
-    logActivity('archive_toggled', String(task.is_archived), String(newVal))
   }
 
   const handlePriorityChange = (priority: number): void => {
     updateTask(task.id, { priority })
-    logActivity('priority_changed', String(task.priority), String(priority))
   }
 
   const handleDueDateChange = (dueDate: string | null): void => {
     updateTask(task.id, { due_date: dueDate })
-    logActivity('due_date_changed', task.due_date ?? '', dueDate ?? '')
   }
 
   const handleRecurrenceChange = (rule: string | null): void => {
@@ -260,7 +252,6 @@ export function DetailPanel(): React.JSX.Element | null {
 
   const handleSnooze = (date: string): void => {
     updateTask(task.id, { due_date: date })
-    logActivity('snoozed', task.due_date ?? '', date)
   }
 
   const handleReferenceUrlChange = (referenceUrl: string | null): void => {
@@ -283,20 +274,6 @@ export function DetailPanel(): React.JSX.Element | null {
   const handleCreateLabel = async (name: string, color: string): Promise<void> => {
     const label = await createOrMatchLabel(name, color)
     await addLabel(task.id, label.id)
-  }
-
-  const logActivity = (action: string, oldValue: string, newValue: string): void => {
-    if (!currentUser) return
-    window.api.activityLog
-      .create({
-        id: crypto.randomUUID(),
-        task_id: task.id,
-        user_id: currentUser.id,
-        action,
-        old_value: oldValue || null,
-        new_value: newValue || null
-      })
-      .catch((err: unknown) => console.error('Failed to log activity:', err))
   }
 
   const isSide = position === 'side'

@@ -45,6 +45,7 @@ interface TaskRowProps {
   project?: Project
   statusIdOverride?: string
   mapStatusId?: (statusId: string) => string
+  hideAssignee?: boolean
 }
 
 export function TaskRow({
@@ -68,7 +69,8 @@ export function TaskRow({
   onOpenDetail,
   project,
   statusIdOverride,
-  mapStatusId
+  mapStatusId,
+  hideAssignee
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -375,8 +377,8 @@ export function TaskRow({
           />
         </button>
 
-        {/* Assignee — clickable to change */}
-        {isSharedProject && (
+        {/* Assignee — clickable to change (hidden in My Day) */}
+        {isSharedProject && !hideAssignee && (
           <InlineAssignee
             taskId={task.id}
             assignedTo={task.assigned_to}

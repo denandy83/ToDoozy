@@ -715,6 +715,14 @@ export function registerIpcHandlers(): void {
     app.setLoginItemSettings({ openAtLogin })
   })
 
+  ipcMain.handle('app:getChangelog', () => {
+    try {
+      const cached = getRepos().settings.get('', 'whats_new')
+      if (cached) return cached
+    } catch { /* fall through */ }
+    return ''
+  })
+
   // ── Notifications ──────────────────────────────────────────────────
   ipcMain.handle('notifications:findAll', (_e, limit?: number) => {
     return getRepos().notifications.findAll(limit)
