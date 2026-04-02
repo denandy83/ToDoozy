@@ -675,8 +675,36 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       if (!localMemberIds.has(member.user_id)) {
         await window.api.projects.addMember(projectId, member.user_id, member.role)
       }
+
+      // Sync display customizations from Supabase
+      if (member.display_color || member.display_initials) {
+        await window.api.projects.updateMember(projectId, member.user_id, {
+          display_color: member.display_color ?? null,
+          display_initials: member.display_initials ?? null
+        })
+      }
     }
   }
+}
+
+/**
+ * Update a member's display_color and display_initials in Supabase
+ * so the customization is visible to all project members.
+ */
+export async function updateSharedMemberDisplay(
+  projectId: string,
+  userId: string,
+  displayColor: string | null,
+  displayInitials: string | null
+): Promise<void> {
+  const supabase = await getSupabase()
+  const { error } = await supabase
+    .from('shared_project_members')
+    .update({ display_color: displayColor, display_initials: displayInitials })
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+
+  if (error) throw error
 }
 
 /**

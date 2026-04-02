@@ -14,6 +14,7 @@ import {
   removeSharedMember,
   removeProjectFromSupabase,
   getSharedProjectMembers,
+  updateSharedMemberDisplay,
   unsubscribeFromProject
 } from '../../services/SyncService'
 
@@ -49,7 +50,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const handleSaveMemberDisplay = async (userId: string): Promise<void> => {
     const color = editColor || null
     const initials = editInitials.trim() || null
+    // Save locally
     await window.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
+    // Sync to Supabase so all members see the change
+    if (project.is_shared === 1) {
+      await updateSharedMemberDisplay(project.id, userId, color, initials).catch((err) =>
+        console.warn('Failed to sync member display to Supabase:', err)
+      )
+    }
     setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
     invalidateMemberDisplay(project.id)
     setEditingMemberId(null)
