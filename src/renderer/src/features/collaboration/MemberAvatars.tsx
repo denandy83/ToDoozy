@@ -36,7 +36,7 @@ function MemberCircle({
       onMouseLeave={() => setHovered(false)}
     >
       <button
-        className="flex h-7 w-7 items-center justify-center rounded-full border-2 text-[9px] font-bold uppercase tracking-wider text-white transition-all"
+        className="flex h-7 w-7 items-center justify-center rounded-full border text-[9px] font-bold uppercase tracking-wider text-white transition-all"
         style={{
           backgroundColor: display.color,
           zIndex: hovered ? 20 : zIndex,
