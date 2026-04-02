@@ -1,11 +1,11 @@
 /**
  * Overlapping avatar circles for shared project members.
  * Shows all members including current user. Clicking a member
- * toggles an assignee filter (blur/hide follows label filter mode).
+ * toggles an assignee filter (multiselect, blur/hide follows label filter mode).
  */
 import { useState } from 'react'
 import { useMemberDisplay } from '../../shared/hooks/useMemberDisplay'
-import { useLabelStore, selectAssigneeFilter } from '../../shared/stores/labelStore'
+import { useLabelStore, selectAssigneeFilters } from '../../shared/stores/labelStore'
 
 interface MemberInfo {
   user_id: string
@@ -39,9 +39,10 @@ function MemberCircle({
         className="flex h-7 w-7 items-center justify-center rounded-full border-2 text-[9px] font-bold uppercase tracking-wider text-white transition-all"
         style={{
           backgroundColor: display.color,
-          zIndex,
-          borderColor: isActive ? 'var(--color-accent)' : 'var(--color-background)',
-          boxShadow: isActive ? '0 0 0 1px var(--color-accent)' : 'none'
+          zIndex: hovered ? 20 : zIndex,
+          borderColor: isActive ? 'var(--color-accent)' : hovered ? 'var(--color-foreground)' : 'var(--color-background)',
+          boxShadow: isActive ? '0 0 0 1px var(--color-accent)' : 'none',
+          transform: hovered ? 'scale(1.15)' : 'scale(1)'
         }}
         onClick={onClick}
         aria-label={`Filter by ${member.display_name || member.email}`}
@@ -72,8 +73,8 @@ export function MemberAvatars({
 }: MemberAvatarsProps): React.JSX.Element | null {
   if (members.length === 0) return null
 
-  const assigneeFilter = useLabelStore(selectAssigneeFilter)
-  const setAssigneeFilter = useLabelStore((s) => s.setAssigneeFilter)
+  const assigneeFilters = useLabelStore(selectAssigneeFilters)
+  const toggleAssigneeFilter = useLabelStore((s) => s.toggleAssigneeFilter)
 
   // Sort: current user first, then others
   const sorted = [...members].sort((a, b) => {
@@ -85,11 +86,6 @@ export function MemberAvatars({
   const visible = sorted.slice(0, maxVisible)
   const overflow = sorted.length - maxVisible
 
-  const handleClick = (userId: string): void => {
-    // Toggle: click same member again to clear filter
-    setAssigneeFilter(assigneeFilter === userId ? null : userId)
-  }
-
   return (
     <div className="flex items-center -space-x-2">
       {visible.map((member, index) => (
@@ -98,8 +94,8 @@ export function MemberAvatars({
           member={member}
           projectId={projectId}
           zIndex={maxVisible - index}
-          isActive={assigneeFilter === member.user_id}
-          onClick={() => handleClick(member.user_id)}
+          isActive={assigneeFilters.has(member.user_id)}
+          onClick={() => toggleAssigneeFilter(member.user_id)}
         />
       ))}
       {overflow > 0 && (

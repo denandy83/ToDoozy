@@ -42,7 +42,8 @@ export {
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
   selectFilterMode,
-  selectAssigneeFilter,
+  selectAssigneeFilters,
+  selectHasAssigneeFilters,
   useLabelsByProject
 } from './labelStore'
 
