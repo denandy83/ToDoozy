@@ -319,3 +319,21 @@
 - **Acceptance Criteria:** Owner can share projects with invite links, real-time sync via Supabase, member management, task assignment, notifications, offline support, RLS enforcement.
 - **Passes:** true
 - **Implemented:** 2026-04-01
+
+---
+
+### #40 — Auto-Update Mechanism
+- **Description:** Sparkle-style auto-update system using electron-updater with GitHub Releases. Checks on launch, every 4 hours, and manual trigger from Settings. Update dialog shows version, release notes, download progress. Settings section displays current version and check button.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** electron-updater configured with GitHub Releases, checks on launch + 4h interval, update dialog with release notes, Install & Restart / Not Now buttons, download progress bar, Settings version display + check button, macOS only, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-02
+
+---
+
+### #41 — Versioned Release Notes on Supabase
+- **Description:** Migrate What's New from local SQLite to Supabase release_notes table. App fetches on launch and caches locally. /fix and /feature skills upsert to Supabase. Update dialog pulls per-version notes. whats_new_seen stays local per-user.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Supabase release_notes table, skills write to Supabase, MCP set_whats_new writes to Supabase, app fetches + caches on launch, What's New displays all versions, offline fallback, notification dot works, update dialog fetches per-version notes, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-02
