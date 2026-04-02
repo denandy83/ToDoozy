@@ -528,8 +528,15 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   // Sync all project labels (create locally if missing, associate with project)
   if (project.label_data) {
     const labels: Array<{ name: string; color: string }> = JSON.parse(project.label_data)
+    const existingProjectLabels = await window.api.labels.findByProjectId(projectId)
+    const existingByName = new Map(existingProjectLabels.map((l) => [l.name.toLowerCase(), l]))
+
     for (const entry of labels) {
-      let label = await window.api.labels.findByName(userId, entry.name)
+      let label = existingByName.get(entry.name.toLowerCase())
+      if (!label) {
+        // Check globally by user before creating
+        label = await window.api.labels.findByName(userId, entry.name) ?? undefined
+      }
       if (!label) {
         label = await window.api.labels.create({
           id: crypto.randomUUID(),
@@ -611,13 +618,18 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
         })
       }
 
-      // Sync labels
+      // Sync labels (check project labels first to avoid duplicates)
       if (task.label_names) {
+        const projLabels = await window.api.labels.findByProjectId(projectId)
+        const projLabelsByName = new Map(projLabels.map((l) => [l.name.toLowerCase(), l]))
         const parsed: Array<string | { name: string; color: string }> = JSON.parse(task.label_names)
         for (const entry of parsed) {
           const name = typeof entry === 'string' ? entry : entry.name
           const color = typeof entry === 'string' ? '#888888' : entry.color
-          let label = await window.api.labels.findByName(userId, name)
+          let label = projLabelsByName.get(name.toLowerCase())
+          if (!label) {
+            label = await window.api.labels.findByName(userId, name) ?? undefined
+          }
           if (!label) {
             label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
           }
