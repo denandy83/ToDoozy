@@ -1,9 +1,11 @@
 /**
- * Asana-style overlapping avatar circles for shared project members.
- * Shows in the project header area for shared projects.
+ * Overlapping avatar circles for shared project members.
+ * Shows all members including current user. Clicking a member
+ * toggles an assignee filter (blur/hide follows label filter mode).
  */
 import { useState } from 'react'
 import { useMemberDisplay } from '../../shared/hooks/useMemberDisplay'
+import { useLabelStore, selectAssigneeFilter } from '../../shared/stores/labelStore'
 
 interface MemberInfo {
   user_id: string
@@ -12,8 +14,19 @@ interface MemberInfo {
   role: string
 }
 
-// Wrapper to use the hook per-member inside the list
-function MemberCircle({ member, projectId, zIndex }: { member: MemberInfo; projectId: string; zIndex: number }): React.JSX.Element {
+function MemberCircle({
+  member,
+  projectId,
+  zIndex,
+  isActive,
+  onClick
+}: {
+  member: MemberInfo
+  projectId: string
+  zIndex: number
+  isActive: boolean
+  onClick: () => void
+}): React.JSX.Element {
   const [hovered, setHovered] = useState(false)
   const display = useMemberDisplay(projectId, member.user_id)
   return (
@@ -22,15 +35,22 @@ function MemberCircle({ member, projectId, zIndex }: { member: MemberInfo; proje
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div
-        className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background text-[9px] font-bold uppercase tracking-wider text-white"
-        style={{ backgroundColor: display.color, zIndex }}
+      <button
+        className="flex h-7 w-7 items-center justify-center rounded-full border-2 text-[9px] font-bold uppercase tracking-wider text-white transition-all"
+        style={{
+          backgroundColor: display.color,
+          zIndex,
+          borderColor: isActive ? 'var(--color-accent)' : 'var(--color-background)',
+          boxShadow: isActive ? '0 0 0 1px var(--color-accent)' : 'none'
+        }}
+        onClick={onClick}
+        aria-label={`Filter by ${member.display_name || member.email}`}
       >
         {display.initials}
-      </div>
+      </button>
       {hovered && (
         <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted shadow-md ring-1 ring-border">
-          {member.email}
+          {member.display_name || member.email}
         </div>
       )}
     </div>
@@ -42,32 +62,45 @@ interface MemberAvatarsProps {
   currentUserId: string
   projectId: string
   maxVisible?: number
-  onClickAvatars?: () => void
 }
 
 export function MemberAvatars({
   members,
   currentUserId,
   projectId,
-  maxVisible = 4,
-  onClickAvatars
+  maxVisible = 5
 }: MemberAvatarsProps): React.JSX.Element | null {
-  // Filter out current user
-  const otherMembers = members.filter((m) => m.user_id !== currentUserId)
-  if (otherMembers.length === 0) return null
+  if (members.length === 0) return null
 
-  const visible = otherMembers.slice(0, maxVisible)
-  const overflow = otherMembers.length - maxVisible
+  const assigneeFilter = useLabelStore(selectAssigneeFilter)
+  const setAssigneeFilter = useLabelStore((s) => s.setAssigneeFilter)
+
+  // Sort: current user first, then others
+  const sorted = [...members].sort((a, b) => {
+    if (a.user_id === currentUserId) return -1
+    if (b.user_id === currentUserId) return 1
+    return 0
+  })
+
+  const visible = sorted.slice(0, maxVisible)
+  const overflow = sorted.length - maxVisible
+
+  const handleClick = (userId: string): void => {
+    // Toggle: click same member again to clear filter
+    setAssigneeFilter(assigneeFilter === userId ? null : userId)
+  }
 
   return (
-    <button
-      className="flex items-center -space-x-2 transition-opacity hover:opacity-80"
-      onClick={onClickAvatars}
-      title="View project members"
-      aria-label={`${otherMembers.length} project member${otherMembers.length !== 1 ? 's' : ''}`}
-    >
+    <div className="flex items-center -space-x-2">
       {visible.map((member, index) => (
-        <MemberCircle key={member.user_id} member={member} projectId={projectId} zIndex={maxVisible - index} />
+        <MemberCircle
+          key={member.user_id}
+          member={member}
+          projectId={projectId}
+          zIndex={maxVisible - index}
+          isActive={assigneeFilter === member.user_id}
+          onClick={() => handleClick(member.user_id)}
+        />
       ))}
       {overflow > 0 && (
         <div
@@ -77,6 +110,6 @@ export function MemberAvatars({
           +{overflow}
         </div>
       )}
-    </button>
+    </div>
   )
 }

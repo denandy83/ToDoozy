@@ -14,6 +14,7 @@ interface LabelState {
   labels: Record<string, Label>
   projectLabels: Record<string, Set<string>> // projectId -> Set<labelId>
   activeLabelFilters: Set<string>
+  assigneeFilter: string | null // user_id to filter by, or null
   filterMode: LabelFilterMode
   loading: boolean
   error: string | null
@@ -31,6 +32,7 @@ interface LabelActions {
   toggleLabelFilter(labelId: string): void
   clearLabelFilters(): void
   setFilterMode(mode: LabelFilterMode): void
+  setAssigneeFilter(userId: string | null): void
   clearError(): void
 }
 
@@ -40,6 +42,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   labels: {},
   projectLabels: {},
   activeLabelFilters: new Set(),
+  assigneeFilter: null,
   filterMode: 'hide' as LabelFilterMode,
   loading: false,
   error: null,
@@ -237,11 +240,15 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   clearLabelFilters(): void {
-    set({ activeLabelFilters: new Set() })
+    set({ activeLabelFilters: new Set(), assigneeFilter: null })
   },
 
   setFilterMode(mode: LabelFilterMode): void {
     set({ filterMode: mode })
+  },
+
+  setAssigneeFilter(userId: string | null): void {
+    set({ assigneeFilter: userId })
   },
 
   clearError(): void {
@@ -272,6 +279,8 @@ export const selectHasActiveLabelFilters = (state: LabelState): boolean =>
   state.activeLabelFilters.size > 0
 
 export const selectFilterMode = (state: LabelState): LabelFilterMode => state.filterMode
+
+export const selectAssigneeFilter = (state: LabelState): string | null => state.assigneeFilter
 
 // Hooks — stable selectors for parameterized queries
 export function useLabelsByProject(projectId: string): Label[] {

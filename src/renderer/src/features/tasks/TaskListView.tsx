@@ -8,7 +8,8 @@ import {
   useLabelsByProject,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
-  selectFilterMode
+  selectFilterMode,
+  selectAssigneeFilter
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
@@ -51,6 +52,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
+  const assigneeFilter = useLabelStore(selectAssigneeFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
@@ -85,29 +87,37 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const blurOpacityStr = useSetting('label_blur_opacity')
   const blurOpacity = (blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8) / 100
 
+  const hasAnyFilter = hasActiveFilters || !!assigneeFilter
+
   const taskFilterOpacity = useMemo(() => {
-    if (!hasActiveFilters) return undefined
+    if (!hasAnyFilter) return undefined
     const map: Record<string, number> = {}
     for (const task of tasks) {
       const labels = taskLabels[task.id] ?? []
       const labelIds = new Set(labels.map((l) => l.id))
-      const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      const labelMatch = !hasActiveFilters || [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      const assigneeMatch = !assigneeFilter || task.assigned_to === assigneeFilter
+      const matches = labelMatch && assigneeMatch
       if (filterMode === 'blur') {
         map[task.id] = matches ? 1 : blurOpacity
       }
     }
     return filterMode === 'blur' ? map : undefined
-  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode, blurOpacity])
+  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, assigneeFilter, hasAnyFilter, filterMode, blurOpacity])
 
   // Filter tasks for hide mode
   const filteredTasks = useMemo(() => {
-    if (!hasActiveFilters || filterMode !== 'hide') return tasks
+    if (!hasAnyFilter || filterMode !== 'hide') return tasks
     return tasks.filter((task) => {
-      const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
-      return [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      const labelMatch = !hasActiveFilters || (() => {
+        const labels = taskLabels[task.id] ?? []
+        const labelIds = new Set(labels.map((l) => l.id))
+        return [...activeLabelFilters].some((fid) => labelIds.has(fid))
+      })()
+      const assigneeMatch = !assigneeFilter || task.assigned_to === assigneeFilter
+      return labelMatch && assigneeMatch
     })
-  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, assigneeFilter, hasAnyFilter, filterMode])
 
   const prioritySortFn = useCallback(
     (a: Task, b: Task): number => {

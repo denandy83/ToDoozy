@@ -1039,7 +1039,6 @@ export function AppLayout(): React.JSX.Element {
                     members={projectMembers}
                     currentUserId={currentUser?.id ?? ''}
                     projectId={selectedProject.id}
-                    onClickAvatars={() => { setSettingsOpen(true); setSettingsInitialTab('projects') }}
                   />
                 )}
                 <div className="relative ml-1">
