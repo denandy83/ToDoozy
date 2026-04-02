@@ -459,14 +459,14 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
 
   if (error || !memberships) return []
 
-  const missingIds: string[] = []
+  const idsToSync: string[] = []
   for (const m of memberships) {
     const local = await window.api.projects.findById(m.project_id)
-    if (!local) {
-      missingIds.push(m.project_id)
+    if (!local || local.is_shared !== 1) {
+      idsToSync.push(m.project_id)
     }
   }
-  return missingIds
+  return idsToSync
 }
 
 /**
@@ -484,15 +484,27 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   if (!project) throw new Error('Shared project not found')
 
-  // Ensure the project owner's user record exists locally (needed for FK on projects.owner_id)
+  // Ensure the project owner's user record exists locally with real profile data
   const localOwner = await window.api.users.findById(project.owner_id)
-  if (!localOwner) {
-    await window.api.users.create({
-      id: project.owner_id,
-      email: 'shared-user',
-      display_name: null,
-      avatar_url: null
-    }).catch(() => { /* already exists */ })
+  if (!localOwner || localOwner.email === 'shared-user') {
+    const { data: ownerProfile } = await supabase
+      .from('user_profiles')
+      .select('email, display_name, avatar_url')
+      .eq('id', project.owner_id)
+      .single()
+
+    if (localOwner && localOwner.email === 'shared-user') {
+      // Replace placeholder with real data
+      await window.api.users.delete(project.owner_id).catch(() => {})
+    }
+    if (!localOwner || localOwner.email === 'shared-user') {
+      await window.api.users.create({
+        id: project.owner_id,
+        email: ownerProfile?.email ?? 'shared-user',
+        display_name: ownerProfile?.display_name ?? null,
+        avatar_url: ownerProfile?.avatar_url ?? null
+      }).catch(() => { /* already exists */ })
+    }
   }
 
   // Create local project if not exists
@@ -624,17 +636,43 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
   }
 
-  // Sync members locally
+  // Sync members locally — fetch real profiles from Supabase
   const { data: members } = await supabase
     .from('shared_project_members')
     .select('*')
     .eq('project_id', projectId)
 
   if (members) {
+    const localMembers = await window.api.projects.getMembers(projectId)
+    const localMemberIds = new Set(localMembers.map((m) => m.user_id))
+
     for (const member of members) {
-      const localMembers = await window.api.projects.getMembers(projectId)
-      const alreadyMember = localMembers.some((m) => m.user_id === member.user_id)
-      if (!alreadyMember) {
+      // Ensure user record exists with real profile data
+      const localUser = await window.api.users.findById(member.user_id)
+      if (!localUser || localUser.email === 'shared-user') {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('email, display_name, avatar_url')
+          .eq('id', member.user_id)
+          .single()
+
+        if (profile) {
+          if (localUser && localUser.email === 'shared-user') {
+            // Replace placeholder with real data
+            await window.api.users.delete(member.user_id).catch(() => {})
+          }
+          if (!localUser || localUser.email === 'shared-user') {
+            await window.api.users.create({
+              id: member.user_id,
+              email: profile.email,
+              display_name: profile.display_name,
+              avatar_url: profile.avatar_url
+            }).catch(() => { /* already exists */ })
+          }
+        }
+      }
+
+      if (!localMemberIds.has(member.user_id)) {
         await window.api.projects.addMember(projectId, member.user_id, member.role)
       }
     }
@@ -693,15 +731,31 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   }> = []
 
   for (const member of data) {
-    // Try to get user info from local users table first
-    const localUser = await window.api.users.findById(member.user_id)
-    members.push({
-      user_id: member.user_id,
-      role: member.role,
-      joined_at: member.joined_at,
-      email: localUser?.email ?? 'unknown',
-      display_name: localUser?.display_name ?? null
-    })
+    // Try Supabase profile first, fall back to local user
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('email, display_name')
+      .eq('id', member.user_id)
+      .single()
+
+    if (profile) {
+      members.push({
+        user_id: member.user_id,
+        role: member.role,
+        joined_at: member.joined_at,
+        email: profile.email,
+        display_name: profile.display_name
+      })
+    } else {
+      const localUser = await window.api.users.findById(member.user_id)
+      members.push({
+        user_id: member.user_id,
+        role: member.role,
+        joined_at: member.joined_at,
+        email: localUser?.email ?? 'unknown',
+        display_name: localUser?.display_name ?? null
+      })
+    }
   }
 
   return members
