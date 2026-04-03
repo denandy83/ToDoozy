@@ -59,7 +59,7 @@ Click the project name in the sidebar. Each project keeps its own task list and 
 Click the gear icon next to a project name (hover to reveal) to open project settings:
 - Rename, change color, change icon
 - Add, rename, reorder, or delete statuses
-- Reorder projects in the sidebar
+- Sidebar & Folders — reorder projects, create/manage folders, drag projects into folders
 
 ---
 
@@ -84,10 +84,11 @@ To make an existing task a subtask, drag it on top of another task (aim for the 
 
 ### Drag and drop
 - Drag a task up or down to reorder it within the same status group
-- Drag onto the top of a task → reorder above
-- Drag onto the middle of a task → make it a subtask
-- Drag onto the bottom of a task → reorder below
+- A full-width ghost row follows your cursor vertically while the original fades in place
+- Drop indicator lines show where the task will land (above or below the target)
+- Drag onto the middle of a task → make it a subtask (the target highlights)
 - Drag a task onto a project in the sidebar → move it to that project
+- Drag onto My Day, Calendar, or Archive in the sidebar for quick actions
 
 ### Moving multiple tasks
 1. Click to select a task; Shift+click to add a range; Cmd+click to add individual tasks
@@ -149,7 +150,7 @@ Labels help you group tasks across projects. Labels are global — create once, 
 - Or go to Settings → Labels
 
 ### Filtering by label
-A label filter bar appears at the top of every view. Click a label to show only tasks with that label. Click again to clear.
+Use the filter bar at the top of any view to filter by label. See the **Filters** section above for all available filter types.
 
 ### Managing labels (Settings → Labels)
 - Rename or change a label's color — applies everywhere
@@ -172,6 +173,100 @@ Type to search by task title. Use operators to narrow results:
 Operators can be combined: `p:high due:today` finds high-priority tasks due today.
 
 Click any result to open the task in the detail panel.
+
+---
+
+## Views (Smart Lists)
+
+Save any filter combination as a reusable view. Views appear in the sidebar between Calendar and Projects with live task count badges.
+
+### Creating a view
+1. Set up filters in the filter bar (labels, priority, status, due date, keyword)
+2. Click **Save as View** in the filter bar
+3. Give it a name — it appears in the sidebar immediately
+
+### Using a view
+- Click a saved view in the sidebar to load its filters
+- Tweak filters as needed — changes are not auto-saved
+- Click **Update View** when filters differ from the stored config to save changes
+
+### Managing views
+- Right-click a view → Rename, Duplicate, or Delete
+- Drag views to reorder them in the sidebar
+- If a label or status referenced by a view is deleted, a warning icon appears with a tooltip explaining what's missing
+
+---
+
+## Stats Dashboard
+
+Click **Stats** in the sidebar (or press **⌘3**) to see your productivity metrics.
+
+### Overview cards
+- Tasks completed today, this week, and this month
+- Focus time today and this week
+
+### Charts
+- **Completion chart** — daily task completions as a bar chart
+- **Focus time chart** — daily focus minutes as a bar chart
+- **Time range** — switch between 7, 30, or 90 days
+
+### Streaks & gamification
+- Current streak (consecutive days with at least 1 completion)
+- Best streak badge
+- 90-day activity heatmap (GitHub contribution style) showing completion density
+
+### Team stats
+- When viewing a shared project, see per-member completion counts and focus time
+- Leaderboard-style ranking by completions for the selected time period
+
+### Filters
+- Project dropdown: All Projects or a specific project
+- Time range: 7 / 30 / 90 days
+
+---
+
+## Project Folders
+
+Group projects into collapsible folders in the sidebar for better organization.
+
+### Creating a folder
+- Hover over the Projects header in the sidebar → click **Folder**
+- Or go to Settings → Projects → Sidebar & Folders → **New Folder**
+
+### Assigning projects to folders
+- In Settings → Projects → Sidebar & Folders: drag a project onto a folder header
+- Drag cursor to the right (past the indent line) to assign, or to the left to keep ungrouped
+
+### Managing folders
+- **Collapse/expand** — click the chevron on any folder header
+- **Rename** — double-click the folder name in Settings, or click the pencil icon
+- **Delete** — click the trash icon (shows confirmation toast). Deleting a folder ungroups its projects without deleting them
+- **Reorder** — drag folders and ungrouped projects to reorder in Settings
+
+### Per-user scoping
+Each user's folder assignments are independent — they are not synced to other members of shared projects.
+
+---
+
+## Filters
+
+A filter bar appears at the top of every task view. Filters combine with AND logic.
+
+### Always visible
+- **Labels** — click to toggle label filters (OR logic between selected labels)
+- **Project scope** — narrow to a specific project or view all
+
+### Additional filters (via + Filter button)
+- **Priority** — multi-select: None, Low, Normal, High, Urgent
+- **Due date** — presets (Today, This Week, Overdue, No Date) or custom date range
+- **Status** — multi-select from the current project's statuses
+- **Assignee** — multi-select from project members
+- **Keyword** — text search matching task title and description
+
+### Managing filters
+- Each active filter shows as a removable chip
+- Click the **X** on any chip to remove that filter
+- **Clear all** resets every filter type
 
 ---
 
@@ -199,7 +294,7 @@ In kanban view, each status is a column. Drag tasks between columns to change th
 
 Tasks have 5 priority levels: None, Low, Normal, High, Urgent.
 
-In **Settings → Priorities**, you can toggle visual indicators:
+In **Settings → Appearance → Priority Display**, you can toggle visual indicators:
 - **Color bar** — a colored left border on the task row
 - **Badges** — priority icon + label shown on the row
 - **Background tint** — subtle color tint on higher-priority rows
@@ -209,7 +304,7 @@ In **Settings → Priorities**, you can toggle visual indicators:
 
 ## Themes
 
-Go to **Settings → Themes** to change the app's appearance.
+Go to **Settings → Appearance → Theme** to change the app's appearance.
 
 - Toggle between **dark** and **light** mode
 - Choose from 12 built-in themes
@@ -315,7 +410,7 @@ Files are stored locally and synced to iCloud Drive for access from other device
 
 ToDoozy checks for updates automatically every 4 hours and on launch.
 
-- Go to **Settings → Updates** to check manually
+- Go to **Settings → About → Updates** to check manually
 - When an update is available, a banner shows the version and release notes
 - Click **Download** to start downloading, then **Install & Restart** to apply
 - If you don't install immediately, the update installs automatically when you quit the app
@@ -329,8 +424,10 @@ ToDoozy is designed to be fully usable without a mouse.
 | Key | Action |
 |-----|--------|
 | Cmd+1 | Go to My Day |
-| Cmd+2 | Go to Archive |
-| Cmd+3 | Go to Templates |
+| Cmd+2 | Go to Calendar |
+| Cmd+3 | Go to Stats |
+| Cmd+5 | Go to Archive |
+| Cmd+6 | Go to Templates |
 | Cmd+K | Open command palette / search |
 | Cmd+L | Toggle list / kanban |
 | Cmd+C | Copy selected task titles |
@@ -374,7 +471,7 @@ Drag it onto the project name in the sidebar. Or open the detail panel — the p
 Open project settings (hover the project name in the sidebar → gear icon) → scroll to the bottom → Delete Project.
 
 **How do I connect an AI assistant (Claude, etc.)?**
-Go to Settings → MCP. Enable the MCP server and copy the config — it gives you the exact JSON to paste into your AI client's MCP configuration.
+Go to Settings → About → Integrations. Enable the MCP server and copy the config — it gives you the exact JSON to paste into your AI client's MCP configuration.
 
 **How do I change the keyboard shortcut for Quick Add or App Toggle?**
 Go to Settings → General. Click the shortcut field and press your desired key combination.
