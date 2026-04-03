@@ -13,7 +13,7 @@ import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { KanbanCard } from './features/tasks/KanbanCard'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
-import { Sidebar } from './features/sidebar'
+import { Sidebar, useSidebarItems } from './features/sidebar'
 import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
 import { findProjectStatusForBucket, type BucketKey } from './features/views/myDayBuckets'
@@ -162,10 +162,7 @@ export function AppLayout(): React.JSX.Element {
     }
   }, [toggleLayoutMode, currentView, selectedProjectId, setSetting])
 
-  const sidebarPinned = useViewStore((s) => s.sidebarPinned)
-  const toggleSidebarPinned = useViewStore((s) => s.toggleSidebarPinned)
-  const setSidebarExpanded = useViewStore((s) => s.setSidebarExpanded)
-  const sidebarExpanded = useViewStore((s) => s.sidebarExpanded)
+  // Sidebar is always expanded (collapse removed in Story #52)
   const { addToast } = useToast()
   const lastRecurringClone = useTaskStore((s) => s.lastRecurringClone)
 
@@ -348,7 +345,7 @@ export function AppLayout(): React.JSX.Element {
   const projectId = selectedProject?.id ?? ''
   const statuses = useStatusesByProject(projectId)
 
-  const collapsed = !sidebarExpanded
+  // Sidebar is always expanded
 
   // DnD sensors
   const pointerSensor = useSensor(PointerSensor, {
@@ -545,17 +542,8 @@ export function AppLayout(): React.JSX.Element {
     setSettingsOpen(true)
   }, [])
 
-  const handleSidebarMouseEnter = useCallback(() => {
-    if (!sidebarPinned) {
-      setSidebarExpanded(true)
-    }
-  }, [sidebarPinned, setSidebarExpanded])
-
-  const handleSidebarMouseLeave = useCallback(() => {
-    if (!sidebarPinned) {
-      setSidebarExpanded(false)
-    }
-  }, [sidebarPinned, setSidebarExpanded])
+  // Sidebar items for dynamic keyboard shortcuts
+  const sidebarNavItems = useSidebarItems()
 
   // View task counts
   const projectTemplates = useTemplateStore(selectAllProjectTemplates)
@@ -674,50 +662,19 @@ export function AppLayout(): React.JSX.Element {
 
       if (!e.metaKey && !e.ctrlKey) return
 
-      // Cmd+1 = My Day
-      if (e.key === '1') {
-        e.preventDefault()
-        setView('my-day')
-        return
-      }
-
-      // Cmd+2 = Calendar
-      if (e.key === '2') {
-        e.preventDefault()
-        setView('calendar')
-        return
-      }
-
-      // Cmd+3 = Stats
-      if (e.key === '3') {
-        e.preventDefault()
-        setView('stats')
-        return
-      }
-
-      // Cmd+4 = Project view (topmost project)
-      if (e.key === '4') {
-        e.preventDefault()
-        if (sortedProjects.length > 0) {
-          clearLabelFilters()
-          useTaskStore.getState().clearSelection()
-          setSelectedProject(sortedProjects[0].id)
+      // Dynamic Cmd+N shortcuts based on visible sidebar items
+      const digitKey = parseInt(e.key, 10)
+      if (digitKey >= 1 && digitKey <= 9) {
+        const item = sidebarNavItems[digitKey - 1]
+        if (item) {
+          e.preventDefault()
+          if (item.id === 'views') {
+            // Views shortcut — no-op (views section doesn't have a single view)
+          } else {
+            setView(item.id)
+          }
+          return
         }
-        return
-      }
-
-      // Cmd+5 = Archive
-      if (e.key === '5') {
-        e.preventDefault()
-        setView('archive')
-        return
-      }
-
-      // Cmd+6 = Templates
-      if (e.key === '6') {
-        e.preventDefault()
-        setView('templates')
-        return
       }
 
       // Cmd+K = open command palette (unless inside Tiptap editor, where it inserts/edits a link)
@@ -753,7 +710,7 @@ export function AppLayout(): React.JSX.Element {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentView, selectedProjectId, sortedProjects, setView, setSelectedProject, clearLabelFilters, handleToggleLayoutMode])
+  }, [currentView, selectedProjectId, sortedProjects, setView, setSelectedProject, clearLabelFilters, handleToggleLayoutMode, sidebarNavItems])
 
   // Dynamic view title
   const viewTitle = useMemo(() => {
@@ -1025,12 +982,7 @@ export function AppLayout(): React.JSX.Element {
           onSettings={handleOpenSettings}
           onHelp={handleOpenHelp}
           onNewProject={() => setNewProjectOpen(true)}
-          collapsed={collapsed}
-          pinned={sidebarPinned}
           isDragging={dragState.isDragging}
-          onTogglePin={toggleSidebarPinned}
-          onMouseEnter={handleSidebarMouseEnter}
-          onMouseLeave={handleSidebarMouseLeave}
         />
 
         {/* Main content area */}
