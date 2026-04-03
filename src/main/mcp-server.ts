@@ -156,6 +156,7 @@ interface SchemaProp {
   type: string
   description: string
   enum?: (string | number)[]
+  items?: { type: string }
 }
 
 function str(description: string): SchemaProp {
@@ -589,6 +590,24 @@ const tools: ToolDef[] = [
         content: str('Release notes content for this version (- **Title** — Description bullets)')
       },
       required: ['content']
+    }
+  },
+
+  // Tasks — Reorder
+  {
+    name: 'reorder_tasks',
+    description:
+      'Reorder tasks by providing an ordered array of task IDs. Sets order_index sequentially based on array position.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_ids: {
+          type: 'array',
+          description: 'Ordered array of task IDs in the desired display order',
+          items: { type: 'string' }
+        }
+      },
+      required: ['task_ids']
     }
   }
 ]
@@ -1257,6 +1276,37 @@ const handlers: Record<string, Handler> = {
 
     deployTemplate(data, projectId, user.id)
     return project
+  },
+
+  // ── Tasks — Reorder ─────────────────────────────────────────────
+  reorder_tasks(args) {
+    const taskIds = args.task_ids
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      throw new Error('task_ids must be a non-empty array of task IDs')
+    }
+    const ids = taskIds.map(String)
+
+    // Validate all task IDs exist
+    for (const id of ids) {
+      const task = repos.tasks.findById(id)
+      if (!task) throw new Error(`Task not found: ${id}`)
+    }
+
+    repos.tasks.reorder(ids)
+
+    // Check if priority auto-sort is enabled
+    const user = getUser()
+    const autoSort = repos.settings.get(user.id, 'priority_auto_sort')
+    const warning =
+      autoSort === 'true'
+        ? 'Note: priority auto-sort is enabled in the user\'s settings — the visual order in the app may differ from the requested order'
+        : undefined
+
+    return {
+      reordered: true,
+      count: ids.length,
+      ...(warning ? { warning } : {})
+    }
   },
 
   // ── Settings — What's New (Supabase) ─────────────────────────────
