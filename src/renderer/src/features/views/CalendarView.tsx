@@ -5,7 +5,19 @@ import { useDroppable, useDraggable } from '@dnd-kit/core'
 import { useTaskStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
-import { useLabelStore } from '../../shared/stores'
+import {
+  useLabelStore,
+  selectActiveLabelFilters,
+  selectHasActiveLabelFilters,
+  selectFilterMode,
+  selectPriorityFilters,
+  selectHasPriorityFilters,
+  selectStatusFilters,
+  selectHasStatusFilters,
+  selectDueDatePreset,
+  selectKeyword,
+  selectHasAnyFilter
+} from '../../shared/stores'
 import { useSettingsStore } from '../../shared/stores/settingsStore'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Project } from '../../../../shared/types'
@@ -51,13 +63,57 @@ export function CalendarView(): React.JSX.Element {
     return map
   }, [allProjects])
 
+  // Filter state
+  const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
+  const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const filterMode = useLabelStore(selectFilterMode)
+  const priorityFilters = useLabelStore(selectPriorityFilters)
+  const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
+  const statusFilters = useLabelStore(selectStatusFilters)
+  const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const dueDatePresetFilter = useLabelStore(selectDueDatePreset)
+  const keywordFilter = useLabelStore(selectKeyword)
+  const hasAnyFilter = useLabelStore(selectHasAnyFilter)
+  const taskLabels = useTaskStore((s) => s.taskLabels)
+
   // Get all tasks that have a due_date OR are in My Day (not archived/template)
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
-  const calendarTasks = useMemo(() => {
+  const allCalendarTasks = useMemo(() => {
     return Object.values(allTasks).filter(
       (t) => (t.due_date || t.is_in_my_day === 1) && t.is_archived === 0 && t.is_template === 0 && t.parent_id === null
     )
   }, [allTasks])
+
+  // Apply filters to calendar tasks
+  const calendarTasks = useMemo(() => {
+    if (!hasAnyFilter || filterMode !== 'hide') return allCalendarTasks
+    return allCalendarTasks.filter((task) => {
+      if (hasActiveFilters) {
+        const labels = taskLabels[task.id] ?? []
+        const labelIds = new Set(labels.map((l) => l.id))
+        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      }
+      if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
+      if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
+      if (dueDatePresetFilter) {
+        const now = new Date()
+        const today = now.toISOString().slice(0, 10)
+        if (dueDatePresetFilter === 'no_date') { if (task.due_date) return false }
+        else if (dueDatePresetFilter === 'overdue') { if (!task.due_date || task.due_date >= today) return false }
+        else if (dueDatePresetFilter === 'today') { if (!task.due_date || task.due_date.slice(0, 10) !== today) return false }
+        else if (dueDatePresetFilter === 'this_week') {
+          if (!task.due_date) return false
+          const endOfWeek = new Date(now); endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
+          if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10) || task.due_date.slice(0, 10) < today) return false
+        }
+      }
+      if (keywordFilter) {
+        const kw = keywordFilter.toLowerCase()
+        if (!task.title.toLowerCase().includes(kw) && !(task.description ?? '').toLowerCase().includes(kw)) return false
+      }
+      return true
+    })
+  }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePresetFilter, keywordFilter])
 
   // Group tasks by date — My Day tasks appear on today (with sun icon) AND on their due date
   // Track which task+date combos are "My Day" entries

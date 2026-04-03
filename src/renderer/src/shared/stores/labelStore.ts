@@ -15,6 +15,10 @@ interface LabelState {
   projectLabels: Record<string, Set<string>> // projectId -> Set<labelId>
   activeLabelFilters: Set<string>
   assigneeFilters: Set<string> // user_ids to filter by
+  priorityFilters: Set<number> // priority levels to filter by
+  statusFilters: Set<string> // status IDs to filter by
+  dueDatePreset: string | null // 'today' | 'this_week' | 'overdue' | 'no_date'
+  keyword: string // search keyword matching title and description
   filterMode: LabelFilterMode
   loading: boolean
   error: string | null
@@ -33,6 +37,11 @@ interface LabelActions {
   clearLabelFilters(): void
   setFilterMode(mode: LabelFilterMode): void
   toggleAssigneeFilter(userId: string): void
+  togglePriorityFilter(priority: number): void
+  toggleStatusFilter(statusId: string): void
+  setDueDatePreset(preset: string | null): void
+  setKeyword(keyword: string): void
+  clearAllFilters(): void
   clearError(): void
 }
 
@@ -43,6 +52,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   projectLabels: {},
   activeLabelFilters: new Set(),
   assigneeFilters: new Set(),
+  priorityFilters: new Set(),
+  statusFilters: new Set(),
+  dueDatePreset: null,
+  keyword: '',
   filterMode: 'hide' as LabelFilterMode,
   loading: false,
   error: null,
@@ -240,7 +253,14 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   clearLabelFilters(): void {
-    set({ activeLabelFilters: new Set(), assigneeFilters: new Set() })
+    set({
+      activeLabelFilters: new Set(),
+      assigneeFilters: new Set(),
+      priorityFilters: new Set(),
+      statusFilters: new Set(),
+      dueDatePreset: null,
+      keyword: ''
+    })
   },
 
   setFilterMode(mode: LabelFilterMode): void {
@@ -256,6 +276,49 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         next.add(userId)
       }
       return { assigneeFilters: next }
+    })
+  },
+
+  togglePriorityFilter(priority: number): void {
+    set((state) => {
+      const next = new Set(state.priorityFilters)
+      if (next.has(priority)) {
+        next.delete(priority)
+      } else {
+        next.add(priority)
+      }
+      return { priorityFilters: next }
+    })
+  },
+
+  toggleStatusFilter(statusId: string): void {
+    set((state) => {
+      const next = new Set(state.statusFilters)
+      if (next.has(statusId)) {
+        next.delete(statusId)
+      } else {
+        next.add(statusId)
+      }
+      return { statusFilters: next }
+    })
+  },
+
+  setDueDatePreset(preset: string | null): void {
+    set({ dueDatePreset: preset })
+  },
+
+  setKeyword(keyword: string): void {
+    set({ keyword })
+  },
+
+  clearAllFilters(): void {
+    set({
+      activeLabelFilters: new Set(),
+      assigneeFilters: new Set(),
+      priorityFilters: new Set(),
+      statusFilters: new Set(),
+      dueDatePreset: null,
+      keyword: ''
     })
   },
 
@@ -291,6 +354,26 @@ export const selectFilterMode = (state: LabelState): LabelFilterMode => state.fi
 export const selectAssigneeFilters = (state: LabelState): Set<string> => state.assigneeFilters
 
 export const selectHasAssigneeFilters = (state: LabelState): boolean => state.assigneeFilters.size > 0
+
+export const selectPriorityFilters = (state: LabelState): Set<number> => state.priorityFilters
+
+export const selectHasPriorityFilters = (state: LabelState): boolean => state.priorityFilters.size > 0
+
+export const selectStatusFilters = (state: LabelState): Set<string> => state.statusFilters
+
+export const selectHasStatusFilters = (state: LabelState): boolean => state.statusFilters.size > 0
+
+export const selectDueDatePreset = (state: LabelState): string | null => state.dueDatePreset
+
+export const selectKeyword = (state: LabelState): string => state.keyword
+
+export const selectHasAnyFilter = (state: LabelState): boolean =>
+  state.activeLabelFilters.size > 0 ||
+  state.assigneeFilters.size > 0 ||
+  state.priorityFilters.size > 0 ||
+  state.statusFilters.size > 0 ||
+  state.dueDatePreset !== null ||
+  state.keyword !== ''
 
 // Hooks — stable selectors for parameterized queries
 export function useLabelsByProject(projectId: string): Label[] {

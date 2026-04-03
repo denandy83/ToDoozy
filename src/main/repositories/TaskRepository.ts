@@ -7,9 +7,14 @@ import { parseRecurrence, getNextOccurrence } from '../../shared/recurrenceUtils
 
 export interface TaskSearchFilters {
   project_id?: string
+  project_ids?: string[]
   status_id?: string
+  status_ids?: string[]
   priority?: number
+  priorities?: number[]
   label_id?: string
+  label_ids?: string[]
+  assigned_to_ids?: string[]
   due_before?: string
   due_after?: string
   keyword?: string
@@ -287,25 +292,53 @@ export class TaskRepository {
     const conditions: string[] = ['t.is_template = 0']
     const params: (string | number)[] = []
 
-    if (filters.label_id) {
+    // Label filters — single or multiple (OR logic between labels)
+    if (filters.label_ids && filters.label_ids.length > 0) {
+      sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
+      const placeholders = filters.label_ids.map(() => '?').join(', ')
+      conditions.push(`tl.label_id IN (${placeholders})`)
+      params.push(...filters.label_ids)
+    } else if (filters.label_id) {
       sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
       conditions.push('tl.label_id = ?')
       params.push(filters.label_id)
     }
 
-    if (filters.project_id) {
+    // Project filters — single or multiple
+    if (filters.project_ids && filters.project_ids.length > 0) {
+      const placeholders = filters.project_ids.map(() => '?').join(', ')
+      conditions.push(`t.project_id IN (${placeholders})`)
+      params.push(...filters.project_ids)
+    } else if (filters.project_id) {
       conditions.push('t.project_id = ?')
       params.push(filters.project_id)
     }
 
-    if (filters.status_id) {
+    // Status filters — single or multiple
+    if (filters.status_ids && filters.status_ids.length > 0) {
+      const placeholders = filters.status_ids.map(() => '?').join(', ')
+      conditions.push(`t.status_id IN (${placeholders})`)
+      params.push(...filters.status_ids)
+    } else if (filters.status_id) {
       conditions.push('t.status_id = ?')
       params.push(filters.status_id)
     }
 
-    if (filters.priority !== undefined) {
+    // Priority filters — single or multiple
+    if (filters.priorities && filters.priorities.length > 0) {
+      const placeholders = filters.priorities.map(() => '?').join(', ')
+      conditions.push(`t.priority IN (${placeholders})`)
+      params.push(...filters.priorities)
+    } else if (filters.priority !== undefined) {
       conditions.push('t.priority = ?')
       params.push(filters.priority)
+    }
+
+    // Assignee filters — multiple
+    if (filters.assigned_to_ids && filters.assigned_to_ids.length > 0) {
+      const placeholders = filters.assigned_to_ids.map(() => '?').join(', ')
+      conditions.push(`t.assigned_to IN (${placeholders})`)
+      params.push(...filters.assigned_to_ids)
     }
 
     if (filters.due_before) {

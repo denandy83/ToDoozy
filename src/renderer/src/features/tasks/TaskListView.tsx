@@ -10,13 +10,20 @@ import {
   selectHasActiveLabelFilters,
   selectFilterMode,
   selectAssigneeFilters,
-  selectHasAssigneeFilters
+  selectHasAssigneeFilters,
+  selectPriorityFilters,
+  selectHasPriorityFilters,
+  selectStatusFilters,
+  selectHasStatusFilters,
+  selectDueDatePreset,
+  selectKeyword,
+  selectHasAnyFilter
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
-import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
+import { FilterBar } from '../../shared/components/FilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
@@ -48,13 +55,20 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const containerRef = useRef<HTMLDivElement>(null)
 
 
-  // Label state
+  // Filter state
   const allLabels = useLabelsByProject(projectId)
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const assigneeFilters = useLabelStore(selectAssigneeFilters)
   const hasAssigneeFilters = useLabelStore(selectHasAssigneeFilters)
+  const priorityFilters = useLabelStore(selectPriorityFilters)
+  const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
+  const statusFilters = useLabelStore(selectStatusFilters)
+  const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const dueDatePreset = useLabelStore(selectDueDatePreset)
+  const keywordFilter = useLabelStore(selectKeyword)
+  const hasAnyFilterGlobal = useLabelStore(selectHasAnyFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
@@ -89,37 +103,68 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const blurOpacityStr = useSetting('label_blur_opacity')
   const blurOpacity = (blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8) / 100
 
-  const hasAnyFilter = hasActiveFilters || hasAssigneeFilters
+  const hasAnyFilter = hasAnyFilterGlobal
+
+  // Shared filter matching function
+  const taskMatchesFilters = useCallback((task: Task): boolean => {
+    if (!hasAnyFilter) return true
+    // Label match (OR logic)
+    if (hasActiveFilters) {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+    }
+    // Assignee match
+    if (hasAssigneeFilters && !assigneeFilters.has(task.assigned_to ?? '')) return false
+    // Priority match
+    if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
+    // Status match
+    if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
+    // Due date preset match
+    if (dueDatePreset) {
+      const now = new Date()
+      const todayStr = now.toISOString().slice(0, 10)
+      if (dueDatePreset === 'no_date') {
+        if (task.due_date) return false
+      } else if (dueDatePreset === 'overdue') {
+        if (!task.due_date || task.due_date >= todayStr) return false
+      } else if (dueDatePreset === 'today') {
+        if (!task.due_date || task.due_date.slice(0, 10) !== todayStr) return false
+      } else if (dueDatePreset === 'this_week') {
+        if (!task.due_date) return false
+        const endOfWeek = new Date(now)
+        endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
+        if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10)) return false
+        if (task.due_date.slice(0, 10) < todayStr) return false
+      }
+    }
+    // Keyword match
+    if (keywordFilter) {
+      const kw = keywordFilter.toLowerCase()
+      const titleMatch = task.title.toLowerCase().includes(kw)
+      const descMatch = (task.description ?? '').toLowerCase().includes(kw)
+      if (!titleMatch && !descMatch) return false
+    }
+    return true
+  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePreset, keywordFilter])
 
   const taskFilterOpacity = useMemo(() => {
     if (!hasAnyFilter) return undefined
     const map: Record<string, number> = {}
     for (const task of tasks) {
-      const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
-      const labelMatch = !hasActiveFilters || [...activeLabelFilters].some((fid) => labelIds.has(fid))
-      const assigneeMatch = !hasAssigneeFilters || assigneeFilters.has(task.assigned_to ?? '')
-      const matches = labelMatch && assigneeMatch
+      const matches = taskMatchesFilters(task)
       if (filterMode === 'blur') {
         map[task.id] = matches ? 1 : blurOpacity
       }
     }
     return filterMode === 'blur' ? map : undefined
-  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, assigneeFilters, hasAssigneeFilters, hasAnyFilter, filterMode, blurOpacity])
+  }, [tasks, hasAnyFilter, filterMode, blurOpacity, taskMatchesFilters])
 
   // Filter tasks for hide mode
   const filteredTasks = useMemo(() => {
     if (!hasAnyFilter || filterMode !== 'hide') return tasks
-    return tasks.filter((task) => {
-      const labelMatch = !hasActiveFilters || (() => {
-        const labels = taskLabels[task.id] ?? []
-        const labelIds = new Set(labels.map((l) => l.id))
-        return [...activeLabelFilters].some((fid) => labelIds.has(fid))
-      })()
-      const assigneeMatch = !hasAssigneeFilters || assigneeFilters.has(task.assigned_to ?? '')
-      return labelMatch && assigneeMatch
-    })
-  }, [tasks, taskLabels, activeLabelFilters, hasActiveFilters, assigneeFilters, hasAssigneeFilters, hasAnyFilter, filterMode])
+    return tasks.filter(taskMatchesFilters)
+  }, [tasks, hasAnyFilter, filterMode, taskMatchesFilters])
 
   const prioritySortFn = useCallback(
     (a: Task, b: Task): number => {
@@ -662,7 +707,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
 
-      <LabelFilterBar labels={allLabels} projectId={projectId} />
+      <FilterBar labels={allLabels} projectId={projectId} />
 
       {layoutMode === 'kanban' ? (
         <KanbanView

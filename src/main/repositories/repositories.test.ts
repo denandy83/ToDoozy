@@ -489,6 +489,83 @@ describe('TaskRepository', () => {
       expect(results).toHaveLength(1)
       expect(results[0].title).toBe('High Buy')
     })
+
+    it('filters by multiple label_ids with OR logic', () => {
+      const now = new Date().toISOString()
+      const label1 = randomUUID()
+      const label2 = randomUUID()
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label1, 'Bug', '#ff0000', 0, now, now)
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label2, 'Feature', '#00ff00', 1, now, now)
+      db.prepare('INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)').run(projectId, label1, now)
+      db.prepare('INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)').run(projectId, label2, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      const t3 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Has Bug', status_id: statusId })
+      repo.addLabel(t1, label1)
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Has Feature', status_id: statusId })
+      repo.addLabel(t2, label2)
+      repo.create({ id: t3, project_id: projectId, owner_id: userId, title: 'No labels', status_id: statusId })
+
+      const results = repo.search({ label_ids: [label1, label2] })
+      expect(results).toHaveLength(2)
+      expect(results.map((r) => r.title).sort()).toEqual(['Has Bug', 'Has Feature'])
+    })
+
+    it('filters by multiple priorities', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'None', status_id: statusId, priority: 0 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Low', status_id: statusId, priority: 1 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'High', status_id: statusId, priority: 3 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Urgent', status_id: statusId, priority: 4 })
+
+      const results = repo.search({ priorities: [3, 4] })
+      expect(results).toHaveLength(2)
+      expect(results.map((r) => r.title).sort()).toEqual(['High', 'Urgent'])
+    })
+
+    it('filters by multiple status_ids', () => {
+      const now = new Date().toISOString()
+      const status2 = randomUUID()
+      db.prepare('INSERT INTO statuses (id, project_id, name, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(status2, projectId, 'In Progress', 1, now, now)
+
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Default', status_id: statusId })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'In Progress', status_id: status2 })
+
+      const results = repo.search({ status_ids: [status2] })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('In Progress')
+    })
+
+    it('filters by multiple project_ids', () => {
+      const now = new Date().toISOString()
+      const proj2 = randomUUID()
+      const stat2 = randomUUID()
+      db.prepare('INSERT INTO projects (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(proj2, 'Proj2', userId, now, now)
+      db.prepare('INSERT INTO statuses (id, project_id, name, order_index, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(stat2, proj2, 'Default', 0, 1, now, now)
+
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'P1', status_id: statusId })
+      repo.create({ id: randomUUID(), project_id: proj2, owner_id: userId, title: 'P2', status_id: stat2 })
+
+      const results = repo.search({ project_ids: [projectId, proj2] })
+      expect(results).toHaveLength(2)
+    })
+
+    it('filters by assigned_to_ids', () => {
+      const now = new Date().toISOString()
+      const user2 = randomUUID()
+      db.prepare('INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(user2, 'user2@test.com', 'User 2', now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Assigned', status_id: statusId })
+      repo.update(t1, { assigned_to: user2 })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Unassigned', status_id: statusId })
+
+      const results = repo.search({ assigned_to_ids: [user2] })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('Assigned')
+    })
   })
 
   describe('reference_url', () => {

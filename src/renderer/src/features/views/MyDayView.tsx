@@ -10,13 +10,20 @@ import {
   useLabelStore,
   selectActiveLabelFilters,
   selectHasActiveLabelFilters,
-  selectFilterMode
+  selectFilterMode,
+  selectPriorityFilters,
+  selectHasPriorityFilters,
+  selectStatusFilters,
+  selectHasStatusFilters,
+  selectDueDatePreset,
+  selectKeyword,
+  selectHasAnyFilter
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
-import { LabelFilterBar } from '../../shared/components/LabelFilterBar'
+import { FilterBar } from '../../shared/components/FilterBar'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
@@ -72,10 +79,17 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   const addTaskProject = allProjects.find((p) => p.id === addTaskProjectId) ?? defaultProject
 
-  // Label state
+  // Filter state
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
+  const priorityFilters = useLabelStore(selectPriorityFilters)
+  const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
+  const statusFilters = useLabelStore(selectStatusFilters)
+  const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const dueDatePreset = useLabelStore(selectDueDatePreset)
+  const keywordFilter = useLabelStore(selectKeyword)
+  const hasAnyFilterGlobal = useLabelStore(selectHasAnyFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(addTaskProjectId)
   const { autoSort: priorityAutoSort } = usePrioritySettings()
   const { copySelectedTasks } = useCopyTasks()
@@ -163,15 +177,40 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
   }, [myDayTasks, taskLabels, allLabelsAcrossProjects])
 
-  // Filter tasks by labels
-  const labelFilteredTasks = useMemo(() => {
-    if (!hasActiveFilters || filterMode !== 'hide') return myDayTasks
-    return myDayTasks.filter((task) => {
+  // Shared filter match for My Day
+  const taskMatchesFilters = useCallback((task: Task): boolean => {
+    if (!hasAnyFilterGlobal) return true
+    if (hasActiveFilters) {
       const labels = taskLabels[task.id] ?? []
       const labelIds = new Set(labels.map((l) => l.id))
-      return [...activeLabelFilters].some((fid) => labelIds.has(fid))
-    })
-  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode])
+      if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+    }
+    if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
+    if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
+    if (dueDatePreset) {
+      const now = new Date()
+      const todayStr = now.toISOString().slice(0, 10)
+      if (dueDatePreset === 'no_date') { if (task.due_date) return false }
+      else if (dueDatePreset === 'overdue') { if (!task.due_date || task.due_date >= todayStr) return false }
+      else if (dueDatePreset === 'today') { if (!task.due_date || task.due_date.slice(0, 10) !== todayStr) return false }
+      else if (dueDatePreset === 'this_week') {
+        if (!task.due_date) return false
+        const endOfWeek = new Date(now); endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
+        if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10) || task.due_date.slice(0, 10) < todayStr) return false
+      }
+    }
+    if (keywordFilter) {
+      const kw = keywordFilter.toLowerCase()
+      if (!task.title.toLowerCase().includes(kw) && !(task.description ?? '').toLowerCase().includes(kw)) return false
+    }
+    return true
+  }, [hasAnyFilterGlobal, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePreset, keywordFilter])
+
+  // Filter tasks by all active filters
+  const labelFilteredTasks = useMemo(() => {
+    if (!hasAnyFilterGlobal || filterMode !== 'hide') return myDayTasks
+    return myDayTasks.filter(taskMatchesFilters)
+  }, [myDayTasks, hasAnyFilterGlobal, filterMode, taskMatchesFilters])
 
   // Filter tasks by project visibility
   const filteredMyDayTasks = useMemo(() => {
@@ -204,16 +243,13 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const blurOpacity = (blurOpacityStr ? parseInt(blurOpacityStr, 10) : 8) / 100
 
   const taskFilterOpacity = useMemo(() => {
-    if (!hasActiveFilters || filterMode !== 'blur') return undefined
+    if (!hasAnyFilterGlobal || filterMode !== 'blur') return undefined
     const map: Record<string, number> = {}
     for (const task of myDayTasks) {
-      const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
-      const matches = [...activeLabelFilters].some((fid) => labelIds.has(fid))
-      map[task.id] = matches ? 1 : blurOpacity
+      map[task.id] = taskMatchesFilters(task) ? 1 : blurOpacity
     }
     return map
-  }, [myDayTasks, taskLabels, activeLabelFilters, hasActiveFilters, filterMode, blurOpacity])
+  }, [myDayTasks, hasAnyFilterGlobal, filterMode, blurOpacity, taskMatchesFilters])
 
   const prioritySortFn = useCallback(
     (a: Task, b: Task): number => {
@@ -743,7 +779,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         }
       />
 
-      <LabelFilterBar labels={labelsInUse} />
+      <FilterBar labels={labelsInUse} />
 
       {/* Project filter bar — only show when multiple projects have My Day tasks */}
       {myDayProjects.length > 1 && (

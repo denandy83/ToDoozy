@@ -44,6 +44,13 @@ export {
   selectFilterMode,
   selectAssigneeFilters,
   selectHasAssigneeFilters,
+  selectPriorityFilters,
+  selectHasPriorityFilters,
+  selectStatusFilters,
+  selectHasStatusFilters,
+  selectDueDatePreset,
+  selectKeyword,
+  selectHasAnyFilter,
   useLabelsByProject
 } from './labelStore'
 
