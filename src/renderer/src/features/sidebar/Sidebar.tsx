@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTaskStore } from '../../shared/stores'
+import { useToast } from '../../shared/components/Toast'
 import { useDroppable } from '@dnd-kit/core'
 import {
   Sun,
@@ -8,6 +9,7 @@ import {
   Calendar,
   LayoutTemplate,
   FolderOpen,
+  LayoutGrid,
   Plus,
   PanelLeftClose,
   PanelLeft,
@@ -27,7 +29,7 @@ import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useAuthStore } from '../../shared/stores/authStore'
-import { useSavedViewStore, selectSavedViews } from '../../shared/stores/savedViewStore'
+import { useSavedViewStore, selectSavedViews, selectViewCounts } from '../../shared/stores/savedViewStore'
 import { useProjectAreaStore, selectProjectAreas } from '../../shared/stores/projectAreaStore'
 import type { ThemeConfig } from '../../../../shared/types'
 import appIcon from '../../assets/icon.png'
@@ -107,10 +109,60 @@ export function Sidebar({
 
   // Saved views
   const savedViews = useSavedViewStore(selectSavedViews)
+  const savedViewCounts = useSavedViewStore(selectViewCounts)
   const { hydrate: hydrateSavedViews } = useSavedViewStore()
   const selectedSavedViewId = useViewStore((s) => s.selectedSavedViewId)
   const setSelectedSavedView = useViewStore((s) => s.setSelectedSavedView)
   const [savedViewsCollapsed, setSavedViewsCollapsed] = useState(false)
+  const { addToast } = useToast()
+
+  // Check if the active saved view has unsaved filter changes
+  const getSavedViewDirtyState = useCallback((): { dirty: boolean; viewId: string | null; currentConfig: string } => {
+    const { activeViewFilterConfig } = useSavedViewStore.getState()
+    if (!activeViewFilterConfig || currentView !== 'saved-view') return { dirty: false, viewId: null, currentConfig: '' }
+    const s = useLabelStore.getState()
+    const config: Record<string, unknown> = {}
+    if (s.activeLabelFilters.size > 0) config.labelIds = [...s.activeLabelFilters]
+    if (s.assigneeFilters.size > 0) config.assigneeIds = [...s.assigneeFilters]
+    if (s.priorityFilters.size > 0) config.priorities = [...s.priorityFilters]
+    if (s.statusFilters.size > 0) config.statusIds = [...s.statusFilters]
+    if (s.projectFilters.size > 0) config.projectIds = [...s.projectFilters]
+    if (s.dueDatePreset) config.dueDatePreset = s.dueDatePreset
+    if (s.dueDateRange) config.dueDateRange = s.dueDateRange
+    if (s.keyword) config.keyword = s.keyword
+    config.filterMode = s.filterMode
+    const currentConfig = JSON.stringify(config)
+    return { dirty: currentConfig !== activeViewFilterConfig, viewId: selectedSavedViewId, currentConfig }
+  }, [currentView, selectedSavedViewId])
+
+  /** Wraps a navigation callback — if saved view has unsaved filters, shows confirm toast first */
+  const guardNavigation = useCallback((onNavigate: () => void): void => {
+    const { dirty, viewId, currentConfig } = getSavedViewDirtyState()
+    if (!dirty) { onNavigate(); return }
+    addToast({
+      message: 'Unsaved filter changes',
+      persistent: true,
+      actions: [
+        {
+          label: 'Save',
+          variant: 'accent',
+          onClick: async () => {
+            if (viewId) await useSavedViewStore.getState().updateView(viewId, { filter_config: currentConfig })
+            useSavedViewStore.getState().setActiveViewFilterConfig(null)
+            onNavigate()
+          }
+        },
+        {
+          label: 'Discard',
+          variant: 'danger',
+          onClick: () => {
+            useSavedViewStore.getState().setActiveViewFilterConfig(null)
+            onNavigate()
+          }
+        }
+      ]
+    })
+  }, [getSavedViewDirtyState, addToast])
 
   // Project areas
   const projectAreas = useProjectAreaStore(selectProjectAreas)
@@ -192,28 +244,37 @@ export function Sidebar({
 
   const handleViewClick = useCallback(
     (view: ViewId) => {
-      clearLabelFilters()
-      setView(view)
+      guardNavigation(() => { clearLabelFilters(); setView(view) })
     },
-    [setView, clearLabelFilters]
+    [setView, clearLabelFilters, guardNavigation]
   )
 
   const handleSavedViewClick = useCallback(
     (viewId: string) => {
-      clearLabelFilters()
-      setSelectedSavedView(viewId)
+      guardNavigation(() => { clearLabelFilters(); setSelectedSavedView(viewId) })
     },
-    [setSelectedSavedView, clearLabelFilters]
+    [setSelectedSavedView, clearLabelFilters, guardNavigation]
   )
+
+  const { createView: createSavedView } = useSavedViewStore()
+  const handleCreateSavedView = useCallback(async () => {
+    if (!currentUser) return
+    guardNavigation(async () => {
+      const view = await createSavedView(currentUser.id, 'New View', JSON.stringify({ filterMode: 'hide' }))
+      clearLabelFilters()
+      setSelectedSavedView(view.id)
+    })
+  }, [currentUser, createSavedView, clearLabelFilters, setSelectedSavedView, guardNavigation])
 
   const handleProjectClick = useCallback(
     (projectId: string) => {
-      clearLabelFilters()
-      setSelectedProject(projectId)
-      // Reset to first task — TaskListView auto-select will pick it up
-      useTaskStore.setState({ selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false })
+      guardNavigation(() => {
+        clearLabelFilters()
+        setSelectedProject(projectId)
+        useTaskStore.setState({ selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false })
+      })
     },
-    [setSelectedProject, clearLabelFilters]
+    [setSelectedProject, clearLabelFilters, guardNavigation]
   )
 
   const sortedProjects = projects
@@ -221,6 +282,19 @@ export function Sidebar({
     ? sortedProjects
     : sortedProjects.slice(0, MAX_VISIBLE_PROJECTS)
   const hasMoreProjects = sortedProjects.length > MAX_VISIBLE_PROJECTS
+
+  // Build interleaved sidebar list: ungrouped projects and areas share a unified sidebar_order
+  type SidebarItem = { type: 'project'; data: Project; order: number } | { type: 'area'; data: typeof projectAreas[0]; order: number }
+  const sidebarItems = useMemo((): SidebarItem[] => {
+    const items: SidebarItem[] = []
+    for (const p of visibleProjects.filter((p) => !p.area_id)) {
+      items.push({ type: 'project', data: p, order: p.sidebar_order })
+    }
+    for (const a of projectAreas) {
+      items.push({ type: 'area', data: a, order: a.sidebar_order })
+    }
+    return items.sort((a, b) => a.order - b.order)
+  }, [visibleProjects, projectAreas])
 
   return (
     <aside
@@ -273,56 +347,65 @@ export function Sidebar({
           ))}
         </div>
 
-        {/* Saved Views */}
-        {savedViews.length > 0 && (
-          <div className="mt-1 flex flex-col gap-0.5">
-            {!collapsed ? (
+        {/* Views */}
+        <div className="mt-1 flex flex-col gap-0.5">
+          {!collapsed ? (
+            <div className="group/savedviews flex items-center gap-3 rounded-lg px-2.5 py-2">
               <button
                 onClick={() => setSavedViewsCollapsed(!savedViewsCollapsed)}
-                className="flex items-center gap-3 rounded-lg px-2.5 py-2 text-left"
+                className="flex flex-1 items-center gap-3 text-left"
               >
                 <Filter size={16} className="text-muted" />
-                <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Saved Views</span>
-                {savedViewsCollapsed ? <ChevronDown size={12} className="text-muted" /> : <ChevronUp size={12} className="text-muted" />}
+                <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Views</span>
               </button>
-            ) : (
-              <div className="flex justify-center rounded-lg px-0 py-2">
-                <Filter size={16} className="text-muted" />
-              </div>
-            )}
-            {!collapsed && !savedViewsCollapsed && (
-              <div className="flex flex-col gap-0.5 pl-4">
-                {savedViews.map((view) => (
-                  <NavItem
-                    key={view.id}
-                    label={view.name}
-                    icon={Filter}
-                    count={0}
-                    active={currentView === 'saved-view' && selectedSavedViewId === view.id}
-                    collapsed={collapsed}
-                    onClick={() => handleSavedViewClick(view.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+              <button
+                onClick={handleCreateSavedView}
+                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted/0 transition-colors group-hover/savedviews:text-muted hover:text-foreground hover:bg-foreground/6"
+                title="New saved view"
+              >
+                <Plus size={10} />
+                Add
+              </button>
+              {savedViewsCollapsed ? <ChevronDown size={12} className="text-muted" /> : <ChevronUp size={12} className="text-muted" />}
+            </div>
+          ) : (
+            <div className="flex justify-center rounded-lg px-0 py-2">
+              <Filter size={16} className="text-muted" />
+            </div>
+          )}
+          {!collapsed && !savedViewsCollapsed && savedViews.length > 0 && (
+            <div className="flex flex-col gap-0.5 pl-[38px]">
+              {savedViews.map((view) => (
+                <NavItem
+                  key={view.id}
+                  label={view.name}
+                  count={savedViewCounts[view.id] ?? 0}
+                  active={currentView === 'saved-view' && selectedSavedViewId === view.id}
+                  collapsed={collapsed}
+                  onClick={() => handleSavedViewClick(view.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Projects — header with Add buttons, projects grouped by area */}
         <div className="mt-1 flex flex-col gap-0.5">
           {!collapsed ? (
             <div className="group/projects flex items-center gap-3 rounded-lg px-2.5 py-2">
-              <FolderOpen size={16} className="text-muted" />
-              <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Projects</span>
+              <div className="flex flex-1 items-center gap-3">
+                <LayoutGrid size={16} className="text-muted" />
+                <span className="flex-1 select-none text-[13px] font-light tracking-tight text-muted">Projects</span>
+              </div>
               <button
                 onClick={() => { setAddingArea(true); setTimeout(() => addAreaRef.current?.focus(), 0) }}
                 className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
-                title="New area"
-                aria-label="New area"
+                title="New folder"
+                aria-label="New folder"
                 tabIndex={-1}
               >
                 <Plus size={8} />
-                <span className="text-[7px] font-bold uppercase tracking-wider">Area</span>
+                <span className="text-[7px] font-bold uppercase tracking-wider">Folder</span>
               </button>
               <button
                 onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
@@ -337,7 +420,7 @@ export function Sidebar({
             </div>
           ) : (
             <div className="flex justify-center rounded-lg px-0 py-2">
-              <FolderOpen size={16} className="text-muted" />
+              <LayoutGrid size={16} className="text-muted" />
             </div>
           )}
           {!collapsed && (
@@ -355,7 +438,7 @@ export function Sidebar({
                       if (e.key === 'Enter' && newAreaName.trim()) handleCreateArea()
                       if (e.key === 'Escape') { e.stopPropagation(); setAddingArea(false); setNewAreaName('') }
                     }}
-                    placeholder="Area name..."
+                    placeholder="Folder name..."
                     className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
                   />
                 </div>
@@ -387,33 +470,41 @@ export function Sidebar({
                 </div>
               )}
 
-              {/* Ungrouped projects (no area_id) */}
-              {visibleProjects.filter((p) => !p.area_id).map((project) => (
-                <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
-                  active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
-                  onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
-              ))}
-
-              {/* Area groups */}
-              {projectAreas.map((area) => {
-                const areaProjects = visibleProjects.filter((p) => p.area_id === area.id)
+              {/* Interleaved: ungrouped projects and area groups in unified sidebar_order */}
+              {sidebarItems.map((item) => {
+                if (item.type === 'area') {
+                  const area = item.data
+                  const areaProjects = visibleProjects.filter((p) => p.area_id === area.id)
+                  return (
+                    <div key={`area-${area.id}`} className="mt-1">
+                      <button
+                        onClick={() => toggleAreaCollapsed(area.id)}
+                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-foreground/6"
+                      >
+                        <FolderOpen size={12} className="flex-shrink-0 text-muted" />
+                        <span className="flex-1 text-[13px] font-light tracking-tight text-muted">{area.name}</span>
+                        {areaProjects.length > 0 && (
+                          <span className="text-[10px] font-bold tabular-nums text-muted/60">{areaProjects.length}</span>
+                        )}
+                        {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted/50" /> : <ChevronUp size={12} className="text-muted/50" />}
+                      </button>
+                      {area.is_collapsed === 0 && (
+                        <div className="flex flex-col gap-0.5 pl-5">
+                          {areaProjects.map((project) => (
+                            <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                              active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
+                              onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+                const project = item.data as Project
                 return (
-                  <div key={area.id} className="mt-0.5">
-                    <button
-                      onClick={() => toggleAreaCollapsed(area.id)}
-                      className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left transition-colors hover:bg-foreground/6"
-                    >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: area.color }} />
-                      <span className="flex-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{area.name}</span>
-                      <span className="text-[9px] text-muted/50">{areaProjects.length}</span>
-                      {area.is_collapsed === 1 ? <ChevronDown size={10} className="text-muted" /> : <ChevronUp size={10} className="text-muted" />}
-                    </button>
-                    {area.is_collapsed === 0 && areaProjects.map((project) => (
-                      <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
-                        active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
-                        onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
-                    ))}
-                  </div>
+                  <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                    active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
+                    onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
                 )
               })}
 

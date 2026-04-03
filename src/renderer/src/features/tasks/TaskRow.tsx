@@ -4,7 +4,7 @@ import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2, ExternalLink, 
 import { describeRecurrence } from '../../../../shared/recurrenceUtils'
 import { useMemberDisplay, useProjectMemberDisplays } from '../../shared/hooks/useMemberDisplay'
 import { formatDate } from '../../shared/utils/dateFormat'
-import { useSortable } from '@dnd-kit/sortable'
+import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { LabelPicker } from '../../shared/components/LabelPicker'
@@ -113,18 +113,23 @@ export function TaskRow({
   const {
     attributes,
     listeners,
-    setNodeRef,
+    setNodeRef: setDragRef,
     isDragging
-  } = useSortable({
+  } = useDraggable({
     id: task.id,
     disabled: isDragOverlay ?? false
   })
+  const { setNodeRef: setDropRef } = useDroppable({
+    id: task.id,
+    disabled: isDragOverlay ?? false
+  })
+  const setNodeRef = useCallback((el: HTMLElement | null) => { setDragRef(el); setDropRef(el) }, [setDragRef, setDropRef])
 
   const style = isDragOverlay
     ? undefined
     : {
         paddingLeft: `${16 + depth * 24}px`,
-        opacity: isDragging ? 0.3 : undefined
+        opacity: isDragging ? 0.2 : undefined
       }
 
   useEffect(() => {
@@ -325,7 +330,7 @@ export function TaskRow({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-pointer select-none ${
+        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-grab active:cursor-grabbing select-none ${
           isMoving
             ? 'bg-accent/20 border-l-2 border-accent ring-1 ring-accent/40'
             : isSelected

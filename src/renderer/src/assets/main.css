@@ -30,6 +30,11 @@ body {
   transition: background-color 300ms, color 300ms, border-color 300ms;
 }
 
+html.is-dragging,
+html.is-dragging * {
+  cursor: grabbing !important;
+}
+
 *:focus {
   outline: none;
 }

@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { SortableContext } from '@dnd-kit/sortable'
 import { useTaskStore } from '../../shared/stores'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import type { Task, Status, Label, Project } from '../../../../shared/types'
@@ -74,8 +73,6 @@ export function StatusSection({
       }),
     [topLevel, autoSort]
   )
-  const sortedIds = useMemo(() => sorted.map((t) => t.id), [sorted])
-
   return (
     <section>
       <button
@@ -101,7 +98,6 @@ export function StatusSection({
       </button>
 
       {!collapsed && (
-        <SortableContext items={sortedIds}>
           <div role="rowgroup">
             {sorted.map((task) => {
               // In My Day with buckets: use allStatuses as-is (they're the 3 bucket statuses)
@@ -138,7 +134,6 @@ export function StatusSection({
               <p className="px-4 py-3 text-sm font-light text-muted/40">No tasks</p>
             )}
           </div>
-        </SortableContext>
       )}
     </section>
   )

@@ -1,5 +1,4 @@
 import { useDroppable, useDndContext } from '@dnd-kit/core'
-import { SortableContext } from '@dnd-kit/sortable'
 import { useMemo } from 'react'
 import { Ban } from 'lucide-react'
 import type { Task, Status } from '../../../../shared/types'
@@ -48,8 +47,6 @@ export function KanbanColumn({
     data: { type: 'kanban-column', statusId: status.id }
   })
 
-  const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks])
-
   return (
     <div
       className="flex min-w-[260px] max-w-[320px] flex-1 flex-col"
@@ -84,7 +81,6 @@ export function KanbanColumn({
             <span className="text-[9px] font-bold uppercase tracking-wider">No in-progress status</span>
           </div>
         )}
-        <SortableContext items={taskIds}>
           {tasks.map((task) => (
             <KanbanCard
               key={task.id}
@@ -98,7 +94,6 @@ export function KanbanColumn({
               onDeleteTask={onDeleteTask}
             />
           ))}
-        </SortableContext>
 
         {tasks.length === 0 && !(isOver && isDropBlocked) && (
           <p className="py-3 text-center text-[10px] font-bold uppercase tracking-widest text-muted/40">

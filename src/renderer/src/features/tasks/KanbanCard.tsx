@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useSortable } from '@dnd-kit/sortable'
+import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { Calendar } from 'lucide-react'
 import type { DropIndicator } from './useDragAndDrop'
 import { PriorityBadge } from '../../shared/components/PriorityBadge'
@@ -60,12 +60,17 @@ export function KanbanCard({
   const {
     attributes,
     listeners,
-    setNodeRef,
+    setNodeRef: setDragRef,
     isDragging
-  } = useSortable({
+  } = useDraggable({
     id: task.id,
     disabled: isDragOverlay ?? false
   })
+  const { setNodeRef: setDropRef } = useDroppable({
+    id: task.id,
+    disabled: isDragOverlay ?? false
+  })
+  const setNodeRef = useCallback((el: HTMLElement | null) => { setDragRef(el); setDropRef(el) }, [setDragRef, setDropRef])
 
   const isDropAbove = dropIndicator?.targetId === task.id && dropIndicator.intent === 'above'
   const isDropBelow = dropIndicator?.targetId === task.id && dropIndicator.intent === 'below'

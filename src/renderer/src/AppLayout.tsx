@@ -7,7 +7,6 @@ import {
   useSensors,
   type Modifier
 } from '@dnd-kit/core'
-import { getEventCoordinates } from '@dnd-kit/utilities'
 import { LayoutList, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
@@ -57,7 +56,13 @@ export function AppLayout(): React.JSX.Element {
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   const [helpOpen, setHelpOpen] = useState(false)
   const helpOpenRef = useRef(false)
+  const dragWidthRef = useRef(0)
   helpOpenRef.current = helpOpen
+
+  // Lock ghost horizontally (stays at original X), only moves vertically
+  const lockHorizontal: Modifier = useCallback(({ transform }) => {
+    return { ...transform, x: 0 }
+  }, [])
   const [projectMembers, setProjectMembers] = useState<Array<{ user_id: string; email: string; display_name: string | null; role: string }>>([])
 
   // Apply current theme CSS variables
@@ -344,21 +349,6 @@ export function AppLayout(): React.JSX.Element {
   const statuses = useStatusesByProject(projectId)
 
   const collapsed = !sidebarExpanded
-
-  // Snap drag overlay top-left to cursor position
-  const snapToPointer: Modifier = useCallback(({ activatorEvent, draggingNodeRect, transform }) => {
-    if (draggingNodeRect && activatorEvent) {
-      const coords = getEventCoordinates(activatorEvent)
-      if (coords) {
-        return {
-          ...transform,
-          x: transform.x + (coords.x - draggingNodeRect.left),
-          y: transform.y + (coords.y - draggingNodeRect.top)
-        }
-      }
-    }
-    return transform
-  }, [])
 
   // DnD sensors
   const pointerSensor = useSensor(PointerSensor, {
@@ -1002,6 +992,15 @@ export function AppLayout(): React.JSX.Element {
     })
   }, [selectedProject, sortedProjects, deleteProject, addToast, setView])
 
+  // Set grabbing cursor globally during drag (class overrides element cursors)
+  useEffect(() => {
+    if (dragState.isDragging) {
+      document.documentElement.classList.add('is-dragging')
+      return (): void => { document.documentElement.classList.remove('is-dragging') }
+    }
+    return undefined
+  }, [dragState.isDragging])
+
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const showDetailPanel = useTaskStore((s) => s.showDetailPanel)
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
@@ -1012,7 +1011,7 @@ export function AppLayout(): React.JSX.Element {
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
-      onDragStart={handleDragStart}
+      onDragStart={(event) => { dragWidthRef.current = (event.active.rect.current.initial?.width ?? 0); handleDragStart(event) }}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
@@ -1035,7 +1034,7 @@ export function AppLayout(): React.JSX.Element {
         />
 
         {/* Main content area */}
-        <main className={`flex flex-1 flex-col overflow-hidden transition-opacity duration-150 ${dragState.isDragging ? 'opacity-40' : 'opacity-100'}`}>
+        <main className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-[57px] items-center gap-3 border-b border-border px-6">
             {currentView === 'project' && selectedProject && (
               <div
@@ -1383,7 +1382,7 @@ export function AppLayout(): React.JSX.Element {
       </div>
 
       {/* Drag overlay - ghost card */}
-      <DragOverlay dropAnimation={null} modifiers={[snapToPointer]}>
+      <DragOverlay dropAnimation={null} modifiers={[lockHorizontal]}>
         {dragState.activeTask ? (
           layoutMode === 'kanban' ? (
             <KanbanCard
@@ -1396,7 +1395,7 @@ export function AppLayout(): React.JSX.Element {
               onDeleteTask={() => {}}
             />
           ) : (
-            <TaskDragOverlay task={dragState.activeTask} statuses={statuses} count={selectedTaskIds.size > 1 && selectedTaskIds.has(dragState.activeTask.id) ? selectedTaskIds.size : 1} />
+            <TaskDragOverlay task={dragState.activeTask} width={dragWidthRef.current} />
           )
         ) : null}
       </DragOverlay>
