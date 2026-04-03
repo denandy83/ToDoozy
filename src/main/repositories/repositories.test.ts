@@ -14,6 +14,7 @@ import { AttachmentRepository } from './AttachmentRepository'
 import { NotificationRepository } from './NotificationRepository'
 import { SyncQueueRepository } from './SyncQueueRepository'
 import { SavedViewRepository } from './SavedViewRepository'
+import { ProjectAreaRepository } from './ProjectAreaRepository'
 import { createRepositories } from './index'
 
 function createTestDb(): DatabaseSync {
@@ -1189,5 +1190,69 @@ describe('SavedViewRepository', () => {
     expect(views[0].id).toBe(ids[2])
     expect(views[1].id).toBe(ids[0])
     expect(views[2].id).toBe(ids[1])
+  })
+})
+
+describe('ProjectAreaRepository', () => {
+  let db: DatabaseSync
+  let repo: ProjectAreaRepository
+  let userId: string
+  let projectId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new ProjectAreaRepository(db)
+    const base = seedBase(db)
+    userId = base.userId
+    projectId = base.projectId
+  })
+
+  it('creates and finds an area', () => {
+    const id = randomUUID()
+    const area = repo.create({ id, user_id: userId, name: 'Work' })
+    expect(area.name).toBe('Work')
+    expect(area.color).toBe('#888888')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds areas by user ID ordered by sidebar_order', () => {
+    repo.create({ id: randomUUID(), user_id: userId, name: 'B', sidebar_order: 1 })
+    repo.create({ id: randomUUID(), user_id: userId, name: 'A', sidebar_order: 0 })
+    const areas = repo.findByUserId(userId)
+    expect(areas).toHaveLength(2)
+    expect(areas[0].name).toBe('A')
+    expect(areas[1].name).toBe('B')
+  })
+
+  it('updates an area', () => {
+    const id = randomUUID()
+    repo.create({ id, user_id: userId, name: 'Old' })
+    const updated = repo.update(id, { name: 'New', color: '#ff0000' })
+    expect(updated!.name).toBe('New')
+    expect(updated!.color).toBe('#ff0000')
+  })
+
+  it('deletes an area and ungroups its projects', () => {
+    const areaId = randomUUID()
+    repo.create({ id: areaId, user_id: userId, name: 'Delete Me' })
+    repo.assignProject(projectId, areaId)
+    // Verify assignment
+    const project = db.prepare('SELECT area_id FROM projects WHERE id = ?').get(projectId) as { area_id: string | null }
+    expect(project.area_id).toBe(areaId)
+    // Delete area
+    expect(repo.delete(areaId)).toBe(true)
+    const after = db.prepare('SELECT area_id FROM projects WHERE id = ?').get(projectId) as { area_id: string | null }
+    expect(after.area_id).toBeNull()
+  })
+
+  it('assigns and unassigns a project to an area', () => {
+    const areaId = randomUUID()
+    repo.create({ id: areaId, user_id: userId, name: 'Area' })
+    repo.assignProject(projectId, areaId)
+    let p = db.prepare('SELECT area_id FROM projects WHERE id = ?').get(projectId) as { area_id: string | null }
+    expect(p.area_id).toBe(areaId)
+    repo.assignProject(projectId, null)
+    p = db.prepare('SELECT area_id FROM projects WHERE id = ?').get(projectId) as { area_id: string | null }
+    expect(p.area_id).toBeNull()
   })
 })

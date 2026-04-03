@@ -414,4 +414,23 @@ const migration_14: Migration = (db) => {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_saved_views_user ON saved_views(user_id)`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14]
+const migration_15: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_areas (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT DEFAULT '#888888',
+      icon TEXT DEFAULT 'folder',
+      sidebar_order INTEGER DEFAULT 0,
+      is_collapsed INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_project_areas_user ON project_areas(user_id)`)
+  db.exec(`ALTER TABLE projects ADD COLUMN area_id TEXT REFERENCES project_areas(id) ON DELETE SET NULL`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15]

@@ -593,6 +593,59 @@ const tools: ToolDef[] = [
     }
   },
 
+  // Project Areas
+  {
+    name: 'create_area',
+    description: 'Create a project area (folder) to group projects in the sidebar',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: str('Area name'),
+        color: str('Area color hex (default: #888888)')
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'list_areas',
+    description: 'List all project areas for the current user',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'update_area',
+    description: 'Update a project area (rename, recolor, reorder)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        area_id: str('Area ID'),
+        name: str('New name'),
+        color: str('New color hex')
+      },
+      required: ['area_id']
+    }
+  },
+  {
+    name: 'delete_area',
+    description: 'Delete a project area (ungroups its projects, does not delete them)',
+    inputSchema: {
+      type: 'object',
+      properties: { area_id: str('Area ID') },
+      required: ['area_id']
+    }
+  },
+  {
+    name: 'assign_project_to_area',
+    description: 'Assign a project to an area, or pass null area_id to ungroup',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: str('Project ID'),
+        area_id: str('Area ID (or empty string to ungroup)')
+      },
+      required: ['project_id']
+    }
+  },
+
   // Saved Views
   {
     name: 'create_saved_view',
@@ -1304,6 +1357,58 @@ const handlers: Record<string, Handler> = {
 
     deployTemplate(data, projectId, user.id)
     return project
+  },
+
+  // ── Project Areas ──────────────────────────────────────────────
+  create_area(args) {
+    const user = getUser()
+    const name = requireStr(args, 'name')
+    const color = optStr(args, 'color')
+    const existing = repos.projectAreas.findByUserId(user.id)
+    return repos.projectAreas.create({
+      id: randomUUID(),
+      user_id: user.id,
+      name,
+      color: color ?? '#888888',
+      sidebar_order: existing.length
+    })
+  },
+
+  list_areas() {
+    const user = getUser()
+    const areas = repos.projectAreas.findByUserId(user.id)
+    // Add project counts
+    return areas.map((area) => {
+      const projects = repos.projects.list().filter((p) => p.area_id === area.id)
+      return { ...area, project_count: projects.length }
+    })
+  },
+
+  update_area(args) {
+    const areaId = requireStr(args, 'area_id')
+    const area = repos.projectAreas.findById(areaId)
+    if (!area) throw new Error(`Area not found: ${areaId}`)
+    const input: Record<string, string> = {}
+    const name = optStr(args, 'name')
+    if (name !== undefined) input.name = name
+    const color = optStr(args, 'color')
+    if (color !== undefined) input.color = color
+    return repos.projectAreas.update(areaId, input)
+  },
+
+  delete_area(args) {
+    const areaId = requireStr(args, 'area_id')
+    const area = repos.projectAreas.findById(areaId)
+    if (!area) throw new Error(`Area not found: ${areaId}`)
+    repos.projectAreas.delete(areaId)
+    return { deleted: true, area_id: areaId }
+  },
+
+  assign_project_to_area(args) {
+    const projectId = requireStr(args, 'project_id')
+    const areaId = optStr(args, 'area_id')
+    repos.projectAreas.assignProject(projectId, areaId && areaId !== '' ? areaId : null)
+    return { assigned: true, project_id: projectId, area_id: areaId || null }
   },
 
   // ── Saved Views ────────────────────────────────────────────────

@@ -241,6 +241,15 @@ const api: TodoozyAPI = {
     getChangelog: () => ipcRenderer.invoke('app:getChangelog')
   },
 
+  projectAreas: {
+    findByUserId: (userId) => ipcRenderer.invoke('projectAreas:findByUserId', userId),
+    create: (input) => ipcRenderer.invoke('projectAreas:create', input),
+    update: (id, input) => ipcRenderer.invoke('projectAreas:update', id, input),
+    delete: (id) => ipcRenderer.invoke('projectAreas:delete', id),
+    reorder: (areaIds) => ipcRenderer.invoke('projectAreas:reorder', areaIds),
+    assignProject: (projectId, areaId) => ipcRenderer.invoke('projectAreas:assignProject', projectId, areaId)
+  },
+
   stats: {
     completions: (userId, projectId, startDate, endDate) =>
       ipcRenderer.invoke('stats:completions', userId, projectId, startDate, endDate),

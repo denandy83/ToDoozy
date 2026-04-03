@@ -792,6 +792,31 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Release Notes ──────────────────────────────────────────────────
+  // ── Project Areas ────────────────────────────────────────────────
+  ipcMain.handle('projectAreas:findByUserId', (_e, userId: string) => {
+    return getRepos().projectAreas.findByUserId(userId)
+  })
+
+  ipcMain.handle('projectAreas:create', (_e, input: import('../shared/types').CreateProjectAreaInput) => {
+    return getRepos().projectAreas.create(input)
+  })
+
+  ipcMain.handle('projectAreas:update', (_e, id: string, input: import('../shared/types').UpdateProjectAreaInput) => {
+    return getRepos().projectAreas.update(id, input)
+  })
+
+  ipcMain.handle('projectAreas:delete', (_e, id: string) => {
+    return getRepos().projectAreas.delete(id)
+  })
+
+  ipcMain.handle('projectAreas:reorder', (_e, areaIds: string[]) => {
+    return getRepos().projectAreas.reorder(areaIds)
+  })
+
+  ipcMain.handle('projectAreas:assignProject', (_e, projectId: string, areaId: string | null) => {
+    return getRepos().projectAreas.assignProject(projectId, areaId)
+  })
+
   // ── Stats ────────────────────────────────────────────────────────
   ipcMain.handle('stats:completions', (_e, userId: string, projectId: string | null, startDate: string, endDate: string) => {
     return getRepos().tasks.getCompletionStats(userId, projectId, startDate, endDate)

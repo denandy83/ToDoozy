@@ -28,6 +28,7 @@ import { useProjectStore } from '../../shared/stores/projectStore'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useSavedViewStore, selectSavedViews } from '../../shared/stores/savedViewStore'
+import { useProjectAreaStore, selectProjectAreas } from '../../shared/stores/projectAreaStore'
 import type { ThemeConfig } from '../../../../shared/types'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
@@ -111,9 +112,27 @@ export function Sidebar({
   const setSelectedSavedView = useViewStore((s) => s.setSelectedSavedView)
   const [savedViewsCollapsed, setSavedViewsCollapsed] = useState(false)
 
+  // Project areas
+  const projectAreas = useProjectAreaStore(selectProjectAreas)
+  const { hydrate: hydrateAreas, createArea, toggleCollapsed: toggleAreaCollapsed } = useProjectAreaStore()
+  const [addingArea, setAddingArea] = useState(false)
+  const [newAreaName, setNewAreaName] = useState('')
+  const addAreaRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
-    if (currentUser?.id) hydrateSavedViews(currentUser.id)
-  }, [currentUser?.id, hydrateSavedViews])
+    if (currentUser?.id) {
+      hydrateSavedViews(currentUser.id)
+      hydrateAreas(currentUser.id)
+    }
+  }, [currentUser?.id, hydrateSavedViews, hydrateAreas])
+
+  const handleCreateArea = useCallback(async () => {
+    const name = newAreaName.trim()
+    if (!name || !currentUser) return
+    await createArea(currentUser.id, name)
+    setAddingArea(false)
+    setNewAreaName('')
+  }, [newAreaName, currentUser, createArea])
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim()
@@ -289,12 +308,22 @@ export function Sidebar({
           </div>
         )}
 
-        {/* Projects — header as nav item, projects indented */}
+        {/* Projects — header with Add buttons, projects grouped by area */}
         <div className="mt-1 flex flex-col gap-0.5">
           {!collapsed ? (
             <div className="group/projects flex items-center gap-3 rounded-lg px-2.5 py-2">
               <FolderOpen size={16} className="text-muted" />
               <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Projects</span>
+              <button
+                onClick={() => { setAddingArea(true); setTimeout(() => addAreaRef.current?.focus(), 0) }}
+                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
+                title="New area"
+                aria-label="New area"
+                tabIndex={-1}
+              >
+                <Plus size={8} />
+                <span className="text-[7px] font-bold uppercase tracking-wider">Area</span>
+              </button>
               <button
                 onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
                 className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
@@ -313,6 +342,26 @@ export function Sidebar({
           )}
           {!collapsed && (
             <div className="flex flex-col gap-0.5 pl-4">
+              {/* New area input */}
+              {addingArea && (
+                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background p-2">
+                  <input
+                    ref={addAreaRef}
+                    type="text"
+                    value={newAreaName}
+                    onChange={(e) => setNewAreaName(e.target.value)}
+                    tabIndex={-1}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newAreaName.trim()) handleCreateArea()
+                      if (e.key === 'Escape') { e.stopPropagation(); setAddingArea(false); setNewAreaName('') }
+                    }}
+                    placeholder="Area name..."
+                    className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {/* New project input */}
               {addingProject && (
                 <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
                   <input
@@ -322,60 +371,56 @@ export function Sidebar({
                     onChange={(e) => setNewProjectName(e.target.value)}
                     tabIndex={-1}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newProjectName.trim()) {
-                        handleCreateProject()
-                      }
-                      if (e.key === 'Escape') {
-                        e.stopPropagation()
-                        setAddingProject(false)
-                        setNewProjectName('')
-                        setNewProjectColor('#6366f1')
-                      }
+                      if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject()
+                      if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor('#6366f1') }
                     }}
                     placeholder="Project name..."
                     className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
                   />
                   <div className="flex items-center gap-1">
                     {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
+                      <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
                         className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
-                        style={{ backgroundColor: c }}
-                      />
+                        style={{ backgroundColor: c }} />
                     ))}
                   </div>
                 </div>
               )}
-              {visibleProjects.map((project) => (
-                <ProjectNavItem
-                  key={project.id}
-                  project={project}
-                  count={projectCounts[project.id] ?? 0}
-                  active={currentView === 'project' && selectedProjectId === project.id}
-                  collapsed={collapsed}
-                  onClick={() => handleProjectClick(project.id)}
-                  isDragging={isDragging}
-                />
+
+              {/* Ungrouped projects (no area_id) */}
+              {visibleProjects.filter((p) => !p.area_id).map((project) => (
+                <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                  active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
+                  onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
               ))}
+
+              {/* Area groups */}
+              {projectAreas.map((area) => {
+                const areaProjects = visibleProjects.filter((p) => p.area_id === area.id)
+                return (
+                  <div key={area.id} className="mt-0.5">
+                    <button
+                      onClick={() => toggleAreaCollapsed(area.id)}
+                      className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left transition-colors hover:bg-foreground/6"
+                    >
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: area.color }} />
+                      <span className="flex-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{area.name}</span>
+                      <span className="text-[9px] text-muted/50">{areaProjects.length}</span>
+                      {area.is_collapsed === 1 ? <ChevronDown size={10} className="text-muted" /> : <ChevronUp size={10} className="text-muted" />}
+                    </button>
+                    {area.is_collapsed === 0 && areaProjects.map((project) => (
+                      <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                        active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
+                        onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
+                    ))}
+                  </div>
+                )
+              })}
+
               {hasMoreProjects && (
-                <button
-                  onClick={() => setProjectsExpanded(!projectsExpanded)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground"
-                  tabIndex={-1}
-                >
-                  {projectsExpanded ? (
-                    <>
-                      <ChevronUp size={12} />
-                      Less
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} />
-                      More
-                    </>
-                  )}
+                <button onClick={() => setProjectsExpanded(!projectsExpanded)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground" tabIndex={-1}>
+                  {projectsExpanded ? (<><ChevronUp size={12} />Less</>) : (<><ChevronDown size={12} />More</>)}
                 </button>
               )}
             </div>
@@ -383,15 +428,9 @@ export function Sidebar({
           {collapsed && (
             <div className="flex flex-col gap-0.5">
               {visibleProjects.map((project) => (
-                <ProjectNavItem
-                  key={project.id}
-                  project={project}
-                  count={projectCounts[project.id] ?? 0}
-                  active={currentView === 'project' && selectedProjectId === project.id}
-                  collapsed={collapsed}
-                  onClick={() => handleProjectClick(project.id)}
-                  isDragging={isDragging}
-                />
+                <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                  active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
+                  onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
               ))}
             </div>
           )}

@@ -36,7 +36,10 @@ import type {
   SyncOperation,
   SavedView,
   CreateSavedViewInput,
-  UpdateSavedViewInput
+  UpdateSavedViewInput,
+  ProjectArea,
+  CreateProjectAreaInput,
+  UpdateProjectAreaInput
 } from '../shared/types'
 
 export interface TasksAPI {
@@ -279,6 +282,15 @@ export interface UpdaterAPI {
   onStatus(callback: (status: UpdateStatus) => void): () => void
 }
 
+export interface ProjectAreasAPI {
+  findByUserId(userId: string): Promise<ProjectArea[]>
+  create(input: CreateProjectAreaInput): Promise<ProjectArea>
+  update(id: string, input: UpdateProjectAreaInput): Promise<ProjectArea | null>
+  delete(id: string): Promise<boolean>
+  reorder(areaIds: string[]): Promise<void>
+  assignProject(projectId: string, areaId: string | null): Promise<void>
+}
+
 export interface StatsAPI {
   completions(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
   streaks(userId: string): Promise<{ current: number; best: number }>
@@ -318,6 +330,7 @@ export interface TodoozyAPI {
   sync: SyncAPI
   shell: ShellAPI
   app: AppAPI
+  projectAreas: ProjectAreasAPI
   stats: StatsAPI
   savedViews: SavedViewsAPI
   releaseNotes: ReleaseNotesAPI

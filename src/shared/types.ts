@@ -20,6 +20,7 @@ export interface Project {
   is_default: number
   is_shared: number
   sidebar_order: number
+  area_id: string | null
   created_at: string
   updated_at: string
 }
@@ -400,6 +401,37 @@ export interface SharedProjectMember {
   joined_at: string
   email: string
   display_name: string | null
+}
+
+// ── Project Areas ──────────────────────────────────────────────────
+
+export interface ProjectArea {
+  id: string
+  user_id: string
+  name: string
+  color: string
+  icon: string
+  sidebar_order: number
+  is_collapsed: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProjectAreaInput {
+  id: string
+  user_id: string
+  name: string
+  color?: string
+  icon?: string
+  sidebar_order?: number
+}
+
+export interface UpdateProjectAreaInput {
+  name?: string
+  color?: string
+  icon?: string
+  sidebar_order?: number
+  is_collapsed?: number
 }
 
 // ── Saved Views ────────────────────────────────────────────────────
