@@ -95,7 +95,7 @@ export function TimerSettingsContent(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Timer</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Presets</p>
 
       {/* Timer Presets */}
       <div>
@@ -187,6 +187,8 @@ export function TimerSettingsContent(): React.JSX.Element {
         </select>
       </div>
 
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Breaks</p>
+
       {/* Break Duration */}
       <div className="flex items-center justify-between">
         <div>
@@ -214,6 +216,8 @@ export function TimerSettingsContent(): React.JSX.Element {
         </div>
         <ToggleButton settingKey="timer_auto_break" defaultValue="true" />
       </div>
+
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Repetition</p>
 
       {/* Repetition mode */}
       <div className="flex items-center justify-between">
@@ -251,6 +255,8 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_perpetual" defaultValue="false" />
       </div>
 
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Behavior</p>
+
       {/* Minimize on start */}
       <div className="flex items-center justify-between">
         <div>
@@ -259,6 +265,8 @@ export function TimerSettingsContent(): React.JSX.Element {
         </div>
         <ToggleButton settingKey="timer_minimize_on_start" defaultValue="true" />
       </div>
+
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Alerts</p>
 
       {/* Sound */}
       <div className="flex items-center justify-between">
