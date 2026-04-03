@@ -34,7 +34,7 @@ export {
 } from './viewStore'
 
 export { useLabelStore } from './labelStore'
-export type { LabelStore, LabelFilterMode } from './labelStore'
+export type { LabelStore, LabelFilterMode, DueDateRange } from './labelStore'
 export {
   selectLabelsByProject,
   selectAllLabels,
@@ -48,7 +48,20 @@ export {
   selectHasPriorityFilters,
   selectStatusFilters,
   selectHasStatusFilters,
+  selectProjectFilters,
+  selectHasProjectFilters,
+  selectExcludeLabelFilters,
+  selectHasExcludeLabelFilters,
+  selectExcludeStatusFilters,
+  selectHasExcludeStatusFilters,
+  selectExcludePriorityFilters,
+  selectHasExcludePriorityFilters,
+  selectExcludeAssigneeFilters,
+  selectHasExcludeAssigneeFilters,
+  selectExcludeProjectFilters,
+  selectHasExcludeProjectFilters,
   selectDueDatePreset,
+  selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter,
   useLabelsByProject

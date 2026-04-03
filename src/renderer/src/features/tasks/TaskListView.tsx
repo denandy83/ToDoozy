@@ -15,7 +15,16 @@ import {
   selectHasPriorityFilters,
   selectStatusFilters,
   selectHasStatusFilters,
+  selectExcludeLabelFilters,
+  selectHasExcludeLabelFilters,
+  selectExcludeStatusFilters,
+  selectHasExcludeStatusFilters,
+  selectExcludePriorityFilters,
+  selectHasExcludePriorityFilters,
+  selectExcludeAssigneeFilters,
+  selectHasExcludeAssigneeFilters,
   selectDueDatePreset,
+  selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter
 } from '../../shared/stores'
@@ -24,6 +33,7 @@ import { useSetting } from '../../shared/stores/settingsStore'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
+import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
@@ -66,7 +76,16 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
   const statusFilters = useLabelStore(selectStatusFilters)
   const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const excludeLabelFilters = useLabelStore(selectExcludeLabelFilters)
+  const hasExcludeLabelFilters = useLabelStore(selectHasExcludeLabelFilters)
+  const excludeStatusFilters = useLabelStore(selectExcludeStatusFilters)
+  const hasExcludeStatusFilters = useLabelStore(selectHasExcludeStatusFilters)
+  const excludePriorityFilters = useLabelStore(selectExcludePriorityFilters)
+  const hasExcludePriorityFilters = useLabelStore(selectHasExcludePriorityFilters)
+  const excludeAssigneeFilters = useLabelStore(selectExcludeAssigneeFilters)
+  const hasExcludeAssigneeFilters = useLabelStore(selectHasExcludeAssigneeFilters)
   const dueDatePreset = useLabelStore(selectDueDatePreset)
+  const dueDateRange = useLabelStore(selectDueDateRange)
   const keywordFilter = useLabelStore(selectKeyword)
   const hasAnyFilterGlobal = useLabelStore(selectHasAnyFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
@@ -108,36 +127,24 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   // Shared filter matching function
   const taskMatchesFilters = useCallback((task: Task): boolean => {
     if (!hasAnyFilter) return true
-    // Label match (OR logic)
+    const labels = taskLabels[task.id] ?? []
+    const labelIds = new Set(labels.map((l) => l.id))
+    // Include filters
     if (hasActiveFilters) {
-      const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
       if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
     }
-    // Assignee match
     if (hasAssigneeFilters && !assigneeFilters.has(task.assigned_to ?? '')) return false
-    // Priority match
     if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
-    // Status match
     if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
-    // Due date preset match
-    if (dueDatePreset) {
-      const now = new Date()
-      const todayStr = now.toISOString().slice(0, 10)
-      if (dueDatePreset === 'no_date') {
-        if (task.due_date) return false
-      } else if (dueDatePreset === 'overdue') {
-        if (!task.due_date || task.due_date >= todayStr) return false
-      } else if (dueDatePreset === 'today') {
-        if (!task.due_date || task.due_date.slice(0, 10) !== todayStr) return false
-      } else if (dueDatePreset === 'this_week') {
-        if (!task.due_date) return false
-        const endOfWeek = new Date(now)
-        endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
-        if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10)) return false
-        if (task.due_date.slice(0, 10) < todayStr) return false
-      }
+    // Exclusion filters
+    if (hasExcludeLabelFilters) {
+      if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
     }
+    if (hasExcludeAssigneeFilters && excludeAssigneeFilters.has(task.assigned_to ?? '')) return false
+    if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
+    if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false
+    // Due date match (preset or custom range)
+    if ((dueDatePreset || dueDateRange) && !matchesDueDateFilter(task.due_date, dueDatePreset, dueDateRange)) return false
     // Keyword match
     if (keywordFilter) {
       const kw = keywordFilter.toLowerCase()
@@ -146,7 +153,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       if (!titleMatch && !descMatch) return false
     }
     return true
-  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePreset, keywordFilter])
+  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludeAssigneeFilters, excludeAssigneeFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
 
   const taskFilterOpacity = useMemo(() => {
     if (!hasAnyFilter) return undefined
@@ -240,8 +247,10 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       for (const label of data.labels) {
         await addLabel(taskId, label.id)
       }
+      // Select the newly created task
+      selectTask(taskId)
     },
-    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition]
+    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition, selectTask]
   )
 
   const handleStatusChange = useCallback(

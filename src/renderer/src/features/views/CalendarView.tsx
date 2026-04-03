@@ -14,11 +14,19 @@ import {
   selectHasPriorityFilters,
   selectStatusFilters,
   selectHasStatusFilters,
+  selectExcludeLabelFilters,
+  selectHasExcludeLabelFilters,
+  selectExcludeStatusFilters,
+  selectHasExcludeStatusFilters,
+  selectExcludePriorityFilters,
+  selectHasExcludePriorityFilters,
   selectDueDatePreset,
+  selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter
 } from '../../shared/stores'
 import { useSettingsStore } from '../../shared/stores/settingsStore'
+import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Project } from '../../../../shared/types'
 import { useCalendar, type CalendarLayout } from './useCalendar'
@@ -71,7 +79,14 @@ export function CalendarView(): React.JSX.Element {
   const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
   const statusFilters = useLabelStore(selectStatusFilters)
   const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const excludeLabelFilters = useLabelStore(selectExcludeLabelFilters)
+  const hasExcludeLabelFilters = useLabelStore(selectHasExcludeLabelFilters)
+  const excludeStatusFilters = useLabelStore(selectExcludeStatusFilters)
+  const hasExcludeStatusFilters = useLabelStore(selectHasExcludeStatusFilters)
+  const excludePriorityFilters = useLabelStore(selectExcludePriorityFilters)
+  const hasExcludePriorityFilters = useLabelStore(selectHasExcludePriorityFilters)
   const dueDatePresetFilter = useLabelStore(selectDueDatePreset)
+  const dueDateRangeFilter = useLabelStore(selectDueDateRange)
   const keywordFilter = useLabelStore(selectKeyword)
   const hasAnyFilter = useLabelStore(selectHasAnyFilter)
   const taskLabels = useTaskStore((s) => s.taskLabels)
@@ -88,32 +103,28 @@ export function CalendarView(): React.JSX.Element {
   const calendarTasks = useMemo(() => {
     if (!hasAnyFilter || filterMode !== 'hide') return allCalendarTasks
     return allCalendarTasks.filter((task) => {
+      const labels = taskLabels[task.id] ?? []
+      const labelIds = new Set(labels.map((l) => l.id))
+      // Include filters
       if (hasActiveFilters) {
-        const labels = taskLabels[task.id] ?? []
-        const labelIds = new Set(labels.map((l) => l.id))
         if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
       }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
-      if (dueDatePresetFilter) {
-        const now = new Date()
-        const today = now.toISOString().slice(0, 10)
-        if (dueDatePresetFilter === 'no_date') { if (task.due_date) return false }
-        else if (dueDatePresetFilter === 'overdue') { if (!task.due_date || task.due_date >= today) return false }
-        else if (dueDatePresetFilter === 'today') { if (!task.due_date || task.due_date.slice(0, 10) !== today) return false }
-        else if (dueDatePresetFilter === 'this_week') {
-          if (!task.due_date) return false
-          const endOfWeek = new Date(now); endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
-          if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10) || task.due_date.slice(0, 10) < today) return false
-        }
+      // Exclusion filters
+      if (hasExcludeLabelFilters) {
+        if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
       }
+      if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
+      if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false
+      if ((dueDatePresetFilter || dueDateRangeFilter) && !matchesDueDateFilter(task.due_date, dueDatePresetFilter, dueDateRangeFilter)) return false
       if (keywordFilter) {
         const kw = keywordFilter.toLowerCase()
         if (!task.title.toLowerCase().includes(kw) && !(task.description ?? '').toLowerCase().includes(kw)) return false
       }
       return true
     })
-  }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePresetFilter, keywordFilter])
+  }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePresetFilter, dueDateRangeFilter, keywordFilter])
 
   // Group tasks by date — My Day tasks appear on today (with sun icon) AND on their due date
   // Track which task+date combos are "My Day" entries

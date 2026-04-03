@@ -568,6 +568,110 @@ describe('TaskRepository', () => {
       expect(results).toHaveLength(1)
       expect(results[0].title).toBe('Assigned')
     })
+
+    it('excludes tasks by label (exclude_label_ids)', () => {
+      const label1 = randomUUID()
+      const label2 = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label1, 'Bug', '#f00', 0, now, now)
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label2, 'Feature', '#0f0', 1, now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      const t3 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Has Bug', status_id: statusId })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Has Feature', status_id: statusId })
+      repo.create({ id: t3, project_id: projectId, owner_id: userId, title: 'No Labels', status_id: statusId })
+      repo.addLabel(t1, label1)
+      repo.addLabel(t2, label2)
+
+      const results = repo.search({ exclude_label_ids: [label1] })
+      expect(results.map((t) => t.title)).toContain('Has Feature')
+      expect(results.map((t) => t.title)).toContain('No Labels')
+      expect(results.map((t) => t.title)).not.toContain('Has Bug')
+    })
+
+    it('excludes tasks by status (exclude_status_ids)', () => {
+      const status2 = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO statuses (id, project_id, name, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(status2, projectId, 'In Progress', 1, now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Not Started Task', status_id: statusId })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'In Progress Task', status_id: status2 })
+
+      const results = repo.search({ exclude_status_ids: [statusId] })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('In Progress Task')
+    })
+
+    it('excludes tasks by priority (exclude_priorities)', () => {
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      const t3 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Urgent', status_id: statusId, priority: 4 })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Normal', status_id: statusId, priority: 2 })
+      repo.create({ id: t3, project_id: projectId, owner_id: userId, title: 'Low', status_id: statusId, priority: 1 })
+
+      const results = repo.search({ exclude_priorities: [4, 1] })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('Normal')
+    })
+
+    it('excludes tasks by project (exclude_project_ids)', () => {
+      const proj2 = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO projects (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(proj2, 'Other Project', userId, now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'In Main', status_id: statusId })
+      repo.create({ id: t2, project_id: proj2, owner_id: userId, title: 'In Other', status_id: statusId })
+
+      const results = repo.search({ exclude_project_ids: [proj2] })
+      expect(results.map((t) => t.title)).toContain('In Main')
+      expect(results.map((t) => t.title)).not.toContain('In Other')
+    })
+
+    it('excludes tasks by assignee (exclude_assigned_to_ids)', () => {
+      const user2 = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(user2, `u2-${user2}@example.com`, 'User 2', now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Assigned to user2', status_id: statusId })
+      repo.update(t1, { assigned_to: user2 })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Unassigned', status_id: statusId })
+
+      const results = repo.search({ exclude_assigned_to_ids: [user2] })
+      expect(results.map((t) => t.title)).toContain('Unassigned')
+      expect(results.map((t) => t.title)).not.toContain('Assigned to user2')
+    })
+
+    it('combines include and exclude filters', () => {
+      const label1 = randomUUID()
+      const label2 = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label1, 'Bug', '#f00', 0, now, now)
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(label2, 'Later', '#888', 1, now, now)
+
+      const t1 = randomUUID()
+      const t2 = randomUUID()
+      const t3 = randomUUID()
+      repo.create({ id: t1, project_id: projectId, owner_id: userId, title: 'Bug only', status_id: statusId, priority: 3 })
+      repo.create({ id: t2, project_id: projectId, owner_id: userId, title: 'Bug + Later', status_id: statusId, priority: 3 })
+      repo.create({ id: t3, project_id: projectId, owner_id: userId, title: 'Neither', status_id: statusId, priority: 1 })
+      repo.addLabel(t1, label1)
+      repo.addLabel(t2, label1)
+      repo.addLabel(t2, label2)
+
+      // Include label1 (Bug), exclude label2 (Later), include priority 3
+      const results = repo.search({ label_ids: [label1], exclude_label_ids: [label2], priorities: [3] })
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('Bug only')
+    })
   })
 
   describe('stats', () => {
@@ -589,8 +693,11 @@ describe('TaskRepository', () => {
     it('getStreakStats computes current and best streak', () => {
       const today = new Date().toISOString().slice(0, 10)
       const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'T', status_id: statusId, completed_date: `${today}T10:00:00Z` })
-      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Y', status_id: statusId, completed_date: `${yesterday}T10:00:00Z` })
+      const taskId = randomUUID()
+      repo.create({ id: taskId, project_id: projectId, owner_id: userId, title: 'T', status_id: statusId })
+      // Streak uses activity_log entries
+      db.prepare('INSERT INTO activity_log (id, task_id, user_id, action, created_at) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), taskId, userId, 'created', `${today}T10:00:00Z`)
+      db.prepare('INSERT INTO activity_log (id, task_id, user_id, action, created_at) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), taskId, userId, 'created', `${yesterday}T10:00:00Z`)
 
       const stats = repo.getStreakStats(userId)
       expect(stats.current).toBe(2)
