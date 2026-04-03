@@ -4,6 +4,32 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.1.0
+
+- **Settings reorganization** — The Settings modal is now cleaner with 7 tabs instead of 11. Themes and Priority Display are grouped under Appearance. Updates, What's New, Integrations, and Help are grouped under About. Section labels make each tab easier to scan.
+
+## v1.0.6
+
+- **Timer improvements** — Better timer UX and reliability improvements
+- **Label search** — Search through your labels for faster filtering
+- **Member display reliability** — More reliable member avatar display in shared projects
+
+## v1.0.5
+
+- **What's New from GitHub** — The What's New tab now pulls release notes directly from GitHub, so you always see the latest changes. Works offline too with bundled fallback.
+- **Help search** — Search through the help documentation to find what you need faster
+- **Shared project fixes** — Fixed several issues with shared project syncing including stale sessions, invite reliability, and member display
+
+## v1.0.4
+
+- **Member display fix** — Fixed an issue where member avatars wouldn't update after collaborator changes
+
+## v1.0.2
+
+- **Assignee filter** — Click member avatars to filter tasks by assignee. Multi-select supported with hover highlights.
+- **Member display sync** — Member display customizations (color, initials) now sync across devices via Supabase
+- **Shared project reliability** — Fixed realtime invite subscriptions, stale sessions, duplicate labels on sync, and post-reinstall state recovery
+
 ## v1.0.0
 
 - **Auto-Update Mechanism** — The app now checks for updates automatically on launch and every 4 hours. When an update is available, a dialog shows the new version and release notes with options to Install & Restart or dismiss. A download progress bar tracks the update. You can also manually check for updates in Settings.

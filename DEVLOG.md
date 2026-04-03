@@ -4,6 +4,27 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-04-03 — Settings reorganization (Story #42)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Settings reorganization** — Consolidated 11 settings tabs down to 7: merged Themes + Priorities into Appearance with subtabs, merged Updates + What's New + MCP + Help into About with subtabs, absorbed Notifications into General as a section. Added section labels to General and Timer tabs. Extracted large components from UnifiedSettingsModal.tsx into separate files.
+
+---
+
+## 2026-04-02 — v1.0.2–v1.0.6 releases, shared project hardening
+
+**Session type:** Feature enhancements + bug fixes + releases
+
+**What was built:**
+- **v1.0.2** — Shared project reliability: realtime invite subscription with retry, stale session handling, duplicate label prevention, shared-user placeholder updates, multiselect assignee filter, member avatar click-to-filter, member display sync via Supabase, post-reinstall sync
+- **v1.0.4** — Member display cache invalidation on Realtime events
+- **v1.0.5** — What's New from GitHub releases, help search, activity log improvements, shared project fixes
+- **v1.0.6** — Timer improvements, label search, member display reliability, GitHub-based What's New flow, bundled release notes fallback
+
+---
+
 ## 2026-04-02 — Auto-Update Mechanism (Story #40)
 
 **Session type:** Feature implementation

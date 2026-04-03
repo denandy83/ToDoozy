@@ -4,6 +4,42 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.1.0
+
+- **Settings reorganization** — Reorganized Settings modal from 11 tabs to 7: General, Projects, Appearance (Theme + Priority Display subtabs), Labels, Timer, About (Updates + What's New + Integrations + Help subtabs). Added section labels throughout. No settings removed or renamed.
+
+## v1.0.6
+
+- **Timer improvements** — Enhanced timer UX and reliability
+- **Label search** — Improved label search and filtering
+- **Member display reliability** — Fixed member avatar display and cache invalidation for shared projects
+- **What's New from GitHub** — What's New tab now syncs release notes directly from GitHub releases, with bundled fallback for offline use
+- **Help search** — Added search functionality to the help/documentation tab
+- **Activity log improvements** — Enhanced activity log display and entries
+
+## v1.0.5
+
+- **What's New syncs from GitHub** — Release notes are fetched from GitHub API and cached locally; bundled fallback ensures content is always available
+- **Help search** — Searchable help content in Settings
+- **Activity log** — Improved activity logging for task changes
+- **Shared project fixes** — Fixed stale sessions, invite polling, realtime member display sync, duplicate label prevention, and shared-user placeholder updates
+
+## v1.0.4
+
+- **Member display cache** — Fixed member display cache invalidation on Realtime member events
+
+## v1.0.2
+
+- **Realtime invite subscription** — Fixed invite subscription with status checking and retry logic
+- **Stale session handling** — Fixed stale sessions, invite polling, and realtime member display sync
+- **Duplicate label prevention** — Prevented duplicate labels when syncing shared projects
+- **Shared-user placeholders** — Updated shared-user placeholders in place instead of delete+recreate
+- **Member avatar border** — Reduced member avatar border width from 2px to 1px
+- **Multiselect assignee filter** — Added multiselect assignee filter with hover highlight on member avatars
+- **Member avatar click filter** — Member avatars show all members; click filters by assignee
+- **Member display sync** — Synced member display customizations (color, initials) via Supabase
+- **Post-reinstall sync** — Re-sync shared project state and member profiles after reinstall
+
 ## v1.0.0
 
 - **Auto-Update Mechanism** — Added Sparkle-style auto-update system using electron-updater with GitHub Releases as the update provider. App checks for updates on launch and every 4 hours. Update dialog shows version number, release notes, and Install & Restart / Not Now buttons. Download progress bar during update download. Settings page displays current version with manual Check for Updates button.

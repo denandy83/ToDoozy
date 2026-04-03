@@ -726,6 +726,33 @@ function deployTemplate(
   return { defaultStatusId, labelMap }
 }
 
+// ── Activity Logging Helper ─────────────────────────────────────────
+
+const PRIORITY_NAMES: Record<number, string> = {
+  0: 'none',
+  1: 'low',
+  2: 'normal',
+  3: 'high',
+  4: 'urgent'
+}
+
+function logActivity(
+  taskId: string,
+  userId: string,
+  action: string,
+  oldValue?: string | null,
+  newValue?: string | null
+): void {
+  repos.activityLog.create({
+    id: randomUUID(),
+    task_id: taskId,
+    user_id: userId,
+    action,
+    old_value: oldValue ?? null,
+    new_value: newValue ?? null
+  })
+}
+
 // ── Tool Handlers ───────────────────────────────────────────────────
 
 type Handler = (args: Record<string, unknown>) => unknown
@@ -738,7 +765,7 @@ const handlers: Record<string, Handler> = {
     const defaultStatus = repos.statuses.findDefault(projectId)
     if (!defaultStatus) throw new Error('No default status found for project')
 
-    return repos.tasks.create({
+    const task = repos.tasks.create({
       id: randomUUID(),
       project_id: projectId,
       owner_id: user.id,
@@ -749,6 +776,8 @@ const handlers: Record<string, Handler> = {
       due_date: optStr(args, 'due_date') ?? null,
       parent_id: optStr(args, 'parent_id') ?? null
     })
+    logActivity(task.id, user.id, 'created')
+    return task
   },
 
   list_tasks(args) {
@@ -766,6 +795,10 @@ const handlers: Record<string, Handler> = {
 
   update_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const oldTask = repos.tasks.findById(taskId)
+    if (!oldTask) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
+
     const input: Record<string, string | number | null> = {}
     const title = optStr(args, 'title')
     if (title !== undefined) input.title = title
@@ -780,18 +813,43 @@ const handlers: Record<string, Handler> = {
 
     const result = repos.tasks.update(taskId, input)
     if (!result) throw new Error(`Task not found: ${taskId}`)
+
+    // Log per changed field
+    if (title !== undefined && title !== oldTask.title) {
+      logActivity(taskId, user.id, 'title_changed', oldTask.title, title)
+    }
+    if (description !== undefined && description !== oldTask.description) {
+      logActivity(taskId, user.id, 'description_changed', oldTask.description ?? '', description)
+    }
+    if (priority !== undefined && priority !== oldTask.priority) {
+      logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[oldTask.priority] ?? '', PRIORITY_NAMES[priority] ?? '')
+    }
+    if (dueDate !== undefined) {
+      const newDue = dueDate === '' ? null : dueDate
+      if (newDue !== oldTask.due_date) {
+        logActivity(taskId, user.id, 'due_date_changed', oldTask.due_date ?? '', newDue ?? '')
+      }
+    }
+    if (statusId !== undefined && statusId !== oldTask.status_id) {
+      const oldStatus = repos.statuses.findById(oldTask.status_id)
+      const newStatus = repos.statuses.findById(statusId)
+      logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
+    }
     return result
   },
 
   delete_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
+    logActivity(taskId, user.id, 'deleted', task.title, null)
     // Delete subtasks first
     const subtasks = repos.tasks.findSubtasks(taskId)
     for (const sub of subtasks) {
       repos.tasks.delete(sub.id)
     }
-    const deleted = repos.tasks.delete(taskId)
-    if (!deleted) throw new Error(`Task not found: ${taskId}`)
+    repos.tasks.delete(taskId)
     return { deleted: true, task_id: taskId }
   },
 
@@ -800,106 +858,144 @@ const handlers: Record<string, Handler> = {
     const taskId = requireStr(args, 'task_id')
     const task = repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
+    const oldStatus = repos.statuses.findById(task.status_id)
     const doneStatus = repos.statuses.findDone(task.project_id)
     if (!doneStatus) throw new Error('No done status found for project')
-    return repos.tasks.update(taskId, {
+    const result = repos.tasks.update(taskId, {
       status_id: doneStatus.id,
       completed_date: new Date().toISOString()
     })
+    logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', doneStatus.name)
+    return result
   },
 
   reopen_task(args) {
     const taskId = requireStr(args, 'task_id')
     const task = repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
+    const oldStatus = repos.statuses.findById(task.status_id)
     const defaultStatus = repos.statuses.findDefault(task.project_id)
     if (!defaultStatus) throw new Error('No default status found for project')
-    return repos.tasks.update(taskId, {
+    const result = repos.tasks.update(taskId, {
       status_id: defaultStatus.id,
       completed_date: null
     })
+    logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', defaultStatus.name)
+    return result
   },
 
   // ── Tasks — Field setters ──────────────────────────────────────
   set_task_priority(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
     const priority = optNum(args, 'priority') ?? 0
     const result = repos.tasks.update(taskId, { priority })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[task.priority] ?? '', PRIORITY_NAMES[priority] ?? '')
     return result
   },
 
   set_task_due_date(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
     const dueDate = optStr(args, 'due_date') ?? ''
-    const result = repos.tasks.update(taskId, { due_date: dueDate === '' ? null : dueDate })
+    const newDue = dueDate === '' ? null : dueDate
+    const result = repos.tasks.update(taskId, { due_date: newDue })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', newDue ?? '')
     return result
   },
 
   set_task_description(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
     const description = optStr(args, 'description') ?? ''
     const result = repos.tasks.update(taskId, { description })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'description_changed', task.description ?? '', description)
     return result
   },
 
   set_task_recurrence(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
     const rule = optStr(args, 'recurrence_rule') ?? ''
-    const result = repos.tasks.update(taskId, {
-      recurrence_rule: rule === '' ? null : rule
-    })
+    const newRule = rule === '' ? null : rule
+    const result = repos.tasks.update(taskId, { recurrence_rule: newRule })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'recurrence_changed', task.recurrence_rule ?? '', newRule ?? '')
     return result
   },
 
   // ── Tasks — My Day ─────────────────────────────────────────────
   add_task_to_my_day(args) {
     const taskId = requireStr(args, 'task_id')
+    const user = getUser()
     const result = repos.tasks.update(taskId, { is_in_my_day: 1 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'pinned_to_my_day')
     return result
   },
 
   remove_task_from_my_day(args) {
     const taskId = requireStr(args, 'task_id')
+    const user = getUser()
     const result = repos.tasks.update(taskId, { is_in_my_day: 0 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'unpinned_from_my_day')
     return result
   },
 
   // ── Tasks — Other actions ──────────────────────────────────────
   snooze_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const task = repos.tasks.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    const user = getUser()
     const snoozeUntil = requireStr(args, 'snooze_until')
     const result = repos.tasks.update(taskId, {
       due_date: snoozeUntil,
       is_in_my_day: 0
     })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', snoozeUntil)
     return result
   },
 
   archive_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const user = getUser()
     const result = repos.tasks.update(taskId, { is_archived: 1 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'archived')
     return result
   },
 
   unarchive_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const user = getUser()
     const result = repos.tasks.update(taskId, { is_archived: 0 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(taskId, user.id, 'unarchived')
     return result
   },
 
   duplicate_task(args) {
     const taskId = requireStr(args, 'task_id')
+    const user = getUser()
     const result = repos.tasks.duplicate(taskId, randomUUID())
     if (!result) throw new Error(`Task not found: ${taskId}`)
+    logActivity(result.id, user.id, 'created')
     return result
   },
 
@@ -919,7 +1015,7 @@ const handlers: Record<string, Handler> = {
     const defaultStatus = repos.statuses.findDefault(parent.project_id)
     if (!defaultStatus) throw new Error('No default status found for project')
 
-    return repos.tasks.create({
+    const subtask = repos.tasks.create({
       id: randomUUID(),
       project_id: parent.project_id,
       owner_id: user.id,
@@ -927,6 +1023,8 @@ const handlers: Record<string, Handler> = {
       status_id: defaultStatus.id,
       parent_id: parentId
     })
+    logActivity(subtask.id, user.id, 'created')
+    return subtask
   },
 
   list_subtasks(args) {
@@ -1032,14 +1130,22 @@ const handlers: Record<string, Handler> = {
   assign_label_to_task(args) {
     const taskId = requireStr(args, 'task_id')
     const labelId = requireStr(args, 'label_id')
+    const user = getUser()
     repos.tasks.addLabel(taskId, labelId)
+    const label = repos.labels.findById(labelId)
+    logActivity(taskId, user.id, 'label_added', null, label?.name ?? labelId)
     return { assigned: true, task_id: taskId, label_id: labelId }
   },
 
   remove_label_from_task(args) {
     const taskId = requireStr(args, 'task_id')
     const labelId = requireStr(args, 'label_id')
+    const user = getUser()
+    const label = repos.labels.findById(labelId)
     const removed = repos.tasks.removeLabel(taskId, labelId)
+    if (removed) {
+      logActivity(taskId, user.id, 'label_removed', label?.name ?? labelId, null)
+    }
     return { removed, task_id: taskId, label_id: labelId }
   },
 
@@ -1128,6 +1234,7 @@ const handlers: Record<string, Handler> = {
     // Copy subtasks recursively
     copyTemplateSubtasks(templateId, newId, projectId, user.id, defaultStatus.id, targetLabels)
 
+    logActivity(newId, user.id, 'created')
     return newTask
   },
 
