@@ -124,6 +124,8 @@ export function CommandPalette(): React.JSX.Element | null {
     (taskId: string) => {
       const task = allTasks[taskId]
       if (task) {
+        // Clear label/assignee filters so the target task is visible after navigation
+        useLabelStore.getState().clearLabelFilters()
         if (task.is_archived === 1) {
           setSelectedProject(task.project_id)
           setView('archive')
