@@ -27,25 +27,34 @@ function logTaskActivity(taskId: string, action: string, oldValue: string | null
   }).catch(() => {})
 }
 
-// Sync task changes to Supabase for shared projects
+// Sync task changes to Supabase for ALL projects (shared and personal)
 async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
   try {
     const project = await window.api.projects.findById(task.project_id)
-    console.log('[TaskStore] syncIfShared:', { taskId: task.id, operation, is_shared: project?.is_shared })
-    if (!project || project.is_shared !== 1) return
-    const { syncTaskChange } = await import('../../services/SyncService')
-    let labelData: Array<{ name: string; color: string }> | undefined
-    if (operation !== 'DELETE') {
-      const taskLabels = await window.api.tasks.getLabels(task.id)
-      labelData = []
-      for (const tl of taskLabels) {
-        const label = await window.api.labels.findById(tl.label_id)
-        if (label) labelData.push({ name: label.name, color: label.color })
+    if (!project) return
+
+    if (project.is_shared === 1) {
+      // Shared project — use existing SyncService (handles Realtime, offline queue)
+      const { syncTaskChange } = await import('../../services/SyncService')
+      let labelData: Array<{ name: string; color: string }> | undefined
+      if (operation !== 'DELETE') {
+        const taskLabels = await window.api.tasks.getLabels(task.id)
+        labelData = []
+        for (const tl of taskLabels) {
+          const label = await window.api.labels.findById(tl.label_id)
+          if (label) labelData.push({ name: label.name, color: label.color })
+        }
+      }
+      await syncTaskChange(task, operation, labelData)
+    } else {
+      // Personal project — push to Supabase via PersonalSyncService
+      const { pushTask, deleteTaskFromSupabase } = await import('../../services/PersonalSyncService')
+      if (operation === 'DELETE') {
+        await deleteTaskFromSupabase(task.id)
+      } else {
+        await pushTask(task)
       }
     }
-    console.log('[TaskStore] Syncing to Supabase...')
-    await syncTaskChange(task, operation, labelData)
-    console.log('[TaskStore] Sync complete')
   } catch (err) {
     console.error('[TaskStore] Failed to sync task to Supabase:', err)
   }
@@ -446,6 +455,12 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           labelUpdates[st.id] = await window.api.labels.findByTaskId(st.id)
         }
         set((state) => ({ taskLabels: { ...state.taskLabels, ...labelUpdates } }))
+
+        // Sync duplicated task + subtasks to Supabase
+        syncIfShared(task, 'INSERT')
+        for (const st of subtasks) {
+          syncIfShared(st, 'INSERT')
+        }
       }
       return task
     } catch (err) {
@@ -490,6 +505,12 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         }
         return { tasks: updated }
       })
+      // Sync reordered tasks to Supabase
+      const currentTasks = get().tasks
+      for (const id of taskIds) {
+        const task = currentTasks[id]
+        if (task) syncIfShared(task, 'UPDATE')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reorder tasks'
       set({ error: message })
@@ -508,6 +529,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           expandedTaskIds: newExpanded
         }
       })
+      syncIfShared(task, 'INSERT')
       logTaskActivity(task.id, 'created', null, null)
       return task
     } catch (err) {
@@ -524,6 +546,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const labels = get().taskLabels[taskId] ?? []
       const added = labels.find((l) => l.id === labelId)
       logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
+      // Sync task to Supabase (label_names changed)
+      const task = get().tasks[taskId]
+      if (task) syncIfShared(task, 'UPDATE')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
       set({ error: message })
@@ -537,7 +562,12 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const removed = labels.find((l) => l.id === labelId)
       const result = await window.api.tasks.removeLabel(taskId, labelId)
       await get().hydrateTaskLabels(taskId)
-      if (result) logTaskActivity(taskId, 'label_removed', removed?.name ?? labelId, null)
+      if (result) {
+        logTaskActivity(taskId, 'label_removed', removed?.name ?? labelId, null)
+        // Sync task to Supabase (label_names changed)
+        const task = get().tasks[taskId]
+        if (task) syncIfShared(task, 'UPDATE')
+      }
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label'
@@ -639,6 +669,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         }
         return { tasks: updated }
       })
+      // Sync all updated tasks to Supabase
+      for (const task of results) {
+        if (task) syncIfShared(task, 'UPDATE')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to bulk update tasks'
       set({ error: message })
@@ -648,7 +682,13 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async bulkDeleteTasks(ids: string[]): Promise<void> {
     try {
+      // Capture tasks before deletion for sync
+      const tasksToDelete = ids.map((id) => get().tasks[id]).filter(Boolean) as Task[]
       await Promise.all(ids.map((id) => window.api.tasks.delete(id)))
+      // Sync deletions to Supabase
+      for (const task of tasksToDelete) {
+        syncIfShared(task, 'DELETE')
+      }
       set((state) => {
         const idsToRemove = new Set<string>(ids)
         // Collect descendants
@@ -702,6 +742,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...labelResults }
       }))
+      // Sync affected tasks to Supabase (label_names changed)
+      for (const id of ids) {
+        const task = get().tasks[id]
+        if (task) syncIfShared(task, 'UPDATE')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label to tasks'
       set({ error: message })
@@ -719,6 +764,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...labelResults }
       }))
+      // Sync affected tasks to Supabase (label_names changed)
+      for (const id of ids) {
+        const task = get().tasks[id]
+        if (task) syncIfShared(task, 'UPDATE')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label from tasks'
       set({ error: message })

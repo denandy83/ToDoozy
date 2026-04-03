@@ -4,11 +4,16 @@ import type { SavedView, CreateSavedViewInput } from '../../../../shared/types'
 
 interface SavedViewState {
   views: SavedView[]
+  viewCounts: Record<string, number>
   loading: boolean
+  /** The filter_config of the currently active saved view (set on mount), used to detect dirty state */
+  activeViewFilterConfig: string | null
 }
 
 interface SavedViewActions {
   hydrate(userId: string): Promise<void>
+  hydrateCounts(userId: string): Promise<void>
+  setActiveViewFilterConfig(config: string | null): void
   createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView>
   updateView(id: string, updates: { name?: string; color?: string; filter_config?: string }): Promise<void>
   deleteView(id: string): Promise<void>
@@ -19,16 +24,33 @@ export type SavedViewStore = SavedViewState & SavedViewActions
 
 export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => ({
   views: [],
+  viewCounts: {},
   loading: false,
+  activeViewFilterConfig: null,
 
   async hydrate(userId: string): Promise<void> {
     set({ loading: true })
     try {
       const views = await window.api.savedViews.findByUserId(userId)
       set({ views, loading: false })
+      // Hydrate counts in background
+      useSavedViewStore.getState().hydrateCounts(userId)
     } catch {
       set({ loading: false })
     }
+  },
+
+  async hydrateCounts(userId: string): Promise<void> {
+    const views = useSavedViewStore.getState().views
+    const counts: Record<string, number> = {}
+    for (const view of views) {
+      try {
+        counts[view.id] = await window.api.savedViews.countMatching(view.filter_config, userId)
+      } catch {
+        counts[view.id] = 0
+      }
+    }
+    set({ viewCounts: counts })
   },
 
   async createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView> {
@@ -42,6 +64,10 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
     }
     const view = await window.api.savedViews.create(input)
     set((state) => ({ views: [...state.views, view] }))
+    // Push to Supabase
+    import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
+      pushSavedView(view).catch(() => {})
+    })
     return view
   },
 
@@ -51,12 +77,20 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
       set((state) => ({
         views: state.views.map((v) => (v.id === id ? result : v))
       }))
+      // Push to Supabase
+      import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
+        pushSavedView(result).catch(() => {})
+      })
     }
   },
 
   async deleteView(id: string): Promise<void> {
     await window.api.savedViews.delete(id)
     set((state) => ({ views: state.views.filter((v) => v.id !== id) }))
+    // Delete from Supabase
+    import('../../services/PersonalSyncService').then(({ deleteSavedViewFromSupabase }) => {
+      deleteSavedViewFromSupabase(id).catch(() => {})
+    })
   },
 
   async reorderViews(viewIds: string[]): Promise<void> {
@@ -68,9 +102,20 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
           return view ? { ...view, sidebar_order: i } : null
         })
         .filter((v): v is SavedView => v !== null)
+      // Push reordered views to Supabase
+      import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
+        for (const view of updated) {
+          pushSavedView(view).catch(() => {})
+        }
+      })
       return { views: updated }
     })
+  },
+
+  setActiveViewFilterConfig(config: string | null): void {
+    set({ activeViewFilterConfig: config })
   }
 }), shallow)
 
 export const selectSavedViews = (state: SavedViewState): SavedView[] => state.views
+export const selectViewCounts = (state: SavedViewState): Record<string, number> => state.viewCounts

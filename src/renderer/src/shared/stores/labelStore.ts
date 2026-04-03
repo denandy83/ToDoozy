@@ -150,6 +150,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         }
         return { labels: labelMap, projectLabels: updatedProjectLabels }
       })
+      // Push to Supabase
+      import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+        pushLabel(label, getUserId()).catch(() => {})
+      })
       return label
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create label'
@@ -165,6 +169,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         set((state) => ({
           labels: { ...state.labels, [label.id]: label }
         }))
+        // Push to Supabase
+        import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+          pushLabel(label, getUserId()).catch(() => {})
+        })
       }
       return label
     } catch (err) {
@@ -199,6 +207,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
             updated[taskId] = labels.filter((l) => l.id !== id)
           }
           return { taskLabels: updated }
+        })
+        // Delete from Supabase
+        import('../../services/PersonalSyncService').then(({ deleteLabelFromSupabase }) => {
+          deleteLabelFromSupabase(id).catch(() => {})
         })
       }
       return result
@@ -265,6 +277,16 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
           if (label) {
             updated[labelIds[i]] = { ...label, order_index: i }
           }
+        }
+        // Push reordered labels to Supabase
+        const userId = getUserId()
+        if (userId) {
+          import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+            for (const id of labelIds) {
+              const label = updated[id]
+              if (label) pushLabel(label, userId).catch(() => {})
+            }
+          })
         }
         return { labels: updated }
       })
