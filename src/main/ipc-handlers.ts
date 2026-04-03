@@ -792,6 +792,23 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Release Notes ──────────────────────────────────────────────────
+  // ── Stats ────────────────────────────────────────────────────────
+  ipcMain.handle('stats:completions', (_e, userId: string, projectId: string | null, startDate: string, endDate: string) => {
+    return getRepos().tasks.getCompletionStats(userId, projectId, startDate, endDate)
+  })
+
+  ipcMain.handle('stats:streaks', (_e, userId: string) => {
+    return getRepos().tasks.getStreakStats(userId)
+  })
+
+  ipcMain.handle('stats:focus', (_e, userId: string, projectId: string | null, startDate: string, endDate: string) => {
+    return getRepos().activityLog.getFocusStats(userId, projectId, startDate, endDate)
+  })
+
+  ipcMain.handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {
+    return getRepos().activityLog.getActivityHeatmap(userId, startDate, endDate)
+  })
+
   // ── Saved Views ──────────────────────────────────────────────────
   ipcMain.handle('savedViews:findById', (_e, id: string) => {
     return getRepos().savedViews.findById(id) ?? null

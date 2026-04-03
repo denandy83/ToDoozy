@@ -57,4 +57,55 @@ export class ActivityLogRepository {
       )
       .all(userId, limit) as unknown as ActivityLogEntry[]
   }
+
+  getFocusStats(
+    userId: string,
+    projectId: string | null,
+    startDate: string,
+    endDate: string
+  ): Array<{ date: string; minutes: number }> {
+    let sql = `
+      SELECT date(al.created_at) as date, al.action
+      FROM activity_log al
+      INNER JOIN tasks t ON t.id = al.task_id
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      WHERE al.action LIKE 'Completed % min focus session'
+        AND al.created_at >= ? AND al.created_at <= ?
+    `
+    const params: (string | number)[] = [userId, startDate, endDate]
+    if (projectId) {
+      sql += ' AND t.project_id = ?'
+      params.push(projectId)
+    }
+    sql += ' ORDER BY al.created_at ASC'
+
+    const rows = this.db.prepare(sql).all(...params) as unknown as Array<{ date: string; action: string }>
+    // Aggregate minutes by date
+    const byDate: Record<string, number> = {}
+    for (const row of rows) {
+      const match = row.action.match(/^Completed (\d+) min focus session$/)
+      if (match) {
+        byDate[row.date] = (byDate[row.date] ?? 0) + Number(match[1])
+      }
+    }
+    return Object.entries(byDate).map(([date, minutes]) => ({ date, minutes }))
+  }
+
+  getActivityHeatmap(
+    userId: string,
+    startDate: string,
+    endDate: string
+  ): Array<{ date: string; count: number }> {
+    return this.db
+      .prepare(
+        `SELECT date(al.created_at) as date, COUNT(*) as count
+         FROM activity_log al
+         INNER JOIN tasks t ON t.id = al.task_id
+         INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+         WHERE al.created_at >= ? AND al.created_at <= ?
+         GROUP BY date(al.created_at)
+         ORDER BY date ASC`
+      )
+      .all(userId, startDate, endDate) as unknown as Array<{ date: string; count: number }>
+  }
 }

@@ -20,6 +20,7 @@ import { MyDayView } from './features/views/MyDayView'
 import { findProjectStatusForBucket, type BucketKey } from './features/views/myDayBuckets'
 import { CalendarView } from './features/views/CalendarView'
 import { SavedViewListView } from './features/views/SavedViewListView'
+import { StatsView } from './features/views/StatsView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
@@ -697,8 +698,15 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+3 = Project view (topmost project)
+      // Cmd+3 = Stats
       if (e.key === '3') {
+        e.preventDefault()
+        setView('stats')
+        return
+      }
+
+      // Cmd+4 = Project view (topmost project)
+      if (e.key === '4') {
         e.preventDefault()
         if (sortedProjects.length > 0) {
           clearLabelFilters()
@@ -708,15 +716,15 @@ export function AppLayout(): React.JSX.Element {
         return
       }
 
-      // Cmd+4 = Archive
-      if (e.key === '4') {
+      // Cmd+5 = Archive
+      if (e.key === '5') {
         e.preventDefault()
         setView('archive')
         return
       }
 
-      // Cmd+5 = Templates
-      if (e.key === '5') {
+      // Cmd+6 = Templates
+      if (e.key === '6') {
         e.preventDefault()
         setView('templates')
         return
@@ -761,6 +769,7 @@ export function AppLayout(): React.JSX.Element {
   const viewTitle = useMemo(() => {
     if (currentView === 'my-day') return 'My Day'
     if (currentView === 'calendar') return 'Calendar'
+    if (currentView === 'stats') return 'Stats'
     if (currentView === 'project' && selectedProject) return selectedProject.name
     if (currentView === 'archive') return 'Archive'
     if (currentView === 'templates') return 'Templates'
@@ -1235,6 +1244,7 @@ export function AppLayout(): React.JSX.Element {
                   <p className="text-sm font-light text-muted">No project selected.</p>
                 </div>
               )}
+              {currentView === 'stats' && <StatsView />}
               {currentView === 'saved-view' && <SavedViewListView />}
               {currentView === 'calendar' && <CalendarView />}
               {currentView === 'archive' && <ArchiveView />}

@@ -279,6 +279,13 @@ export interface UpdaterAPI {
   onStatus(callback: (status: UpdateStatus) => void): () => void
 }
 
+export interface StatsAPI {
+  completions(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+  streaks(userId: string): Promise<{ current: number; best: number }>
+  focus(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
+  heatmap(userId: string, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+}
+
 export interface SavedViewsAPI {
   findById(id: string): Promise<SavedView | null>
   findByUserId(userId: string): Promise<SavedView[]>
@@ -311,6 +318,7 @@ export interface TodoozyAPI {
   sync: SyncAPI
   shell: ShellAPI
   app: AppAPI
+  stats: StatsAPI
   savedViews: SavedViewsAPI
   releaseNotes: ReleaseNotesAPI
   updater: UpdaterAPI

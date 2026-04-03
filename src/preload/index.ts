@@ -241,6 +241,16 @@ const api: TodoozyAPI = {
     getChangelog: () => ipcRenderer.invoke('app:getChangelog')
   },
 
+  stats: {
+    completions: (userId, projectId, startDate, endDate) =>
+      ipcRenderer.invoke('stats:completions', userId, projectId, startDate, endDate),
+    streaks: (userId) => ipcRenderer.invoke('stats:streaks', userId),
+    focus: (userId, projectId, startDate, endDate) =>
+      ipcRenderer.invoke('stats:focus', userId, projectId, startDate, endDate),
+    heatmap: (userId, startDate, endDate) =>
+      ipcRenderer.invoke('stats:heatmap', userId, startDate, endDate)
+  },
+
   savedViews: {
     findById: (id) => ipcRenderer.invoke('savedViews:findById', id),
     findByUserId: (userId) => ipcRenderer.invoke('savedViews:findByUserId', userId),

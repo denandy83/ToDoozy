@@ -16,7 +16,8 @@ import {
   ChevronUp,
   HelpCircle,
   Users,
-  Filter
+  Filter,
+  BarChart3
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
@@ -55,7 +56,8 @@ const TOP_VIEW_ITEMS: Array<{
   droppableId: string
 }> = [
   { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' },
-  { id: 'calendar', label: 'Calendar', icon: Calendar, shortcut: '⌘2', droppableId: 'nav-calendar' }
+  { id: 'calendar', label: 'Calendar', icon: Calendar, shortcut: '⌘2', droppableId: 'nav-calendar' },
+  { id: 'stats', label: 'Stats', icon: BarChart3, shortcut: '⌘3', droppableId: 'nav-stats' }
 ]
 
 const BOTTOM_VIEW_ITEMS: Array<{
@@ -65,8 +67,8 @@ const BOTTOM_VIEW_ITEMS: Array<{
   shortcut: string
   droppableId: string
 }> = [
-  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘4', droppableId: 'nav-archive' },
-  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘5', droppableId: 'nav-templates' }
+  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘5', droppableId: 'nav-archive' },
+  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘6', droppableId: 'nav-templates' }
 ]
 
 const MAX_VISIBLE_PROJECTS = 5

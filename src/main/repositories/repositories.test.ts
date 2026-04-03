@@ -569,6 +569,34 @@ describe('TaskRepository', () => {
     })
   })
 
+  describe('stats', () => {
+    it('getCompletionStats returns daily counts', () => {
+      const doneStatusId = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO statuses (id, project_id, name, is_done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(doneStatusId, projectId, 'Done', 1, now, now)
+
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Done1', status_id: doneStatusId, completed_date: '2026-03-01T10:00:00Z' })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Done2', status_id: doneStatusId, completed_date: '2026-03-01T14:00:00Z' })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Done3', status_id: doneStatusId, completed_date: '2026-03-02T10:00:00Z' })
+
+      const stats = repo.getCompletionStats(userId, null, '2026-03-01', '2026-03-03T23:59:59')
+      expect(stats).toHaveLength(2)
+      expect(stats[0]).toEqual({ date: '2026-03-01', count: 2 })
+      expect(stats[1]).toEqual({ date: '2026-03-02', count: 1 })
+    })
+
+    it('getStreakStats computes current and best streak', () => {
+      const today = new Date().toISOString().slice(0, 10)
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'T', status_id: statusId, completed_date: `${today}T10:00:00Z` })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Y', status_id: statusId, completed_date: `${yesterday}T10:00:00Z` })
+
+      const stats = repo.getStreakStats(userId)
+      expect(stats.current).toBe(2)
+      expect(stats.best).toBeGreaterThanOrEqual(2)
+    })
+  })
+
   describe('reference_url', () => {
     it('creates a task with reference_url', () => {
       const id = randomUUID()

@@ -527,4 +527,75 @@ export class TaskRepository {
       this.copySubtasksForRecurrence(subtask.id, subtaskId, projectId, defaultStatusId)
     }
   }
+
+  // ── Stats Methods ───────────────────────────────────────────────
+
+  getCompletionStats(
+    userId: string,
+    projectId: string | null,
+    startDate: string,
+    endDate: string
+  ): Array<{ date: string; count: number }> {
+    let sql = `
+      SELECT date(t.completed_date) as date, COUNT(*) as count
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      WHERE t.completed_date IS NOT NULL
+        AND t.completed_date >= ? AND t.completed_date <= ?
+        AND t.is_template = 0
+    `
+    const params: (string | number)[] = [userId, startDate, endDate]
+    if (projectId) {
+      sql += ' AND t.project_id = ?'
+      params.push(projectId)
+    }
+    sql += ' GROUP BY date(t.completed_date) ORDER BY date ASC'
+    return this.db.prepare(sql).all(...params) as unknown as Array<{ date: string; count: number }>
+  }
+
+  getStreakStats(userId: string): { current: number; best: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT date(completed_date) as date
+         FROM tasks t
+         INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+         WHERE t.completed_date IS NOT NULL AND t.is_template = 0
+         ORDER BY date DESC`
+      )
+      .all(userId) as unknown as Array<{ date: string }>
+
+    if (rows.length === 0) return { current: 0, best: 0 }
+
+    const today = new Date().toISOString().slice(0, 10)
+    let current = 0
+    let best = 0
+    let streak = 0
+    let prev: string | null = null
+
+    for (const row of rows) {
+      if (!prev) {
+        // First row — only start streak if it's today or yesterday
+        const diff = Math.floor((new Date(today).getTime() - new Date(row.date).getTime()) / 86400000)
+        if (diff <= 1) {
+          streak = 1
+          current = 1
+        } else {
+          streak = 1
+        }
+      } else {
+        const diff = Math.floor((new Date(prev).getTime() - new Date(row.date).getTime()) / 86400000)
+        if (diff === 1) {
+          streak++
+          if (current > 0) current = streak
+        } else {
+          best = Math.max(best, streak)
+          streak = 1
+          current = current > 0 ? current : 0
+        }
+      }
+      prev = row.date
+    }
+    best = Math.max(best, streak)
+    return { current, best }
+  }
 }
