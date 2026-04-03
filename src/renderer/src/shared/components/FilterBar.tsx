@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
-import { X, Plus, Search } from 'lucide-react'
+import { X, Plus, Search, Save } from 'lucide-react'
 import {
   useLabelStore,
   selectActiveLabelFilters,
@@ -13,6 +13,8 @@ import {
 import type { Label } from '../../../../shared/types'
 import type { LabelFilterMode } from '../stores'
 import { useStatusesByProject } from '../stores/statusStore'
+import { useAuthStore } from '../stores/authStore'
+import { useSavedViewStore } from '../stores/savedViewStore'
 
 const PRIORITY_OPTIONS = [
   { value: 0, label: 'None', color: '#888' },
@@ -48,8 +50,13 @@ export function FilterBar({ labels, projectId }: FilterBarProps): React.JSX.Elem
     toggleLabelFilter, clearLabelFilters, setFilterMode,
     togglePriorityFilter, toggleStatusFilter, setDueDatePreset, setKeyword
   } = useLabelStore()
+  const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
+  const { createView } = useSavedViewStore()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [activeFilterType, setActiveFilterType] = useState<FilterType | null>(null)
+  const [savingView, setSavingView] = useState(false)
+  const [saveViewName, setSaveViewName] = useState('')
+  const saveViewInputRef = useRef<HTMLInputElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const keywordInputRef = useRef<HTMLInputElement>(null)
 
@@ -89,6 +96,28 @@ export function FilterBar({ labels, projectId }: FilterBarProps): React.JSX.Elem
     setKeyword(value)
     setActiveFilterType(null)
   }, [setKeyword])
+
+  const handleSaveAsView = useCallback(async () => {
+    const name = saveViewName.trim()
+    if (!name || !userId) return
+    const state = useLabelStore.getState()
+    const config: Record<string, unknown> = {}
+    if (state.activeLabelFilters.size > 0) config.labelIds = [...state.activeLabelFilters]
+    if (state.assigneeFilters.size > 0) config.assigneeIds = [...state.assigneeFilters]
+    if (state.priorityFilters.size > 0) config.priorities = [...state.priorityFilters]
+    if (state.statusFilters.size > 0) config.statusIds = [...state.statusFilters]
+    if (state.dueDatePreset) config.dueDatePreset = state.dueDatePreset
+    if (state.keyword) config.keyword = state.keyword
+    config.filterMode = state.filterMode
+    await createView(userId, name, JSON.stringify(config))
+    setSavingView(false)
+    setSaveViewName('')
+  }, [saveViewName, userId, createView])
+
+  // Focus save view input
+  useEffect(() => {
+    if (savingView) requestAnimationFrame(() => saveViewInputRef.current?.focus())
+  }, [savingView])
 
   // Compute which additional filter types are available (not yet active)
   const availableFilterTypes = useMemo<FilterType[]>(() => {
@@ -207,9 +236,40 @@ export function FilterBar({ labels, projectId }: FilterBarProps): React.JSX.Elem
         )}
       </div>
 
-      {/* Filter mode + clear */}
+      {/* Save as View + Filter mode + clear */}
       {hasAnyFilter && (
         <div className="ml-auto flex items-center gap-1.5">
+          {savingView ? (
+            <div className="flex items-center gap-1">
+              <input
+                ref={saveViewInputRef}
+                type="text"
+                value={saveViewName}
+                onChange={(e) => setSaveViewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && saveViewName.trim()) handleSaveAsView()
+                  if (e.key === 'Escape') { setSavingView(false); setSaveViewName(''); e.stopPropagation() }
+                }}
+                placeholder="View name..."
+                className="w-24 rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] font-light text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
+              />
+              <button
+                onClick={handleSaveAsView}
+                className="rounded bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/20"
+              >
+                Save
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSavingView(true)}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+              title="Save current filters as a view"
+            >
+              <Save size={10} />
+              Save View
+            </button>
+          )}
           <button
             onClick={handleToggleMode}
             className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"

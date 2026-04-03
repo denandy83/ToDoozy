@@ -241,6 +241,16 @@ const api: TodoozyAPI = {
     getChangelog: () => ipcRenderer.invoke('app:getChangelog')
   },
 
+  savedViews: {
+    findById: (id) => ipcRenderer.invoke('savedViews:findById', id),
+    findByUserId: (userId) => ipcRenderer.invoke('savedViews:findByUserId', userId),
+    create: (input) => ipcRenderer.invoke('savedViews:create', input),
+    update: (id, input) => ipcRenderer.invoke('savedViews:update', id, input),
+    delete: (id) => ipcRenderer.invoke('savedViews:delete', id),
+    reorder: (viewIds) => ipcRenderer.invoke('savedViews:reorder', viewIds),
+    countMatching: (filterConfig, userId) => ipcRenderer.invoke('savedViews:countMatching', filterConfig, userId)
+  },
+
   releaseNotes: {
     sync: () => ipcRenderer.invoke('releaseNotes:sync'),
     fetchVersion: (version) => ipcRenderer.invoke('releaseNotes:fetchVersion', version)

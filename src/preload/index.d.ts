@@ -33,7 +33,10 @@ import type {
   Notification,
   CreateNotificationInput,
   SyncQueueEntry,
-  SyncOperation
+  SyncOperation,
+  SavedView,
+  CreateSavedViewInput,
+  UpdateSavedViewInput
 } from '../shared/types'
 
 export interface TasksAPI {
@@ -276,6 +279,16 @@ export interface UpdaterAPI {
   onStatus(callback: (status: UpdateStatus) => void): () => void
 }
 
+export interface SavedViewsAPI {
+  findById(id: string): Promise<SavedView | null>
+  findByUserId(userId: string): Promise<SavedView[]>
+  create(input: CreateSavedViewInput): Promise<SavedView>
+  update(id: string, input: UpdateSavedViewInput): Promise<SavedView | null>
+  delete(id: string): Promise<boolean>
+  reorder(viewIds: string[]): Promise<void>
+  countMatching(filterConfig: string, userId: string): Promise<number>
+}
+
 export interface TodoozyAPI {
   tasks: TasksAPI
   labels: LabelsAPI
@@ -298,6 +311,7 @@ export interface TodoozyAPI {
   sync: SyncAPI
   shell: ShellAPI
   app: AppAPI
+  savedViews: SavedViewsAPI
   releaseNotes: ReleaseNotesAPI
   updater: UpdaterAPI
   onTasksChanged(callback: () => void): () => void

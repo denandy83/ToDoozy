@@ -792,6 +792,35 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Release Notes ──────────────────────────────────────────────────
+  // ── Saved Views ──────────────────────────────────────────────────
+  ipcMain.handle('savedViews:findById', (_e, id: string) => {
+    return getRepos().savedViews.findById(id) ?? null
+  })
+
+  ipcMain.handle('savedViews:findByUserId', (_e, userId: string) => {
+    return getRepos().savedViews.findByUserId(userId)
+  })
+
+  ipcMain.handle('savedViews:create', (_e, input: import('../shared/types').CreateSavedViewInput) => {
+    return getRepos().savedViews.create(input)
+  })
+
+  ipcMain.handle('savedViews:update', (_e, id: string, input: import('../shared/types').UpdateSavedViewInput) => {
+    return getRepos().savedViews.update(id, input)
+  })
+
+  ipcMain.handle('savedViews:delete', (_e, id: string) => {
+    return getRepos().savedViews.delete(id)
+  })
+
+  ipcMain.handle('savedViews:reorder', (_e, viewIds: string[]) => {
+    return getRepos().savedViews.reorder(viewIds)
+  })
+
+  ipcMain.handle('savedViews:countMatching', (_e, filterConfig: string, userId: string) => {
+    return getRepos().savedViews.countMatchingTasks(filterConfig, userId)
+  })
+
   ipcMain.handle('releaseNotes:sync', async () => {
     const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
     return syncReleaseNotes()

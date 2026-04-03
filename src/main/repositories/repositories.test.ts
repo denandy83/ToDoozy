@@ -13,6 +13,7 @@ import { ActivityLogRepository } from './ActivityLogRepository'
 import { AttachmentRepository } from './AttachmentRepository'
 import { NotificationRepository } from './NotificationRepository'
 import { SyncQueueRepository } from './SyncQueueRepository'
+import { SavedViewRepository } from './SavedViewRepository'
 import { createRepositories } from './index'
 
 function createTestDb(): DatabaseSync {
@@ -1098,5 +1099,67 @@ describe('AttachmentRepository', () => {
 
   it('returns empty array for task with no attachments', () => {
     expect(repo.findByTaskId(randomUUID())).toHaveLength(0)
+  })
+})
+
+describe('SavedViewRepository', () => {
+  let db: DatabaseSync
+  let repo: SavedViewRepository
+  let userId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    repo = new SavedViewRepository(db)
+    const base = seedBase(db)
+    userId = base.userId
+  })
+
+  it('creates and finds a saved view', () => {
+    const id = randomUUID()
+    const view = repo.create({
+      id,
+      user_id: userId,
+      name: 'High Priority',
+      filter_config: JSON.stringify({ priorities: [3, 4] })
+    })
+    expect(view.name).toBe('High Priority')
+    expect(view.color).toBe('#6366f1')
+    expect(repo.findById(id)).toBeDefined()
+  })
+
+  it('finds views by user ID ordered by sidebar_order', () => {
+    repo.create({ id: randomUUID(), user_id: userId, name: 'B', filter_config: '{}', sidebar_order: 1 })
+    repo.create({ id: randomUUID(), user_id: userId, name: 'A', filter_config: '{}', sidebar_order: 0 })
+    const views = repo.findByUserId(userId)
+    expect(views).toHaveLength(2)
+    expect(views[0].name).toBe('A')
+    expect(views[1].name).toBe('B')
+  })
+
+  it('updates a saved view', () => {
+    const id = randomUUID()
+    repo.create({ id, user_id: userId, name: 'Old', filter_config: '{}' })
+    const updated = repo.update(id, { name: 'New', color: '#ff0000' })
+    expect(updated!.name).toBe('New')
+    expect(updated!.color).toBe('#ff0000')
+  })
+
+  it('deletes a saved view', () => {
+    const id = randomUUID()
+    repo.create({ id, user_id: userId, name: 'Delete Me', filter_config: '{}' })
+    expect(repo.delete(id)).toBe(true)
+    expect(repo.findById(id)).toBeUndefined()
+  })
+
+  it('reorders saved views', () => {
+    const ids = [randomUUID(), randomUUID(), randomUUID()]
+    for (let i = 0; i < ids.length; i++) {
+      repo.create({ id: ids[i], user_id: userId, name: `View ${i}`, filter_config: '{}', sidebar_order: i })
+    }
+    repo.reorder([ids[2], ids[0], ids[1]])
+    const views = repo.findByUserId(userId)
+    expect(views[0].id).toBe(ids[2])
+    expect(views[1].id).toBe(ids[0])
+    expect(views[2].id).toBe(ids[1])
   })
 })

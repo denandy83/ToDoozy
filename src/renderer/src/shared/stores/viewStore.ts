@@ -2,13 +2,14 @@ import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import { useTaskStore } from './taskStore'
 
-export type ViewId = 'my-day' | 'calendar' | 'project' | 'archive' | 'templates'
+export type ViewId = 'my-day' | 'calendar' | 'saved-view' | 'project' | 'archive' | 'templates'
 export type DetailPanelPosition = 'side' | 'bottom'
 export type LayoutMode = 'list' | 'kanban'
 
 interface ViewState {
   currentView: ViewId
   selectedProjectId: string | null
+  selectedSavedViewId: string | null
   layoutMode: LayoutMode
   sidebarPinned: boolean
   sidebarExpanded: boolean
@@ -20,6 +21,7 @@ interface ViewState {
 interface ViewActions {
   setView(view: ViewId): void
   setSelectedProject(projectId: string): void
+  setSelectedSavedView(viewId: string): void
   toggleLayoutMode(): void
   nextView(): void
   prevView(): void
@@ -34,11 +36,12 @@ interface ViewActions {
 
 export type ViewStore = ViewState & ViewActions
 
-const VIEW_ORDER: ViewId[] = ['my-day', 'calendar', 'project', 'archive', 'templates']
+const VIEW_ORDER: ViewId[] = ['my-day', 'calendar', 'saved-view', 'project', 'archive', 'templates']
 
 export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
   currentView: 'my-day',
   selectedProjectId: null,
+  selectedSavedViewId: null,
   layoutMode: 'list' as LayoutMode,
   sidebarPinned: true,
   sidebarExpanded: true,
@@ -53,6 +56,11 @@ export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
 
   setSelectedProject(projectId: string): void {
     set({ currentView: 'project', selectedProjectId: projectId })
+    useTaskStore.getState().clearSelection()
+  },
+
+  setSelectedSavedView(viewId: string): void {
+    set({ currentView: 'saved-view', selectedSavedViewId: viewId })
     useTaskStore.getState().clearSelection()
   },
 
@@ -114,6 +122,7 @@ export const useViewStore = createWithEqualityFn<ViewStore>((set, get) => ({
 // Selectors
 export const selectCurrentView = (state: ViewState): ViewId => state.currentView
 export const selectSelectedProjectId = (state: ViewState): string | null => state.selectedProjectId
+export const selectSelectedSavedViewId = (state: ViewState): string | null => state.selectedSavedViewId
 export const selectSidebarPinned = (state: ViewState): boolean => state.sidebarPinned
 export const selectSidebarExpanded = (state: ViewState): boolean => state.sidebarExpanded
 export const selectSidebarWidth = (state: ViewState): number => state.sidebarWidth

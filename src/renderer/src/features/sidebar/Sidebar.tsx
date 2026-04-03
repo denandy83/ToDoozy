@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   HelpCircle,
-  Users
+  Users,
+  Filter
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
@@ -25,6 +26,7 @@ import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useAuthStore } from '../../shared/stores/authStore'
+import { useSavedViewStore, selectSavedViews } from '../../shared/stores/savedViewStore'
 import type { ThemeConfig } from '../../../../shared/types'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
@@ -100,6 +102,17 @@ export function Sidebar({
   const createStatus = useStatusStore((s) => s.createStatus)
   const currentUser = useAuthStore((s) => s.currentUser)
 
+  // Saved views
+  const savedViews = useSavedViewStore(selectSavedViews)
+  const { hydrate: hydrateSavedViews } = useSavedViewStore()
+  const selectedSavedViewId = useViewStore((s) => s.selectedSavedViewId)
+  const setSelectedSavedView = useViewStore((s) => s.setSelectedSavedView)
+  const [savedViewsCollapsed, setSavedViewsCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (currentUser?.id) hydrateSavedViews(currentUser.id)
+  }, [currentUser?.id, hydrateSavedViews])
+
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim()
     if (!name || !currentUser) return
@@ -162,6 +175,14 @@ export function Sidebar({
       setView(view)
     },
     [setView, clearLabelFilters]
+  )
+
+  const handleSavedViewClick = useCallback(
+    (viewId: string) => {
+      clearLabelFilters()
+      setSelectedSavedView(viewId)
+    },
+    [setSelectedSavedView, clearLabelFilters]
   )
 
   const handleProjectClick = useCallback(
@@ -230,6 +251,41 @@ export function Sidebar({
             />
           ))}
         </div>
+
+        {/* Saved Views */}
+        {savedViews.length > 0 && (
+          <div className="mt-1 flex flex-col gap-0.5">
+            {!collapsed ? (
+              <button
+                onClick={() => setSavedViewsCollapsed(!savedViewsCollapsed)}
+                className="flex items-center gap-3 rounded-lg px-2.5 py-2 text-left"
+              >
+                <Filter size={16} className="text-muted" />
+                <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Saved Views</span>
+                {savedViewsCollapsed ? <ChevronDown size={12} className="text-muted" /> : <ChevronUp size={12} className="text-muted" />}
+              </button>
+            ) : (
+              <div className="flex justify-center rounded-lg px-0 py-2">
+                <Filter size={16} className="text-muted" />
+              </div>
+            )}
+            {!collapsed && !savedViewsCollapsed && (
+              <div className="flex flex-col gap-0.5 pl-4">
+                {savedViews.map((view) => (
+                  <NavItem
+                    key={view.id}
+                    label={view.name}
+                    icon={Filter}
+                    count={0}
+                    active={currentView === 'saved-view' && selectedSavedViewId === view.id}
+                    collapsed={collapsed}
+                    onClick={() => handleSavedViewClick(view.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Projects — header as nav item, projects indented */}
         <div className="mt-1 flex flex-col gap-0.5">

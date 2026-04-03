@@ -19,6 +19,7 @@ import { DetailPanel } from './features/detail'
 import { MyDayView } from './features/views/MyDayView'
 import { findProjectStatusForBucket, type BucketKey } from './features/views/myDayBuckets'
 import { CalendarView } from './features/views/CalendarView'
+import { SavedViewListView } from './features/views/SavedViewListView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
@@ -1234,6 +1235,7 @@ export function AppLayout(): React.JSX.Element {
                   <p className="text-sm font-light text-muted">No project selected.</p>
                 </div>
               )}
+              {currentView === 'saved-view' && <SavedViewListView />}
               {currentView === 'calendar' && <CalendarView />}
               {currentView === 'archive' && <ArchiveView />}
               {currentView === 'templates' && <TemplatesView />}

@@ -401,3 +401,37 @@ export interface SharedProjectMember {
   email: string
   display_name: string | null
 }
+
+// ── Saved Views ────────────────────────────────────────────────────
+
+export interface SavedView {
+  id: string
+  user_id: string
+  project_id: string | null
+  name: string
+  color: string
+  icon: string
+  sidebar_order: number
+  filter_config: string // JSON serialized filter state
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateSavedViewInput {
+  id: string
+  user_id: string
+  project_id?: string | null
+  name: string
+  color?: string
+  icon?: string
+  sidebar_order?: number
+  filter_config: string
+}
+
+export interface UpdateSavedViewInput {
+  name?: string
+  color?: string
+  icon?: string
+  sidebar_order?: number
+  filter_config?: string
+}

@@ -593,6 +593,34 @@ const tools: ToolDef[] = [
     }
   },
 
+  // Saved Views
+  {
+    name: 'create_saved_view',
+    description: 'Create a saved view with a name and filter configuration JSON',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: str('View name'),
+        filter_config: str('JSON string of filter configuration (labelIds, priorities, statusIds, dueDatePreset, keyword, filterMode)')
+      },
+      required: ['name', 'filter_config']
+    }
+  },
+  {
+    name: 'list_saved_views',
+    description: 'List all saved views for the current user',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'delete_saved_view',
+    description: 'Delete a saved view by ID',
+    inputSchema: {
+      type: 'object',
+      properties: { view_id: str('Saved view ID') },
+      required: ['view_id']
+    }
+  },
+
   // Tasks — Reorder
   {
     name: 'reorder_tasks',
@@ -1276,6 +1304,36 @@ const handlers: Record<string, Handler> = {
 
     deployTemplate(data, projectId, user.id)
     return project
+  },
+
+  // ── Saved Views ────────────────────────────────────────────────
+  create_saved_view(args) {
+    const user = getUser()
+    const name = requireStr(args, 'name')
+    const filterConfig = requireStr(args, 'filter_config')
+    // Validate JSON
+    try { JSON.parse(filterConfig) } catch { throw new Error('filter_config must be valid JSON') }
+    const existing = repos.savedViews.findByUserId(user.id)
+    return repos.savedViews.create({
+      id: randomUUID(),
+      user_id: user.id,
+      name,
+      filter_config: filterConfig,
+      sidebar_order: existing.length
+    })
+  },
+
+  list_saved_views() {
+    const user = getUser()
+    return repos.savedViews.findByUserId(user.id)
+  },
+
+  delete_saved_view(args) {
+    const viewId = requireStr(args, 'view_id')
+    const view = repos.savedViews.findById(viewId)
+    if (!view) throw new Error(`Saved view not found: ${viewId}`)
+    repos.savedViews.delete(viewId)
+    return { deleted: true, view_id: viewId }
   },
 
   // ── Tasks — Reorder ─────────────────────────────────────────────

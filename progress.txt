@@ -2,6 +2,44 @@
 Started: Thu Apr  2 23:40:28 CEST 2026
 ---
 
+## Story #43 — MCP Activity Logging
+- Added `logActivity()` helper and `PRIORITY_NAMES` map to mcp-server.ts
+- All 22 mutating tools now log activity entries: create_task, delete_task, update_task (per-field), complete_task, reopen_task, set_task_priority, set_task_due_date, set_task_description, set_task_recurrence, add_task_to_my_day, remove_task_from_my_day, snooze_task, archive_task, unarchive_task, duplicate_task, create_subtask, assign_label_to_task, remove_label_from_task, use_task_template
+- save_task_as_template: no logging (template is separate entity, per story spec)
+- No new repo methods or types needed — ActivityLogRepository.create() already existed
+- Typecheck: zero errors. Tests: 377 pass.
+
+---
+
+## Story #46 — Expanded Filter System
+- Enhanced TaskRepository.search() with array support: label_ids, status_ids, priorities, assigned_to_ids, project_ids (backward-compatible with single values)
+- Expanded labelStore state: priorityFilters, statusFilters, dueDatePreset, keyword + toggle/set/clear actions + selectors
+- Created FilterBar.tsx (replaces LabelFilterBar usage): label chips + "+" Filter dropdown + priority/status/due date/keyword pickers + removable chips + clear all
+- Updated TaskListView, MyDayView with shared taskMatchesFilters callback (AND between types, OR within labels)
+- Added filter support to CalendarView (was previously unfiltered)
+- Filter logic: priority match, status match, due date presets (today/this_week/overdue/no_date), keyword (title + description)
+- 5 new tests for array search filters (382 total)
+- Decision: expanded labelStore rather than creating separate filterStore — fewer migration changes, backward compat for clearLabelFilters
+- Typecheck: zero errors. Tests: 382 pass.
+
+---
+
+## Story #45 — Command Palette Clears Filters on Navigation
+- Added `useLabelStore.getState().clearLabelFilters()` call in handleSelect before setSelectedProject
+- clearLabelFilters() already clears both label and assignee filters
+- Matches sidebar navigation pattern (Sidebar.tsx handleViewClick/handleProjectClick)
+- No new repo methods or utility functions — no new tests needed
+- Typecheck: zero errors. Tests: 377 pass.
+
+---
+
+## Story #44 — MCP Task Reorder Tool
+- Added `reorder_tasks` tool definition with array input schema (extended SchemaProp with `items`)
+- Handler validates all task IDs exist, calls TaskRepository.reorder(), checks priority_auto_sort setting
+- No new repo methods needed — reorder() at TaskRepository.ts:148 already existed
+- No activity logging (bulk order_index change, per story spec)
+- Typecheck: zero errors. Tests: 377 pass.
+
 ---
 Story #42: Settings Menu Reorganization — 2026-04-03
 - Extracted GeneralSettingsContent.tsx (with notifications absorbed as a section, 6 section labels)

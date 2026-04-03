@@ -395,4 +395,23 @@ const migration_13: Migration = (db) => {
   db.exec(`ALTER TABLE project_members ADD COLUMN display_initials TEXT`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13]
+const migration_14: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS saved_views (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT,
+      name TEXT NOT NULL,
+      color TEXT DEFAULT '#6366f1',
+      icon TEXT DEFAULT 'filter',
+      sidebar_order INTEGER DEFAULT 0,
+      filter_config TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_saved_views_user ON saved_views(user_id)`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14]
