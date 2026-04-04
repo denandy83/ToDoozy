@@ -30,6 +30,8 @@ import {
   selectSortRules
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
+import { useProjectStore } from '../../shared/stores/projectStore'
+import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
@@ -62,6 +64,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const layoutMode = useViewStore(selectLayoutMode)
+  const project = useProjectStore((s) => s.projects[projectId])
+  const syncStatus = useSyncStore(selectSyncStatus)
+  const isOfflineShared = syncStatus === 'offline' && project?.is_shared === 1
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -275,7 +280,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
-      if (!currentUser) return
+      if (!currentUser || isOfflineShared) return
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
 
@@ -306,6 +311,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleStatusChange = useCallback(
     async (taskId: string, newStatusId: string) => {
+      if (isOfflineShared) return
       const newStatus = statuses.find((s) => s.id === newStatusId)
       const update: { status_id: string; completed_date?: string | null; order_index?: number } = {
         status_id: newStatusId
@@ -352,16 +358,18 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleTitleChange = useCallback(
     async (taskId: string, newTitle: string) => {
+      if (isOfflineShared) return
       await updateTask(taskId, { title: newTitle })
     },
-    [updateTask]
+    [updateTask, isOfflineShared]
   )
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
+      if (isOfflineShared) return
       setPendingDeleteTask(taskId)
     },
-    [setPendingDeleteTask]
+    [setPendingDeleteTask, isOfflineShared]
   )
 
   const clickOpensDetail = useSetting('click_opens_detail') ?? 'true'
@@ -405,23 +413,26 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleAddLabel = useCallback(
     async (taskId: string, labelId: string) => {
+      if (isOfflineShared) return
       await addLabel(taskId, labelId)
     },
-    [addLabel]
+    [addLabel, isOfflineShared]
   )
 
   const handleRemoveLabel = useCallback(
     async (taskId: string, labelId: string) => {
+      if (isOfflineShared) return
       await removeLabel(taskId, labelId)
     },
-    [removeLabel]
+    [removeLabel, isOfflineShared]
   )
 
   const handleCreateLabel = useCallback(
     async (name: string, color: string) => {
+      if (isOfflineShared) return
       await createOrMatchLabel(name, color)
     },
-    [createOrMatchLabel]
+    [createOrMatchLabel, isOfflineShared]
   )
 
   // Keyboard navigation
@@ -765,7 +776,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
+      {isOfflineShared && (
+        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2.5">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-warning">Offline</span>
+          <span className="text-xs font-light text-warning/80">Shared projects are read-only while offline</span>
+        </div>
+      )}
+      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} disabled={isOfflineShared} />
 
       <FilterBar labels={allLabels} projectId={projectId} showSort showCustomSort />
 
@@ -804,7 +821,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
                 onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
-                disableDrag={!isCustomSort}
+                disableDrag={!isCustomSort || isOfflineShared}
               />
             )
           })}
