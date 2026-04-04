@@ -822,6 +822,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onCreateLabel={handleCreateLabel}
                 onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
                 disableDrag={!isCustomSort || isOfflineShared}
+                readOnly={isOfflineShared}
               />
             )
           })}

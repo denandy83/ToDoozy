@@ -47,6 +47,7 @@ interface TaskRowProps {
   mapStatusId?: (statusId: string) => string
   hideAssignee?: boolean
   disableDrag?: boolean
+  readOnly?: boolean
 }
 
 export function TaskRow({
@@ -72,7 +73,8 @@ export function TaskRow({
   statusIdOverride,
   mapStatusId,
   hideAssignee,
-  disableDrag
+  disableDrag,
+  readOnly
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -199,12 +201,13 @@ export function TaskRow({
   }, [taskLabels.length, task.title])
 
   const handleDoubleClick = useCallback(() => {
+    if (readOnly) return
     if (onOpenDetail) {
       onOpenDetail(task.id)
     } else {
       setIsEditing(true)
     }
-  }, [onOpenDetail, task.id])
+  }, [onOpenDetail, task.id, readOnly])
 
   const saveTitle = useCallback(() => {
     const trimmed = editValue.trim()
@@ -250,6 +253,7 @@ export function TaskRow({
     (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
+      if (readOnly) return
       if (selectedTaskIds.has(task.id) && selectedTaskIds.size > 1) {
         openBulkContextMenu([...selectedTaskIds], e.clientX, e.clientY)
       } else {
@@ -382,7 +386,11 @@ export function TaskRow({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-grab active:cursor-grabbing select-none ${
+        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all select-none ${
+          readOnly
+            ? 'cursor-not-allowed opacity-75'
+            : 'cursor-grab active:cursor-grabbing'
+        } ${
           isMoving
             ? 'bg-accent/20 border-l-2 border-accent ring-1 ring-accent/40'
             : isSelected

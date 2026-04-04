@@ -28,6 +28,7 @@ interface StatusSectionProps {
   mapStatusId?: (statusId: string) => string
   hideAssignee?: boolean
   disableDrag?: boolean
+  readOnly?: boolean
 }
 
 export function StatusSection({
@@ -51,7 +52,8 @@ export function StatusSection({
   bucketColor,
   mapStatusId,
   hideAssignee,
-  disableDrag
+  disableDrag,
+  readOnly
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -133,6 +135,7 @@ export function StatusSection({
                 mapStatusId={mapStatusId}
                 hideAssignee={hideAssignee}
                 disableDrag={disableDrag}
+                readOnly={readOnly}
               />
               )
             })}
