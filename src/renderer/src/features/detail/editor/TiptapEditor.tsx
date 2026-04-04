@@ -15,6 +15,7 @@ interface TiptapEditorProps {
   content: string | null
   taskId: string
   onChange: (content: string | null) => void
+  readOnly?: boolean
 }
 
 export function normalizeUrl(url: string): string {
@@ -24,7 +25,7 @@ export function normalizeUrl(url: string): string {
   return `https://${trimmed}`
 }
 
-export function TiptapEditor({ content, taskId, onChange }: TiptapEditorProps): React.JSX.Element {
+export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEditorProps): React.JSX.Element {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [linkPopover, setLinkPopover] = useState<{
     top: number
@@ -70,6 +71,7 @@ export function TiptapEditor({ content, taskId, onChange }: TiptapEditorProps): 
         transformCopiedText: true
       })
     ],
+    editable: !readOnly,
     content: content ?? '',
     editorProps: {
       attributes: {

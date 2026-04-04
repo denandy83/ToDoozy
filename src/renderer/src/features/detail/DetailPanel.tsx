@@ -379,7 +379,7 @@ function DetailPanelContent({
   onAddLabel,
   onRemoveLabel,
   onCreateLabel,
-  readOnly: _readOnly
+  readOnly
 }: DetailPanelContentProps): React.JSX.Element {
   const project = useProjectStore((s) => task.project_id ? s.projects[task.project_id] : undefined)
   const isTemplate = task.is_template === 1
@@ -449,6 +449,7 @@ function DetailPanelContent({
         onAddLabel={onAddLabel}
         onRemoveLabel={onRemoveLabel}
         onCreateLabel={onCreateLabel}
+        readOnly={readOnly}
       />
     </div>
   )
@@ -529,7 +530,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       </Section>
     ) : null,
     <div key="subtasks" data-detail-field="8"><DetailSubtasks taskId={task.id} projectId={task.project_id} /></div>,
-    <div key="desc" data-detail-field="9"><DetailDescription description={task.description} taskId={task.id} updatedAt={task.updated_at} onDescriptionChange={props.onDescriptionChange} /></div>,
+    <div key="desc" data-detail-field="9"><DetailDescription description={task.description} taskId={task.id} updatedAt={task.updated_at} onDescriptionChange={props.onDescriptionChange} readOnly={props.readOnly} /></div>,
     !isTemplate ? <div key="attachments" data-detail-field="10"><DetailAttachments taskId={task.id} /></div> : null,
     !isTemplate ? <DetailActivityLog key="activity" taskId={task.id} /> : null
   ]
