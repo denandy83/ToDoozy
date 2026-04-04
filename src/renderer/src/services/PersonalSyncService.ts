@@ -448,26 +448,26 @@ export async function fullUpload(userId: string): Promise<void> {
       }
     } catch { /* areas might not exist */ }
 
-    // 6. Push themes
+    // 6. Push themes (parse config JSON inline)
     try {
       const themes = await window.api.themes.list(userId)
       for (const theme of themes) {
-        const config = await window.api.themes.getConfig(theme.id)
-        if (config) {
+        try {
+          const config = JSON.parse(theme.config) as Record<string, string>
           await pushTheme({
             id: theme.id,
             user_id: userId,
             name: theme.name,
             mode: theme.mode,
-            bg: config.bg,
-            fg: config.fg,
-            accent: config.accent,
-            surface: config.fgSecondary,
-            muted: config.muted,
-            border: config.border,
+            bg: config.bg ?? '',
+            fg: config.fg ?? '',
+            accent: config.accent ?? '',
+            surface: config.fgSecondary ?? '',
+            muted: config.muted ?? '',
+            border: config.border ?? '',
             updated_at: theme.updated_at
           })
-        }
+        } catch { /* skip themes with invalid config */ }
       }
     } catch { /* themes might not exist */ }
 
