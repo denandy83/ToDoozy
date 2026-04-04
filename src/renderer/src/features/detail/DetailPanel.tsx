@@ -20,6 +20,7 @@ import { PriorityIndicator } from '../../shared/components/PriorityIndicator'
 import { AssigneePicker } from '../collaboration/AssigneePicker'
 import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
+import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
 import { formatDate } from '../../shared/utils/dateFormat'
 
 export function DetailPanel(): React.JSX.Element | null {
@@ -33,6 +34,9 @@ export function DetailPanel(): React.JSX.Element | null {
   const resizeRef = useRef<{ startPos: number; startSize: number } | null>(null)
 
   const projectId = task?.project_id ?? ''
+  const project = useProjectStore((s) => s.projects[projectId])
+  const syncStatus = useSyncStore(selectSyncStatus)
+  const isOfflineShared = syncStatus === 'offline' && project?.is_shared === 1
   const statuses = useStatusesByProject(projectId)
   const allLabels = useLabelsByProject(projectId)
   const taskLabels = useTaskLabelsHook(task?.id ?? '')
@@ -298,26 +302,33 @@ export function DetailPanel(): React.JSX.Element | null {
       {/* Resize handle */}
       <div className={resizeHandleClass} onMouseDown={handleResizeStart} />
 
+      {isOfflineShared && (
+        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-warning">Read-only</span>
+          <span className="text-[11px] font-light text-warning/80">Offline</span>
+        </div>
+      )}
       <DetailPanelContent
         task={task}
         statuses={statuses}
         taskLabels={taskLabels}
         allLabels={allLabels}
         position={position}
+        readOnly={isOfflineShared}
         onClose={() => setCurrentTask(null)}
         onTogglePosition={togglePosition}
-        onTitleChange={handleTitleChange}
-        onReferenceUrlChange={handleReferenceUrlChange}
-        onStatusChange={handleStatusChange}
-        onToggleArchive={handleToggleArchive}
-        onPriorityChange={handlePriorityChange}
-        onDueDateChange={handleDueDateChange}
-        onRecurrenceChange={handleRecurrenceChange}
-        onSnooze={handleSnooze}
-        onDescriptionChange={handleDescriptionChange}
-        onAddLabel={handleAddLabel}
-        onRemoveLabel={handleRemoveLabel}
-        onCreateLabel={handleCreateLabel}
+        onTitleChange={isOfflineShared ? () => {} : handleTitleChange}
+        onReferenceUrlChange={isOfflineShared ? () => {} : handleReferenceUrlChange}
+        onStatusChange={isOfflineShared ? () => {} : handleStatusChange}
+        onToggleArchive={isOfflineShared ? () => {} : handleToggleArchive}
+        onPriorityChange={isOfflineShared ? () => {} : handlePriorityChange}
+        onDueDateChange={isOfflineShared ? () => {} : handleDueDateChange}
+        onRecurrenceChange={isOfflineShared ? () => {} : handleRecurrenceChange}
+        onSnooze={isOfflineShared ? () => {} : handleSnooze}
+        onDescriptionChange={isOfflineShared ? () => {} : handleDescriptionChange}
+        onAddLabel={isOfflineShared ? async () => {} : handleAddLabel}
+        onRemoveLabel={isOfflineShared ? async () => {} : handleRemoveLabel}
+        onCreateLabel={isOfflineShared ? async () => {} : handleCreateLabel}
       />
     </div>
   )
@@ -345,6 +356,7 @@ interface DetailPanelContentProps {
   onAddLabel: (labelId: string) => void
   onRemoveLabel: (labelId: string) => void
   onCreateLabel: (name: string, color: string) => void
+  readOnly?: boolean
 }
 
 function DetailPanelContent({
@@ -366,7 +378,8 @@ function DetailPanelContent({
   onDescriptionChange,
   onAddLabel,
   onRemoveLabel,
-  onCreateLabel
+  onCreateLabel,
+  readOnly: _readOnly
 }: DetailPanelContentProps): React.JSX.Element {
   const project = useProjectStore((s) => task.project_id ? s.projects[task.project_id] : undefined)
   const isTemplate = task.is_template === 1

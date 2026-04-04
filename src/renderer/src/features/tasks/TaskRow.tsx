@@ -201,10 +201,9 @@ export function TaskRow({
   }, [taskLabels.length, task.title])
 
   const handleDoubleClick = useCallback(() => {
-    if (readOnly) return
     if (onOpenDetail) {
       onOpenDetail(task.id)
-    } else {
+    } else if (!readOnly) {
       setIsEditing(true)
     }
   }, [onOpenDetail, task.id, readOnly])
@@ -388,7 +387,7 @@ export function TaskRow({
         onDoubleClick={handleDoubleClick}
         className={`group relative flex items-center gap-2 py-2 pr-6 transition-all select-none ${
           readOnly
-            ? 'cursor-not-allowed opacity-75'
+            ? 'cursor-default'
             : 'cursor-grab active:cursor-grabbing'
         } ${
           isMoving
@@ -460,11 +459,13 @@ export function TaskRow({
           />
         )}
 
-        <StatusButton
-          currentStatusId={statusIdOverride ?? task.status_id}
-          statuses={statuses}
-          onStatusChange={handleStatusChange}
-        />
+        <div className={readOnly ? 'pointer-events-none' : ''}>
+          <StatusButton
+            currentStatusId={statusIdOverride ?? task.status_id}
+            statuses={statuses}
+            onStatusChange={handleStatusChange}
+          />
+        </div>
 
         {isEditing ? (
           <input
@@ -555,7 +556,7 @@ export function TaskRow({
                 name={label.name}
                 color={label.color}
                 onClick={() => toggleLabelFilter(label.id)}
-                onRemove={() => onRemoveLabel(task.id, label.id)}
+                onRemove={readOnly ? undefined : () => onRemoveLabel(task.id, label.id)}
               />
             ))}
             {taskLabels.length > maxVisibleLabels && (
@@ -568,25 +569,29 @@ export function TaskRow({
         )}
 
         {/* Add label button */}
-        <button
-          ref={addLabelBtnRef}
-          onClick={handleOpenPicker}
-          className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
-          title="Add label"
-          aria-label="Add label"
-          tabIndex={0}
-        >
-          <Plus size={14} />
-        </button>
+        {!readOnly && (
+          <button
+            ref={addLabelBtnRef}
+            onClick={handleOpenPicker}
+            className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
+            title="Add label"
+            aria-label="Add label"
+            tabIndex={0}
+          >
+            <Plus size={14} />
+          </button>
+        )}
 
-        <button
-          onClick={handleDelete}
-          className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
-          title="Delete task"
-          aria-label="Delete task"
-        >
-          <Trash2 size={14} />
-        </button>
+        {!readOnly && (
+          <button
+            onClick={handleDelete}
+            className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
+            title="Delete task"
+            aria-label="Delete task"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
       {/* Label picker portal */}
