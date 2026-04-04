@@ -7,6 +7,21 @@ User-facing changes by date. Most recent first.
 ## v1.1.0
 
 - **Settings reorganization** — The Settings modal is now cleaner with 7 tabs instead of 11. Themes and Priority Display are grouped under Appearance. Updates, What's New, Integrations, and Help are grouped under About. Section labels make each tab easier to scan.
+- **MCP activity logging** — Changes made by AI assistants via MCP (creating tasks, updating statuses, assigning labels, etc.) now appear in the activity timeline, so you can see exactly what your AI did.
+
+## v1.0.7
+
+- **Full Task Rows in Saved Views + Multi-Sort** — Saved views now display complete task information including status, labels, priority, due date, recurrence, timer, and subtask count. You can stack multiple sort rules (e.g., Priority then Due date) in both saved views and project views. Saved view items in the sidebar show colored dots. Custom (drag) sort in project views, with drag disabled when using other sort modes.
+- **Sidebar Customization** — The sidebar is now always expanded for a cleaner layout. A light/dark theme toggle replaces the old collapse button. Stats moved to the sidebar footer. You can show/hide and reorder nav items in Settings, and keyboard shortcuts update dynamically to match your layout.
+- **Supabase Full Sync Engine** — Every change you make now syncs to Supabase in the background automatically. A sync status indicator shows connection state, offline changes are queued and flushed when you reconnect, and all stores (tasks, labels, projects, settings) have write-through sync hooks.
+- **Exclusion Filters** — All filter types (labels, status, priority, assignee, projects) now support "is not" exclusion mode, letting you filter out tasks that match specific criteria. Works in both the filter bar and saved views.
+- **Saved Views / Smart Lists** — Create and save custom filtered views that persist across sessions. Define filter criteria (labels, priorities, statuses, due dates, keywords) and access them from the sidebar for quick one-click filtering.
+- **Stats Dashboard** — A new productivity stats view powered by Recharts showing visual analytics for your tasks: completion trends, priority distributions, and productivity insights.
+- **Project Areas & Folders** — Organize projects in the sidebar using areas/folders. Group related projects together for a cleaner, more structured workspace.
+- **Expanded Filter System** — The filter bar now supports priority, status, due date, and keyword filters in addition to labels. Combine multiple filter types for precise task views.
+- **MCP Task Reorder** — AI assistants can now reorder tasks via the new `reorder_tasks` MCP tool, enabling automated task prioritization and sorting.
+- **Improved Drag & Drop** — Drag-and-drop has been overhauled with horizontal intent detection and full-row ghost rendering for a smoother, more intuitive experience.
+- **Fix: Command palette filters** — Label and assignee filters now clear properly when navigating to a task from the command palette.
 
 ## v1.0.6
 
