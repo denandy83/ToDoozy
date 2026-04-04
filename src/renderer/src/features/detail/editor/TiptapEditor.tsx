@@ -73,6 +73,7 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
     ],
     editable: !readOnly,
     content: content ?? '',
+    // Note: editable is only read on init; we update it via useEffect below
     editorProps: {
       attributes: {
         class: 'tiptap-editor-content'
@@ -164,6 +165,13 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
       isExternalUpdate.current = false
     }
   }, [content, editor])
+
+  // Update editable state when readOnly changes
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) {
+      editor.setEditable(!readOnly)
+    }
+  }, [readOnly, editor])
 
   // Cleanup debounce on unmount
   useEffect(() => {
