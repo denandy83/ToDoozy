@@ -81,8 +81,14 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         console.log(`[Realtime] Subscribed to project ${projectId}`)
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.warn(`[Realtime] Project subscription failed for ${projectId}:`, status)
+        // Realtime connected — mark as online
+        const currentStatus = useSyncStore.getState().status
+        if (currentStatus === 'offline') {
+          useSyncStore.getState().setStatus('synced')
+        }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn(`[Realtime] Project subscription ${status} for ${projectId}`)
+        useSyncStore.getState().setStatus('offline')
       }
     })
 
