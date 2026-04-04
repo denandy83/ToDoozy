@@ -253,6 +253,44 @@ export async function deleteProjectAreaFromSupabase(areaId: string): Promise<voi
 }
 
 /**
+ * Push a theme to user_themes in Supabase.
+ */
+export async function pushTheme(theme: {
+  id: string
+  user_id: string
+  name: string
+  mode: string
+  bg: string
+  fg: string
+  accent: string
+  surface: string
+  muted: string
+  border: string
+  updated_at?: string
+}): Promise<void> {
+  try {
+    const supabase = await getSupabase()
+    const { error } = await supabase.from('user_themes').upsert({
+      id: theme.id,
+      user_id: theme.user_id,
+      name: theme.name,
+      mode: theme.mode,
+      bg: theme.bg,
+      fg: theme.fg,
+      accent: theme.accent,
+      surface: theme.surface,
+      muted: theme.muted,
+      border: theme.border,
+      updated_at: theme.updated_at ?? new Date().toISOString()
+    })
+    if (error) console.error('[PersonalSync] pushTheme error:', error)
+    else markSynced()
+  } catch (err) {
+    console.error('[PersonalSync] pushTheme failed:', err)
+  }
+}
+
+/**
  * Delete a status from Supabase.
  */
 export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
@@ -409,6 +447,47 @@ export async function fullUpload(userId: string): Promise<void> {
         await pushProjectArea({ ...area, user_id: userId })
       }
     } catch { /* areas might not exist */ }
+
+    // 6. Push themes
+    try {
+      const themes = await window.api.themes.list(userId)
+      for (const theme of themes) {
+        const config = await window.api.themes.getConfig(theme.id)
+        if (config) {
+          await pushTheme({
+            id: theme.id,
+            user_id: userId,
+            name: theme.name,
+            mode: theme.mode,
+            bg: config.bg,
+            fg: config.fg,
+            accent: config.accent,
+            surface: config.fgSecondary,
+            muted: config.muted,
+            border: config.border,
+            updated_at: theme.updated_at
+          })
+        }
+      }
+    } catch { /* themes might not exist */ }
+
+    // 7. Push task_labels (junction table)
+    for (const project of projects) {
+      const tasks = await window.api.tasks.findByProjectId(project.id)
+      for (const task of tasks) {
+        const taskLabels = await window.api.tasks.getLabels(task.id)
+        if (taskLabels.length > 0) {
+          for (const tl of taskLabels) {
+            await supabase.from('task_labels').upsert({
+              task_id: tl.task_id,
+              label_id: tl.label_id
+            }).then(({ error }) => {
+              if (error) console.error('[PersonalSync] pushTaskLabel error:', error.message)
+            })
+          }
+        }
+      }
+    }
 
     // Verify sync by checking counts
     const { count: sbProjects } = await supabase.from('project_members').select('*', { count: 'exact', head: true }).eq('user_id', userId)
