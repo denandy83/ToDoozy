@@ -306,7 +306,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       // Select the newly created task
       selectTask(taskId)
     },
-    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition, selectTask]
+    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition, selectTask, isOfflineShared]
   )
 
   const handleStatusChange = useCallback(
@@ -353,7 +353,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
     },
-    [statuses, updateTask, newTaskPosition]
+    [statuses, updateTask, newTaskPosition, isOfflineShared]
   )
 
   const handleTitleChange = useCallback(
