@@ -84,9 +84,23 @@ function App(): React.JSX.Element {
       } catch (err) {
         console.error('[Startup] Failed to sync shared projects:', err)
       }
+
+      // Always start online monitoring (even if sync fails)
+      const { initSync, startOnlineMonitoring } = await import('./services/PersonalSyncService')
+      startOnlineMonitoring()
+
+      // Initialize personal sync (first-time upload or new-device pull)
+      try {
+        await initSync(currentUser.id)
+      } catch (err) {
+        console.error('[Startup] Failed to initialize personal sync:', err)
+      }
     }
     const timeout = setTimeout(syncShared, 2000)
-    return () => clearTimeout(timeout)
+    return () => {
+      clearTimeout(timeout)
+      import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
+    }
   }, [isAuthenticated, currentUser, hydrateProjects])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes

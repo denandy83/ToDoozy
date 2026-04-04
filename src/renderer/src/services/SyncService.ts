@@ -499,14 +499,31 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
   if (error || !memberships) return []
 
   const idsToSync: string[] = []
+  const projectIds = memberships.map((m) => m.project_id)
+
+  // Get member counts for all projects to detect truly shared ones
+  const memberCounts = new Map<string, number>()
+  for (const pid of projectIds) {
+    const { count } = await supabase
+      .from('project_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', pid)
+    memberCounts.set(pid, count ?? 0)
+  }
+
   for (const m of memberships) {
     const local = await window.api.projects.findById(m.project_id)
     if (!local) {
-      // Only sync projects we don't have locally at all
+      // Project doesn't exist locally — sync it down
+      idsToSync.push(m.project_id)
+    } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
+      // Project exists locally but isn't marked shared, yet has multiple members
+      // in Supabase — mark as shared and sync members down
       idsToSync.push(m.project_id)
     }
   }
-  return idsToSync
+  // Deduplicate
+  return [...new Set(idsToSync)]
 }
 
 /**
