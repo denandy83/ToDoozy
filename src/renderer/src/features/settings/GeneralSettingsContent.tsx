@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { ShortcutRecorder, AppToggleShortcutRecorder } from './ShortcutRecorder'
-import { GripVertical, Eye, EyeOff } from 'lucide-react'
-import type { ViewId } from '../../shared/stores/viewStore'
+import { Eye, EyeOff } from 'lucide-react'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const LEAD_TIME_OPTIONS = [
   { value: '5', label: '5 minutes' },
@@ -390,11 +392,12 @@ function SystemSection(): React.JSX.Element {
   )
 }
 
-const DEFAULT_SIDEBAR_ORDER: ViewId[] = ['my-day', 'calendar', 'views', 'archive', 'templates']
+const DEFAULT_SIDEBAR_ORDER: string[] = ['my-day', 'calendar', 'views', 'projects', 'archive', 'templates']
 const SIDEBAR_ITEM_LABELS: Record<string, string> = {
   'my-day': 'My Day',
   'calendar': 'Calendar',
   'views': 'Views',
+  'projects': 'Projects',
   'archive': 'Archive',
   'templates': 'Templates'
 }
@@ -404,19 +407,28 @@ function SidebarSection(): React.JSX.Element {
   const orderJson = useSetting('sidebar_order')
   const hiddenJson = useSetting('sidebar_hidden')
 
-  const order: ViewId[] = orderJson ? JSON.parse(orderJson) as ViewId[] : DEFAULT_SIDEBAR_ORDER
+  const order: string[] = (() => {
+    let o: string[] = orderJson ? JSON.parse(orderJson) as string[] : DEFAULT_SIDEBAR_ORDER
+    const s = new Set(o)
+    for (const item of DEFAULT_SIDEBAR_ORDER) { if (!s.has(item)) o.push(item) }
+    o = o.filter((id) => DEFAULT_SIDEBAR_ORDER.includes(id))
+    return o
+  })()
   const hidden = new Set<string>(hiddenJson ? JSON.parse(hiddenJson) as string[] : [])
 
-  const dragItem = useRef<number | null>(null)
-  const dragOverItem = useRef<number | null>(null)
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  const updateOrder = useCallback((newOrder: ViewId[]) => {
-    setSetting('sidebar_order', JSON.stringify(newOrder))
-  }, [setSetting])
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = order.indexOf(active.id as string)
+    const newIndex = order.indexOf(over.id as string)
+    if (oldIndex === -1 || newIndex === -1) return
+    setSetting('sidebar_order', JSON.stringify(arrayMove(order, oldIndex, newIndex)))
+  }, [order, setSetting])
 
   const toggleHidden = useCallback((id: string) => {
-    if (id === 'my-day') return // My Day is always visible
+    if (id === 'my-day') return
     const newHidden = new Set(hidden)
     if (newHidden.has(id)) {
       newHidden.delete(id)
@@ -426,74 +438,76 @@ function SidebarSection(): React.JSX.Element {
     setSetting('sidebar_hidden', JSON.stringify([...newHidden]))
   }, [hidden, setSetting])
 
-  const handleDragStart = useCallback((index: number) => {
-    dragItem.current = index
-    setDraggingIndex(index)
-  }, [])
-
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault()
-    dragOverItem.current = index
-  }, [])
-
-  const handleDrop = useCallback(() => {
-    if (dragItem.current === null || dragOverItem.current === null) return
-    const newOrder = [...order]
-    const [removed] = newOrder.splice(dragItem.current, 1)
-    newOrder.splice(dragOverItem.current, 0, removed)
-    updateOrder(newOrder)
-    dragItem.current = null
-    dragOverItem.current = null
-    setDraggingIndex(null)
-  }, [order, updateOrder])
-
-  const handleDragEnd = useCallback(() => {
-    dragItem.current = null
-    dragOverItem.current = null
-    setDraggingIndex(null)
-  }, [])
-
   let shortcutIndex = 1
 
   return (
     <div className="flex flex-col gap-1">
       <p className="text-[10px] text-muted mb-1">Drag to reorder. Toggle visibility with the eye icon. My Day is always visible.</p>
-      {order.map((id, index) => {
-        const isHidden = hidden.has(id)
-        const isMyDay = id === 'my-day'
-        const currentShortcut = !isHidden ? `⌘${shortcutIndex++}` : null
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+          {order.map((id) => {
+            const isHidden = hidden.has(id)
+            const currentShortcut = !isHidden ? `⌘${shortcutIndex++}` : null
+            return (
+              <SortableSidebarItem
+                key={id}
+                id={id}
+                label={SIDEBAR_ITEM_LABELS[id] ?? id}
+                isHidden={isHidden}
+                isMyDay={id === 'my-day'}
+                shortcut={currentShortcut}
+                onToggleHidden={() => toggleHidden(id)}
+              />
+            )
+          })}
+        </SortableContext>
+      </DndContext>
+    </div>
+  )
+}
 
-        return (
-          <div
-            key={id}
-            draggable
-            onDragStart={() => handleDragStart(index)}
-            onDragOver={(e) => handleDragOver(e, index)}
-            onDrop={handleDrop}
-            onDragEnd={handleDragEnd}
-            className={`flex items-center gap-2 rounded-lg border border-border px-2 py-2 transition-colors ${
-              draggingIndex === index ? 'opacity-50 bg-accent/8' : 'bg-surface hover:bg-foreground/4'
-            }`}
-          >
-            <GripVertical size={14} className="flex-shrink-0 cursor-grab text-muted/50" />
-            <span className={`flex-1 text-sm font-light ${isHidden ? 'text-muted/40 line-through' : 'text-foreground'}`}>
-              {SIDEBAR_ITEM_LABELS[id] ?? id}
-            </span>
-            {currentShortcut && (
-              <span className="text-[10px] text-muted/50 font-light tabular-nums">{currentShortcut}</span>
-            )}
-            {!isMyDay && (
-              <button
-                onClick={() => toggleHidden(id)}
-                className="rounded p-1 text-muted transition-colors hover:bg-foreground/6"
-                title={isHidden ? 'Show in sidebar' : 'Hide from sidebar'}
-              >
-                {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            )}
-          </div>
-        )
-      })}
+interface SortableSidebarItemProps {
+  id: string
+  label: string
+  isHidden: boolean
+  isMyDay: boolean
+  shortcut: string | null
+  onToggleHidden: () => void
+}
+
+function SortableSidebarItem({ id, label, isHidden, isMyDay, shortcut, onToggleHidden }: SortableSidebarItemProps): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`flex items-center gap-2 rounded-lg border border-border px-2 py-2 transition-colors touch-none ${
+        isDragging ? 'bg-accent/8 border-accent/30 cursor-grabbing' : 'bg-surface hover:bg-foreground/4 cursor-grab'
+      }`}
+    >
+      <span className={`flex-1 text-sm font-light ${isHidden ? 'text-muted/40 line-through' : 'text-foreground'}`}>
+        {label}
+      </span>
+      {shortcut && (
+        <span className="text-[10px] text-muted/50 font-light tabular-nums">{shortcut}</span>
+      )}
+      {!isMyDay && (
+        <button
+          onClick={onToggleHidden}
+          className="rounded p-1 text-muted transition-colors hover:bg-foreground/6"
+          title={isHidden ? 'Show in sidebar' : 'Hide from sidebar'}
+        >
+          {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      )}
     </div>
   )
 }

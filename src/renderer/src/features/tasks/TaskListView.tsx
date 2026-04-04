@@ -106,8 +106,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   // Load saved sort config for this project (with priority_auto_sort migration)
   const projectSortSetting = useSetting(`sort_config_${projectId}`)
   const priorityAutoSortSetting = useSetting('priority_auto_sort')
+  // Load saved sort config when switching projects
+  const loadedProjectRef = useRef<string | null>(null)
   useEffect(() => {
     if (!projectId) return
+    // Only load on project switch, not on every settings change
+    if (loadedProjectRef.current === projectId) return
+    loadedProjectRef.current = projectId
     const store = useLabelStore.getState()
     if (projectSortSetting) {
       try {
@@ -115,7 +120,6 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         store.setSortRules(rules)
       } catch { store.setSortRules([]) }
     } else if (priorityAutoSortSetting === 'true') {
-      // Migrate legacy priority_auto_sort to per-project sort config
       const migrated: SortRule[] = [{ field: 'priority', direction: 'desc' }]
       store.setSortRules(migrated)
       setSetting(`sort_config_${projectId}`, JSON.stringify(migrated))
@@ -123,18 +127,18 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       store.setSortRules([])
     }
   }, [projectId, projectSortSetting, priorityAutoSortSetting, setSetting])
-  const sortRulesJson = JSON.stringify(sortRules)
-  const prevSortRef = useRef(sortRulesJson)
+
+  // Persist sort config when user changes it
   useEffect(() => {
-    if (sortRulesJson !== prevSortRef.current) {
-      prevSortRef.current = sortRulesJson
-      if (sortRules.length > 0) {
-        setSetting(`sort_config_${projectId}`, sortRulesJson)
-      } else {
-        setSetting(`sort_config_${projectId}`, '')
-      }
+    if (!projectId || loadedProjectRef.current !== projectId) return
+    const json = JSON.stringify(sortRules)
+    const current = useLabelStore.getState().sortRules
+    if (current.length > 0) {
+      setSetting(`sort_config_${projectId}`, json)
+    } else {
+      setSetting(`sort_config_${projectId}`, '')
     }
-  }, [sortRulesJson, sortRules, projectId, setSetting])
+  }, [sortRules, projectId, setSetting])
 
   // Auto-select first task (without opening detail panel) when navigating to project
   // or when selection is cleared (e.g. clicking same project in sidebar)
@@ -781,7 +785,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           {sortedStatuses.map((status) => {
             const statusTasks = filteredTasks.filter(
               (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
-            )
+            ).sort(prioritySortFn)
             return (
               <StatusSection
                 key={status.id}

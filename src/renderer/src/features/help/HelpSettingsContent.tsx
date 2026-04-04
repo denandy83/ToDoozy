@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { useSetting } from '../../shared/stores/settingsStore'
+import { useSidebarItems } from '../sidebar'
 
 interface HelpSectionProps {
   title: string
@@ -182,18 +183,30 @@ const HELP_SECTIONS: HelpSectionData[] = [
   }
 ]
 
-function getShortcuts(appToggleShortcut: string): { category: string; entries: ShortcutEntry[] }[] {
+const NAV_ITEM_NAMES: Record<string, string> = {
+  'my-day': 'My Day',
+  'calendar': 'Calendar',
+  'views': 'Views (first saved view)',
+  'projects': 'Projects (first project)',
+  'archive': 'Archive',
+  'templates': 'Templates'
+}
+
+function getShortcuts(appToggleShortcut: string, sidebarItems: Array<{ id: string; shortcut: string }>): { category: string; entries: ShortcutEntry[] }[] {
+  const navEntries: ShortcutEntry[] = sidebarItems.map((item) => ({
+    keys: item.shortcut,
+    description: NAV_ITEM_NAMES[item.id] ?? item.id,
+    category: 'Navigation'
+  }))
+  navEntries.push(
+    { keys: '⌘L', description: 'Toggle kanban / list view', category: 'Navigation' },
+    { keys: 'Tab / Shift+Tab', description: 'Cycle projects (no task selected)', category: 'Navigation' }
+  )
+
   return [
     {
       category: 'Navigation',
-      entries: [
-        { keys: '⌘1', description: 'My Day', category: 'Navigation' },
-        { keys: '⌘2', description: 'Project view (first project)', category: 'Navigation' },
-        { keys: '⌘3', description: 'Archive', category: 'Navigation' },
-        { keys: '⌘4', description: 'Templates', category: 'Navigation' },
-        { keys: '⌘L', description: 'Toggle kanban / list view', category: 'Navigation' },
-        { keys: 'Tab / Shift+Tab', description: 'Cycle projects (no task selected)', category: 'Navigation' }
-      ]
+      entries: navEntries
     },
     {
       category: 'Tasks',
@@ -247,7 +260,8 @@ export function HelpSettingsContent(): React.JSX.Element {
       .filter((s): s is HelpSectionData => s !== null)
   }, [query])
 
-  const shortcuts = useMemo(() => getShortcuts(appToggleShortcut), [appToggleShortcut])
+  const sidebarItems = useSidebarItems()
+  const shortcuts = useMemo(() => getShortcuts(appToggleShortcut, sidebarItems), [appToggleShortcut, sidebarItems])
 
   const filteredShortcuts = useMemo(() => {
     if (!query) return shortcuts
@@ -266,8 +280,6 @@ export function HelpSettingsContent(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-8">
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Help & Documentation</p>
-
       {/* Search */}
       <div className="relative">
         <input

@@ -46,6 +46,7 @@ interface TaskRowProps {
   statusIdOverride?: string
   mapStatusId?: (statusId: string) => string
   hideAssignee?: boolean
+  disableDrag?: boolean
 }
 
 export function TaskRow({
@@ -70,7 +71,8 @@ export function TaskRow({
   project,
   statusIdOverride,
   mapStatusId,
-  hideAssignee
+  hideAssignee,
+  disableDrag
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -79,6 +81,8 @@ export function TaskRow({
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addLabelBtnRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLSpanElement>(null)
+  const [maxVisibleLabels, setMaxVisibleLabels] = useState(Infinity)
 
   const taskProject = useProjectStore((s) => s.projects[task.project_id])
   const isSharedProject = taskProject?.is_shared === 1
@@ -117,11 +121,11 @@ export function TaskRow({
     isDragging
   } = useDraggable({
     id: task.id,
-    disabled: isDragOverlay ?? false
+    disabled: (isDragOverlay ?? false) || (disableDrag ?? false)
   })
   const { setNodeRef: setDropRef } = useDroppable({
     id: task.id,
-    disabled: isDragOverlay ?? false
+    disabled: (isDragOverlay ?? false) || (disableDrag ?? false)
   })
   const setNodeRef = useCallback((el: HTMLElement | null) => { setDragRef(el); setDropRef(el) }, [setDragRef, setDropRef])
 
@@ -145,6 +149,54 @@ export function TaskRow({
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [])
+
+  // Dynamically adjust visible labels based on row width.
+  // When the title is truncated, progressively hide labels.
+  // Reset to show all when row resizes wider (e.g. fullscreen).
+  const rowRef = useRef<HTMLDivElement>(null)
+  const lastRowWidth = useRef(0)
+  useEffect(() => {
+    const row = rowRef.current
+    const el = titleRef.current
+    if (!row || !el || taskLabels.length === 0) {
+      setMaxVisibleLabels(Infinity)
+      return
+    }
+    let settling = false
+    const observer = new ResizeObserver(() => {
+      if (settling) return
+      const currentWidth = row.clientWidth
+      const grewWider = currentWidth > lastRowWidth.current + 20
+      lastRowWidth.current = currentWidth
+
+      if (grewWider) {
+        // Row got wider — try showing all labels again
+        setMaxVisibleLabels(Infinity)
+        return
+      }
+
+      const isTruncated = el.scrollWidth > el.clientWidth + 2
+      if (isTruncated) {
+        settling = true
+        setMaxVisibleLabels((prev) => {
+          const next = Math.max(0, (prev === Infinity ? taskLabels.length : prev) - 1)
+          // Let the layout settle before observing again
+          requestAnimationFrame(() => { settling = false })
+          return next
+        })
+      }
+    })
+    observer.observe(row)
+    lastRowWidth.current = row.clientWidth
+    // Initial check
+    const isTruncated = el.scrollWidth > el.clientWidth + 2
+    if (isTruncated) {
+      setMaxVisibleLabels(Math.min(3, taskLabels.length))
+    } else {
+      setMaxVisibleLabels(Infinity)
+    }
+    return () => observer.disconnect()
+  }, [taskLabels.length, task.title])
 
   const handleDoubleClick = useCallback(() => {
     if (onOpenDetail) {
@@ -326,7 +378,7 @@ export function TaskRow({
   return (
     <>
       <div
-        ref={setNodeRef}
+        ref={(el) => { setNodeRef(el); (rowRef as React.MutableRefObject<HTMLDivElement | null>).current = el }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
@@ -392,10 +444,7 @@ export function TaskRow({
         )}
 
         {project ? (
-          <>
-            <ProjectIndicator project={project} />
-            <StatusLabel statusId={task.status_id} />
-          </>
+          <ProjectIndicator project={project} />
         ) : (
           <MyDayIndicator
             visible={task.is_in_my_day === 1}
@@ -421,6 +470,7 @@ export function TaskRow({
           />
         ) : (
           <span
+            ref={titleRef}
             className={`flex-1 truncate text-[15px] ${fontWeightClass} tracking-tight ${
               isDone ? 'text-muted line-through' : 'text-foreground'
             }`}
@@ -488,10 +538,10 @@ export function TaskRow({
         {/* Priority badge */}
         {showBadge && <PriorityBadge priority={task.priority} showIcon={prioritySettings.badgeIcons} showLabel={prioritySettings.badgeLabels} />}
 
-        {/* Label chips — show max 3, then "+X" */}
-        {taskLabels.length > 0 && (
+        {/* Label chips — dynamically adjust visible count based on title truncation */}
+        {taskLabels.length > 0 && maxVisibleLabels > 0 && (
           <div className="flex flex-shrink-0 items-center gap-1">
-            {taskLabels.slice(0, 3).map((label) => (
+            {taskLabels.slice(0, maxVisibleLabels).map((label) => (
               <LabelChip
                 key={label.id}
                 name={label.name}
@@ -500,10 +550,13 @@ export function TaskRow({
                 onRemove={() => onRemoveLabel(task.id, label.id)}
               />
             ))}
-            {taskLabels.length > 3 && (
-              <LabelOverflowBadge labels={taskLabels.slice(3)} />
+            {taskLabels.length > maxVisibleLabels && (
+              <LabelOverflowBadge labels={taskLabels.slice(maxVisibleLabels)} />
             )}
           </div>
+        )}
+        {taskLabels.length > 0 && maxVisibleLabels === 0 && (
+          <LabelOverflowBadge labels={taskLabels} />
         )}
 
         {/* Add label button */}
@@ -807,18 +860,6 @@ function MyDayIndicator({ visible, onToggle }: { visible: boolean; onToggle?: ()
   )
 }
 
-function StatusLabel({ statusId }: { statusId: string }): React.JSX.Element | null {
-  const status = useStatusStore((s) => s.statuses[statusId])
-  if (!status) return null
-  if (status.is_default === 1 || status.is_done === 1) return null
-  // Hide when name matches the My Day "In Progress" bucket — it's redundant
-  if (status.name.toLowerCase() === 'in progress') return null
-  return (
-    <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">
-      [{status.name}]
-    </span>
-  )
-}
 
 function getProjectInitials(name: string): string {
   const words = name.trim().split(/\s+/)

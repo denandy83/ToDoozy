@@ -2,7 +2,7 @@ import { useDroppable } from '@dnd-kit/core'
 import type { LucideIcon } from 'lucide-react'
 
 interface NavItemProps {
-  icon: LucideIcon
+  icon?: LucideIcon
   label: string
   count: number
   active: boolean
@@ -10,6 +10,7 @@ interface NavItemProps {
   onClick: () => void
   shortcutHint?: string
   droppableId?: string
+  colorDot?: string
 }
 
 export function NavItem({
@@ -20,7 +21,8 @@ export function NavItem({
   collapsed,
   onClick,
   shortcutHint,
-  droppableId
+  droppableId,
+  colorDot
 }: NavItemProps): React.JSX.Element {
   const { isOver, setNodeRef } = useDroppable({
     id: droppableId ?? `nav-${label.toLowerCase().replace(/\s+/g, '-')}`,
@@ -43,7 +45,10 @@ export function NavItem({
       aria-selected={active}
       tabIndex={-1}
     >
-      <Icon size={16} className={active || isOver ? 'text-accent' : 'text-muted'} />
+      {colorDot && (
+        <div className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: colorDot }} />
+      )}
+      {Icon && <Icon size={16} className={active || isOver ? 'text-accent' : 'text-muted'} />}
       {!collapsed && (
         <>
           <span className="flex-1 text-[13px] font-light tracking-tight">{label}</span>

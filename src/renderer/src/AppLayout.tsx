@@ -7,7 +7,7 @@ import {
   useSensors,
   type Modifier
 } from '@dnd-kit/core'
-import { LayoutList, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink } from 'lucide-react'
+import { LayoutList, LayoutGrid, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink, Copy, Filter } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
@@ -29,6 +29,7 @@ import { useTaskStore } from './shared/stores'
 import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './shared/stores/viewStore'
 import { useSettingsStore } from './shared/stores/settingsStore'
 import { useLabelStore } from './shared/stores/labelStore'
+import { useSavedViewStore } from './shared/stores/savedViewStore'
 import type { ViewId } from './shared/stores/viewStore'
 import { useAuthStore } from './shared/stores/authStore'
 import { useToast } from './shared/components/Toast'
@@ -81,6 +82,9 @@ export function AppLayout(): React.JSX.Element {
   const layoutMode = useViewStore(selectLayoutMode)
   const toggleLayoutMode = useViewStore((s) => s.toggleLayoutMode)
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
+  const selectedSavedViewId = useViewStore((s) => s.selectedSavedViewId)
+  const savedViews = useSavedViewStore((s) => s.views)
+  const currentSavedView = savedViews.find((v) => v.id === selectedSavedViewId)
   const { setSetting, getSetting } = useSettingsStore()
 
   // Selected project for the project view
@@ -669,9 +673,19 @@ export function AppLayout(): React.JSX.Element {
         if (item) {
           e.preventDefault()
           if (item.id === 'views') {
-            // Views shortcut — no-op (views section doesn't have a single view)
+            const views = useSavedViewStore.getState().views
+            if (views.length > 0) {
+              clearLabelFilters()
+              setView('saved-view')
+              useViewStore.getState().setSelectedSavedView(views[0].id)
+            }
+          } else if (item.id === 'projects') {
+            if (sortedProjects.length > 0) {
+              clearLabelFilters()
+              setSelectedProject(sortedProjects[0].id)
+            }
           } else {
-            setView(item.id)
+            setView(item.id as ViewId)
           }
           return
         }
@@ -718,10 +732,11 @@ export function AppLayout(): React.JSX.Element {
     if (currentView === 'calendar') return 'Calendar'
     if (currentView === 'stats') return 'Stats'
     if (currentView === 'project' && selectedProject) return selectedProject.name
+    if (currentView === 'saved-view' && currentSavedView) return currentSavedView.name
     if (currentView === 'archive') return 'Archive'
     if (currentView === 'templates') return 'Templates'
     return ''
-  }, [currentView, selectedProject])
+  }, [currentView, selectedProject, currentSavedView])
 
   const [editingProjectName, setEditingProjectName] = useState(false)
   const [projectNameValue, setProjectNameValue] = useState('')
@@ -989,10 +1004,22 @@ export function AppLayout(): React.JSX.Element {
         <main className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-[57px] items-center gap-3 border-b border-border px-6">
             {currentView === 'project' && selectedProject && (
-              <div
-                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: selectedProject.color }}
-              />
+              <>
+                <LayoutGrid size={16} className="flex-shrink-0 text-muted" />
+                <ViewColorDot
+                  color={selectedProject.color ?? '#6366f1'}
+                  onChange={(c) => updateProject(selectedProject.id, { color: c })}
+                />
+              </>
+            )}
+            {currentView === 'saved-view' && currentSavedView && (
+              <>
+                <Filter size={16} className="flex-shrink-0 text-muted" />
+                <ViewColorDot
+                  color={currentSavedView.color ?? '#6366f1'}
+                  onChange={(c) => useSavedViewStore.getState().updateView(currentSavedView.id, { color: c })}
+                />
+              </>
             )}
             {editingProjectName && currentView === 'project' ? (
               <input
@@ -1142,6 +1169,47 @@ export function AppLayout(): React.JSX.Element {
                     {sortedProjects.length <= 1 ? "Can't delete the last project" : 'Shift+click to skip confirmation'}
                   </div>
                 </div>
+              </>
+            )}
+
+            {/* Saved view actions — clone + delete */}
+            {currentView === 'saved-view' && currentSavedView && (
+              <>
+                <button
+                  onClick={async () => {
+                    const clone = await useSavedViewStore.getState().createView(currentUser?.id ?? '', `${currentSavedView.name} (copy)`, currentSavedView.filter_config)
+                    if (currentSavedView.color) await useSavedViewStore.getState().updateView(clone.id, { color: currentSavedView.color })
+                    useLabelStore.getState().clearLabelFilters()
+                    useViewStore.getState().setSelectedSavedView(clone.id)
+                  }}
+                  className="rounded p-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                  title="Duplicate view"
+                >
+                  <Copy size={14} />
+                </button>
+                <button
+                  onClick={async () => {
+                    const viewData = { name: currentSavedView.name, filter_config: currentSavedView.filter_config, color: currentSavedView.color }
+                    await useSavedViewStore.getState().deleteView(currentSavedView.id)
+                    setView('my-day')
+                    addToast({
+                      message: `"${viewData.name}" deleted`,
+                      variant: 'danger',
+                      action: {
+                        label: 'Undo',
+                        onClick: async () => {
+                          const restored = await useSavedViewStore.getState().createView(currentUser?.id ?? '', viewData.name, viewData.filter_config)
+                          if (viewData.color) await useSavedViewStore.getState().updateView(restored.id, { color: viewData.color })
+                          useViewStore.getState().setSelectedSavedView(restored.id)
+                        }
+                      }
+                    })
+                  }}
+                  className="rounded p-1 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
+                  title="Delete view"
+                >
+                  <Trash2 size={14} />
+                </button>
               </>
             )}
 
@@ -1352,5 +1420,48 @@ export function AppLayout(): React.JSX.Element {
         ) : null}
       </DragOverlay>
     </DndContext>
+  )
+}
+
+const VIEW_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#14b8a6', '#f97316', '#84cc16', '#e11d48']
+
+function ViewColorDot({ color, onChange }: { color: string; onChange: (c: string) => void }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="relative flex-shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="h-2.5 w-2.5 rounded-full transition-transform hover:scale-125"
+        style={{ backgroundColor: color }}
+        title="Change view color"
+      />
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-2 rounded-lg border border-border bg-surface p-3 shadow-lg">
+          <div className="flex gap-1.5">
+            {VIEW_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => { onChange(c); setOpen(false) }}
+                className={`h-4 w-4 rounded-full transition-transform ${
+                  color === c ? 'scale-110 ring-2 ring-foreground/30 ring-offset-1 ring-offset-surface' : ''
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

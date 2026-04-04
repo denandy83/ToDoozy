@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { useFocusTrap } from '../../shared/hooks/useFocusTrap'
 import { useFocusRestore } from '../../shared/hooks/useFocusRestore'
 import { useSetting } from '../../shared/stores/settingsStore'
+import { useSidebarItems } from '../sidebar'
 
 interface ShortcutRowProps {
   keys: string[]
@@ -39,6 +40,29 @@ function Section({ title, children }: SectionProps): React.JSX.Element {
       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{title}</p>
       <div className="flex flex-col divide-y divide-border/50">{children}</div>
     </div>
+  )
+}
+
+const NAV_NAMES: Record<string, string> = {
+  'my-day': 'My Day',
+  'calendar': 'Calendar',
+  'views': 'Views (first saved view)',
+  'projects': 'Projects (first project)',
+  'archive': 'Archive',
+  'templates': 'Templates'
+}
+
+function DynamicNavigationShortcuts(): React.JSX.Element {
+  const items = useSidebarItems()
+  return (
+    <Section title="Navigation">
+      {items.map((item) => (
+        <ShortcutRow key={item.id} keys={['⌘', item.shortcut.replace('⌘', '')]} description={NAV_NAMES[item.id] ?? item.id} />
+      ))}
+      <ShortcutRow keys={['⌘', 'L']} description="Toggle kanban / list view" />
+      <ShortcutRow keys={['Tab']} description="Cycle to next project" />
+      <ShortcutRow keys={['Shift', 'Tab']} description="Cycle to previous project" />
+    </Section>
   )
 }
 
@@ -100,16 +124,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         {/* Shortcuts content */}
         <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
           <div className="flex flex-col gap-5">
-            <Section title="Navigation">
-              <ShortcutRow keys={['⌘', '1']} description="My Day" />
-              <ShortcutRow keys={['⌘', '2']} description="Calendar" />
-              <ShortcutRow keys={['⌘', '3']} description="Project view (first project)" />
-              <ShortcutRow keys={['⌘', '4']} description="Archive" />
-              <ShortcutRow keys={['⌘', '5']} description="Templates" />
-              <ShortcutRow keys={['⌘', 'L']} description="Toggle kanban / list view" />
-              <ShortcutRow keys={['Tab']} description="Cycle to next project" />
-              <ShortcutRow keys={['Shift', 'Tab']} description="Cycle to previous project" />
-            </Section>
+            <DynamicNavigationShortcuts />
 
             <Section title="Tasks">
               <ShortcutRow keys={['Enter']} description="Open task detail panel" />

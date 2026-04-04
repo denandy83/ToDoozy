@@ -67,14 +67,18 @@ export function StatusButton({
   const color = current?.color || '#888'
 
   return (
-    <button
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      className="flex-shrink-0 rounded p-0.5 transition-colors hover:bg-foreground/6 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-      title={current?.name ?? 'Status'}
-      aria-label={`Status: ${current?.name ?? 'Unknown'}. Click to cycle.`}
-    >
-      <Icon size={size} style={{ color }} strokeWidth={isDone ? 2.5 : 1.5} />
-    </button>
+    <div className="group/status relative flex-shrink-0">
+      <button
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        className="rounded p-0.5 transition-colors hover:bg-foreground/6 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        aria-label={`Status: ${current?.name ?? 'Unknown'}. Click to cycle.`}
+      >
+        <Icon size={size} style={{ color }} strokeWidth={isDone ? 2.5 : 1.5} />
+      </button>
+      <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover/status:opacity-100">
+        {current?.name ?? 'Status'}
+      </div>
+    </div>
   )
 }

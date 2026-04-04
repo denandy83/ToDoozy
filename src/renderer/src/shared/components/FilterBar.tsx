@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
-import { X, Plus, Search, Save, Minus, Calendar } from 'lucide-react'
+import { X, Plus, Search, Save, Minus, Calendar, ArrowUpDown, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 import {
   useLabelStore,
   selectActiveLabelFilters,
@@ -14,10 +14,13 @@ import {
   selectDueDatePreset,
   selectDueDateRange,
   selectKeyword,
-  selectHasAnyFilter
+  selectHasAnyFilter,
+  selectSortRules
 } from '../stores'
 import type { Label, Project } from '../../../../shared/types'
 import type { LabelFilterMode, DueDateRange } from '../stores'
+import type { SortRule, SortField } from '../utils/sortTasks'
+import { SORT_FIELD_LABELS } from '../utils/sortTasks'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useProjectStore, selectAllProjects } from '../stores/projectStore'
 import { useAuthStore } from '../stores/authStore'
@@ -54,9 +57,13 @@ interface FilterBarProps {
   onSave?: () => void
   /** Label for the save button override */
   saveLabel?: string
+  /** When true, "Custom" sort option is available (project views only) */
+  showCustomSort?: boolean
+  /** When true, show sort UI (defaults to true) */
+  showSort?: boolean
 }
 
-export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFilter, onSave, saveLabel }: FilterBarProps): React.JSX.Element | null {
+export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFilter, onSave, saveLabel, showCustomSort, showSort = true }: FilterBarProps): React.JSX.Element | null {
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const priorityFilters = useLabelStore(selectPriorityFilters)
@@ -70,6 +77,8 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
   const dueDateRange = useLabelStore(selectDueDateRange)
   const keyword = useLabelStore(selectKeyword)
   const hasAnyFilter = useLabelStore(selectHasAnyFilter)
+  const sortRules = useLabelStore(selectSortRules)
+  const { setSortRules } = useLabelStore()
   const {
     toggleLabelFilter, clearLabelFilters, setFilterMode,
     togglePriorityFilter, toggleStatusFilter, toggleProjectFilter, setDueDatePreset, setDueDateRange, setKeyword,
@@ -169,6 +178,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
     if (state.dueDateRange) config.dueDateRange = state.dueDateRange
     if (state.keyword) config.keyword = state.keyword
     config.filterMode = state.filterMode
+    if (state.sortRules.length > 0) config.sortRules = state.sortRules
     await createView(userId, name, JSON.stringify(config))
     setSavingView(false)
     setSaveViewName('')
@@ -182,7 +192,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
   // Compute which additional filter types are available (not yet active)
   const availableFilterTypes = useMemo<FilterType[]>(() => {
     const types: FilterType[] = []
-    if (labelsInFilterMenu && labels.length > 0) types.push('labels')
+    if (labels.length > 0) types.push('labels')
     if (showProjectFilter) types.push('projects')
     types.push('priority') // always available (multi-select)
     types.push('due_date') // always available (can change)
@@ -191,228 +201,401 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
     return types
   }, [projectId, labelsInFilterMenu, labels.length, showProjectFilter])
 
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close sort dropdown on outside click
+  useEffect(() => {
+    if (!sortDropdownOpen) return
+    const handler = (e: MouseEvent): void => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+        setSortDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [sortDropdownOpen])
+
   const hasLabels = labels.length > 0
   const showLabelsInline = hasLabels && !labelsInFilterMenu
   const alwaysShow = labelsInFilterMenu || showProjectFilter
-  if (!alwaysShow && !showLabelsInline && !hasAnyFilter) return null
+  if (!alwaysShow && !showLabelsInline && !hasAnyFilter && sortRules.length === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 py-2">
-      {/* Label section (inline, not in saved views) */}
+    <div className="flex flex-col px-4 py-2 gap-1.5">
+      {/* Row 1: Label chips (inline) */}
       {showLabelsInline && (
-        <>
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Labels</span>
-          <div className="flex flex-wrap items-center gap-1">
-            {labels.map((label) => {
-              const isActive = activeLabelFilters.has(label.id)
-              return (
-                <span
-                  key={label.id}
-                  className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold tracking-wider transition-all cursor-pointer"
-                  style={{
-                    backgroundColor: isActive ? `${label.color}30` : `${label.color}15`,
-                    color: label.color,
-                    border: `1px solid ${isActive ? label.color : `${label.color}30`}`,
-                    boxShadow: isActive ? `0 0 0 2px ${label.color}40` : 'none'
-                  }}
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mr-1">Labels</span>
+          {labels.map((label) => {
+            const isActive = activeLabelFilters.has(label.id)
+            return (
+              <span
+                key={label.id}
+                className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold tracking-wider transition-all cursor-pointer"
+                style={{
+                  backgroundColor: isActive ? `${label.color}30` : `${label.color}15`,
+                  color: label.color,
+                  border: `1px solid ${isActive ? label.color : `${label.color}30`}`,
+                  boxShadow: isActive ? `0 0 0 2px ${label.color}40` : 'none'
+                }}
+              >
+                <button
+                  onClick={() => toggleLabelFilter(label.id)}
+                  aria-pressed={isActive}
+                  aria-label={`Filter by ${label.name}`}
                 >
+                  {label.name}
+                </button>
+                {projectId && (
                   <button
-                    onClick={() => toggleLabelFilter(label.id)}
-                    aria-pressed={isActive}
-                    aria-label={`Filter by ${label.name}`}
+                    onClick={(e) => handleRemoveLabel(label, e)}
+                    className="rounded-full p-0.5 transition-colors hover:bg-black/10"
+                    aria-label={`Delete ${label.name} from project`}
+                    title="Delete from project"
                   >
-                    {label.name}
+                    <X size={10} />
                   </button>
-                  {projectId && (
-                    <button
-                      onClick={(e) => handleRemoveLabel(label, e)}
-                      className="rounded-full p-0.5 transition-colors hover:bg-black/10"
-                      aria-label={`Delete ${label.name} from project`}
-                      title="Delete from project"
-                    >
-                      <X size={10} />
-                    </button>
-                  )}
-                </span>
-              )
-            })}
-          </div>
-        </>
+                )}
+              </span>
+            )
+          })}
+        </div>
       )}
 
-      {/* Active filter chips */}
-      <ActiveFilterChips
-        priorityFilters={priorityFilters}
-        statusFilters={statusFilters}
-        excludePriorityFilters={excludePriorityFilters}
-        excludeStatusFilters={excludeStatusFilters}
-        dueDatePreset={dueDatePreset}
-        dueDateRange={dueDateRange}
-        keyword={keyword}
-        projectStatuses={projectStatuses}
-        onRemovePriority={togglePriorityFilter}
-        onRemoveStatus={toggleStatusFilter}
-        onRemoveExcludePriority={toggleExcludePriorityFilter}
-        onRemoveExcludeStatus={toggleExcludeStatusFilter}
-        onRemoveDueDate={() => { setDueDatePreset(null); setDueDateRange(null) }}
-        onRemoveKeyword={() => setKeyword('')}
-        labelChips={labelsInFilterMenu ? { labels, activeIds: activeLabelFilters, onRemove: toggleLabelFilter } : undefined}
-        excludeLabelChips={labelsInFilterMenu ? { labels, activeIds: excludeLabelFilters, onRemove: toggleExcludeLabelFilter } : undefined}
-        projectChips={showProjectFilter ? { projects: allProjects, activeIds: projectFilters, onRemove: toggleProjectFilter } : undefined}
-        excludeProjectChips={showProjectFilter ? { projects: allProjects, activeIds: excludeProjectFilters, onRemove: toggleExcludeProjectFilter } : undefined}
-      />
+      {/* Row 2: Toolbar — +Filter, Sort, Save, Blur, Clear */}
+      <div className="flex items-center gap-2">
+        {/* + Filter button and dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            ref={filterButtonRef}
+            onClick={() => {
+              setDropdownOpen(!dropdownOpen)
+              setActiveFilterType(null)
+            }}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+          >
+            <Plus size={10} />
+            Filter
+          </button>
 
-      {/* + Filter button and dropdown */}
-      <div className="relative" ref={dropdownRef}>
-        <button
-          ref={filterButtonRef}
-          onClick={() => {
-            setDropdownOpen(!dropdownOpen)
-            setActiveFilterType(null)
-          }}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-        >
-          <Plus size={10} />
-          Filter
-        </button>
-
-        {dropdownOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-border bg-surface shadow-lg">
-            {availableFilterTypes.map((type) => (
-              <button
-                key={type}
-                onClick={() => handleAddFilter(type)}
-                className="block w-full px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6 first:rounded-t-lg last:rounded-b-lg"
-              >
-                {{ due_date: 'Due Date', keyword: 'Keyword', labels: 'Labels', projects: 'Projects', priority: 'Priority', status: 'Status' }[type]}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Filter picker popups — fixed position to prevent jumping when chips change */}
-        {activeFilterType && pickerPos && (
-          <div ref={dropdownRef} style={{ position: 'fixed', left: pickerPos.left, top: pickerPos.top, zIndex: 50 }}>
-            {activeFilterType === 'priority' && (
-              <PriorityFilterPicker
-                active={priorityFilters}
-                excluded={excludePriorityFilters}
-                onToggle={togglePriorityFilter}
-                onExcludeToggle={toggleExcludePriorityFilter}
-                onClose={() => setActiveFilterType(null)}
-              />
-            )}
-            {activeFilterType === 'status' && projectId && (
-              <StatusFilterPicker
-                statuses={projectStatuses}
-                active={statusFilters}
-                excluded={excludeStatusFilters}
-                onToggle={toggleStatusFilter}
-                onExcludeToggle={toggleExcludeStatusFilter}
-                onClose={() => setActiveFilterType(null)}
-              />
-            )}
-            {activeFilterType === 'due_date' && (
-              <DueDateFilterPicker
-                activePreset={dueDatePreset}
-                activeRange={dueDateRange}
-                onSelectPreset={(v) => { setDueDatePreset(v); setActiveFilterType(null) }}
-                onSelectRange={(r) => { setDueDateRange(r); setActiveFilterType(null) }}
-                onClose={() => setActiveFilterType(null)}
-              />
-            )}
-            {activeFilterType === 'keyword' && (
-              <KeywordFilterInput
-                initial={keyword}
-                onSubmit={handleKeywordSubmit}
-                onClose={() => setActiveFilterType(null)}
-                inputRef={keywordInputRef}
-              />
-            )}
-            {activeFilterType === 'labels' && labelsInFilterMenu && (
-              <LabelFilterPicker
-                labels={labels}
-                active={activeLabelFilters}
-                excluded={excludeLabelFilters}
-                onToggle={toggleLabelFilter}
-                onExcludeToggle={toggleExcludeLabelFilter}
-                onClose={() => setActiveFilterType(null)}
-              />
-            )}
-            {activeFilterType === 'projects' && showProjectFilter && (
-              <ProjectFilterPicker
-                projects={allProjects}
-                active={projectFilters}
-                excluded={excludeProjectFilters}
-                onToggle={toggleProjectFilter}
-                onExcludeToggle={toggleExcludeProjectFilter}
-                onClose={() => setActiveFilterType(null)}
-              />
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Save / Filter mode / clear */}
-      {hasAnyFilter && (
-        <div className="ml-auto flex items-center gap-1.5">
-          {onSave ? (
-            <button
-              onClick={onSave}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/12"
-              title={saveLabel ?? 'Save'}
-            >
-              <Save size={10} />
-              {saveLabel ?? 'Save'}
-            </button>
-          ) : labelsInFilterMenu ? null : savingView ? (
-            <div className="flex items-center gap-1">
-              <input
-                ref={saveViewInputRef}
-                type="text"
-                value={saveViewName}
-                onChange={(e) => setSaveViewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && saveViewName.trim()) handleSaveAsView()
-                  if (e.key === 'Escape') { setSavingView(false); setSaveViewName(''); e.stopPropagation() }
-                }}
-                placeholder="View name..."
-                className="w-24 rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] font-light text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
-              />
-              <button
-                onClick={handleSaveAsView}
-                className="rounded bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/20"
-              >
-                Save
-              </button>
+          {dropdownOpen && (
+            <div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-border bg-surface shadow-lg">
+              {availableFilterTypes.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => handleAddFilter(type)}
+                  className="block w-full px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6 first:rounded-t-lg last:rounded-b-lg"
+                >
+                  {{ due_date: 'Due Date', keyword: 'Keyword', labels: 'Labels', projects: 'Projects', priority: 'Priority', status: 'Status' }[type]}
+                </button>
+              ))}
             </div>
-          ) : (
-            <button
-              onClick={() => setSavingView(true)}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-              title="Save current filters as a view"
-            >
-              <Save size={10} />
-              Save View
-            </button>
           )}
-          {!labelsInFilterMenu && (
-            <button
-              onClick={handleToggleMode}
-              className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
-              title={`Filter mode: ${filterMode}. Click to toggle.`}
-            >
-              {filterMode === 'hide' ? 'Hide' : 'Blur'}
-            </button>
+
+          {/* Filter picker popups */}
+          {activeFilterType && pickerPos && (
+            <div ref={dropdownRef} style={{ position: 'fixed', left: pickerPos.left, top: pickerPos.top, zIndex: 50 }}>
+              {activeFilterType === 'priority' && (
+                <PriorityFilterPicker
+                  active={priorityFilters}
+                  excluded={excludePriorityFilters}
+                  onToggle={togglePriorityFilter}
+                  onExcludeToggle={toggleExcludePriorityFilter}
+                  onClose={() => setActiveFilterType(null)}
+                />
+              )}
+              {activeFilterType === 'status' && projectId && (
+                <StatusFilterPicker
+                  statuses={projectStatuses}
+                  active={statusFilters}
+                  excluded={excludeStatusFilters}
+                  onToggle={toggleStatusFilter}
+                  onExcludeToggle={toggleExcludeStatusFilter}
+                  onClose={() => setActiveFilterType(null)}
+                />
+              )}
+              {activeFilterType === 'due_date' && (
+                <DueDateFilterPicker
+                  activePreset={dueDatePreset}
+                  activeRange={dueDateRange}
+                  onSelectPreset={(v) => { setDueDatePreset(v); setActiveFilterType(null) }}
+                  onSelectRange={(r) => { setDueDateRange(r); setActiveFilterType(null) }}
+                  onClose={() => setActiveFilterType(null)}
+                />
+              )}
+              {activeFilterType === 'keyword' && (
+                <KeywordFilterInput
+                  initial={keyword}
+                  onSubmit={handleKeywordSubmit}
+                  onClose={() => setActiveFilterType(null)}
+                  inputRef={keywordInputRef}
+                />
+              )}
+              {activeFilterType === 'labels' && (
+                <LabelFilterPicker
+                  labels={labels}
+                  active={activeLabelFilters}
+                  excluded={excludeLabelFilters}
+                  onToggle={toggleLabelFilter}
+                  onExcludeToggle={toggleExcludeLabelFilter}
+                  onClose={() => setActiveFilterType(null)}
+                />
+              )}
+              {activeFilterType === 'projects' && showProjectFilter && (
+                <ProjectFilterPicker
+                  projects={allProjects}
+                  active={projectFilters}
+                  excluded={excludeProjectFilters}
+                  onToggle={toggleProjectFilter}
+                  onExcludeToggle={toggleExcludeProjectFilter}
+                  onClose={() => setActiveFilterType(null)}
+                />
+              )}
+            </div>
           )}
+        </div>
+
+        {/* Sort */}
+        {showSort && (
+          <SortDropdown
+            rules={sortRules}
+            onChange={setSortRules}
+            showCustom={showCustomSort}
+            isOpen={sortDropdownOpen}
+            onToggle={() => setSortDropdownOpen(!sortDropdownOpen)}
+            dropdownRef={sortDropdownRef}
+          />
+        )}
+
+        {/* Save */}
+        {onSave ? (
+          <button
+            onClick={onSave}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/12"
+            title={saveLabel ?? 'Save'}
+          >
+            <Save size={10} />
+            {saveLabel ?? 'Save'}
+          </button>
+        ) : labelsInFilterMenu ? null : savingView ? (
+          <div className="flex items-center gap-1">
+            <input
+              ref={saveViewInputRef}
+              type="text"
+              value={saveViewName}
+              onChange={(e) => setSaveViewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveViewName.trim()) handleSaveAsView()
+                if (e.key === 'Escape') { setSavingView(false); setSaveViewName(''); e.stopPropagation() }
+              }}
+              placeholder="View name..."
+              className="w-24 rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] font-light text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
+            />
+            <button
+              onClick={handleSaveAsView}
+              className="rounded bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/20"
+            >
+              Save
+            </button>
+          </div>
+        ) : hasAnyFilter ? (
+          <button
+            onClick={() => setSavingView(true)}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            title="Save current filters as a view"
+          >
+            <Save size={10} />
+            Save
+          </button>
+        ) : null}
+
+        {/* Blur/Hide */}
+        {!labelsInFilterMenu && hasAnyFilter && (
+          <button
+            onClick={handleToggleMode}
+            className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            title={`Filter mode: ${filterMode}. Click to toggle.`}
+          >
+            {filterMode === 'hide' ? 'Hide' : 'Blur'}
+          </button>
+        )}
+
+        {/* Clear — only clears filters, not sort */}
+        {hasAnyFilter && (
           <button
             onClick={clearLabelFilters}
-            className="rounded p-0.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
             aria-label="Clear all filters"
             title="Clear all filters"
           >
-            <X size={14} />
+            Clear
           </button>
+        )}
+      </div>
+
+      {/* Row 3: Active filter chips */}
+      {hasAnyFilter && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <ActiveFilterChips
+            priorityFilters={priorityFilters}
+            statusFilters={statusFilters}
+            excludePriorityFilters={excludePriorityFilters}
+            excludeStatusFilters={excludeStatusFilters}
+            dueDatePreset={dueDatePreset}
+            dueDateRange={dueDateRange}
+            keyword={keyword}
+            projectStatuses={projectStatuses}
+            onRemovePriority={togglePriorityFilter}
+            onRemoveStatus={toggleStatusFilter}
+            onRemoveExcludePriority={toggleExcludePriorityFilter}
+            onRemoveExcludeStatus={toggleExcludeStatusFilter}
+            onRemoveDueDate={() => { setDueDatePreset(null); setDueDateRange(null) }}
+            onRemoveKeyword={() => setKeyword('')}
+            labelChips={{ labels, activeIds: activeLabelFilters, onRemove: toggleLabelFilter }}
+            excludeLabelChips={{ labels, activeIds: excludeLabelFilters, onRemove: toggleExcludeLabelFilter }}
+            projectChips={showProjectFilter ? { projects: allProjects, activeIds: projectFilters, onRemove: toggleProjectFilter } : undefined}
+            excludeProjectChips={showProjectFilter ? { projects: allProjects, activeIds: excludeProjectFilters, onRemove: toggleExcludeProjectFilter } : undefined}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Sort Dropdown ─────────────────────────────────────────────── */
+
+const ALL_SORT_FIELDS: SortField[] = ['priority', 'due_date', 'status', 'created_at', 'updated_at', 'title', 'project', 'custom']
+
+interface SortDropdownProps {
+  rules: SortRule[]
+  onChange: (rules: SortRule[]) => void
+  showCustom?: boolean
+  isOpen: boolean
+  onToggle: () => void
+  dropdownRef: React.RefObject<HTMLDivElement | null>
+}
+
+function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dropdownRef }: SortDropdownProps): React.JSX.Element {
+  const availableFields = useMemo(() => {
+    const used = new Set(rules.map((r) => r.field))
+    return ALL_SORT_FIELDS.filter((f) => {
+      if (f === 'custom' && !showCustom) return false
+      return !used.has(f)
+    })
+  }, [rules, showCustom])
+
+  const handleAddRule = useCallback((field: SortField) => {
+    const direction = field === 'priority' ? 'desc' : 'asc'
+    onChange([...rules, { field, direction }])
+  }, [rules, onChange])
+
+  const handleRemoveRule = useCallback((index: number) => {
+    onChange(rules.filter((_, i) => i !== index))
+  }, [rules, onChange])
+
+  const handleToggleDirection = useCallback((index: number) => {
+    onChange(rules.map((r, i) => i === index ? { ...r, direction: r.direction === 'asc' ? 'desc' : 'asc' } : r))
+  }, [rules, onChange])
+
+  const handleChangeField = useCallback((index: number, field: SortField) => {
+    onChange(rules.map((r, i) => i === index ? { ...r, field } : r))
+  }, [rules, onChange])
+
+  const primaryLabel = rules.length > 0
+    ? rules.map((r) => `${SORT_FIELD_LABELS[r.field]} ${r.direction === 'asc' ? '↑' : '↓'}`).join(', ')
+    : null
+
+  return (
+    <div className="relative flex items-center gap-0.5" ref={dropdownRef}>
+      <button
+        onClick={onToggle}
+        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+          rules.length > 0
+            ? 'text-accent hover:bg-accent/12'
+            : 'text-muted hover:bg-foreground/6 hover:text-foreground'
+        }`}
+      >
+        <ArrowUpDown size={10} />
+        {primaryLabel ?? 'Sort'}
+      </button>
+      {rules.length > 0 && (
+        <button
+          onClick={() => onChange([])}
+          className="rounded p-0.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+          title="Clear sort"
+          aria-label="Clear sort"
+        >
+          <X size={10} />
+        </button>
+      )}
+
+      {isOpen && (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface p-2 shadow-lg">
+          {/* Existing rules */}
+          {rules.map((rule, idx) => (
+            <div key={idx} className="flex items-center gap-1.5 py-1">
+              <select
+                value={rule.field}
+                onChange={(e) => handleChangeField(idx, e.target.value as SortField)}
+                className="flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-light text-foreground focus:outline-none focus:border-accent"
+              >
+                <option value={rule.field}>{SORT_FIELD_LABELS[rule.field]}</option>
+                {availableFields.map((f) => (
+                  <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => handleToggleDirection(idx)}
+                className="rounded p-0.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                title={rule.direction === 'asc' ? 'Ascending' : 'Descending'}
+              >
+                {rule.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              <button
+                onClick={() => handleRemoveRule(idx)}
+                className="rounded p-0.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
+                title="Remove sort"
+              >
+                <Trash2 size={10} />
+              </button>
+            </div>
+          ))}
+
+          {/* Add sort rule */}
+          {availableFields.length > 0 && (
+            <div className="border-t border-border pt-1.5 mt-1">
+              <div className="text-[9px] font-bold uppercase tracking-[0.3em] text-muted mb-1">Add Sort</div>
+              {availableFields.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => handleAddRule(f)}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] font-light text-foreground transition-colors hover:bg-foreground/6"
+                >
+                  <Plus size={10} className="text-muted" />
+                  {SORT_FIELD_LABELS[f]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Done + Clear sort */}
+          <div className="flex items-center gap-1 border-t border-border pt-1.5 mt-1">
+            <button
+              onClick={onToggle}
+              className="rounded px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/12"
+            >
+              Done
+            </button>
+            {rules.length > 0 && (
+              <button
+                onClick={() => onChange([])}
+                className="ml-auto rounded px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-red-500 transition-colors hover:bg-red-500/10"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -557,7 +740,7 @@ interface FilterChipProps {
 function FilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.JSX.Element {
   return (
     <span
-      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
       style={{ backgroundColor: `${color}20`, color, border: `1px solid ${color}30` }}
     >
       <span className="opacity-60">{prefix}:</span>
@@ -572,7 +755,7 @@ function FilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.
 function ExcludeFilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.JSX.Element {
   return (
     <span
-      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
       style={{ backgroundColor: `${color}20`, color, border: `1px solid ${color}30` }}
     >
       <span className="text-red-400/80">{prefix} is not:</span>

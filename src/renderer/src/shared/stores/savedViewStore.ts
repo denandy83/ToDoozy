@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { SavedView, CreateSavedViewInput } from '../../../../shared/types'
+import { LABEL_AUTO_COLORS } from '../hooks/smartInputParser'
 
 interface SavedViewState {
   views: SavedView[]
@@ -14,6 +15,7 @@ interface SavedViewActions {
   hydrate(userId: string): Promise<void>
   hydrateCounts(userId: string): Promise<void>
   setActiveViewFilterConfig(config: string | null): void
+  setViewCount(viewId: string, count: number): void
   createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView>
   updateView(id: string, updates: { name?: string; color?: string; filter_config?: string }): Promise<void>
   deleteView(id: string): Promise<void>
@@ -54,10 +56,21 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   },
 
   async createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView> {
+    // Auto-assign next available color
+    const existingColors = new Set(useSavedViewStore.getState().views.map((v) => v.color))
+    let autoColor: string = LABEL_AUTO_COLORS[0]
+    for (const c of LABEL_AUTO_COLORS) {
+      if (!existingColors.has(c)) { autoColor = c; break }
+    }
+    // If all used, cycle based on count
+    if (existingColors.has(autoColor) && existingColors.size >= LABEL_AUTO_COLORS.length) {
+      autoColor = LABEL_AUTO_COLORS[useSavedViewStore.getState().views.length % LABEL_AUTO_COLORS.length]
+    }
     const input: CreateSavedViewInput = {
       id: crypto.randomUUID(),
       user_id: userId,
       name,
+      color: autoColor,
       filter_config: filterConfig,
       project_id: projectId ?? null,
       sidebar_order: useSavedViewStore.getState().views.length
@@ -114,6 +127,12 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
 
   setActiveViewFilterConfig(config: string | null): void {
     set({ activeViewFilterConfig: config })
+  },
+
+  setViewCount(viewId: string, count: number): void {
+    set((state) => ({
+      viewCounts: { ...state.viewCounts, [viewId]: count }
+    }))
   }
 }), shallow)
 
