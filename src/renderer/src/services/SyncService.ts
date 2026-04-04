@@ -523,13 +523,70 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
       // Project doesn't exist locally — sync it down
       idsToSync.push(m.project_id)
     } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
-      // Project exists locally but isn't marked shared, yet has multiple members
-      // in Supabase — mark as shared and sync members down
-      idsToSync.push(m.project_id)
+      // Project exists locally but isn't marked shared — just mark it and sync members
+      // Do NOT call syncProjectDown which would delete/overwrite local tasks
+      await window.api.projects.update(m.project_id, { is_shared: 1 })
+      await syncMembersDown(m.project_id)
     }
   }
   // Deduplicate
   return [...new Set(idsToSync)]
+}
+
+/**
+ * Sync only project members from Supabase (without overwriting tasks/statuses).
+ * Used when a local project is discovered to be shared.
+ */
+async function syncMembersDown(projectId: string): Promise<void> {
+  const supabase = await getSupabase()
+  const { data: members } = await supabase
+    .from('project_members')
+    .select('*')
+    .eq('project_id', projectId)
+
+  if (!members) return
+
+  const localMembers = await window.api.projects.getMembers(projectId)
+  const localMemberIds = new Set(localMembers.map((m) => m.user_id))
+
+  for (const member of members) {
+    const localUser = await window.api.users.findById(member.user_id)
+    if (!localUser || localUser.email === 'shared-user') {
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('email, display_name, avatar_url')
+        .eq('id', member.user_id)
+        .single()
+
+      if (profile) {
+        if (localUser) {
+          await window.api.users.update(member.user_id, {
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url
+          })
+        } else {
+          await window.api.users.create({
+            id: member.user_id,
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url
+          }).catch(() => { /* already exists */ })
+        }
+      }
+    }
+
+    if (!localMemberIds.has(member.user_id)) {
+      await window.api.projects.addMember(projectId, member.user_id, member.role)
+    }
+
+    if (member.display_color || member.display_initials) {
+      await window.api.projects.updateMember(projectId, member.user_id, {
+        display_color: member.display_color ?? null,
+        display_initials: member.display_initials ?? null
+      })
+    }
+  }
 }
 
 /**
