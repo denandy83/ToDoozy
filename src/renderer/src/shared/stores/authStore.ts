@@ -64,6 +64,35 @@ async function ensureLocalUser(
   })
 }
 
+/**
+ * Try to restore a user session from local DB when offline.
+ * Decodes the JWT to get the user ID, switches to the per-user DB,
+ * then loads the user from local storage.
+ */
+async function offlineFallback(
+  parsed: { access_token: string; refresh_token: string } | null
+): Promise<User | null> {
+  if (!parsed) return null
+  try {
+    // Decode the JWT payload to get the user ID (no verification needed — just reading claims)
+    const payload = JSON.parse(atob(parsed.access_token.split('.')[1])) as { sub?: string }
+    const userId = payload.sub
+    if (!userId) return null
+
+    // Switch to the per-user DB so we read the right data
+    await window.api.auth.switchDatabase(userId)
+
+    const user = await window.api.users.findById(userId)
+    if (user) {
+      console.log('[Auth] Offline fallback: loaded user from local DB')
+      return user
+    }
+  } catch (err) {
+    console.error('[Auth] Offline fallback failed:', err)
+  }
+  return null
+}
+
 export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   currentUser: null,
   isAuthenticated: false,
@@ -301,10 +330,15 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       })
 
       if (error || !data.session || !data.user) {
-        // Session invalid or expired — clear stale session and force re-login
+        // Could be network failure or truly expired token — try offline fallback
         console.warn('Session restore failed:', error?.message)
-        await window.api.auth.clearSession()
-        set({ loading: false, error: 'Session expired — please log in again' })
+        const offlineUser = await offlineFallback(parsed)
+        if (offlineUser) {
+          set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
+        } else {
+          await window.api.auth.clearSession()
+          set({ loading: false, error: 'Session expired — please log in again' })
+        }
         return
       }
 
@@ -323,19 +357,13 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     } catch (err) {
       // Network error during session restore — try offline fallback
       console.warn('Auth init failed (possibly offline):', err)
-      try {
-        const users = await window.api.users.list()
-        if (users.length > 0) {
-          set({
-            currentUser: users[0],
-            isAuthenticated: true,
-            isOffline: true,
-            loading: false
-          })
-          return
-        }
-      } catch (dbErr) {
-        console.error('Offline fallback failed:', dbErr)
+      const storedSession = await window.api.auth.getSession()
+      let parsed: { access_token: string; refresh_token: string } | null = null
+      try { parsed = storedSession ? JSON.parse(storedSession) : null } catch { /* ignore */ }
+      const offlineUser = await offlineFallback(parsed)
+      if (offlineUser) {
+        set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
+        return
       }
       set({ loading: false })
     }
