@@ -26,11 +26,11 @@ import {
   selectDueDatePreset,
   selectDueDateRange,
   selectKeyword,
-  selectHasAnyFilter
+  selectHasAnyFilter,
+  selectSortRules
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
-import { useSetting } from '../../shared/stores/settingsStore'
-import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
+import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
@@ -39,6 +39,8 @@ import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import type { SortRule } from '../../shared/utils/sortTasks'
+import { createSortComparator } from '../../shared/utils/sortTasks'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskListViewProps {
@@ -89,13 +91,50 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const keywordFilter = useLabelStore(selectKeyword)
   const hasAnyFilterGlobal = useLabelStore(selectHasAnyFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
-  const { autoSort: priorityAutoSort } = usePrioritySettings()
+  const sortRules = useLabelStore(selectSortRules)
+  const isCustomSort = sortRules.length === 0 || (sortRules.length === 1 && sortRules[0].field === 'custom')
   const { copySelectedTasks } = useCopyTasks()
 
   // Hydrate all task labels for this project
   useEffect(() => {
     if (projectId) hydrateAllTaskLabels(projectId)
   }, [projectId, hydrateAllTaskLabels])
+
+  // Persist sort config when it changes
+  const { setSetting } = useSettingsStore()
+
+  // Load saved sort config for this project (with priority_auto_sort migration)
+  const projectSortSetting = useSetting(`sort_config_${projectId}`)
+  const priorityAutoSortSetting = useSetting('priority_auto_sort')
+  useEffect(() => {
+    if (!projectId) return
+    const store = useLabelStore.getState()
+    if (projectSortSetting) {
+      try {
+        const rules = JSON.parse(projectSortSetting) as typeof sortRules
+        store.setSortRules(rules)
+      } catch { store.setSortRules([]) }
+    } else if (priorityAutoSortSetting === 'true') {
+      // Migrate legacy priority_auto_sort to per-project sort config
+      const migrated: SortRule[] = [{ field: 'priority', direction: 'desc' }]
+      store.setSortRules(migrated)
+      setSetting(`sort_config_${projectId}`, JSON.stringify(migrated))
+    } else {
+      store.setSortRules([])
+    }
+  }, [projectId, projectSortSetting, priorityAutoSortSetting, setSetting])
+  const sortRulesJson = JSON.stringify(sortRules)
+  const prevSortRef = useRef(sortRulesJson)
+  useEffect(() => {
+    if (sortRulesJson !== prevSortRef.current) {
+      prevSortRef.current = sortRulesJson
+      if (sortRules.length > 0) {
+        setSetting(`sort_config_${projectId}`, sortRulesJson)
+      } else {
+        setSetting(`sort_config_${projectId}`, '')
+      }
+    }
+  }, [sortRulesJson, sortRules, projectId, setSetting])
 
   // Auto-select first task (without opening detail panel) when navigating to project
   // or when selection is cleared (e.g. clicking same project in sidebar)
@@ -173,16 +212,24 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     return tasks.filter(taskMatchesFilters)
   }, [tasks, hasAnyFilter, filterMode, taskMatchesFilters])
 
-  const prioritySortFn = useCallback(
-    (a: Task, b: Task): number => {
-      if (priorityAutoSort) {
-        const priDiff = b.priority - a.priority
-        if (priDiff !== 0) return priDiff
-      }
-      return a.order_index - b.order_index
-    },
-    [priorityAutoSort]
-  )
+  // Build status order map for sort comparator
+  const statusOrderMap = useMemo((): Map<string, number> => {
+    const m = new Map<string, number>()
+    for (const s of statuses) {
+      const order = s.is_default === 1 ? -1000 : s.is_done === 1 ? 1000 : s.order_index
+      m.set(s.id, order)
+    }
+    return m
+  }, [statuses])
+
+  const prioritySortFn = useMemo(() => {
+    // If explicit sort rules are set (not custom), use them
+    if (sortRules.length > 0 && !isCustomSort) {
+      return createSortComparator(sortRules, statusOrderMap)
+    }
+    // Default: order_index (custom sort)
+    return (a: Task, b: Task): number => a.order_index - b.order_index
+  }, [sortRules, isCustomSort, statusOrderMap])
 
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
@@ -716,7 +763,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
 
-      <FilterBar labels={allLabels} projectId={projectId} />
+      <FilterBar labels={allLabels} projectId={projectId} showSort showCustomSort />
 
       {layoutMode === 'kanban' ? (
         <KanbanView
@@ -753,6 +800,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
                 onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
+                disableDrag={!isCustomSort}
               />
             )
           })}
