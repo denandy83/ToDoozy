@@ -56,6 +56,14 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       } else {
         set({ projects: projectMap, loading: false })
       }
+      // Hydrate members for all projects (for sidebar shared icon)
+      const membersMap: Record<string, ProjectMember[]> = { ...get().members }
+      for (const project of projects) {
+        try {
+          membersMap[project.id] = await window.api.projects.getMembers(project.id)
+        } catch { /* ignore */ }
+      }
+      set({ members: membersMap })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       set({ error: message, loading: false })

@@ -142,7 +142,8 @@ const api: TodoozyAPI = {
     getSession: () => ipcRenderer.invoke('auth:getSession'),
     clearSession: () => ipcRenderer.invoke('auth:clearSession'),
     getSupabaseConfig: () => ipcRenderer.invoke('auth:getSupabaseConfig'),
-    openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url)
+    openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url),
+    switchDatabase: (userId) => ipcRenderer.invoke('auth:switchDatabase', userId)
   },
 
   quickadd: {

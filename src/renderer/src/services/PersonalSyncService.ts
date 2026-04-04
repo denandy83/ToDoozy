@@ -9,7 +9,24 @@ import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import type { Task, Status, Label } from '../../../shared/types'
 
-const CHUNK_SIZE = 50
+/** Mark a successful push in the sync store */
+function markSynced(): void {
+  useSyncStore.getState().setLastSynced()
+}
+
+/** Track which projects have been confirmed in Supabase this session */
+const confirmedProjects = new Set<string>()
+
+/** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
+async function ensureProjectInSupabase(projectId: string): Promise<void> {
+  if (confirmedProjects.has(projectId)) return
+
+  const project = await window.api.projects.findById(projectId)
+  if (!project) return
+
+  await pushProject(project)
+  confirmedProjects.add(projectId)
+}
 
 // ── Push Operations ──────────────────────────────────────────────────
 
@@ -21,6 +38,9 @@ export async function pushTask(task: Task): Promise<void> {
     const supabase = await getSupabase()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
+
+    // Ensure the project exists in Supabase (RLS requires project_members entry)
+    await ensureProjectInSupabase(task.project_id)
 
     // Get label names for this task
     const taskLabels = await window.api.tasks.getLabels(task.id)
@@ -51,7 +71,9 @@ export async function pushTask(task: Task): Promise<void> {
       created_at: task.created_at,
       updated_at: task.updated_at
     })
-    if (error) console.error('[PersonalSync] pushTask error:', error)
+    if (error) {
+      console.error('[PersonalSync] pushTask error:', error.message, error.code, error.details, 'task:', task.id, 'project:', task.project_id)
+    } else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushTask failed:', err)
     // Queue for later
@@ -66,6 +88,7 @@ export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
     await supabase.from('tasks').delete().eq('id', taskId)
+    markSynced()
   } catch (err) {
     console.error('[PersonalSync] deleteTask failed:', err)
   }
@@ -76,8 +99,9 @@ export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
  */
 export async function pushStatus(status: Status): Promise<void> {
   try {
+    await ensureProjectInSupabase(status.project_id)
     const supabase = await getSupabase()
-    const { error } = await supabase.from('statuses').upsert({
+    const payload = {
       id: status.id,
       project_id: status.project_id,
       name: status.name,
@@ -88,8 +112,11 @@ export async function pushStatus(status: Status): Promise<void> {
       is_default: status.is_default,
       created_at: status.created_at,
       updated_at: status.updated_at
-    })
-    if (error) console.error('[PersonalSync] pushStatus error:', error)
+    }
+    const { error } = await supabase.from('statuses').upsert(payload)
+    if (error) {
+      console.error('[PersonalSync] pushStatus error:', error.message, error.code, error.details, 'payload:', JSON.stringify({ id: status.id, project_id: status.project_id }))
+    } else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushStatus failed:', err)
   }
@@ -110,6 +137,7 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
       updated_at: label.updated_at
     })
     if (error) console.error('[PersonalSync] pushLabel error:', error)
+    else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushLabel failed:', err)
   }
@@ -122,6 +150,7 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
     await supabase.from('user_labels').delete().eq('id', labelId)
+    markSynced()
   } catch (err) {
     console.error('[PersonalSync] deleteLabel failed:', err)
   }
@@ -141,6 +170,7 @@ export async function pushSetting(key: string, value: string, userId: string): P
       updated_at: new Date().toISOString()
     })
     if (error) console.error('[PersonalSync] pushSetting error:', error)
+    else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushSetting failed:', err)
   }
@@ -165,6 +195,7 @@ export async function pushSavedView(view: {
       updated_at: new Date().toISOString()
     })
     if (error) console.error('[PersonalSync] pushSavedView error:', error)
+    else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushSavedView failed:', err)
   }
@@ -189,6 +220,7 @@ export async function pushProjectArea(area: {
       updated_at: new Date().toISOString()
     })
     if (error) console.error('[PersonalSync] pushProjectArea error:', error)
+    else markSynced()
   } catch (err) {
     console.error('[PersonalSync] pushProjectArea failed:', err)
   }
@@ -201,6 +233,7 @@ export async function deleteSavedViewFromSupabase(viewId: string): Promise<void>
   try {
     const supabase = await getSupabase()
     await supabase.from('user_saved_views').delete().eq('id', viewId)
+    markSynced()
   } catch (err) {
     console.error('[PersonalSync] deleteSavedView failed:', err)
   }
@@ -213,6 +246,7 @@ export async function deleteProjectAreaFromSupabase(areaId: string): Promise<voi
   try {
     const supabase = await getSupabase()
     await supabase.from('user_project_areas').delete().eq('id', areaId)
+    markSynced()
   } catch (err) {
     console.error('[PersonalSync] deleteProjectArea failed:', err)
   }
@@ -225,6 +259,7 @@ export async function deleteStatusFromSupabase(statusId: string): Promise<void> 
   try {
     const supabase = await getSupabase()
     await supabase.from('statuses').delete().eq('id', statusId)
+    markSynced()
   } catch (err) {
     console.error('[PersonalSync] deleteStatus failed:', err)
   }
@@ -263,28 +298,20 @@ export async function pushProject(project: {
 }): Promise<void> {
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('projects').upsert({
-      id: project.id,
-      owner_id: project.owner_id,
-      name: project.name,
-      description: project.description,
-      color: project.color,
-      icon: project.icon,
-      created_at: project.created_at,
-      updated_at: project.updated_at
+    // Use the share_project RPC (SECURITY DEFINER) which atomically inserts
+    // the project + owner membership, bypassing RLS chicken-and-egg problem
+    const { error } = await supabase.rpc('share_project', {
+      p_id: project.id,
+      p_name: project.name,
+      p_description: project.description,
+      p_color: project.color ?? '#888888',
+      p_icon: project.icon ?? 'folder'
     })
     if (error) {
       console.error('[PersonalSync] pushProject error:', error)
-      return
+    } else {
+      markSynced()
     }
-
-    // Ensure owner is a member
-    await supabase.from('project_members').upsert({
-      project_id: project.id,
-      user_id: project.owner_id,
-      role: 'owner',
-      joined_at: project.created_at
-    })
   } catch (err) {
     console.error('[PersonalSync] pushProject failed:', err)
   }
@@ -306,8 +333,9 @@ export async function fullUpload(userId: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('No authenticated session')
 
-    // Count total items for progress
-    const projects = await window.api.projects.getProjectsForUser(userId)
+    // Count total items for progress — only sync projects owned by this user
+    const allProjects = await window.api.projects.getProjectsForUser(userId)
+    const projects = allProjects.filter((p) => p.owner_id === userId)
     const allLabels = await window.api.labels.findAll(userId)
     const allSettings = await window.api.settings.getAll(userId)
     const savedViews = await window.api.savedViews.findByUserId(userId)
@@ -344,15 +372,19 @@ export async function fullUpload(userId: string): Promise<void> {
       const labelData = projectLabels.map((l) => ({ name: l.name, color: l.color }))
       await supabase.from('projects').update({ label_data: JSON.stringify(labelData) }).eq('id', project.id)
 
-      // Push tasks in chunks
-      const tasks = await window.api.tasks.findByProjectId(project.id)
+      // Push ALL tasks (including archived and templates)
+      // Parent tasks first, then subtasks (to satisfy FK constraint on parent_id)
+      const activeTasks = await window.api.tasks.findByProjectId(project.id)
+      const archivedTasks = await window.api.tasks.findArchived(project.id)
+      const templateTasks = await window.api.tasks.findTemplates(project.id)
+      const allTasks = [...activeTasks, ...archivedTasks, ...templateTasks]
+      const parentTasks = allTasks.filter((t) => !t.parent_id)
+      const subtasks = allTasks.filter((t) => t.parent_id)
+      const tasks = [...parentTasks, ...subtasks]
       totalItems += tasks.length
-      for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
-        const chunk = tasks.slice(i, i + CHUNK_SIZE)
-        for (const task of chunk) {
-          await pushTask(task)
-          updateProgress()
-        }
+      for (const task of tasks) {
+        await pushTask(task)
+        updateProgress()
       }
     }
 
@@ -378,11 +410,16 @@ export async function fullUpload(userId: string): Promise<void> {
       }
     } catch { /* areas might not exist */ }
 
+    // Verify sync by checking counts
+    const { count: sbProjects } = await supabase.from('project_members').select('*', { count: 'exact', head: true }).eq('user_id', userId)
+    const { count: sbStatuses } = await supabase.from('statuses').select('*', { count: 'exact', head: true })
+    const { count: sbTasks } = await supabase.from('tasks').select('*', { count: 'exact', head: true })
+    console.log(`[PersonalSync] Full upload done — Supabase: ${sbProjects} project memberships, ${sbStatuses} statuses, ${sbTasks} tasks (local: ${projects.length} projects, ${totalItems} total items)`)
+
     // Mark sync complete
     await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
     syncStore.setLastSynced()
     syncStore.setFirstSync(false)
-    console.log('[PersonalSync] Full upload complete')
   } catch (err) {
     console.error('[PersonalSync] Full upload failed:', err)
     syncStore.setError(err instanceof Error ? err.message : 'Sync failed')
@@ -613,24 +650,18 @@ export async function initSync(userId: string): Promise<void> {
   const syncStore = useSyncStore.getState()
 
   if (!lastSyncAt) {
-    // Check if there's data in Supabase
-    const supabase = await getSupabase()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return
+    // Check if there's local data to decide: upload or pull
+    const localProjects = await window.api.projects.getProjectsForUser(userId)
+    const hasLocalData = localProjects.length > 0
 
-    const { count } = await supabase
-      .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', session.user.id)
-
-    if (count && count > 0) {
-      // Existing data in Supabase — new device, pull everything
-      console.log('[PersonalSync] New device detected, pulling data from Supabase')
-      await fullPull(userId)
-    } else {
-      // No data in Supabase — first-ever sync, upload everything
-      console.log('[PersonalSync] First-time sync, uploading data to Supabase')
+    if (hasLocalData) {
+      // Local data exists — upload to Supabase (existing device, first sync or retry)
+      console.log('[PersonalSync] Local data found, uploading to Supabase')
       await fullUpload(userId)
+    } else {
+      // No local data — new device, pull from Supabase
+      console.log('[PersonalSync] No local data, pulling from Supabase')
+      await fullPull(userId)
     }
   } else {
     syncStore.setLastSynced()

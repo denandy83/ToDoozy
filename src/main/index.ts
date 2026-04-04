@@ -2,7 +2,7 @@ import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { app, shell, BrowserWindow, globalShortcut } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDatabase, closeDatabase, getDatabase } from './database'
+import { initDatabase, closeDatabase, getDatabase, getDatabasePath } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
 import { showQuickAddWindow } from './quick-add'
 import { createTray, destroyTray } from './tray'
@@ -254,18 +254,23 @@ app.whenReady().then(() => {
   }
 
   // Poll for external database changes (e.g., MCP server writing tasks)
-  const baseDbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
-  const dbPath = baseDbPath + '-wal'
+  let lastWalPath = getDatabasePath() + '-wal'
   let lastMtime = 0
   try {
     const { statSync } = require('fs') as typeof import('fs')
-    lastMtime = statSync(dbPath).mtimeMs
+    lastMtime = statSync(lastWalPath).mtimeMs
   } catch { /* WAL file may not exist yet */ }
 
   setInterval(() => {
     try {
+      const walPath = getDatabasePath() + '-wal'
+      // Reset mtime tracking if DB switched (per-user DB)
+      if (walPath !== lastWalPath) {
+        lastWalPath = walPath
+        lastMtime = 0
+      }
       const { statSync } = require('fs') as typeof import('fs')
-      const mtime = statSync(dbPath).mtimeMs
+      const mtime = statSync(walPath).mtimeMs
       if (mtime > lastMtime) {
         lastMtime = mtime
         for (const win of BrowserWindow.getAllWindows()) {

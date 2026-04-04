@@ -756,11 +756,11 @@ function SortableViewItem({ view, count, active, onClick, onContextMenu }: Sorta
 
 function ProjectNavItem({
   project,
-  count,
   active,
   onClick,
   isDragging
 }: ProjectNavItemProps): React.JSX.Element {
+  const memberCount = useProjectStore((s) => s.members[project.id]?.length ?? 0)
   const droppableId = isDragging ? `nav-project-${project.id}` : undefined
   const { isOver, setNodeRef } = useDroppable({
     id: droppableId ?? `nav-project-${project.id}`,
@@ -789,17 +789,8 @@ function ProjectNavItem({
       <span className="flex-1 truncate text-[13px] font-light tracking-tight">
         {project.name}
       </span>
-      {project.is_shared === 1 && (
+      {memberCount > 1 && (
         <Users size={12} className="flex-shrink-0 text-muted/50" />
-      )}
-      {count > 0 && (
-        <span
-          className={`text-[10px] font-bold tabular-nums ${
-            active ? 'text-accent' : 'text-muted/60'
-          }`}
-        >
-          {count}
-        </span>
       )}
     </button>
   )

@@ -1,10 +1,12 @@
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
+import { existsSync, copyFileSync } from 'fs'
 import { migrations } from './migrations'
 import { withTransaction } from './transaction'
 
 let db: DatabaseSync | null = null
+let currentDbPath: string | null = null
 
 export function getDatabase(): DatabaseSync {
   if (!db) {
@@ -13,25 +15,83 @@ export function getDatabase(): DatabaseSync {
   return db
 }
 
-export function initDatabase(): DatabaseSync {
-  const dbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
+export function getDatabasePath(): string {
+  return currentDbPath ?? join(app.getPath('userData'), 'todoozy.db')
+}
 
-  db = new DatabaseSync(dbPath)
+function openDatabase(dbPath: string): DatabaseSync {
+  const database = new DatabaseSync(dbPath)
 
   // Enable WAL mode for better concurrent read performance
-  db.exec('PRAGMA journal_mode = WAL')
+  database.exec('PRAGMA journal_mode = WAL')
   // Enable foreign keys
-  db.exec('PRAGMA foreign_keys = ON')
+  database.exec('PRAGMA foreign_keys = ON')
 
   // Create schema_version table if it doesn't exist
-  db.exec(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY
     );
   `)
 
-  runMigrations(db)
+  runMigrations(database)
+  currentDbPath = dbPath
 
+  return database
+}
+
+export function initDatabase(): DatabaseSync {
+  const dbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
+  db = openDatabase(dbPath)
+  return db
+}
+
+/**
+ * Switch to a per-user database file. Closes the current DB and opens
+ * todoozy-{userId}.db, running migrations if needed.
+ */
+export function switchDatabase(userId: string): DatabaseSync {
+  // If dev DB is set, don't switch — always use the dev DB
+  if (process.env.TODOOZY_DEV_DB) return getDatabase()
+
+  const userDbPath = join(app.getPath('userData'), `todoozy-${userId}.db`)
+
+  // Already using this user's DB
+  if (currentDbPath === userDbPath && db) return db
+
+  // Close current DB
+  if (db) {
+    db.close()
+    db = null
+  }
+
+  // One-time migration: if per-user DB doesn't exist, copy the legacy todoozy.db
+  // so existing users don't lose their data when upgrading
+  let migratedFromLegacy = false
+  if (!existsSync(userDbPath)) {
+    const legacyDbPath = join(app.getPath('userData'), 'todoozy.db')
+    if (existsSync(legacyDbPath)) {
+      console.log(`[Database] Migrating legacy DB to per-user DB for ${userId}`)
+      copyFileSync(legacyDbPath, userDbPath)
+      // Also copy WAL/SHM files if they exist (ensures no data loss from uncommitted WAL entries)
+      const walPath = legacyDbPath + '-wal'
+      const shmPath = legacyDbPath + '-shm'
+      if (existsSync(walPath)) copyFileSync(walPath, userDbPath + '-wal')
+      if (existsSync(shmPath)) copyFileSync(shmPath, userDbPath + '-shm')
+      migratedFromLegacy = true
+    }
+  }
+
+  db = openDatabase(userDbPath)
+
+  // Clear last_sync_at after legacy migration so fullUpload runs and pushes
+  // all personal projects/tasks to Supabase for the first time
+  if (migratedFromLegacy) {
+    try {
+      db.prepare("DELETE FROM settings WHERE key = 'last_sync_at'").run()
+      console.log('[Database] Cleared last_sync_at to trigger full Supabase upload')
+    } catch { /* settings table may not exist yet */ }
+  }
   return db
 }
 

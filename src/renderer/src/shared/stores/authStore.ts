@@ -147,6 +147,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
 
       await persistSession(data.session)
+      await window.api.auth.switchDatabase(data.user.id)
       const localUser = await ensureLocalUser(
         data.user.id,
         data.user.email ?? email,
@@ -185,6 +186,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
 
       await persistSession(data.session)
+      await window.api.auth.switchDatabase(data.user.id)
       const localUser = await ensureLocalUser(
         data.user.id,
         data.user.email ?? email,
@@ -235,6 +237,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           return
         }
         await persistSession(sessionData.session)
+        await window.api.auth.switchDatabase(sessionData.user.id)
         const localUser = await ensureLocalUser(
           sessionData.user.id,
           sessionData.user.email ?? '',
@@ -257,6 +260,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           return
         }
         await persistSession(sessionData.session)
+        await window.api.auth.switchDatabase(sessionData.user.id)
         const localUser = await ensureLocalUser(
           sessionData.user.id,
           sessionData.user.email ?? '',
@@ -306,6 +310,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
 
       // Session restored — update stored tokens (may have been refreshed)
       await persistSession(data.session)
+      await window.api.auth.switchDatabase(data.user.id)
 
       const localUser = await ensureLocalUser(
         data.user.id,
