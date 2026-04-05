@@ -107,20 +107,22 @@ function App(): React.JSX.Element {
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
-    if (currentProjectId && currentUser) {
-      hydrateStatuses(currentProjectId)
-      hydrateLabels(currentProjectId)
-      hydrateAllForProject(currentProjectId, currentUser.id)
+    if (!currentProjectId || !currentUser) return
+    hydrateStatuses(currentProjectId)
+    hydrateLabels(currentProjectId)
+    hydrateAllForProject(currentProjectId, currentUser.id)
 
-      // Pull any new tasks from Supabase that aren't in local SQLite
-      // (e.g. created by Telegram bot or another device)
-      if (navigator.onLine) {
-        import('./services/PersonalSyncService').then(async ({ pullNewTasks }) => {
-          const pulled = await pullNewTasks(currentProjectId).catch(() => 0)
-          if (pulled > 0) hydrateAllForProject(currentProjectId, currentUser.id)
-        })
-      }
+    // Pull any new tasks from Supabase that aren't in local SQLite
+    // (e.g. created by Telegram bot or another device)
+    const doPull = async (): Promise<void> => {
+      if (!navigator.onLine) return
+      const { pullNewTasks } = await import('./services/PersonalSyncService')
+      const pulled = await pullNewTasks(currentProjectId).catch(() => 0)
+      if (pulled > 0) hydrateAllForProject(currentProjectId, currentUser.id)
     }
+    doPull()
+    const pollInterval = setInterval(doPull, 10_000)
+    return () => clearInterval(pollInterval)
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
