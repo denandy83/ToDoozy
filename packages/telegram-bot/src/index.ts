@@ -91,12 +91,6 @@ bot.on('message', async (msg) => {
       return
     }
 
-    // /default or .default — set default project for new tasks
-    if (normalized === '/default') {
-      await handleSetDefault(chatId)
-      return
-    }
-
     // /myday or .myday
     if (isMyDayCommand(normalized)) {
       await handleMyDay(chatId)
@@ -111,9 +105,22 @@ bot.on('message', async (msg) => {
     }
 
     // /projectname or .projectname (standalone) — list project tasks
+    // Project names take priority over built-in commands like /default
     const standaloneProject = isStandaloneCommand(normalized)
     if (standaloneProject) {
-      await handleListProject(chatId, standaloneProject)
+      // Check if it's actually a project name first
+      const matchedProject = await findProjectByName(standaloneProject)
+      if (matchedProject) {
+        await handleListProject(chatId, standaloneProject)
+        return
+      }
+      // Not a project — check if it's a built-in command
+      if (standaloneProject.toLowerCase() === 'default') {
+        await handleSetDefault(chatId)
+        return
+      }
+      // Unknown project
+      await bot.sendMessage(chatId, `Project "${standaloneProject}" not found.`)
       return
     }
 
@@ -217,7 +224,7 @@ async function sendHelp(chatId: number): Promise<void> {
     '`/done text` — fuzzy\\-match and complete a task',
     '`/myday` — show My Day tasks',
     '`/list` — show all projects \\(tap to view tasks\\)',
-    '`/default` — set default project for new tasks',
+    '`/default` — set default project for new tasks \\(if no project named "default"\\)',
     '`/help` — show this help',
     '',
     '*Example:*',
