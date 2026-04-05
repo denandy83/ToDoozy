@@ -108,6 +108,10 @@ bot.on('message', async (msg) => {
       await handleSetDefault(chatId)
       return
     }
+    if (normalized === '/settings') {
+      await handleSettings(chatId, msg)
+      return
+    }
     if (isMyDayCommand(normalized)) {
       await handleMyDay(chatId)
       return
@@ -156,6 +160,31 @@ bot.on('callback_query', async (query) => {
   }
 
   try {
+    if (query.data === 'settings:default') {
+      await bot.answerCallbackQuery(query.id)
+      await handleSetDefault(chatId)
+      return
+    }
+    if (query.data === 'settings:help') {
+      await bot.answerCallbackQuery(query.id)
+      await sendHelp(chatId)
+      return
+    }
+    if (query.data === 'settings:id') {
+      await bot.answerCallbackQuery(query.id)
+      const tgId = query.from.id
+      await bot.sendMessage(chatId, [
+        `🔑 *Your Telegram ID:* \`${tgId}\``,
+        ``,
+        `To allow another user to use this bot:`,
+        `1\\. Ask them to message @userinfobot to get their ID`,
+        `2\\. Add their ID to the \`ALLOWED\\_TELEGRAM\\_IDS\` environment variable`,
+        `   \\(comma\\-separated, e\\.g\\. \`${tgId},123456789\`\\)`,
+        `3\\. Restart the bot`,
+      ].join('\n'), { parse_mode: 'MarkdownV2' })
+      return
+    }
+
     if (query.data.startsWith('def:')) {
       const projectId = query.data.slice(4)
       // Look up project name
@@ -235,6 +264,7 @@ async function sendHelp(chatId: number): Promise<void> {
     '`/myday` — show My Day tasks',
     '`/list` — show all projects \\(tap to view tasks\\)',
     '`/default` — set default project for new tasks \\(if no project named "default"\\)',
+    '`/settings` — bot settings \\(default project, ID, etc\\.\\)',
     '`/help` — show this help',
     '',
     '*Example:*',
@@ -345,6 +375,30 @@ async function handleCreateTask(chatId: number, text: string): Promise<void> {
   }
 
   await bot.sendMessage(chatId, lines.join('\n'))
+}
+
+async function handleSettings(chatId: number, msg: TelegramBot.Message): Promise<void> {
+  const currentDefault = await getDefaultProjectName()
+  const telegramId = msg.from?.id ?? 'unknown'
+  const telegramName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || 'unknown'
+
+  const keyboard: TelegramBot.InlineKeyboardButton[][] = [
+    [{ text: `📁 Default: ${currentDefault ?? 'not set'} — change`, callback_data: 'settings:default' }],
+    [{ text: '📋 Show all commands', callback_data: 'settings:help' }],
+    [{ text: '🔑 My Telegram ID', callback_data: 'settings:id' }],
+  ]
+
+  await bot.sendMessage(chatId, [
+    `⚙️ *Settings*`,
+    ``,
+    `👤 *User:* ${escapeMarkdownV2(telegramName)}`,
+    `🆔 *Telegram ID:* \`${telegramId}\``,
+    `📁 *Default project:* ${escapeMarkdownV2(currentDefault ?? 'not set')}`,
+    `🔗 *Supabase user:* \`${userId.slice(0, 8)}…\``,
+  ].join('\n'), {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: keyboard }
+  })
 }
 
 async function handleSetDefault(chatId: number): Promise<void> {
