@@ -1,4 +1,24 @@
+import { existsSync, writeFileSync, unlinkSync, readFileSync } from 'fs'
+import { join } from 'path'
 import TelegramBot from 'node-telegram-bot-api'
+
+// Prevent multiple instances — PID file lock
+const PID_FILE = join(__dirname, '..', '.bot.pid')
+if (existsSync(PID_FILE)) {
+  const oldPid = parseInt(readFileSync(PID_FILE, 'utf-8'), 10)
+  try {
+    process.kill(oldPid, 0) // Check if process exists
+    console.error(`Bot already running (PID ${oldPid}). Killing old instance.`)
+    process.kill(oldPid, 'SIGTERM')
+    // Wait a moment for cleanup
+    const start = Date.now()
+    while (Date.now() - start < 2000) { try { process.kill(oldPid, 0) } catch { break } }
+  } catch { /* process doesn't exist, stale PID file */ }
+}
+writeFileSync(PID_FILE, String(process.pid))
+process.on('exit', () => { try { unlinkSync(PID_FILE) } catch { /* ignore */ } })
+process.on('SIGTERM', () => process.exit(0))
+process.on('SIGINT', () => process.exit(0))
 import {
   parseMessage,
   isStandaloneCommand,
