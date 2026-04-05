@@ -28,10 +28,10 @@ export interface SupabaseTask {
   priority: number
   due_date: string | null
   reference_url: string | null
-  is_in_my_day: boolean
-  is_archived: boolean
+  is_in_my_day: number
+  is_archived: number
   parent_id: string | null
-  sort_order: number
+  order_index: number
   created_at: string
   updated_at: string
   completed_date: string | null
@@ -99,7 +99,7 @@ export async function getDefaultStatus(projectId: string): Promise<SupabaseStatu
     .from('statuses')
     .select('*')
     .eq('project_id', projectId)
-    .eq('is_default', true)
+    .eq('is_default', 1)
     .limit(1)
     .single()
 
@@ -112,7 +112,7 @@ export async function getDoneStatus(projectId: string): Promise<SupabaseStatus |
     .from('statuses')
     .select('*')
     .eq('project_id', projectId)
-    .eq('is_done', true)
+    .eq('is_done', 1)
     .limit(1)
     .single()
 
@@ -207,16 +207,16 @@ export async function createTask(params: {
     if (defaultStatus) finalStatusId = defaultStatus.id
   }
 
-  // Get max sort_order
+  // Get max order_index
   const { data: maxRow } = await supabase
     .from('tasks')
-    .select('sort_order')
+    .select('order_index')
     .eq('project_id', projectId)
-    .order('sort_order', { ascending: false })
+    .order('order_index', { ascending: false })
     .limit(1)
     .single()
 
-  const sortOrder = (maxRow?.sort_order ?? 0) + 1
+  const sortOrder = (maxRow?.order_index ?? 0) + 1
 
   const id = uuidv4()
   const now = new Date().toISOString()
@@ -225,15 +225,16 @@ export async function createTask(params: {
     .insert({
       id,
       project_id: projectId,
+      owner_id: userId,
       title,
       status_id: finalStatusId,
       priority,
       due_date: dueDate,
       reference_url: referenceUrl,
-      is_in_my_day: false,
-      is_archived: false,
+      is_in_my_day: 0,
+      is_archived: 0,
       parent_id: null,
-      sort_order: sortOrder,
+      order_index: sortOrder,
       created_at: now,
       updated_at: now,
       completed_date: null
@@ -260,8 +261,8 @@ export async function getProjectTasks(projectId: string): Promise<(SupabaseTask 
     .from('tasks')
     .select('*')
     .eq('project_id', projectId)
-    .eq('is_archived', false)
-    .order('sort_order', { ascending: true })
+    .eq('is_archived', 0)
+    .order('order_index', { ascending: true })
 
   if (error) throw error
   if (!tasks) return []
@@ -325,8 +326,8 @@ export async function getMyDayTasks(): Promise<(SupabaseTask & { project_name: s
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('*')
-    .eq('is_in_my_day', true)
-    .eq('is_archived', false)
+    .eq('is_in_my_day', 1)
+    .eq('is_archived', 0)
 
   if (error) throw error
   if (!tasks || tasks.length === 0) return []
@@ -385,7 +386,7 @@ export async function getRecentTasks(limit: number = 10): Promise<(SupabaseTask 
     .from('tasks')
     .select('*')
     .in('project_id', projectIds)
-    .eq('is_archived', false)
+    .eq('is_archived', 0)
     .order('created_at', { ascending: false })
     .limit(limit * 2) // fetch extra to filter done
 

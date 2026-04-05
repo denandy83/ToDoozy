@@ -722,6 +722,58 @@ export async function fullPull(userId: string): Promise<void> {
 }
 
 /**
+ * Pull tasks from Supabase that don't exist in local SQLite for a given project.
+ * Returns the number of tasks pulled.
+ */
+export async function pullNewTasks(projectId: string): Promise<number> {
+  try {
+    const supabase = await getSupabase()
+    const { data: remoteTasks, error } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('project_id', projectId)
+
+    if (error || !remoteTasks) return 0
+
+    let pulled = 0
+    for (const rt of remoteTasks) {
+      const existing = await window.api.tasks.findById(rt.id)
+      if (!existing) {
+        // Ensure owner user record exists
+        const ownerId = rt.owner_id as string
+        const localOwner = await window.api.users.findById(ownerId)
+        if (!localOwner) {
+          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+        }
+        await window.api.tasks.create({
+          id: rt.id,
+          project_id: rt.project_id,
+          owner_id: ownerId,
+          title: rt.title,
+          description: rt.description,
+          status_id: rt.status_id,
+          priority: rt.priority ?? 0,
+          due_date: rt.due_date,
+          parent_id: rt.parent_id,
+          order_index: rt.order_index ?? 0,
+          assigned_to: rt.assigned_to,
+          is_template: rt.is_template ?? 0,
+          is_archived: rt.is_archived ?? 0,
+          completed_date: rt.completed_date,
+          recurrence_rule: rt.recurrence_rule,
+          reference_url: rt.reference_url
+        }).catch(() => {})
+        pulled++
+      }
+    }
+    if (pulled > 0) console.log(`[PersonalSync] Pulled ${pulled} new tasks for project ${projectId}`)
+    return pulled
+  } catch {
+    return 0
+  }
+}
+
+/**
  * Check if this is a new device (no last_sync_at) and initiate appropriate sync.
  */
 export async function initSync(userId: string): Promise<void> {
