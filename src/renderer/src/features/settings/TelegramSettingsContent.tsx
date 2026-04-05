@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Check, ExternalLink, Plus, X } from 'lucide-react'
+import { Check, ExternalLink } from 'lucide-react'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 
@@ -7,28 +7,20 @@ export function TelegramSettingsContent(): React.JSX.Element {
   const projects = useProjectStore((s) => s.projects)
   const { setSetting } = useSettingsStore()
   const defaultProject = useSetting('telegram_default_project')
-  const allowedIds = useSetting('telegram_allowed_ids')
-  const [newId, setNewId] = useState('')
-  const [idAdded, setIdAdded] = useState(false)
+  const telegramId = useSetting('telegram_user_id')
+  const [idInput, setIdInput] = useState(telegramId ?? '')
+  const [saved, setSaved] = useState(false)
 
   const sortedProjects = Object.values(projects).sort((a, b) => a.sidebar_order - b.sidebar_order)
 
-  const parsedIds = (allowedIds ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-
-  const handleAddId = useCallback(() => {
-    const trimmed = newId.trim()
-    if (!trimmed || parsedIds.includes(trimmed)) return
-    const updated = [...parsedIds, trimmed].join(',')
-    setSetting('telegram_allowed_ids', updated)
-    setNewId('')
-    setIdAdded(true)
-    setTimeout(() => setIdAdded(false), 2000)
-  }, [newId, parsedIds, setSetting])
-
-  const handleRemoveId = useCallback((id: string) => {
-    const updated = parsedIds.filter((i) => i !== id).join(',')
-    setSetting('telegram_allowed_ids', updated || null)
-  }, [parsedIds, setSetting])
+  const handleSaveId = useCallback(() => {
+    const trimmed = idInput.trim()
+    setSetting('telegram_user_id', trimmed || null)
+    // Also set as allowed ID for the bot
+    setSetting('telegram_allowed_ids', trimmed || null)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }, [idInput, setSetting])
 
   return (
     <div className="flex flex-col gap-6">
@@ -37,6 +29,33 @@ export function TelegramSettingsContent(): React.JSX.Element {
         <p className="text-sm font-light text-foreground/60">
           Create and manage tasks directly from Telegram.
         </p>
+      </div>
+
+      {/* Telegram User ID */}
+      <div>
+        <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Your Telegram ID</h4>
+        <p className="text-xs font-light text-foreground/50 mb-2">
+          Message{' '}
+          <button onClick={() => window.open('https://t.me/userinfobot', '_blank')} className="text-accent hover:underline inline-flex items-center gap-0.5">
+            @userinfobot <ExternalLink size={10} />
+          </button>
+          {' '}on Telegram to get your ID, then paste it here.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={idInput}
+            onChange={(e) => setIdInput(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={(e) => e.key === 'Enter' && handleSaveId()}
+            onBlur={handleSaveId}
+            placeholder="e.g. 674103800"
+            className="flex-1 rounded-lg border border-border bg-transparent px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
+          />
+          {saved && <Check size={16} className="text-success self-center" />}
+        </div>
+        {telegramId && (
+          <p className="text-[10px] font-light text-success/60 mt-1">Connected — bot will respond to this ID</p>
+        )}
       </div>
 
       {/* Default Project */}
@@ -55,50 +74,6 @@ export function TelegramSettingsContent(): React.JSX.Element {
             <option key={p.id} value={p.name}>{p.name}</option>
           ))}
         </select>
-      </div>
-
-      {/* Allowed Users */}
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Allowed Users</h4>
-        <p className="text-xs font-light text-foreground/50 mb-2">
-          Telegram user IDs that can use the bot. Get yours from{' '}
-          <button onClick={() => window.open('https://t.me/userinfobot', '_blank')} className="text-accent hover:underline inline-flex items-center gap-0.5">
-            @userinfobot <ExternalLink size={10} />
-          </button>
-        </p>
-
-        {/* Current IDs */}
-        {parsedIds.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {parsedIds.map((id) => (
-              <div key={id} className="inline-flex items-center gap-1 rounded-full bg-accent/12 px-2.5 py-1 text-[11px] font-mono text-accent">
-                {id}
-                <button onClick={() => handleRemoveId(id)} className="rounded-full p-0.5 hover:bg-accent/20 transition-colors">
-                  <X size={10} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add new ID */}
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newId}
-            onChange={(e) => setNewId(e.target.value.replace(/[^0-9]/g, ''))}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddId()}
-            placeholder="Enter Telegram user ID"
-            className="flex-1 rounded-lg border border-border bg-transparent px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
-          />
-          <button
-            onClick={handleAddId}
-            disabled={!newId.trim()}
-            className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-30"
-          >
-            {idAdded ? <Check size={14} className="text-success" /> : <Plus size={14} />}
-          </button>
-        </div>
       </div>
 
       {/* Commands Reference */}
