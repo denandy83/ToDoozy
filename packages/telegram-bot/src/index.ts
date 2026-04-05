@@ -76,51 +76,61 @@ bot.on('message', async (msg) => {
   const text = msg.text.trim()
 
   try {
-    // Normalize . prefix to / for command parsing
-    const normalized = text.startsWith('.') ? '/' + text.slice(1) : text
+    const isDotCommand = text.startsWith('.')
+    // Normalize . prefix to / for uniform parsing
+    const normalized = isDotCommand ? '/' + text.slice(1) : text
 
-    // /help or .help
+    // Dot commands always run built-in commands directly
+    // Slash commands check project names first, then fall back to built-in
+    if (normalized.startsWith('/') && !isDotCommand) {
+      // /projectname — check if it matches a real project first
+      const standaloneProject = isStandaloneCommand(normalized)
+      if (standaloneProject) {
+        const matchedProject = await findProjectByName(standaloneProject)
+        if (matchedProject) {
+          await handleListProject(chatId, standaloneProject)
+          return
+        }
+        // Not a project — fall through to built-in command check below
+      }
+    }
+
+    // Built-in commands (always for ., fallback for /)
     if (normalized === '/help' || normalized === '/start') {
       await sendHelp(chatId)
       return
     }
-
-    // /list or .list — show projects with inline buttons
     if (normalized === '/list') {
       await handleListProjects(chatId)
       return
     }
-
-    // /myday or .myday
+    if (normalized === '/default') {
+      await handleSetDefault(chatId)
+      return
+    }
     if (isMyDayCommand(normalized)) {
       await handleMyDay(chatId)
       return
     }
-
-    // /done or .done or /done <query>
     const doneCmd = isDoneCommand(normalized)
     if (doneCmd) {
       await handleDone(chatId, doneCmd.query)
       return
     }
 
-    // /projectname or .projectname (standalone) — list project tasks
-    // Project names take priority over built-in commands like /default
-    const standaloneProject = isStandaloneCommand(normalized)
-    if (standaloneProject) {
-      // Check if it's actually a project name first
-      const matchedProject = await findProjectByName(standaloneProject)
-      if (matchedProject) {
+    // Dot-prefixed project names (e.g. .personal)
+    if (isDotCommand) {
+      const standaloneProject = isStandaloneCommand(normalized)
+      if (standaloneProject) {
         await handleListProject(chatId, standaloneProject)
         return
       }
-      // Not a project — check if it's a built-in command
-      if (standaloneProject.toLowerCase() === 'default') {
-        await handleSetDefault(chatId)
-        return
-      }
-      // Unknown project
-      await bot.sendMessage(chatId, `Project "${standaloneProject}" not found.`)
+    }
+
+    // Slash command that didn't match project or built-in
+    if (normalized.startsWith('/') && isStandaloneCommand(normalized)) {
+      const name = isStandaloneCommand(normalized)
+      await bot.sendMessage(chatId, `Project "${name}" not found.`)
       return
     }
 
