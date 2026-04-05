@@ -3,6 +3,7 @@ import { shallow } from 'zustand/shallow'
 import type { User, CreateUserInput, UpdateUserInput } from '../../../../shared/types'
 import { getSupabase, parseAuthTokensFromUrl } from '../../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
+import { useSyncStore } from './syncStore'
 
 interface AuthState {
   currentUser: User | null
@@ -85,6 +86,7 @@ async function offlineFallback(
     const user = await window.api.users.findById(userId)
     if (user) {
       console.log('[Auth] Offline fallback: loaded user from local DB')
+      useSyncStore.getState().setStatus('offline')
       return user
     }
   } catch (err) {
