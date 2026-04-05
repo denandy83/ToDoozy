@@ -493,6 +493,7 @@ export async function declineInvite(token: string): Promise<void> {
  * but doesn't have locally. Returns project IDs to sync down.
  */
 export async function discoverRemoteMemberships(_userId: string): Promise<string[]> {
+  if (!navigator.onLine) return []
   const supabase = await getSupabase()
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return []
@@ -593,6 +594,11 @@ async function syncMembersDown(projectId: string): Promise<void> {
  * Sync all shared project data from Supabase to local SQLite.
  */
 export async function syncProjectDown(projectId: string, userId: string): Promise<void> {
+  // Never sync down when offline — would delete all local tasks
+  if (!navigator.onLine) {
+    console.log('[SyncService] Skipping syncProjectDown (offline)')
+    return
+  }
   const supabase = await getSupabase()
 
   // Get shared project
