@@ -54,27 +54,30 @@ bot.on('message', async (msg) => {
   const text = msg.text.trim()
 
   try {
-    // /help
-    if (text === '/help' || text === '/start') {
+    // Normalize . prefix to / for command parsing
+    const normalized = text.startsWith('.') ? '/' + text.slice(1) : text
+
+    // /help or .help
+    if (normalized === '/help' || normalized === '/start') {
       await sendHelp(chatId)
       return
     }
 
-    // /myday
-    if (isMyDayCommand(text)) {
+    // /myday or .myday
+    if (isMyDayCommand(normalized)) {
       await handleMyDay(chatId)
       return
     }
 
-    // /done or /done <query>
-    const doneCmd = isDoneCommand(text)
+    // /done or .done or /done <query>
+    const doneCmd = isDoneCommand(normalized)
     if (doneCmd) {
       await handleDone(chatId, doneCmd.query)
       return
     }
 
-    // /projectname (standalone) — list project tasks
-    const standaloneProject = isStandaloneCommand(text)
+    // /projectname or .projectname (standalone) — list project tasks
+    const standaloneProject = isStandaloneCommand(normalized)
     if (standaloneProject) {
       await handleListProject(chatId, standaloneProject)
       return
@@ -137,21 +140,22 @@ async function sendHelp(chatId: number): Promise<void> {
     '*ToDoozy Bot*',
     '',
     'Send any text to create a task\\. Use smart syntax:',
-    '`@label` — assign label',
-    '`/project` — assign to project \\(mixed with text\\)',
+    '`@label` — assign label \\(auto\\-created if new\\)',
+    '`/project` — assign to project \\(fuzzy\\-matched\\)',
     '`d:today` — due date \\(today, tomorrow, monday, 2026\\-04\\-10\\)',
     '`p:high` — priority \\(low, normal, high, urgent\\)',
     '`r:url` — reference URL',
     '`s:status` — set status',
     '',
-    '*Commands:*',
+    '*Commands \\(use `/` or `.`\\):*',
     '`/projectname` — list tasks in a project',
     '`/done` — show recent tasks to complete',
     '`/done text` — fuzzy\\-match and complete a task',
     '`/myday` — show My Day tasks',
+    '`/help` — show this help',
     '',
     '*Example:*',
-    '`eggs and milk /groceries d:today @fast`'
+    '`eggs and milk /groceries d:today @fast p:high`'
   ].join('\n'), { parse_mode: 'MarkdownV2' })
 }
 
