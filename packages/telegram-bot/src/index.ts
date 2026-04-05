@@ -18,7 +18,9 @@ import {
   getRecentTasks,
   fuzzyFindTask,
   findStatusByName,
-  SupabaseLabel
+  SupabaseLabel,
+  supabase,
+  userId
 } from './supabase'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -60,6 +62,18 @@ bot.on('message', async (msg) => {
     // /help or .help
     if (normalized === '/help' || normalized === '/start') {
       await sendHelp(chatId)
+      return
+    }
+
+    // /list or .list — show projects with inline buttons
+    if (normalized === '/list') {
+      await handleListProjects(chatId)
+      return
+    }
+
+    // /default or .default — set default project for new tasks
+    if (normalized === '/default') {
+      await handleSetDefault(chatId)
       return
     }
 
@@ -105,6 +119,36 @@ bot.on('callback_query', async (query) => {
   }
 
   try {
+    if (query.data.startsWith('def:')) {
+      const projectId = query.data.slice(4)
+      // Look up project name
+      const projects = await getProjects()
+      const project = projects.find((p) => p.id === projectId)
+      const projectName = project?.name ?? projectId
+      // Save to user_settings
+      await supabase.from('user_settings').upsert({
+        id: `${userId}:telegram_default_project`,
+        user_id: userId,
+        key: 'telegram_default_project',
+        value: projectName,
+        updated_at: new Date().toISOString()
+      })
+      await bot.answerCallbackQuery(query.id, { text: `Default: ${projectName}` })
+      await bot.editMessageText(`✅ Default project set to *${escapeMarkdownV2(projectName)}*`, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'MarkdownV2'
+      }).catch(() => {})
+      return
+    }
+
+    if (query.data.startsWith('list:')) {
+      const projectName = query.data.slice(5)
+      await bot.answerCallbackQuery(query.id)
+      await handleListProject(chatId, projectName)
+      return
+    }
+
     if (query.data.startsWith('done:')) {
       const taskId = query.data.slice(5)
       const success = await completeTask(taskId)
@@ -152,6 +196,8 @@ async function sendHelp(chatId: number): Promise<void> {
     '`/done` — show recent tasks to complete',
     '`/done text` — fuzzy\\-match and complete a task',
     '`/myday` — show My Day tasks',
+    '`/list` — show all projects \\(tap to view tasks\\)',
+    '`/default` — set default project for new tasks',
     '`/help` — show this help',
     '',
     '*Example:*',
@@ -181,14 +227,31 @@ async function handleCreateTask(chatId: number, text: string): Promise<void> {
       return
     }
   } else {
-    // Default to first project (personal)
-    const projects = await getProjects()
-    if (projects.length > 0) {
-      // Prefer a project owned by the user
-      const owned = projects.find((p) => p.owner_id === (process.env.TODOOZY_USER_ID ?? ''))
-      const proj = owned ?? projects[0]
-      projectId = proj.id
-      projectName = proj.name
+    // Check for user's telegram default project setting
+    const { data: defaultSetting } = await supabase
+      .from('user_settings')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'telegram_default_project')
+      .single()
+
+    if (defaultSetting?.value) {
+      const proj = await findProjectByName(defaultSetting.value)
+      if (proj) {
+        projectId = proj.id
+        projectName = proj.name
+      }
+    }
+
+    // Fallback to first owned project
+    if (!projectId) {
+      const projects = await getProjects()
+      if (projects.length > 0) {
+        const owned = projects.find((p) => p.owner_id === (process.env.TODOOZY_USER_ID ?? ''))
+        const proj = owned ?? projects[0]
+        projectId = proj.id
+        projectName = proj.name
+      }
     }
   }
 
@@ -245,6 +308,72 @@ async function handleCreateTask(chatId: number, text: string): Promise<void> {
   }
 
   await bot.sendMessage(chatId, lines.join('\n'))
+}
+
+async function handleSetDefault(chatId: number): Promise<void> {
+  const projects = await getProjects()
+  if (projects.length === 0) {
+    await bot.sendMessage(chatId, 'No projects found.')
+    return
+  }
+
+  // Show current default
+  const currentDefault = await getDefaultProjectName()
+  const ROW_SIZE = 2
+  const buttons: TelegramBot.InlineKeyboardButton[][] = []
+  for (let i = 0; i < projects.length; i += ROW_SIZE) {
+    buttons.push(
+      projects.slice(i, i + ROW_SIZE).map((p) => ({
+        text: `${p.name === currentDefault ? '✅ ' : ''}${p.name}`,
+        callback_data: `def:${p.id}`
+      }))
+    )
+  }
+
+  await bot.sendMessage(chatId, `*Default project:* ${escapeMarkdownV2(currentDefault ?? 'none')}`, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: buttons }
+  })
+}
+
+async function getDefaultProjectName(): Promise<string | null> {
+  const { data } = await supabase
+    .from('user_settings')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', 'telegram_default_project')
+    .single()
+  if (!data?.value) return null
+  const proj = await findProjectByName(data.value)
+  return proj?.name ?? null
+}
+
+function escapeMarkdownV2(text: string): string {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
+}
+
+async function handleListProjects(chatId: number): Promise<void> {
+  const projects = await getProjects()
+  if (projects.length === 0) {
+    await bot.sendMessage(chatId, 'No projects found.')
+    return
+  }
+
+  const ROW_SIZE = 2
+  const buttons: TelegramBot.InlineKeyboardButton[][] = []
+  for (let i = 0; i < projects.length; i += ROW_SIZE) {
+    buttons.push(
+      projects.slice(i, i + ROW_SIZE).map((p) => ({
+        text: `📁 ${p.name}`,
+        callback_data: `list:${p.name}`
+      }))
+    )
+  }
+
+  await bot.sendMessage(chatId, '*Your Projects:*\nClick to show all open tasks', {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: buttons }
+  })
 }
 
 async function handleListProject(chatId: number, projectName: string): Promise<void> {
