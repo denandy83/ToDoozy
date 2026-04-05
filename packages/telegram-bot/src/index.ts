@@ -426,39 +426,14 @@ async function handleListProject(chatId: number, projectName: string): Promise<v
     return
   }
 
-  const lines: string[] = []
-  lines.push(`📁 ${project.name} (${tasks.length} task${tasks.length === 1 ? '' : 's'})`)
-  lines.push('')
-
-  for (const task of tasks.slice(0, 20)) {
-    let line = `○ ${task.title}`
-    const meta: string[] = []
-    if (task.due_date) meta.push(`📅 ${formatDueDate(task.due_date)}`)
-    if (task.priority > 0) {
-      const pLabels = ['', 'p:low', 'p:normal', 'p:high', 'p:urgent']
-      meta.push(pLabels[task.priority])
-    }
-    if (task.labels.length > 0) {
-      meta.push(task.labels.map((l) => l.name).join(', '))
-    }
-    if (meta.length > 0) line += ` · ${meta.join(' · ')}`
-    lines.push(line)
-  }
-
-  // Build inline keyboard with done buttons
+  // Build inline keyboard — one task per row with done button
   const keyboard: TelegramBot.InlineKeyboardButton[][] = []
-  const ROW_SIZE = 2
-  for (let i = 0; i < Math.min(tasks.length, 20); i += ROW_SIZE) {
-    const row: TelegramBot.InlineKeyboardButton[] = []
-    for (let j = i; j < Math.min(i + ROW_SIZE, tasks.length, 20); j++) {
-      const t = tasks[j]
-      const label = `✓ ${t.title.length > 20 ? t.title.slice(0, 20) + '…' : t.title}`
-      row.push({ text: label, callback_data: `done:${t.id}` })
-    }
-    keyboard.push(row)
+  for (const t of tasks.slice(0, 20)) {
+    const label = `○ ${t.title.length > 30 ? t.title.slice(0, 30) + '…' : t.title}`
+    keyboard.push([{ text: label, callback_data: `done:${t.id}` }])
   }
 
-  await bot.sendMessage(chatId, lines.join('\n'), {
+  await bot.sendMessage(chatId, `📁 ${project.name} — ${tasks.length} task${tasks.length === 1 ? '' : 's'}`, {
     reply_markup: { inline_keyboard: keyboard }
   })
 }
