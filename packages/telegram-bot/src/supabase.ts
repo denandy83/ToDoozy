@@ -207,16 +207,29 @@ export async function createTask(params: {
     if (defaultStatus) finalStatusId = defaultStatus.id
   }
 
-  // Get max order_index
-  const { data: maxRow } = await supabase
+  // Check user's task position preference
+  const { data: posSetting } = await supabase
+    .from('user_settings')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', 'new_task_position')
+    .single()
+  const position = posSetting?.value ?? 'top'
+
+  // Get order_index based on position preference
+  const { data: edgeRow } = await supabase
     .from('tasks')
     .select('order_index')
     .eq('project_id', projectId)
-    .order('order_index', { ascending: false })
+    .eq('status_id', finalStatusId ?? '')
+    .eq('is_archived', 0)
+    .order('order_index', { ascending: position === 'top' })
     .limit(1)
     .single()
 
-  const sortOrder = (maxRow?.order_index ?? 0) + 1
+  const sortOrder = position === 'top'
+    ? (edgeRow?.order_index ?? 0) - 1
+    : (edgeRow?.order_index ?? 0) + 1
 
   const id = uuidv4()
   const now = new Date().toISOString()
