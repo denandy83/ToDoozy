@@ -303,7 +303,7 @@ export function DetailPanel(): React.JSX.Element | null {
       <div className={resizeHandleClass} onMouseDown={handleResizeStart} />
 
       {isOfflineShared && (
-        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2">
+        <div className="flex items-center gap-2 bg-warning/10 px-4 py-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-warning">Read-only</span>
           <span className="text-[11px] font-light text-warning/80">Offline</span>
         </div>
@@ -537,7 +537,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
 
   if (position !== 'bottom' || colCount <= 1) {
     return (
-      <div ref={containerRef} className={`flex-1 overflow-y-auto p-4 ${props.readOnly ? 'pointer-events-none select-none' : ''}`}>
+      <div ref={containerRef} className={`flex-1 overflow-y-auto p-4 ${props.readOnly ? 'pointer-events-none' : ''}`} style={props.readOnly ? { userSelect: 'none' } : undefined}>
         <div className="flex flex-col gap-5">
           {sections}
         </div>
@@ -554,7 +554,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
   }
 
   return (
-    <div ref={containerRef} className={`flex flex-1 gap-6 overflow-hidden p-4 ${props.readOnly ? 'pointer-events-none select-none' : ''}`}>
+    <div ref={containerRef} className={`flex flex-1 gap-6 overflow-hidden p-4 ${props.readOnly ? 'pointer-events-none' : ''}`} style={props.readOnly ? { userSelect: 'none' } : undefined}>
       {columns.map((colItems, i) => (
         <div key={i} className="flex flex-1 flex-col gap-5 overflow-y-auto">
           {colItems}

@@ -777,7 +777,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       {isOfflineShared && (
-        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2.5">
+        <div className="flex items-center gap-2 bg-warning/10 px-4 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-widest text-warning">Offline</span>
           <span className="text-xs font-light text-warning/80">Shared projects are read-only while offline</span>
         </div>
