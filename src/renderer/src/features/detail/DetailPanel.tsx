@@ -303,9 +303,9 @@ export function DetailPanel(): React.JSX.Element | null {
       <div className={resizeHandleClass} onMouseDown={handleResizeStart} />
 
       {isOfflineShared && (
-        <div className="flex items-center gap-2 bg-warning/10 px-4 py-2">
+        <div className="flex items-center gap-2 border-b border-border bg-warning/10 px-4 py-1.5">
           <span className="text-[10px] font-bold uppercase tracking-widest text-warning">Read-only</span>
-          <span className="text-[11px] font-light text-warning/80">Offline</span>
+          <span className="text-[10px] font-light text-warning/80">Offline</span>
         </div>
       )}
       <DetailPanelContent
