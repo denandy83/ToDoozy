@@ -108,10 +108,7 @@ bot.on('message', async (msg) => {
       await handleSetDefault(chatId)
       return
     }
-    if (normalized === '/settings') {
-      await handleSettings(chatId, msg)
-      return
-    }
+    // Settings is in the ToDoozy app (Settings → Telegram)
     if (isMyDayCommand(normalized)) {
       await handleMyDay(chatId)
       return
