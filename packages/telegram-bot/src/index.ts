@@ -44,7 +44,7 @@ import {
 } from './supabase'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const ALLOWED_TELEGRAM_IDS = (process.env.ALLOWED_TELEGRAM_IDS ?? '')
+const ENV_ALLOWED_IDS = (process.env.ALLOWED_TELEGRAM_IDS ?? '')
   .split(',')
   .map((id) => parseInt(id.trim(), 10))
   .filter((id) => !isNaN(id))
@@ -53,7 +53,7 @@ if (!TELEGRAM_BOT_TOKEN) {
   throw new Error('Missing TELEGRAM_BOT_TOKEN env var')
 }
 
-if (ALLOWED_TELEGRAM_IDS.length === 0) {
+if (ENV_ALLOWED_IDS.length === 0) {
   throw new Error('Missing ALLOWED_TELEGRAM_IDS env var')
 }
 
@@ -61,16 +61,38 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true })
 
 console.log('ToDoozy Telegram Bot started. Polling for messages...')
 
-// ---- Auth guard ----
+// ---- Auth guard (checks env var + Supabase user_settings) ----
 
-function isAuthorized(msg: TelegramBot.Message): boolean {
-  return msg.from !== undefined && ALLOWED_TELEGRAM_IDS.includes(msg.from.id)
+let cachedSupabaseIds: number[] = []
+let lastIdsFetch = 0
+
+async function getAllowedIds(): Promise<number[]> {
+  // Refresh from Supabase every 60s
+  if (Date.now() - lastIdsFetch > 60_000) {
+    try {
+      const { data } = await supabase
+        .from('user_settings')
+        .select('value')
+        .eq('user_id', userId)
+        .eq('key', 'telegram_allowed_ids')
+        .single()
+      cachedSupabaseIds = (data?.value ?? '').split(',').map((s: string) => parseInt(s.trim(), 10)).filter((n: number) => !isNaN(n))
+    } catch { /* ignore */ }
+    lastIdsFetch = Date.now()
+  }
+  return [...new Set([...ENV_ALLOWED_IDS, ...cachedSupabaseIds])]
+}
+
+async function isAuthorized(msg: TelegramBot.Message): Promise<boolean> {
+  if (!msg.from) return false
+  const allowed = await getAllowedIds()
+  return allowed.includes(msg.from.id)
 }
 
 // ---- Message handler ----
 
 bot.on('message', async (msg) => {
-  if (!msg.text || !isAuthorized(msg)) return
+  if (!msg.text || !(await isAuthorized(msg))) return
 
   const chatId = msg.chat.id
   const text = msg.text.trim()
@@ -151,7 +173,8 @@ bot.on('callback_query', async (query) => {
 
   // Auth check via chat
   const chatId = query.message.chat.id
-  if (!query.from || !ALLOWED_TELEGRAM_IDS.includes(query.from.id)) {
+  const allowedIds = await getAllowedIds()
+  if (!query.from || !allowedIds.includes(query.from.id)) {
     await bot.answerCallbackQuery(query.id, { text: 'Unauthorized' })
     return
   }
