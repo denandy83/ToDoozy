@@ -52,10 +52,18 @@ export function TelegramSettingsContent(): React.JSX.Element {
     setTimeout(() => setSaved(false), 2000)
   }, [idInput, setSetting])
 
-  const handleRemoveId = useCallback(() => {
+  const handleRemoveId = useCallback(async () => {
     setSetting('telegram_user_id', null)
     setSetting('telegram_allowed_ids', null)
-  }, [setSetting])
+    // Also remove from Supabase so it doesn't get pulled back
+    try {
+      const supabase = await getSupabase()
+      if (userId) {
+        await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'telegram_user_id')
+        await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'telegram_allowed_ids')
+      }
+    } catch { /* offline */ }
+  }, [setSetting, userId])
 
   return (
     <div className="flex flex-col gap-6">
