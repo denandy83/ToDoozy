@@ -267,6 +267,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
               window.api.statuses.findById(input.status_id)
             ])
             logTaskActivity(id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
+            window.api.tray.refresh()
           }
           if (input.priority !== undefined && input.priority !== oldTask.priority) {
             const names = ['None', 'Low', 'Normal', 'High', 'Urgent']
@@ -289,6 +290,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           }
           if (input.is_in_my_day !== undefined && input.is_in_my_day !== oldTask.is_in_my_day) {
             logTaskActivity(id, input.is_in_my_day === 1 ? 'pinned_to_my_day' : 'unpinned_from_my_day', null, null)
+            window.api.tray.refresh()
           }
           if (input.project_id !== undefined && input.project_id !== oldTask.project_id) {
             logTaskActivity(id, 'moved_to_project', oldTask.project_id, input.project_id)
