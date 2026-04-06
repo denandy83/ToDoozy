@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Check, ExternalLink, X } from 'lucide-react'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
+import { useToast } from '../../shared/components/Toast'
 import { getSupabase } from '../../lib/supabase'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 
 export function TelegramSettingsContent(): React.JSX.Element {
   const projects = useProjectStore((s) => s.projects)
@@ -15,6 +17,8 @@ export function TelegramSettingsContent(): React.JSX.Element {
 
   const sortedProjects = Object.values(projects).sort((a, b) => a.sidebar_order - b.sidebar_order)
   const isConnected = !!telegramId
+  const { addToast } = useToast()
+  const undoRef = useRef<string | null>(null)
 
   const userId = useAuthStore((s) => s.currentUser?.id)
 
@@ -52,10 +56,9 @@ export function TelegramSettingsContent(): React.JSX.Element {
     setTimeout(() => setSaved(false), 2000)
   }, [idInput, setSetting])
 
-  const handleRemoveId = useCallback(async () => {
+  const doRemoveId = useCallback(async () => {
     setSetting('telegram_user_id', null)
     setSetting('telegram_allowed_ids', null)
-    // Also remove from Supabase so it doesn't get pulled back
     try {
       const supabase = await getSupabase()
       if (userId) {
@@ -64,6 +67,37 @@ export function TelegramSettingsContent(): React.JSX.Element {
       }
     } catch { /* offline */ }
   }, [setSetting, userId])
+
+  const handleRemoveId = useCallback((e: React.MouseEvent) => {
+    if (shouldForceDelete(e)) {
+      doRemoveId()
+      return
+    }
+    const savedId = telegramId
+    undoRef.current = savedId
+    doRemoveId()
+    addToast({
+      message: 'Telegram ID removed',
+      variant: 'danger',
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (undoRef.current) {
+            setSetting('telegram_user_id', undoRef.current)
+            setSetting('telegram_allowed_ids', undoRef.current)
+            // Restore in Supabase
+            getSupabase().then(async (supabase) => {
+              if (userId && undoRef.current) {
+                await supabase.from('user_settings').upsert({ id: `${userId}:telegram_user_id`, user_id: userId, key: 'telegram_user_id', value: undoRef.current, updated_at: new Date().toISOString() })
+                await supabase.from('user_settings').upsert({ id: `${userId}:telegram_allowed_ids`, user_id: userId, key: 'telegram_allowed_ids', value: undoRef.current, updated_at: new Date().toISOString() })
+              }
+            }).catch(() => {})
+            undoRef.current = null
+          }
+        }
+      }
+    })
+  }, [doRemoveId, telegramId, addToast, setSetting, userId])
 
   return (
     <div className="flex flex-col gap-6">

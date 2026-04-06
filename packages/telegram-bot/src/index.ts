@@ -80,7 +80,8 @@ async function getAllowedIds(): Promise<number[]> {
     } catch { /* ignore */ }
     lastIdsFetch = Date.now()
   }
-  return [...new Set([...ENV_ALLOWED_IDS, ...cachedSupabaseIds])]
+  // Supabase IDs take priority when available; env var is bootstrap fallback
+  return cachedSupabaseIds.length > 0 ? cachedSupabaseIds : ENV_ALLOWED_IDS
 }
 
 async function isAuthorized(msg: TelegramBot.Message): Promise<boolean> {
