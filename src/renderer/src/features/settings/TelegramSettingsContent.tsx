@@ -92,7 +92,7 @@ export function TelegramSettingsContent(): React.JSX.Element {
                 value={idInput}
                 onChange={(e) => setIdInput(e.target.value.replace(/[^0-9]/g, ''))}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveId()}
-                placeholder="e.g. 674103800"
+                placeholder="Your numeric Telegram ID"
                 className="flex-1 rounded-lg border border-border bg-transparent px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
               />
               <button
