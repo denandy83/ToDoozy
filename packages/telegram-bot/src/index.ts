@@ -61,6 +61,15 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true })
 
 console.log('ToDoozy Telegram Bot started. Polling for messages...')
 
+// Register bot commands for Telegram's autocomplete menu
+bot.setMyCommands([
+  { command: 'help', description: 'Show all commands and syntax' },
+  { command: 'list', description: 'Show all projects' },
+  { command: 'default', description: 'Change default project' },
+  { command: 'done', description: 'Show recent tasks to complete' },
+  { command: 'myday', description: 'Show My Day tasks' },
+]).catch(() => { /* ignore if already set */ })
+
 // ---- Auth guard (checks env var + Supabase user_settings) ----
 
 let cachedSupabaseIds: number[] = []
