@@ -76,12 +76,12 @@ async function offlineFallback(
   if (!parsed) return null
   try {
     // Decode the JWT payload to get the user ID (no verification needed — just reading claims)
-    const payload = JSON.parse(atob(parsed.access_token.split('.')[1])) as { sub?: string }
+    const payload = JSON.parse(atob(parsed.access_token.split('.')[1])) as { sub?: string; email?: string }
     const userId = payload.sub
     if (!userId) return null
 
     // Switch to the per-user DB so we read the right data
-    await window.api.auth.switchDatabase(userId)
+    await window.api.auth.switchDatabase(userId, payload.email)
 
     const user = await window.api.users.findById(userId)
     if (user) {
@@ -178,7 +178,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
 
       await persistSession(data.session)
-      await window.api.auth.switchDatabase(data.user.id)
+      await window.api.auth.switchDatabase(data.user.id, data.user.email ?? undefined)
       const localUser = await ensureLocalUser(
         data.user.id,
         data.user.email ?? email,
@@ -217,7 +217,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
 
       await persistSession(data.session)
-      await window.api.auth.switchDatabase(data.user.id)
+      await window.api.auth.switchDatabase(data.user.id, data.user.email ?? undefined)
       const localUser = await ensureLocalUser(
         data.user.id,
         data.user.email ?? email,
@@ -346,7 +346,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
 
       // Session restored — update stored tokens (may have been refreshed)
       await persistSession(data.session)
-      await window.api.auth.switchDatabase(data.user.id)
+      await window.api.auth.switchDatabase(data.user.id, data.user.email ?? undefined)
 
       const localUser = await ensureLocalUser(
         data.user.id,

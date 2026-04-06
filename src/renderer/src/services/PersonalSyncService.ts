@@ -64,6 +64,7 @@ export async function pushTask(task: Task): Promise<void> {
       order_index: task.order_index,
       is_template: task.is_template,
       is_archived: task.is_archived,
+      is_in_my_day: task.is_in_my_day ?? 0,
       completed_date: task.completed_date,
       recurrence_rule: task.recurrence_rule,
       reference_url: task.reference_url,
@@ -759,6 +760,7 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           assigned_to: rt.assigned_to,
           is_template: rt.is_template ?? 0,
           is_archived: rt.is_archived ?? 0,
+          is_in_my_day: rt.is_in_my_day ?? 0,
           completed_date: rt.completed_date,
           recurrence_rule: rt.recurrence_rule,
           reference_url: rt.reference_url

@@ -177,7 +177,7 @@ export interface AuthAPI {
   clearSession(): Promise<void>
   getSupabaseConfig(): Promise<SupabaseConfig>
   openOAuthWindow(url: string): Promise<string | null>
-  switchDatabase(userId: string): Promise<void>
+  switchDatabase(userId: string, email?: string): Promise<void>
 }
 
 export interface ShortcutUpdateResult {

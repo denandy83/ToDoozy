@@ -69,8 +69,8 @@ function registerAuthHandlers(): void {
     clearEncryptedSession()
   })
 
-  ipcMain.handle('auth:switchDatabase', (_e, userId: string) => {
-    switchDatabase(userId)
+  ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
+    switchDatabase(userId, email)
     // Reset repos so they use the new DB
     repos = null
   })

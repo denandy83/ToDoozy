@@ -50,11 +50,24 @@ export function initDatabase(): DatabaseSync {
  * Switch to a per-user database file. Closes the current DB and opens
  * todoozy-{userId}.db, running migrations if needed.
  */
-export function switchDatabase(userId: string): DatabaseSync {
+export function switchDatabase(userId: string, email?: string): DatabaseSync {
   // If dev DB is set, don't switch — always use the dev DB
   if (process.env.TODOOZY_DEV_DB) return getDatabase()
 
-  const userDbPath = join(app.getPath('userData'), `todoozy-${userId}.db`)
+  // Use email prefix for friendly DB name, fall back to userId
+  const dbName = email ? email.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_') : userId
+  const userDbPath = join(app.getPath('userData'), `todoozy-${dbName}.db`)
+
+  // Also check for legacy UUID-named DB and rename it
+  const legacyUserDbPath = join(app.getPath('userData'), `todoozy-${userId}.db`)
+  if (!existsSync(userDbPath) && existsSync(legacyUserDbPath)) {
+    console.log(`[Database] Renaming ${legacyUserDbPath} → ${userDbPath}`)
+    copyFileSync(legacyUserDbPath, userDbPath)
+    const walPath = legacyUserDbPath + '-wal'
+    const shmPath = legacyUserDbPath + '-shm'
+    if (existsSync(walPath)) copyFileSync(walPath, userDbPath + '-wal')
+    if (existsSync(shmPath)) copyFileSync(shmPath, userDbPath + '-shm')
+  }
 
   // Already using this user's DB
   if (currentDbPath === userDbPath && db) return db
