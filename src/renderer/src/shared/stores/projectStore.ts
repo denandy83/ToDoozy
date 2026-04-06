@@ -103,6 +103,10 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         set((state) => ({
           projects: { ...state.projects, [project.id]: project }
         }))
+        // Sync to Supabase
+        import('../../services/PersonalSyncService').then(({ pushProject }) => {
+          pushProject(project).catch(() => {})
+        })
       }
       return project
     } catch (err) {
