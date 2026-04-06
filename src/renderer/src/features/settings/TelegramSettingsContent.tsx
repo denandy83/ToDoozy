@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Check, ExternalLink, X } from 'lucide-react'
 import { useProjectStore } from '../../shared/stores/projectStore'
+import { useAuthStore } from '../../shared/stores/authStore'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
+import { getSupabase } from '../../lib/supabase'
 
 export function TelegramSettingsContent(): React.JSX.Element {
   const projects = useProjectStore((s) => s.projects)
@@ -14,10 +16,31 @@ export function TelegramSettingsContent(): React.JSX.Element {
   const sortedProjects = Object.values(projects).sort((a, b) => a.sidebar_order - b.sidebar_order)
   const isConnected = !!telegramId
 
-  // Refresh settings on mount to pick up changes made via Telegram bot
+  const userId = useAuthStore((s) => s.currentUser?.id)
+
+  // Pull telegram-related settings from Supabase on mount
   useEffect(() => {
-    hydrateSettings()
-  }, [hydrateSettings])
+    if (!userId) return
+    const pullTelegramSettings = async (): Promise<void> => {
+      try {
+        const supabase = await getSupabase()
+        const { data } = await supabase
+          .from('user_settings')
+          .select('key, value')
+          .eq('user_id', userId)
+          .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids'])
+        if (data) {
+          for (const row of data) {
+            if (row.value) {
+              await window.api.settings.set(userId, row.key, row.value)
+            }
+          }
+          hydrateSettings()
+        }
+      } catch { /* offline or no session */ }
+    }
+    pullTelegramSettings()
+  }, [userId, hydrateSettings])
 
   const handleSaveId = useCallback(() => {
     const trimmed = idInput.trim()
