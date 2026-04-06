@@ -157,23 +157,6 @@ export function TelegramSettingsContent(): React.JSX.Element {
       {/* Everything below only shows when connected */}
       {isConnected && (
         <>
-          {/* Get Started */}
-          <div className="rounded-lg border border-accent/15 bg-accent/5 px-4 py-3">
-            <p className="text-xs font-light text-foreground/70 mb-2">
-              Open{' '}
-              <button onClick={() => window.open('https://t.me/todoozybot', '_blank')} className="text-accent font-bold hover:underline inline-flex items-center gap-0.5">
-                @todoozybot <ExternalLink size={10} />
-              </button>
-              {' '}on Telegram and send your first task:
-            </p>
-            <code className="block rounded bg-background/50 px-3 py-2 text-sm font-mono text-foreground/80">
-              buy groceries d:tomorrow @shopping p:high
-            </code>
-            <p className="text-[10px] font-light text-foreground/40 mt-1.5">
-              This creates a task due tomorrow, with a "Shopping" label and high priority.
-            </p>
-          </div>
-
           {/* Default Project */}
           <div>
             <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Default Project</h4>
@@ -190,6 +173,23 @@ export function TelegramSettingsContent(): React.JSX.Element {
                 <option key={p.id} value={p.name}>{p.name}</option>
               ))}
             </select>
+          </div>
+
+          {/* Get Started */}
+          <div className="rounded-lg border border-accent/15 bg-accent/5 px-4 py-3">
+            <p className="text-xs font-light text-foreground/70 mb-2">
+              Open{' '}
+              <button onClick={() => window.open('https://t.me/todoozybot', '_blank')} className="text-accent font-bold hover:underline inline-flex items-center gap-0.5">
+                @todoozybot <ExternalLink size={10} />
+              </button>
+              {' '}on Telegram and send your first task:
+            </p>
+            <code className="block rounded bg-background/50 px-3 py-2 text-sm font-mono text-foreground/80">
+              buy groceries d:tomorrow @shopping p:high
+            </code>
+            <p className="text-[10px] font-light text-foreground/40 mt-1.5">
+              Creates a task due tomorrow with a "Shopping" label and high priority.
+            </p>
           </div>
 
           {/* Commands Reference */}
