@@ -252,20 +252,34 @@ bot.on('callback_query', async (query) => {
       if (success) {
         await bot.answerCallbackQuery(query.id, { text: 'Task completed!' })
 
-        // Update the message to strike through the completed task
-        const originalText = query.message.text ?? ''
-        const lines = originalText.split('\n')
-        // Find the task title from callback data — just show a done indicator
-        const updatedText = originalText + `\n\nDone: task marked complete`
-        await bot.editMessageText(updatedText, {
-          chat_id: chatId,
-          message_id: query.message.message_id
-        }).catch(() => {
-          // Message might be unchanged, ignore
-        })
+        // Update the inline keyboard: mark completed task with ✅, keep others clickable
+        const oldKeyboard = (query.message.reply_markup?.inline_keyboard ?? []) as TelegramBot.InlineKeyboardButton[][]
+        const newKeyboard: TelegramBot.InlineKeyboardButton[][] = []
+        for (const row of oldKeyboard) {
+          const newRow: TelegramBot.InlineKeyboardButton[] = []
+          for (const btn of row) {
+            if (btn.callback_data === `done:${taskId}`) {
+              // Replace with completed indicator (no callback = not clickable)
+              const title = btn.text.replace(/^○ /, '')
+              newRow.push({ text: `✅ ${title}`, callback_data: `noop:${taskId}` })
+            } else {
+              newRow.push(btn)
+            }
+          }
+          newKeyboard.push(newRow)
+        }
+
+        await bot.editMessageReplyMarkup(
+          { inline_keyboard: newKeyboard },
+          { chat_id: chatId, message_id: query.message.message_id }
+        ).catch(() => {})
       } else {
         await bot.answerCallbackQuery(query.id, { text: 'Failed to complete task' })
       }
+    }
+
+    if (query.data.startsWith('noop:')) {
+      await bot.answerCallbackQuery(query.id, { text: 'Already completed' })
     }
   } catch (err) {
     console.error('Error handling callback:', err)
