@@ -1,0 +1,33 @@
+{
+  "name": "todoozy-telegram-twa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ToDoozy Telegram Web App — view your tasks inside Telegram",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "server": "node dist-server/index.js",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:all": "npm run build && npm run build:server",
+    "start": "node dist-server/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.2",
+    "@telegram-apps/sdk": "^2.11.0",
+    "express": "^5.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/express": "^5.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  todoozy-twa:
+    build: .
+    container_name: todoozy-twa
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      # Supabase (same as your ToDoozy .env)
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - SUPABASE_URL=${VITE_SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      # Optional: Supabase service role key (enables automatic Telegram login)
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Your Telegram bot token
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PORT=3100
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
