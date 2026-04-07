@@ -130,6 +130,8 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     } catch { /* offline */ }
   }, [setSetting, userId])
 
+  const [subTab, setSubTab] = useState<'telegram' | 'shortcut'>('telegram')
+
   // ── Shortcut deep link ──
   const shortcutUrl = apiKey ? buildShortcutDeepLink(apiKey) : null
 
@@ -157,8 +159,26 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
         </select>
       </div>
 
+      {/* ── Sub-tabs ── */}
+      <div className="flex gap-1 border-b border-border">
+        {(['telegram', 'shortcut'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setSubTab(tab)}
+            className={`px-4 py-2 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              subTab === tab
+                ? 'text-accent border-b-2 border-accent -mb-px'
+                : 'text-muted hover:text-foreground'
+            }`}
+          >
+            {tab === 'telegram' ? 'Telegram Bot' : 'iOS Shortcut'}
+          </button>
+        ))}
+      </div>
+
       {/* ══════════════ TELEGRAM BOT ══════════════ */}
-      <div className="border-t border-border pt-4">
+      {subTab === 'telegram' && (
+      <div>
         <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">Telegram Bot</h4>
 
         {/* Telegram ID */}
@@ -227,8 +247,11 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
         )}
       </div>
 
+      )}
+
       {/* ══════════════ iOS SHORTCUT ══════════════ */}
-      <div className="border-t border-border pt-4">
+      {subTab === 'shortcut' && (
+      <div>
         <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">iOS Shortcut</h4>
         <p className="text-xs font-light text-foreground/50 mb-3">
           Create tasks by voice using your iPhone or Apple Watch Action Button.
@@ -323,8 +346,11 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
         )}
       </div>
 
-      {/* ══════════════ SMART SYNTAX ══════════════ */}
-      <div className="border-t border-border pt-4">
+      )}
+
+      {/* ══════════════ SMART SYNTAX (shown in telegram tab) ══════════════ */}
+      {subTab === 'telegram' && isTelegramConnected && (
+      <div>
         <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Smart Syntax (Telegram)</h4>
         <div className="flex flex-col gap-0.5">
           {[
@@ -338,6 +364,7 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
           ))}
         </div>
       </div>
+      )}
     </div>
   )
 }
