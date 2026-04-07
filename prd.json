@@ -51,7 +51,8 @@
         "npm run test passes with all existing and new tests"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     },
     {
       "id": "52",
@@ -131,7 +132,8 @@
         "npm run test passes with all existing and new tests"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     }
   ]
 }
