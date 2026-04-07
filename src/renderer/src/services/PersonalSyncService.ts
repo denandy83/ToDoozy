@@ -726,6 +726,38 @@ export async function fullPull(userId: string): Promise<void> {
  * Pull tasks from Supabase that don't exist in local SQLite for a given project.
  * Returns the number of tasks pulled.
  */
+/**
+ * Pull project metadata (name, color, icon) from Supabase if newer than local.
+ */
+export async function pullProjectMetadata(projectId: string): Promise<boolean> {
+  try {
+    const supabase = await getSupabase()
+    const { data: remote, error } = await supabase
+      .from('projects')
+      .select('name, color, icon, description, updated_at')
+      .eq('id', projectId)
+      .single()
+
+    if (error || !remote) return false
+
+    const local = await window.api.projects.findById(projectId)
+    if (!local) return false
+
+    if (remote.updated_at && local.updated_at && remote.updated_at > local.updated_at) {
+      await window.api.projects.update(projectId, {
+        name: remote.name,
+        color: remote.color,
+        icon: remote.icon,
+        description: remote.description
+      })
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 export async function pullNewTasks(projectId: string): Promise<number> {
   try {
     const supabase = await getSupabase()

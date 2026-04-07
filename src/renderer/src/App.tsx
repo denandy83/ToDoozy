@@ -116,7 +116,9 @@ function App(): React.JSX.Element {
     // (e.g. created by Telegram bot or another device)
     const doPull = async (): Promise<void> => {
       if (!navigator.onLine) return
-      const { pullNewTasks } = await import('./services/PersonalSyncService')
+      const { pullNewTasks, pullProjectMetadata } = await import('./services/PersonalSyncService')
+      const metaChanged = await pullProjectMetadata(currentProjectId).catch(() => false)
+      if (metaChanged) hydrateProjects(currentUser.id)
       const pulled = await pullNewTasks(currentProjectId).catch(() => 0)
       if (pulled > 0) hydrateAllForProject(currentProjectId, currentUser.id)
     }
