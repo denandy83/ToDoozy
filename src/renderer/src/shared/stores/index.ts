@@ -64,6 +64,7 @@ export {
   selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter,
+  selectSortRules,
   useLabelsByProject
 } from './labelStore'
 

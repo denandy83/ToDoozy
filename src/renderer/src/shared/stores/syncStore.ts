@@ -1,38 +1,65 @@
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 
-type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error'
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
 interface SyncState {
   status: SyncStatus
   pendingCount: number
   lastSyncedAt: string | null
+  /** True during initial full sync (new device or first login) */
+  isFirstSync: boolean
+  /** Progress 0-100 during first sync */
+  firstSyncProgress: number
+  /** Error message for display */
+  errorMessage: string | null
 }
 
 interface SyncActions {
   setStatus(status: SyncStatus): void
   setPendingCount(count: number): void
   setLastSynced(): void
+  setFirstSync(active: boolean): void
+  setFirstSyncProgress(progress: number): void
+  setError(message: string | null): void
   hydrate(): Promise<void>
 }
 
-export const useSyncStore = createWithEqualityFn<SyncState & SyncActions>(
+export type SyncStore = SyncState & SyncActions
+
+export const useSyncStore = createWithEqualityFn<SyncStore>(
   (set) => ({
-    status: 'idle',
+    status: 'synced',
     pendingCount: 0,
     lastSyncedAt: null,
+    isFirstSync: false,
+    firstSyncProgress: 0,
+    errorMessage: null,
 
-    setStatus: (status) => set({ status }),
+    setStatus: (status) => set({ status, errorMessage: status !== 'error' ? null : undefined }),
     setPendingCount: (count) => set({ pendingCount: count }),
-    setLastSynced: () => set({ lastSyncedAt: new Date().toISOString() }),
+    setLastSynced: () => set({ lastSyncedAt: new Date().toISOString(), status: 'synced' }),
+    setFirstSync: (active) => set({ isFirstSync: active, firstSyncProgress: active ? 0 : 100 }),
+    setFirstSyncProgress: (progress) => set({ firstSyncProgress: progress }),
+    setError: (message) => set({ errorMessage: message, status: message ? 'error' : 'synced' }),
 
     hydrate: async () => {
-      const count = await window.api.sync.count()
-      set({
-        pendingCount: count,
-        status: count > 0 ? 'syncing' : 'idle'
-      })
+      try {
+        const count = await window.api.sync.count()
+        set({
+          pendingCount: count,
+          status: count > 0 ? 'syncing' : 'synced'
+        })
+      } catch {
+        set({ status: 'synced', pendingCount: 0 })
+      }
     }
   }),
   shallow
 )
+
+export const selectSyncStatus = (state: SyncState): SyncStatus => state.status
+export const selectPendingCount = (state: SyncState): number => state.pendingCount
+export const selectLastSyncedAt = (state: SyncState): string | null => state.lastSyncedAt
+export const selectIsFirstSync = (state: SyncState): boolean => state.isFirstSync
+export const selectFirstSyncProgress = (state: SyncState): number => state.firstSyncProgress
