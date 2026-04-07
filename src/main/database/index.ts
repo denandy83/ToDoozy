@@ -63,19 +63,32 @@ export function switchDatabase(userId: string, email?: string): DatabaseSync {
   // If dev DB is set, don't switch — always use the dev DB
   if (process.env.TODOOZY_DEV_DB) return getDatabase()
 
-  // Use email prefix for friendly DB name, fall back to userId
-  const dbName = email ? email.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_') : userId
-  const userDbPath = join(app.getPath('userData'), `todoozy-${dbName}.db`)
+  // Use email prefix for friendly DB name
+  const emailPrefix = email ? email.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_') : null
+  const emailDbPath = emailPrefix ? join(app.getPath('userData'), `todoozy-${emailPrefix}.db`) : null
+  const uuidDbPath = join(app.getPath('userData'), `todoozy-${userId}.db`)
 
-  // Also check for legacy UUID-named DB and rename it
-  const legacyUserDbPath = join(app.getPath('userData'), `todoozy-${userId}.db`)
-  if (!existsSync(userDbPath) && existsSync(legacyUserDbPath)) {
-    console.log(`[Database] Renaming ${legacyUserDbPath} → ${userDbPath}`)
-    copyFileSync(legacyUserDbPath, userDbPath)
-    const walPath = legacyUserDbPath + '-wal'
-    const shmPath = legacyUserDbPath + '-shm'
-    if (existsSync(walPath)) copyFileSync(walPath, userDbPath + '-wal')
-    if (existsSync(shmPath)) copyFileSync(shmPath, userDbPath + '-shm')
+  // Determine which DB to use (priority: email-named > UUID-named > create new)
+  let userDbPath: string
+  if (emailDbPath && existsSync(emailDbPath)) {
+    userDbPath = emailDbPath
+  } else if (existsSync(uuidDbPath)) {
+    if (emailDbPath) {
+      // Rename UUID DB to email-named
+      console.log(`[Database] Renaming UUID DB to email-named: ${emailDbPath}`)
+      copyFileSync(uuidDbPath, emailDbPath)
+      const walPath = uuidDbPath + '-wal'
+      const shmPath = uuidDbPath + '-shm'
+      if (existsSync(walPath)) copyFileSync(walPath, emailDbPath + '-wal')
+      if (existsSync(shmPath)) copyFileSync(shmPath, emailDbPath + '-shm')
+      userDbPath = emailDbPath
+    } else {
+      userDbPath = uuidDbPath
+    }
+  } else if (emailDbPath) {
+    userDbPath = emailDbPath
+  } else {
+    userDbPath = uuidDbPath
   }
 
   // Already using this user's DB
