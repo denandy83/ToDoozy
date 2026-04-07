@@ -38,13 +38,15 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
           .select('key, value')
           .eq('user_id', userId)
           .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids', 'api_key'])
-        if (data) {
+        if (data && data.length > 0) {
           for (const row of data) {
             if (row.value) await window.api.settings.set(userId, row.key, row.value)
           }
           hydrateSettings()
+        } else {
+          console.log('[Integrations] No settings returned from Supabase (auth may not be ready)')
         }
-      } catch { /* offline */ }
+      } catch (err) { console.warn('[Integrations] Failed to pull settings from Supabase:', err) }
     }
     pull()
   }, [userId, hydrateSettings])
