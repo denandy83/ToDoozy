@@ -41,8 +41,17 @@ function openDatabase(dbPath: string): DatabaseSync {
 }
 
 export function initDatabase(): DatabaseSync {
-  const dbPath = process.env.TODOOZY_DEV_DB || join(app.getPath('userData'), 'todoozy.db')
-  db = openDatabase(dbPath)
+  if (process.env.TODOOZY_DEV_DB) {
+    db = openDatabase(process.env.TODOOZY_DEV_DB)
+  } else {
+    // Start with in-memory DB as placeholder until switchDatabase is called after auth
+    db = new DatabaseSync(':memory:')
+    db.exec('PRAGMA journal_mode = WAL')
+    db.exec('PRAGMA foreign_keys = ON')
+    db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)')
+    runMigrations(db)
+    currentDbPath = ':memory:'
+  }
   return db
 }
 
