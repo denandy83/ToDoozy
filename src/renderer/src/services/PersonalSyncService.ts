@@ -736,11 +736,11 @@ export async function pullNewTasks(projectId: string): Promise<number> {
 
     if (error || !remoteTasks) return 0
 
-    let pulled = 0
+    let changed = 0
     for (const rt of remoteTasks) {
       const existing = await window.api.tasks.findById(rt.id)
       if (!existing) {
-        // Ensure owner user record exists
+        // New task — create locally
         const ownerId = rt.owner_id as string
         const localOwner = await window.api.users.findById(ownerId)
         if (!localOwner) {
@@ -765,11 +765,29 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           recurrence_rule: rt.recurrence_rule,
           reference_url: rt.reference_url
         }).catch(() => {})
-        pulled++
+        changed++
+      } else if (rt.updated_at && existing.updated_at && rt.updated_at > existing.updated_at) {
+        // Remote is newer — update locally
+        await window.api.tasks.update(rt.id, {
+          title: rt.title,
+          description: rt.description,
+          status_id: rt.status_id,
+          priority: rt.priority ?? 0,
+          due_date: rt.due_date,
+          parent_id: rt.parent_id,
+          order_index: rt.order_index ?? 0,
+          assigned_to: rt.assigned_to,
+          is_archived: rt.is_archived ?? 0,
+          is_in_my_day: rt.is_in_my_day ?? 0,
+          completed_date: rt.completed_date,
+          recurrence_rule: rt.recurrence_rule,
+          reference_url: rt.reference_url
+        }).catch(() => {})
+        changed++
       }
     }
-    if (pulled > 0) console.log(`[PersonalSync] Pulled ${pulled} new tasks for project ${projectId}`)
-    return pulled
+    if (changed > 0) console.log(`[PersonalSync] Synced ${changed} tasks for project ${projectId}`)
+    return changed
   } catch {
     return 0
   }
