@@ -424,6 +424,31 @@ export async function getRecentTasks(limit: number = 10): Promise<(SupabaseTask 
     }))
 }
 
+export async function getRecentlyCompletedTasks(limit: number = 10): Promise<(SupabaseTask & { project_name: string })[]> {
+  const projects = await getProjects()
+  if (projects.length === 0) return []
+
+  const projectIds = projects.map((p) => p.id)
+  const projectMap = new Map(projects.map((p) => [p.id, p.name]))
+
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .in('project_id', projectIds)
+    .not('completed_date', 'is', null)
+    .eq('is_archived', 0)
+    .order('completed_date', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  if (!tasks) return []
+
+  return tasks.map((t) => ({
+    ...t,
+    project_name: projectMap.get(t.project_id) ?? 'Unknown'
+  }))
+}
+
 export async function fuzzyFindTask(query: string): Promise<(SupabaseTask & { project_name: string }) | null> {
   const tasks = await getRecentTasks(50)
   const q = query.toLowerCase()

@@ -38,6 +38,7 @@ import {
   getRecentTasks,
   fuzzyFindTask,
   findStatusByName,
+  getRecentlyCompletedTasks,
   SupabaseLabel,
   supabase,
   userId
@@ -66,7 +67,8 @@ bot.setMyCommands([
   { command: 'help', description: 'Show all commands and syntax' },
   { command: 'list', description: 'Show all projects' },
   { command: 'default', description: 'Change default project' },
-  { command: 'done', description: 'Show recent tasks to complete' },
+  { command: 'done', description: 'Show recently completed tasks' },
+  { command: 'recent', description: 'Recent open tasks (tap to complete)' },
   { command: 'myday', description: 'Show My Day tasks' },
 ]).catch(() => { /* ignore if already set */ })
 
@@ -138,6 +140,10 @@ bot.on('message', async (msg) => {
     }
     if (normalized === '/default') {
       await handleSetDefault(chatId)
+      return
+    }
+    if (normalized === '/recent') {
+      await handleRecent(chatId)
       return
     }
     if (isMyDayCommand(normalized)) {
@@ -277,8 +283,9 @@ async function sendHelp(chatId: number): Promise<void> {
     '',
     '*Commands \\(use `/` or `.`\\):*',
     '`/projectname` — list tasks in a project',
-    '`/done` — show recent tasks to complete',
+    '`/done` — show recently completed tasks',
     '`/done text` — fuzzy\\-match and complete a task',
+    '`/recent` — recent open tasks \\(tap to complete\\)',
     '`/myday` — show My Day tasks',
     '`/list` — show all projects \\(tap to view tasks\\)',
     '`/default` — set default project for new tasks \\(if no project named "default"\\)',
@@ -485,6 +492,25 @@ async function handleListProject(chatId: number, projectName: string): Promise<v
   })
 }
 
+async function handleRecent(chatId: number): Promise<void> {
+  // Show 10 most recently added non-done tasks with inline done buttons
+  const tasks = await getRecentTasks(10)
+  if (tasks.length === 0) {
+    await bot.sendMessage(chatId, 'No open tasks found.')
+    return
+  }
+
+  const keyboard: TelegramBot.InlineKeyboardButton[][] = []
+  for (const task of tasks) {
+    const label = `○ ${task.title.length > 30 ? task.title.slice(0, 30) + '…' : task.title}`
+    keyboard.push([{ text: label, callback_data: `done:${task.id}` }])
+  }
+
+  await bot.sendMessage(chatId, `Recent open tasks — ${tasks.length}`, {
+    reply_markup: { inline_keyboard: keyboard }
+  })
+}
+
 async function handleDone(chatId: number, query: string | null): Promise<void> {
   if (query) {
     // Fuzzy match and complete
@@ -503,27 +529,21 @@ async function handleDone(chatId: number, query: string | null): Promise<void> {
     return
   }
 
-  // Show recent tasks with done buttons
-  const tasks = await getRecentTasks(10)
+  // Show recently completed tasks (text only)
+  const tasks = await getRecentlyCompletedTasks(10)
   if (tasks.length === 0) {
-    await bot.sendMessage(chatId, 'No open tasks found.')
+    await bot.sendMessage(chatId, 'No recently completed tasks.')
     return
   }
 
-  const lines: string[] = ['Recent tasks:']
+  const lines: string[] = [`✅ Recently completed:`, '']
   for (const task of tasks) {
-    lines.push(`○ ${task.title} (${task.project_name})`)
+    const date = task.completed_date ? new Date(task.completed_date) : null
+    const dateStr = date ? `${date.getDate()}/${date.getMonth() + 1} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : ''
+    lines.push(`✅ ${task.title} · ${task.project_name}${dateStr ? ` · ${dateStr}` : ''}`)
   }
 
-  const keyboard: TelegramBot.InlineKeyboardButton[][] = []
-  for (const task of tasks) {
-    const label = `✓ ${task.title.length > 30 ? task.title.slice(0, 30) + '…' : task.title}`
-    keyboard.push([{ text: label, callback_data: `done:${task.id}` }])
-  }
-
-  await bot.sendMessage(chatId, lines.join('\n'), {
-    reply_markup: { inline_keyboard: keyboard }
-  })
+  await bot.sendMessage(chatId, lines.join('\n'))
 }
 
 async function handleMyDay(chatId: number): Promise<void> {
