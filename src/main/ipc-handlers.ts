@@ -7,6 +7,7 @@ import { getDatabase, switchDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
+import { is } from '@electron-toolkit/utils'
 import { getReservedShortcutName } from '../shared/shortcut-utils'
 import { setTrayUserId, refreshTray, setTimerState, clearTimerState } from './tray'
 import { getMainWindow } from './index'
@@ -22,7 +23,10 @@ function getRepos(): Repositories {
 }
 
 // ── Auth token storage using safeStorage ──────────────────────────────
-const getTokenPath = (): string => join(app.getPath('userData'), '.auth-session')
+const getTokenPath = (): string => {
+  const suffix = is.dev ? '.dev' : ''
+  return join(app.getPath('userData'), `.auth-session${suffix}`)
+}
 
 function storeEncryptedSession(sessionJson: string): void {
   if (safeStorage.isEncryptionAvailable()) {

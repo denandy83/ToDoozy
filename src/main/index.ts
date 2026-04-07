@@ -72,7 +72,7 @@ function createWindow(): void {
 }
 
 function hasAuthSession(): boolean {
-  const tokenPath = join(app.getPath('userData'), '.auth-session')
+  const tokenPath = join(app.getPath('userData'), is.dev ? '.auth-session.dev' : '.auth-session')
   return existsSync(tokenPath)
 }
 
