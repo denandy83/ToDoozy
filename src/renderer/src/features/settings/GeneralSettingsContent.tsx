@@ -533,6 +533,49 @@ export function GeneralSettingsContent(): React.JSX.Element {
       <SectionLabel>Keyboard Shortcuts</SectionLabel>
       <ShortcutRecorder />
       <AppToggleShortcutRecorder />
+
+      <SectionLabel>Sync</SectionLabel>
+      <ForceSyncButton />
+    </div>
+  )
+}
+
+function ForceSyncButton(): React.JSX.Element {
+  const [syncing, setSyncing] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const handleForceSync = useCallback(async () => {
+    setSyncing(true)
+    setDone(false)
+    try {
+      const userId = (await window.api.users.list())[0]?.id
+      if (userId) {
+        await window.api.settings.set(userId, 'last_sync_at', '')
+        const { fullUpload } = await import('../../services/PersonalSyncService')
+        await fullUpload(userId)
+        setDone(true)
+        setTimeout(() => setDone(false), 3000)
+      }
+    } catch (err) {
+      console.error('Force sync failed:', err)
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <button
+        onClick={handleForceSync}
+        disabled={syncing}
+        className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-50"
+      >
+        {syncing ? 'Syncing...' : 'Force Full Sync'}
+      </button>
+      {done && <span className="text-[10px] font-bold uppercase tracking-widest text-success">Done</span>}
+      <p className="text-[10px] font-light text-foreground/40">
+        Re-uploads all local data to Supabase
+      </p>
     </div>
   )
 }
