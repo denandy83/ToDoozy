@@ -28,7 +28,7 @@ mac:
   hardenedRuntime: true
   gatekeeperAssess: false
   identity: "Andy Cassiers (HXNS28BT9C)"
-  notarize: true
+  notarize: false
   extendInfo:
     - NSDocumentsFolderUsageDescription: Application data storage.
     - NSDownloadsFolderUsageDescription: Export functionality.
