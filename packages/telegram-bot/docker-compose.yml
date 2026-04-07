@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  todoozy-telegram-bot:
+    build: .
+    container_name: todoozy-telegram-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TODOOZY_USER_ID=${TODOOZY_USER_ID}
+      - ALLOWED_TELEGRAM_IDS=${ALLOWED_TELEGRAM_IDS}

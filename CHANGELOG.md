@@ -7,6 +7,21 @@ All bug fixes and changes to ToDoozy. Most recent first.
 ## v1.1.0
 
 - **Settings reorganization** — Reorganized Settings modal from 11 tabs to 7: General, Projects, Appearance (Theme + Priority Display subtabs), Labels, Timer, About (Updates + What's New + Integrations + Help subtabs). Added section labels throughout. No settings removed or renamed.
+- **MCP activity logging** — All 22 mutating MCP tools now create activity log entries, so AI-made changes (task creation, updates, label changes, etc.) appear in the activity timeline alongside user actions.
+
+## v1.0.7
+
+- **Full task rows in saved views + multi-sort** — Saved views now use the full TaskRow component with all task info (status, labels, priority, due date, etc.). Multi-sort with stackable sort rules in both saved views and project views. Sidebar saved views show colored dots. Priority auto-sort migrated to new sort system (#53)
+- **Sidebar customization** — Sidebar always expanded (collapse removed), light/dark theme toggle replaces collapse button, Stats moved to footer, show/hide and reorder nav items in Settings, dynamic keyboard shortcuts (#52)
+- **Supabase full sync engine** — Write-through sync hooks on all Zustand stores so every local write pushes to Supabase in background. Sync status indicator, offline detection, queue-and-flush for personal projects (#51)
+- **Exclusion filters ("is not")** — Added "is not" exclusion filter support for all filter types (labels, status, priority, assignee, projects) in saved views and the filter bar (#50)
+- **Saved views / smart lists** — Added saved views with persistent filter configurations for reusable smart lists (#47)
+- **Stats dashboard** — Added productivity stats dashboard with Recharts for visual task analytics (#48)
+- **Project areas/folders** — Added project areas and folders for sidebar grouping and organization (#49)
+- **Expanded filter system** — Added priority, status, due date, and keyword filters to the filter bar (#46)
+- **MCP task reorder tool** — Added `reorder_tasks` tool for task ordering via MCP (#44)
+- **Drag-drop UX overhaul** — Overhauled drag UX with horizontal intent detection and full-row ghost rendering
+- **Fix: Command palette filter clearing** — Fixed label/assignee filters not clearing on task navigation in command palette (#45)
 
 ## v1.0.6
 

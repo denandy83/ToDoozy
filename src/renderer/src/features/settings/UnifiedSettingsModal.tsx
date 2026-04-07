@@ -8,10 +8,11 @@ import { ProjectsSettingsContent } from './ProjectsSettingsContent'
 import { AppearanceSettingsContent, type AppearanceSettingsHandle } from './AppearanceSettingsContent'
 import { LabelSettingsContent } from './LabelSettingsContent'
 import { TimerSettingsContent } from './TimerSettingsContent'
+import { TelegramSettingsContent } from './TelegramSettingsContent'
 import { AboutSettingsContent } from './AboutSettingsContent'
 import { WhatsNewDot } from './WhatsNewSettingsContent'
 
-type Tab = 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'about'
+type Tab = 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'telegram' | 'about'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -87,7 +88,7 @@ export function UnifiedSettingsModal({
   const tabs: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' }, { key: 'projects', label: 'Projects' },
     { key: 'appearance', label: 'Appearance' }, { key: 'labels', label: 'Labels' },
-    { key: 'timer', label: 'Timer' }, { key: 'about', label: 'About' }
+    { key: 'timer', label: 'Timer' }, { key: 'telegram', label: 'Telegram' }, { key: 'about', label: 'About' }
   ]
 
   return (
@@ -141,6 +142,7 @@ export function UnifiedSettingsModal({
           )}
           {activeTab === 'labels' && <LabelSettingsContent />}
           {activeTab === 'timer' && <TimerSettingsContent />}
+          {activeTab === 'telegram' && <TelegramSettingsContent />}
           {activeTab === 'about' && <AboutSettingsContent />}
         </div>
       </div>

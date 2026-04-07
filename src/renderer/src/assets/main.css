@@ -24,6 +24,20 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   transition: background-color 300ms, color 300ms;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Allow text selection in editable areas */
+input,
+textarea,
+[contenteditable="true"],
+.tiptap-editor-content,
+.select-text,
+pre,
+code {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 * {

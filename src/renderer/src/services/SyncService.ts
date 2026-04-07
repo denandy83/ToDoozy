@@ -6,12 +6,18 @@
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import type { Task, Status, SyncOperation } from '../../../shared/types'
+import { useSyncStore } from '../shared/stores/syncStore'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
 let channels: Map<string, RealtimeChannel> = new Map()
 let onChangeCallback: RealtimeCallback | null = null
 let isOnline = true
+
+/** Mark a successful push in the sync store */
+function markSynced(): void {
+  useSyncStore.getState().setLastSynced()
+}
 
 export function setOnlineStatus(online: boolean): void {
   isOnline = online
@@ -36,7 +42,7 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     .channel(`project:${projectId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'shared_tasks', filter: `project_id=eq.${projectId}` },
+      { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
       (payload) => {
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
@@ -46,7 +52,7 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'shared_statuses', filter: `project_id=eq.${projectId}` },
+      { event: '*', schema: 'public', table: 'statuses', filter: `project_id=eq.${projectId}` },
       (payload) => {
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
@@ -56,7 +62,7 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'shared_project_members', filter: `project_id=eq.${projectId}` },
+      { event: '*', schema: 'public', table: 'project_members', filter: `project_id=eq.${projectId}` },
       (payload) => {
         // For DELETE events, pass the old record (new is empty on delete)
         const data = payload.eventType === 'DELETE'
@@ -67,7 +73,7 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'shared_activity_log', filter: `project_id=eq.${projectId}` },
+      { event: '*', schema: 'public', table: 'activity_log', filter: `project_id=eq.${projectId}` },
       (payload) => {
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
@@ -75,8 +81,14 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         console.log(`[Realtime] Subscribed to project ${projectId}`)
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.warn(`[Realtime] Project subscription failed for ${projectId}:`, status)
+        // Realtime connected — mark as online
+        const currentStatus = useSyncStore.getState().status
+        if (currentStatus === 'offline') {
+          useSyncStore.getState().setStatus('synced')
+        }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn(`[Realtime] Project subscription ${status} for ${projectId}`)
+        useSyncStore.getState().setStatus('offline')
       }
     })
 
@@ -141,7 +153,7 @@ export async function uploadProjectToSupabase(
   // Upload statuses
   const statuses = await window.api.statuses.findByProjectId(projectId)
   if (statuses.length > 0) {
-    const { error: statusError } = await supabase.from('shared_statuses').upsert(
+    const { error: statusError } = await supabase.from('statuses').upsert(
       statuses.map((s) => ({
         id: s.id,
         project_id: projectId,
@@ -161,7 +173,7 @@ export async function uploadProjectToSupabase(
   // Upload all project labels (not just task-assigned ones)
   const projectLabels = await window.api.labels.findByProjectId(projectId)
   const allLabelData = projectLabels.map((l) => ({ name: l.name, color: l.color }))
-  await supabase.from('shared_projects').update({ label_data: JSON.stringify(allLabelData) }).eq('id', projectId)
+  await supabase.from('projects').update({ label_data: JSON.stringify(allLabelData) }).eq('id', projectId)
 
   // Upload tasks with label names+colors (resolve IDs for cross-user sync)
   const tasks = await window.api.tasks.findByProjectId(projectId)
@@ -181,7 +193,7 @@ async function syncTaskToSupabase(
   task: Task,
   labelData: Array<{ name: string; color: string }> | string[]
 ): Promise<void> {
-  const { error } = await supabase.from('shared_tasks').upsert({
+  const { error } = await supabase.from('tasks').upsert({
     id: task.id,
     project_id: task.project_id,
     owner_id: task.owner_id,
@@ -214,17 +226,18 @@ export async function syncTaskChange(
   labelData?: Array<{ name: string; color: string }>
 ): Promise<void> {
   if (!isOnline) {
-    await window.api.sync.enqueue('shared_tasks', task.id, operation, JSON.stringify(task))
+    await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
     return
   }
 
   const supabase = await getSupabase()
 
   if (operation === 'DELETE') {
-    await supabase.from('shared_tasks').delete().eq('id', task.id)
+    await supabase.from('tasks').delete().eq('id', task.id)
   } else {
     await syncTaskToSupabase(supabase, task, labelData ?? [])
   }
+  markSynced()
 }
 
 /**
@@ -235,16 +248,16 @@ export async function syncStatusChange(
   operation: SyncOperation
 ): Promise<void> {
   if (!isOnline) {
-    await window.api.sync.enqueue('shared_statuses', status.id, operation, JSON.stringify(status))
+    await window.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
     return
   }
 
   const supabase = await getSupabase()
 
   if (operation === 'DELETE') {
-    await supabase.from('shared_statuses').delete().eq('id', status.id)
+    await supabase.from('statuses').delete().eq('id', status.id)
   } else {
-    await supabase.from('shared_statuses').upsert({
+    await supabase.from('statuses').upsert({
       id: status.id,
       project_id: status.project_id,
       name: status.name,
@@ -257,6 +270,7 @@ export async function syncStatusChange(
       updated_at: status.updated_at
     })
   }
+  markSynced()
 }
 
 /**
@@ -313,7 +327,7 @@ export async function generateInviteLink(
   }
 
   const { data, error } = await supabase
-    .from('shared_project_invites')
+    .from('project_invites')
     .insert(insertData)
     .select('token')
     .single()
@@ -372,7 +386,7 @@ export async function subscribeToInvites(
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'shared_project_invites',
+          table: 'project_invites',
           filter: `target_email=eq.${email.toLowerCase().trim()}`
         },
         (payload) => {
@@ -440,7 +454,7 @@ export async function validateInviteToken(token: string): Promise<{
 }
 
 /**
- * Accept an invite — adds user to shared_project_members and syncs data down.
+ * Accept an invite — adds user to project_members and syncs data down.
  */
 export async function acceptInvite(token: string, userId: string): Promise<string> {
   const supabase = await getSupabase()
@@ -469,7 +483,7 @@ export async function acceptInvite(token: string, userId: string): Promise<strin
 export async function declineInvite(token: string): Promise<void> {
   const supabase = await getSupabase()
   await supabase
-    .from('shared_project_invites')
+    .from('project_invites')
     .update({ status: 'declined' })
     .eq('token', token)
 }
@@ -479,36 +493,117 @@ export async function declineInvite(token: string): Promise<void> {
  * but doesn't have locally. Returns project IDs to sync down.
  */
 export async function discoverRemoteMemberships(_userId: string): Promise<string[]> {
+  if (!navigator.onLine) return []
   const supabase = await getSupabase()
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return []
 
   const { data: memberships, error } = await supabase
-    .from('shared_project_members')
+    .from('project_members')
     .select('project_id')
     .eq('user_id', session.user.id)
 
   if (error || !memberships) return []
 
   const idsToSync: string[] = []
+  const projectIds = memberships.map((m) => m.project_id)
+
+  // Get member counts for all projects to detect truly shared ones
+  const memberCounts = new Map<string, number>()
+  for (const pid of projectIds) {
+    const { count } = await supabase
+      .from('project_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', pid)
+    memberCounts.set(pid, count ?? 0)
+  }
+
   for (const m of memberships) {
     const local = await window.api.projects.findById(m.project_id)
-    if (!local || local.is_shared !== 1) {
+    if (!local) {
+      // Project doesn't exist locally — sync it down
       idsToSync.push(m.project_id)
+    } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
+      // Project exists locally but isn't marked shared — just mark it and sync members
+      // Do NOT call syncProjectDown which would delete/overwrite local tasks
+      await window.api.projects.update(m.project_id, { is_shared: 1 })
+      await syncMembersDown(m.project_id)
     }
   }
-  return idsToSync
+  // Deduplicate
+  return [...new Set(idsToSync)]
+}
+
+/**
+ * Sync only project members from Supabase (without overwriting tasks/statuses).
+ * Used when a local project is discovered to be shared.
+ */
+async function syncMembersDown(projectId: string): Promise<void> {
+  const supabase = await getSupabase()
+  const { data: members } = await supabase
+    .from('project_members')
+    .select('*')
+    .eq('project_id', projectId)
+
+  if (!members) return
+
+  const localMembers = await window.api.projects.getMembers(projectId)
+  const localMemberIds = new Set(localMembers.map((m) => m.user_id))
+
+  for (const member of members) {
+    const localUser = await window.api.users.findById(member.user_id)
+    if (!localUser || localUser.email === 'shared-user') {
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('email, display_name, avatar_url')
+        .eq('id', member.user_id)
+        .single()
+
+      if (profile) {
+        if (localUser) {
+          await window.api.users.update(member.user_id, {
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url
+          })
+        } else {
+          await window.api.users.create({
+            id: member.user_id,
+            email: profile.email,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url
+          }).catch(() => { /* already exists */ })
+        }
+      }
+    }
+
+    if (!localMemberIds.has(member.user_id)) {
+      await window.api.projects.addMember(projectId, member.user_id, member.role)
+    }
+
+    if (member.display_color || member.display_initials) {
+      await window.api.projects.updateMember(projectId, member.user_id, {
+        display_color: member.display_color ?? null,
+        display_initials: member.display_initials ?? null
+      })
+    }
+  }
 }
 
 /**
  * Sync all shared project data from Supabase to local SQLite.
  */
 export async function syncProjectDown(projectId: string, userId: string): Promise<void> {
+  // Never sync down when offline — would delete all local tasks
+  if (!navigator.onLine) {
+    console.log('[SyncService] Skipping syncProjectDown (offline)')
+    return
+  }
   const supabase = await getSupabase()
 
   // Get shared project
   const { data: project } = await supabase
-    .from('shared_projects')
+    .from('projects')
     .select('*')
     .eq('id', projectId)
     .single()
@@ -581,7 +676,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   // Sync statuses
   const { data: statuses } = await supabase
-    .from('shared_statuses')
+    .from('statuses')
     .select('*')
     .eq('project_id', projectId)
 
@@ -605,7 +700,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   // Sync tasks — create new, update existing, delete removed
   const { data: remoteTasks } = await supabase
-    .from('shared_tasks')
+    .from('tasks')
     .select('*')
     .eq('project_id', projectId)
 
@@ -681,7 +776,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   // Sync members locally — fetch real profiles from Supabase
   const { data: members } = await supabase
-    .from('shared_project_members')
+    .from('project_members')
     .select('*')
     .eq('project_id', projectId)
 
@@ -744,7 +839,7 @@ export async function updateSharedMemberDisplay(
 ): Promise<void> {
   const supabase = await getSupabase()
   const { error } = await supabase
-    .from('shared_project_members')
+    .from('project_members')
     .update({ display_color: displayColor, display_initials: displayInitials })
     .eq('project_id', projectId)
     .eq('user_id', userId)
@@ -764,14 +859,14 @@ export async function removeProjectFromSupabase(projectId: string): Promise<void
   const ownerId = session?.user?.id
   if (ownerId) {
     await supabase
-      .from('shared_project_members')
+      .from('project_members')
       .delete()
       .eq('project_id', projectId)
       .neq('user_id', ownerId)
   }
 
   // Now delete the project (cascades remaining data: tasks, statuses, owner member row, etc.)
-  const { error } = await supabase.from('shared_projects').delete().eq('id', projectId)
+  const { error } = await supabase.from('projects').delete().eq('id', projectId)
   if (error) throw error
 }
 
@@ -790,7 +885,7 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   const supabase = await getSupabase()
 
   const { data, error } = await supabase
-    .from('shared_project_members')
+    .from('project_members')
     .select('user_id, role, joined_at, display_color, display_initials')
     .eq('project_id', projectId)
 
@@ -846,7 +941,7 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
 export async function removeSharedMember(projectId: string, userId: string): Promise<void> {
   const supabase = await getSupabase()
   const { error } = await supabase
-    .from('shared_project_members')
+    .from('project_members')
     .delete()
     .eq('project_id', projectId)
     .eq('user_id', userId)

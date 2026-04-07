@@ -27,6 +27,8 @@ interface StatusSectionProps {
   bucketColor?: string
   mapStatusId?: (statusId: string) => string
   hideAssignee?: boolean
+  disableDrag?: boolean
+  readOnly?: boolean
 }
 
 export function StatusSection({
@@ -49,7 +51,9 @@ export function StatusSection({
   bucketName,
   bucketColor,
   mapStatusId,
-  hideAssignee
+  hideAssignee,
+  disableDrag,
+  readOnly
 }: StatusSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
@@ -63,15 +67,18 @@ export function StatusSection({
   // Only render top-level tasks (no parent_id) in status sections
   const topLevel = tasks.filter((t) => t.parent_id === null)
   const sorted = useMemo(
-    () =>
-      [...topLevel].sort((a, b) => {
+    () => {
+      // When an external sort is active (disableDrag=true), trust the pre-sorted order
+      if (disableDrag) return topLevel
+      return [...topLevel].sort((a, b) => {
         if (autoSort) {
           const priDiff = b.priority - a.priority
           if (priDiff !== 0) return priDiff
         }
         return a.order_index - b.order_index
-      }),
-    [topLevel, autoSort]
+      })
+    },
+    [topLevel, autoSort, disableDrag]
   )
   return (
     <section>
@@ -127,6 +134,8 @@ export function StatusSection({
                 statusIdOverride={mapStatusId ? mapStatusId(task.status_id) : undefined}
                 mapStatusId={mapStatusId}
                 hideAssignee={hideAssignee}
+                disableDrag={disableDrag}
+                readOnly={readOnly}
               />
               )
             })}

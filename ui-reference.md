@@ -193,6 +193,19 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 
 ---
 
+## Text Selection
+
+Global `user-select: none` applied on `body` in `main.css`. No text is selectable anywhere in the app except in explicitly editable areas:
+- `input`, `textarea`
+- `[contenteditable="true"]`
+- `.tiptap-editor-content`
+- `.select-text` (utility class for opt-in selection)
+- `pre`, `code`
+
+Never add `select-text` or `user-select: text` to labels, buttons, headings, or metadata.
+
+---
+
 ## Scrollbars
 
 Global scrollbar style applied via `::-webkit-scrollbar` in `main.css`:

@@ -4,12 +4,64 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
-## 2026-04-03 — Settings reorganization (Story #42)
+## 2026-04-04 — Full Task Rows in Saved Views + Multi-Sort (#53)
 
 **Session type:** Feature implementation
 
 **What was built:**
-- **Settings reorganization** — Consolidated 11 settings tabs down to 7: merged Themes + Priorities into Appearance with subtabs, merged Updates + What's New + MCP + Help into About with subtabs, absorbed Notifications into General as a section. Added section labels to General and Timer tabs. Extracted large components from UnifiedSettingsModal.tsx into separate files.
+- **Full task rows in saved views (Story #53)** — Replaced minimal SavedViewTaskRow with full TaskRow component. Added multi-sort dropdown to filter bar for both saved views and project views. Sidebar saved views show colored dots. Migrated priority_auto_sort to new sort system. 4 files changed.
+
+**Commits:** 721d9f8
+
+---
+
+## 2026-04-04 — Sidebar Customization (#52) + Supabase Sync Engine (#51)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Sidebar customization (Story #52)** — Sidebar always expanded, collapse removed, light/dark theme toggle replaces collapse button, Stats moved to footer, show/hide and reorder nav items in Settings, dynamic keyboard shortcuts. 6 files changed.
+- **Supabase full sync engine (Story #51)** — Write-through sync hooks on all Zustand stores so every local write pushes to Supabase in background. Sync status indicator, offline detection, queue-and-flush for personal projects. 7 files changed.
+
+**Commits:** f5925af, 24ebfad
+
+---
+
+## 2026-04-04 — Exclusion Filters (Story #50)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Exclusion filters (Story #50)** — Added "is not" exclusion filter support for all filter types (labels, status, priority, assignee, projects). Works in both the filter bar and saved views, allowing users to exclude tasks matching specific criteria. 12 files changed.
+
+**Commits:** 9f12183
+
+---
+
+## 2026-04-03 — Features #44-49 + Drag-Drop Overhaul
+
+**Session type:** Feature implementation + bug fix
+
+**What was built:**
+- **MCP task reorder (Story #44)** — Added `reorder_tasks` tool to the MCP server for AI-driven task ordering. 2 files changed.
+- **Command palette filter fix (Story #45)** — Fixed label/assignee filters not clearing when navigating to a task from the command palette. 2 files changed.
+- **Expanded filters (Story #46)** — Extended the filter bar with priority, status, due date, and keyword filters beyond the existing label filter. 9 files changed.
+- **Saved views / smart lists (Story #47)** — Saved views with persistent filter configurations, accessible from the sidebar. 18 files changed.
+- **Stats dashboard (Story #48)** — Productivity stats dashboard with Recharts for visual task analytics. 13 files changed.
+- **Project areas/folders (Story #49)** — Sidebar grouping for projects using areas/folders. 12 files changed.
+- **Drag-drop overhaul** — Rewrote drag UX with horizontal intent detection and full-row ghost rendering. 12 files changed.
+
+**Commits:** a749fbe, 0e73df8, 43a6203, 0f394a2, dbb23d8, 1e2c9d4, e8839e8, 0d071f1, c0a9aa6
+
+---
+
+## 2026-04-03 — Settings reorganization + MCP activity logging (Stories #42-43)
+
+**Session type:** Feature implementation
+
+**What was built:**
+- **Settings reorganization (Story #42)** — Consolidated 11 settings tabs down to 7: merged Themes + Priorities into Appearance with subtabs, merged Updates + What's New + MCP + Help into About with subtabs, absorbed Notifications into General as a section. Added section labels to General and Timer tabs. Extracted large components from UnifiedSettingsModal.tsx into separate files.
+- **MCP activity logging (Story #43)** — Added activity log entries to all 22 mutating MCP tools so that AI-made changes (task CRUD, label assignment, status changes, project operations, etc.) appear in the activity timeline alongside user-initiated actions. 6 files changed.
 
 ---
 

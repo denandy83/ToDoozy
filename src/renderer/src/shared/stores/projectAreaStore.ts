@@ -43,6 +43,10 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
     }
     const area = await window.api.projectAreas.create(input)
     set((state) => ({ areas: [...state.areas, area] }))
+    // Push to Supabase
+    import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+      pushProjectArea({ ...area, user_id: userId }).catch(() => {})
+    })
     return area
   },
 
@@ -52,12 +56,20 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
       set((state) => ({
         areas: state.areas.map((a) => (a.id === id ? result : a))
       }))
+      // Push to Supabase
+      import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+        pushProjectArea({ ...result, user_id: result.user_id }).catch(() => {})
+      })
     }
   },
 
   async deleteArea(id: string): Promise<void> {
     await window.api.projectAreas.delete(id)
     set((state) => ({ areas: state.areas.filter((a) => a.id !== id) }))
+    // Delete from Supabase
+    import('../../services/PersonalSyncService').then(({ deleteProjectAreaFromSupabase }) => {
+      deleteProjectAreaFromSupabase(id).catch(() => {})
+    })
   },
 
   async reorderAreas(areaIds: string[]): Promise<void> {
@@ -69,6 +81,12 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
           return area ? { ...area, sidebar_order: i } : null
         })
         .filter((a): a is ProjectArea => a !== null)
+      // Push reordered areas to Supabase
+      import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+        for (const area of updated) {
+          pushProjectArea({ ...area, user_id: area.user_id }).catch(() => {})
+        }
+      })
       return { areas: updated }
     })
   },
@@ -84,6 +102,10 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
         const newCollapsed = a.is_collapsed === 1 ? 0 : 1
         // Persist to DB
         window.api.projectAreas.update(id, { is_collapsed: newCollapsed })
+        // Push to Supabase
+        import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+          pushProjectArea({ ...a, is_collapsed: newCollapsed, user_id: a.user_id }).catch(() => {})
+        })
         return { ...a, is_collapsed: newCollapsed }
       })
       return { areas }

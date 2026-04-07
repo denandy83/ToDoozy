@@ -337,3 +337,76 @@
 - **Acceptance Criteria:** Supabase release_notes table, skills write to Supabase, MCP set_whats_new writes to Supabase, app fetches + caches on launch, What's New displays all versions, offline fallback, notification dot works, update dialog fetches per-version notes, typecheck passes.
 - **Passes:** true
 - **Implemented:** 2026-04-02
+
+---
+
+### #42 — Settings Menu Reorganization
+- **Description:** Reorganized Settings modal from 11 tabs to 7: General (absorbed Notifications), Projects, Appearance (Theme + Priority Display subtabs), Labels, Timer, About (Updates + What's New + Integrations + Help subtabs) + Logout. Added section labels throughout. Extracted large components into separate files.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** 7 tabs instead of 11, Appearance subtabs for Theme and Priority Display, About subtabs for Updates/What's New/Integrations/Help, section labels in General and Timer, no settings removed or renamed, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #43 — MCP Activity Logging
+- **Description:** Added activity log entries to all 22 mutating MCP tools so AI-made changes appear in the activity timeline. Covers task CRUD, subtask CRUD, label assignment/removal, status changes, project operations, template deployment, and My Day management.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** All 22 mutating MCP tools create activity log entries, activity timeline shows AI-made changes alongside user actions, no regressions in MCP tool functionality, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #44 — MCP Task Reorder Tool
+- **Description:** Added reorder_tasks MCP tool that accepts an ordered array of task IDs and sets order_index sequentially. Validates all IDs exist, warns if priority auto-sort is enabled.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** reorder_tasks tool accepts task ID array, calls TaskRepository.reorder(), validates IDs exist, warns about priority auto-sort, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #45 — Command Palette Clears Filters on Navigation
+- **Description:** Fixed Cmd+K navigation not clearing active label/assignee filters, which caused the target task to be invisible after navigation. Now calls clearLabelFilters() before setSelectedProject().
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Cmd+K clears label and assignee filters on navigation, target task is visible and scrolled into view, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #46 — Expanded Filter System
+- **Description:** Expanded filter bar from labels-only to support priority, due date range, status, assignee, keyword, and project scope filters. All filters combine with AND logic. "+ Filter" button reveals additional filter options.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Filter bar supports labels, priority, due date, status, assignee, keyword, project scope. TaskRepository.search() enhanced for array filters. Works in project views, My Day, Calendar. Typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #47 — Saved Views / Smart Lists
+- **Description:** Persist filter combinations as named views in the sidebar. Save as View button, collapsible sidebar section, Update View when filters change, broken filter warnings, MCP tools.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** saved_views table, Save as View button, sidebar section with count badges, filter restoration, Update View button, broken filter warnings, MCP tools, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #48 — Productivity Stats Dashboard
+- **Description:** Stats view with completion trends, focus time charts, streaks with gamification, calendar heatmap, and team stats. Uses Recharts for visualizations.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Stats view with ⌘3 shortcut, overview cards, completion and focus charts, streaks with fire icon, 90-day heatmap, time range and project filters, team stats for shared projects, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+
+---
+
+### #49 — Project Areas / Folders
+- **Description:** Group projects into collapsible single-level areas in the sidebar. Per-user area assignments, drag-drop assignment, MCP tools.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** project_areas table, create/rename/reorder/delete areas, sidebar grouping, collapsible with persistence, drag between areas, per-user scoping, MCP tools, typecheck passes.
+- **Passes:** true
+- **Implemented:** 2026-04-03
+

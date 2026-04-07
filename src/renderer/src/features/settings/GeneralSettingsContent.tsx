@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { ShortcutRecorder, AppToggleShortcutRecorder } from './ShortcutRecorder'
+import { Eye, EyeOff } from 'lucide-react'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const LEAD_TIME_OPTIONS = [
   { value: '5', label: '5 minutes' },
@@ -63,7 +67,6 @@ function ToggleSetting({
 function TaskBehaviorSection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const addPosition = useSetting('new_task_position') ?? 'top'
-  const dateFormat = useSetting('date_format') ?? 'dd/mm/yyyy'
 
   return (
     <>
@@ -91,32 +94,11 @@ function TaskBehaviorSection(): React.JSX.Element {
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Date format</p>
-          <p className="text-[10px] text-muted">How dates are displayed throughout the app</p>
-        </div>
-        <select
-          value={dateFormat}
-          onChange={(e) => setSetting('date_format', e.target.value)}
-          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
-        >
-          <option value="dd/mm/yyyy">DD/MM/YYYY</option>
-          <option value="mm/dd/yyyy">MM/DD/YYYY</option>
-          <option value="yyyy/mm/dd">YYYY/MM/DD</option>
-        </select>
-      </div>
       <ToggleSetting
         settingKey="click_opens_detail"
         defaultValue="true"
         label="Click opens detail panel"
         description="Open the detail panel when clicking a task. When off, use double-click or Enter."
-      />
-      <ToggleSetting
-        settingKey="shift_delete_enabled"
-        defaultValue="false"
-        label="Shift+click to delete"
-        description="Hold Shift while clicking delete to skip confirmation"
       />
     </>
   )
@@ -154,7 +136,7 @@ function QuickAddSection(): React.JSX.Element {
   )
 }
 
-function MyDaySection(): React.JSX.Element {
+export function MyDaySection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const projects = useProjectStore(selectAllProjects)
   const myDayDefaultProject = useSetting('myday_default_project') ?? ''
@@ -241,12 +223,36 @@ function NotificationsSection(): React.JSX.Element {
   )
 }
 
+const COMMON_TIMEZONES = [
+  { value: 'auto', label: 'Auto (system)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii (HST)' },
+  { value: 'America/Anchorage', label: 'Alaska (AKST)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (PST)' },
+  { value: 'America/Denver', label: 'Mountain (MST)' },
+  { value: 'America/Chicago', label: 'Central (CST)' },
+  { value: 'America/New_York', label: 'Eastern (EST)' },
+  { value: 'America/Sao_Paulo', label: 'São Paulo (BRT)' },
+  { value: 'Atlantic/Reykjavik', label: 'UTC' },
+  { value: 'Europe/London', label: 'London (GMT)' },
+  { value: 'Europe/Paris', label: 'Central Europe (CET)' },
+  { value: 'Europe/Helsinki', label: 'Eastern Europe (EET)' },
+  { value: 'Asia/Dubai', label: 'Dubai (GST)' },
+  { value: 'Asia/Kolkata', label: 'India (IST)' },
+  { value: 'Asia/Shanghai', label: 'China (CST)' },
+  { value: 'Asia/Tokyo', label: 'Japan (JST)' },
+  { value: 'Australia/Sydney', label: 'Sydney (AEST)' },
+  { value: 'Pacific/Auckland', label: 'New Zealand (NZST)' }
+]
+
 function SystemSection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const enabledSetting = useSetting('auto_archive_enabled') ?? 'false'
   const valueSetting = useSetting('auto_archive_value') ?? '3'
   const unitSetting = useSetting('auto_archive_unit') ?? 'days'
+  const dateFormat = useSetting('date_format') ?? 'dd/mm/yyyy'
+  const weekStart = useSetting('week_start') ?? 'monday'
+  const timezone = useSetting('timezone') ?? 'auto'
   const enabled = enabledSetting === 'true'
 
   useEffect(() => {
@@ -262,6 +268,56 @@ function SystemSection(): React.JSX.Element {
 
   return (
     <>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Timezone</p>
+          <p className="text-[10px] text-muted">Used for activity log timestamps and time display</p>
+        </div>
+        <select
+          value={timezone}
+          onChange={(e) => setSetting('timezone', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          {COMMON_TIMEZONES.map((tz) => (
+            <option key={tz.value} value={tz.value}>{tz.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Date format</p>
+          <p className="text-[10px] text-muted">How dates are displayed throughout the app</p>
+        </div>
+        <select
+          value={dateFormat}
+          onChange={(e) => setSetting('date_format', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          <option value="dd/mm/yyyy">DD/MM/YYYY</option>
+          <option value="mm/dd/yyyy">MM/DD/YYYY</option>
+          <option value="yyyy/mm/dd">YYYY/MM/DD</option>
+        </select>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Week starts on</p>
+          <p className="text-[10px] text-muted">Affects calendar, stats, and weekly views</p>
+        </div>
+        <select
+          value={weekStart}
+          onChange={(e) => setSetting('week_start', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          <option value="monday">Monday</option>
+          <option value="sunday">Sunday</option>
+        </select>
+      </div>
+      <ToggleSetting
+        settingKey="shift_delete_enabled"
+        defaultValue="false"
+        label="Shift+click to delete"
+        description="Hold Shift while clicking delete to skip confirmation"
+      />
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Launch at login</p>
@@ -336,17 +392,137 @@ function SystemSection(): React.JSX.Element {
   )
 }
 
+const DEFAULT_SIDEBAR_ORDER: string[] = ['my-day', 'calendar', 'views', 'projects', 'archive', 'templates']
+const SIDEBAR_ITEM_LABELS: Record<string, string> = {
+  'my-day': 'My Day',
+  'calendar': 'Calendar',
+  'views': 'Views',
+  'projects': 'Projects',
+  'archive': 'Archive',
+  'templates': 'Templates'
+}
+
+function SidebarSection(): React.JSX.Element {
+  const { setSetting } = useSettingsStore()
+  const orderJson = useSetting('sidebar_order')
+  const hiddenJson = useSetting('sidebar_hidden')
+
+  const order: string[] = (() => {
+    let o: string[] = orderJson ? JSON.parse(orderJson) as string[] : DEFAULT_SIDEBAR_ORDER
+    const s = new Set(o)
+    for (const item of DEFAULT_SIDEBAR_ORDER) { if (!s.has(item)) o.push(item) }
+    o = o.filter((id) => DEFAULT_SIDEBAR_ORDER.includes(id))
+    return o
+  })()
+  const hidden = new Set<string>(hiddenJson ? JSON.parse(hiddenJson) as string[] : [])
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = order.indexOf(active.id as string)
+    const newIndex = order.indexOf(over.id as string)
+    if (oldIndex === -1 || newIndex === -1) return
+    setSetting('sidebar_order', JSON.stringify(arrayMove(order, oldIndex, newIndex)))
+  }, [order, setSetting])
+
+  const toggleHidden = useCallback((id: string) => {
+    if (id === 'my-day') return
+    const newHidden = new Set(hidden)
+    if (newHidden.has(id)) {
+      newHidden.delete(id)
+    } else {
+      newHidden.add(id)
+    }
+    setSetting('sidebar_hidden', JSON.stringify([...newHidden]))
+  }, [hidden, setSetting])
+
+  let shortcutIndex = 1
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[10px] text-muted mb-1">Drag to reorder. Toggle visibility with the eye icon. My Day is always visible.</p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+          {order.map((id) => {
+            const isHidden = hidden.has(id)
+            const currentShortcut = !isHidden ? `⌘${shortcutIndex++}` : null
+            return (
+              <SortableSidebarItem
+                key={id}
+                id={id}
+                label={SIDEBAR_ITEM_LABELS[id] ?? id}
+                isHidden={isHidden}
+                isMyDay={id === 'my-day'}
+                shortcut={currentShortcut}
+                onToggleHidden={() => toggleHidden(id)}
+              />
+            )
+          })}
+        </SortableContext>
+      </DndContext>
+    </div>
+  )
+}
+
+interface SortableSidebarItemProps {
+  id: string
+  label: string
+  isHidden: boolean
+  isMyDay: boolean
+  shortcut: string | null
+  onToggleHidden: () => void
+}
+
+function SortableSidebarItem({ id, label, isHidden, isMyDay, shortcut, onToggleHidden }: SortableSidebarItemProps): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`flex items-center gap-2 rounded-lg border border-border px-2 py-2 transition-colors touch-none ${
+        isDragging ? 'bg-accent/8 border-accent/30 cursor-grabbing' : 'bg-surface hover:bg-foreground/4 cursor-grab'
+      }`}
+    >
+      <span className={`flex-1 text-sm font-light ${isHidden ? 'text-muted/40 line-through' : 'text-foreground'}`}>
+        {label}
+      </span>
+      {shortcut && (
+        <span className="text-[10px] text-muted/50 font-light tabular-nums">{shortcut}</span>
+      )}
+      {!isMyDay && (
+        <button
+          onClick={onToggleHidden}
+          className="rounded p-1 text-muted transition-colors hover:bg-foreground/6"
+          title={isHidden ? 'Show in sidebar' : 'Hide from sidebar'}
+        >
+          {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function GeneralSettingsContent(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-6">
-      <SectionLabel first>Task Behavior</SectionLabel>
+      <SectionLabel first>Sidebar</SectionLabel>
+      <SidebarSection />
+
+      <SectionLabel>Task Behavior</SectionLabel>
       <TaskBehaviorSection />
 
       <SectionLabel>Quick Add</SectionLabel>
       <QuickAddSection />
-
-      <SectionLabel>My Day</SectionLabel>
-      <MyDaySection />
 
       <SectionLabel>Notifications</SectionLabel>
       <NotificationsSection />
@@ -357,6 +533,49 @@ export function GeneralSettingsContent(): React.JSX.Element {
       <SectionLabel>Keyboard Shortcuts</SectionLabel>
       <ShortcutRecorder />
       <AppToggleShortcutRecorder />
+
+      <SectionLabel>Sync</SectionLabel>
+      <ForceSyncButton />
+    </div>
+  )
+}
+
+function ForceSyncButton(): React.JSX.Element {
+  const [syncing, setSyncing] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const handleForceSync = useCallback(async () => {
+    setSyncing(true)
+    setDone(false)
+    try {
+      const userId = (await window.api.users.list())[0]?.id
+      if (userId) {
+        await window.api.settings.set(userId, 'last_sync_at', '')
+        const { fullUpload } = await import('../../services/PersonalSyncService')
+        await fullUpload(userId)
+        setDone(true)
+        setTimeout(() => setDone(false), 3000)
+      }
+    } catch (err) {
+      console.error('Force sync failed:', err)
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <button
+        onClick={handleForceSync}
+        disabled={syncing}
+        className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-50"
+      >
+        {syncing ? 'Syncing...' : 'Force Full Sync'}
+      </button>
+      {done && <span className="text-[10px] font-bold uppercase tracking-widest text-success">Done</span>}
+      <p className="text-[10px] font-light text-foreground/40">
+        Re-uploads all local data to Supabase
+      </p>
     </div>
   )
 }

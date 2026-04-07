@@ -8,8 +8,7 @@ const TOGGLE_KEYS = [
   { key: 'priority_badge_icons', label: 'Badge Icons', description: 'Priority icon indicator' },
   { key: 'priority_badge_labels', label: 'Badge Labels', description: 'Priority text label (LOW, NORMAL, etc.)' },
   { key: 'priority_background_tint', label: 'Background Tint', description: '3% for High, 6% for Urgent' },
-  { key: 'priority_font_weight', label: 'Font Weight', description: 'Heavier text for higher priority' },
-  { key: 'priority_auto_sort', label: 'Auto-Sort', description: 'Sort by priority descending within sections' }
+  { key: 'priority_font_weight', label: 'Font Weight', description: 'Heavier text for higher priority' }
 ] as const
 
 const PREVIEW_TASKS = [
@@ -33,20 +32,20 @@ export function PrioritySettingsContent(): React.JSX.Element {
   })
 
   const colorBar = useSetting('priority_color_bar')
-  const badges = useSetting('priority_badges')
+  const badgeIcons = useSetting('priority_badge_icons')
+  const badgeLabels = useSetting('priority_badge_labels')
   const backgroundTint = useSetting('priority_background_tint')
   const fontWeight = useSetting('priority_font_weight')
-  const autoSort = useSetting('priority_auto_sort')
 
   useMemo(() => {
     setLocalToggles({
       priority_color_bar: colorBar === 'true',
-      priority_badges: badges === 'true',
+      priority_badge_icons: badgeIcons === 'true',
+      priority_badge_labels: badgeLabels === 'true',
       priority_background_tint: backgroundTint === 'true',
-      priority_font_weight: fontWeight === 'true',
-      priority_auto_sort: autoSort === 'true'
+      priority_font_weight: fontWeight === 'true'
     })
-  }, [colorBar, badges, backgroundTint, fontWeight, autoSort])
+  }, [colorBar, badgeIcons, badgeLabels, backgroundTint, fontWeight])
 
   const handleToggle = useCallback(
     async (key: string) => {
@@ -57,12 +56,7 @@ export function PrioritySettingsContent(): React.JSX.Element {
     [localToggles, setSetting]
   )
 
-  const previewTasks = useMemo(() => {
-    if (localToggles.priority_auto_sort) {
-      return [...PREVIEW_TASKS].sort((a, b) => b.priority - a.priority)
-    }
-    return PREVIEW_TASKS
-  }, [localToggles.priority_auto_sort])
+  const previewTasks = PREVIEW_TASKS
 
   return (
     <div>

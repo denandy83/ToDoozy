@@ -46,6 +46,8 @@ interface TaskRowProps {
   statusIdOverride?: string
   mapStatusId?: (statusId: string) => string
   hideAssignee?: boolean
+  disableDrag?: boolean
+  readOnly?: boolean
 }
 
 export function TaskRow({
@@ -70,7 +72,9 @@ export function TaskRow({
   project,
   statusIdOverride,
   mapStatusId,
-  hideAssignee
+  hideAssignee,
+  disableDrag,
+  readOnly
 }: TaskRowProps): React.JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(task.title)
@@ -79,6 +83,8 @@ export function TaskRow({
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addLabelBtnRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLSpanElement>(null)
+  const [maxVisibleLabels, setMaxVisibleLabels] = useState(Infinity)
 
   const taskProject = useProjectStore((s) => s.projects[task.project_id])
   const isSharedProject = taskProject?.is_shared === 1
@@ -117,11 +123,11 @@ export function TaskRow({
     isDragging
   } = useDraggable({
     id: task.id,
-    disabled: isDragOverlay ?? false
+    disabled: (isDragOverlay ?? false) || (disableDrag ?? false)
   })
   const { setNodeRef: setDropRef } = useDroppable({
     id: task.id,
-    disabled: isDragOverlay ?? false
+    disabled: (isDragOverlay ?? false) || (disableDrag ?? false)
   })
   const setNodeRef = useCallback((el: HTMLElement | null) => { setDragRef(el); setDropRef(el) }, [setDragRef, setDropRef])
 
@@ -146,13 +152,61 @@ export function TaskRow({
     }
   }, [])
 
+  // Dynamically adjust visible labels based on row width.
+  // When the title is truncated, progressively hide labels.
+  // Reset to show all when row resizes wider (e.g. fullscreen).
+  const rowRef = useRef<HTMLDivElement>(null)
+  const lastRowWidth = useRef(0)
+  useEffect(() => {
+    const row = rowRef.current
+    const el = titleRef.current
+    if (!row || !el || taskLabels.length === 0) {
+      setMaxVisibleLabels(Infinity)
+      return
+    }
+    let settling = false
+    const observer = new ResizeObserver(() => {
+      if (settling) return
+      const currentWidth = row.clientWidth
+      const grewWider = currentWidth > lastRowWidth.current + 20
+      lastRowWidth.current = currentWidth
+
+      if (grewWider) {
+        // Row got wider — try showing all labels again
+        setMaxVisibleLabels(Infinity)
+        return
+      }
+
+      const isTruncated = el.scrollWidth > el.clientWidth + 2
+      if (isTruncated) {
+        settling = true
+        setMaxVisibleLabels((prev) => {
+          const next = Math.max(0, (prev === Infinity ? taskLabels.length : prev) - 1)
+          // Let the layout settle before observing again
+          requestAnimationFrame(() => { settling = false })
+          return next
+        })
+      }
+    })
+    observer.observe(row)
+    lastRowWidth.current = row.clientWidth
+    // Initial check
+    const isTruncated = el.scrollWidth > el.clientWidth + 2
+    if (isTruncated) {
+      setMaxVisibleLabels(Math.min(3, taskLabels.length))
+    } else {
+      setMaxVisibleLabels(Infinity)
+    }
+    return () => observer.disconnect()
+  }, [taskLabels.length, task.title])
+
   const handleDoubleClick = useCallback(() => {
     if (onOpenDetail) {
       onOpenDetail(task.id)
-    } else {
+    } else if (!readOnly) {
       setIsEditing(true)
     }
-  }, [onOpenDetail, task.id])
+  }, [onOpenDetail, task.id, readOnly])
 
   const saveTitle = useCallback(() => {
     const trimmed = editValue.trim()
@@ -198,6 +252,7 @@ export function TaskRow({
     (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
+      if (readOnly) return
       if (selectedTaskIds.has(task.id) && selectedTaskIds.size > 1) {
         openBulkContextMenu([...selectedTaskIds], e.clientX, e.clientY)
       } else {
@@ -326,11 +381,15 @@ export function TaskRow({
   return (
     <>
       <div
-        ref={setNodeRef}
+        ref={(el) => { setNodeRef(el); (rowRef as React.MutableRefObject<HTMLDivElement | null>).current = el }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all cursor-grab active:cursor-grabbing select-none ${
+        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all select-none ${
+          readOnly
+            ? 'cursor-default'
+            : 'cursor-grab active:cursor-grabbing'
+        } ${
           isMoving
             ? 'bg-accent/20 border-l-2 border-accent ring-1 ring-accent/40'
             : isSelected
@@ -392,10 +451,7 @@ export function TaskRow({
         )}
 
         {project ? (
-          <>
-            <ProjectIndicator project={project} />
-            <StatusLabel statusId={task.status_id} />
-          </>
+          <ProjectIndicator project={project} />
         ) : (
           <MyDayIndicator
             visible={task.is_in_my_day === 1}
@@ -403,11 +459,13 @@ export function TaskRow({
           />
         )}
 
-        <StatusButton
-          currentStatusId={statusIdOverride ?? task.status_id}
-          statuses={statuses}
-          onStatusChange={handleStatusChange}
-        />
+        <div className={readOnly ? 'pointer-events-none' : ''}>
+          <StatusButton
+            currentStatusId={statusIdOverride ?? task.status_id}
+            statuses={statuses}
+            onStatusChange={handleStatusChange}
+          />
+        </div>
 
         {isEditing ? (
           <input
@@ -421,6 +479,7 @@ export function TaskRow({
           />
         ) : (
           <span
+            ref={titleRef}
             className={`flex-1 truncate text-[15px] ${fontWeightClass} tracking-tight ${
               isDone ? 'text-muted line-through' : 'text-foreground'
             }`}
@@ -488,44 +547,51 @@ export function TaskRow({
         {/* Priority badge */}
         {showBadge && <PriorityBadge priority={task.priority} showIcon={prioritySettings.badgeIcons} showLabel={prioritySettings.badgeLabels} />}
 
-        {/* Label chips — show max 3, then "+X" */}
-        {taskLabels.length > 0 && (
+        {/* Label chips — dynamically adjust visible count based on title truncation */}
+        {taskLabels.length > 0 && maxVisibleLabels > 0 && (
           <div className="flex flex-shrink-0 items-center gap-1">
-            {taskLabels.slice(0, 3).map((label) => (
+            {taskLabels.slice(0, maxVisibleLabels).map((label) => (
               <LabelChip
                 key={label.id}
                 name={label.name}
                 color={label.color}
                 onClick={() => toggleLabelFilter(label.id)}
-                onRemove={() => onRemoveLabel(task.id, label.id)}
+                onRemove={readOnly ? undefined : () => onRemoveLabel(task.id, label.id)}
               />
             ))}
-            {taskLabels.length > 3 && (
-              <LabelOverflowBadge labels={taskLabels.slice(3)} />
+            {taskLabels.length > maxVisibleLabels && (
+              <LabelOverflowBadge labels={taskLabels.slice(maxVisibleLabels)} />
             )}
           </div>
         )}
+        {taskLabels.length > 0 && maxVisibleLabels === 0 && (
+          <LabelOverflowBadge labels={taskLabels} />
+        )}
 
         {/* Add label button */}
-        <button
-          ref={addLabelBtnRef}
-          onClick={handleOpenPicker}
-          className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
-          title="Add label"
-          aria-label="Add label"
-          tabIndex={0}
-        >
-          <Plus size={14} />
-        </button>
+        {!readOnly && (
+          <button
+            ref={addLabelBtnRef}
+            onClick={handleOpenPicker}
+            className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
+            title="Add label"
+            aria-label="Add label"
+            tabIndex={0}
+          >
+            <Plus size={14} />
+          </button>
+        )}
 
-        <button
-          onClick={handleDelete}
-          className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
-          title="Delete task"
-          aria-label="Delete task"
-        >
-          <Trash2 size={14} />
-        </button>
+        {!readOnly && (
+          <button
+            onClick={handleDelete}
+            className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
+            title="Delete task"
+            aria-label="Delete task"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
       {/* Label picker portal */}
@@ -807,18 +873,6 @@ function MyDayIndicator({ visible, onToggle }: { visible: boolean; onToggle?: ()
   )
 }
 
-function StatusLabel({ statusId }: { statusId: string }): React.JSX.Element | null {
-  const status = useStatusStore((s) => s.statuses[statusId])
-  if (!status) return null
-  if (status.is_default === 1 || status.is_done === 1) return null
-  // Hide when name matches the My Day "In Progress" bucket — it's redundant
-  if (status.name.toLowerCase() === 'in progress') return null
-  return (
-    <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">
-      [{status.name}]
-    </span>
-  )
-}
 
 function getProjectInitials(name: string): string {
   const words = name.trim().split(/\s+/)

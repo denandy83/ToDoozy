@@ -55,7 +55,7 @@ function App(): React.JSX.Element {
       try {
         const { syncProjectDown: syncDown, subscribeToProject: subProject, discoverRemoteMemberships } = await import('./services/SyncService')
 
-        // Sync existing local shared projects
+        // Sync existing local shared projects + subscribe to Realtime for ALL projects
         const projects = useProjectStore.getState().projects
         for (const p of Object.values(projects)) {
           if (p.is_shared === 1) {
@@ -65,8 +65,10 @@ function App(): React.JSX.Element {
                 window.api.projects.update(p.id, { is_shared: 0 })
               }
             })
-            subProject(p.id)
           }
+          // Subscribe to Realtime for shared projects only
+          // (personal projects use the WAL polling + fullUpload/Pull flow)
+          if (p.is_shared === 1) subProject(p.id)
         }
 
         // Discover projects we're a member of in Supabase but don't have locally
@@ -84,18 +86,43 @@ function App(): React.JSX.Element {
       } catch (err) {
         console.error('[Startup] Failed to sync shared projects:', err)
       }
+
+      // Always start online monitoring (even if sync fails)
+      const { initSync, startOnlineMonitoring } = await import('./services/PersonalSyncService')
+      startOnlineMonitoring()
+
+      // Initialize personal sync (first-time upload or new-device pull)
+      try {
+        await initSync(currentUser.id)
+      } catch (err) {
+        console.error('[Startup] Failed to initialize personal sync:', err)
+      }
     }
     const timeout = setTimeout(syncShared, 2000)
-    return () => clearTimeout(timeout)
+    return () => {
+      clearTimeout(timeout)
+      import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
+    }
   }, [isAuthenticated, currentUser, hydrateProjects])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
-    if (currentProjectId && currentUser) {
-      hydrateStatuses(currentProjectId)
-      hydrateLabels(currentProjectId)
-      hydrateAllForProject(currentProjectId, currentUser.id)
+    if (!currentProjectId || !currentUser) return
+    hydrateStatuses(currentProjectId)
+    hydrateLabels(currentProjectId)
+    hydrateAllForProject(currentProjectId, currentUser.id)
+
+    // Pull any new tasks from Supabase that aren't in local SQLite
+    // (e.g. created by Telegram bot or another device)
+    const doPull = async (): Promise<void> => {
+      if (!navigator.onLine) return
+      const { pullNewTasks } = await import('./services/PersonalSyncService')
+      const pulled = await pullNewTasks(currentProjectId).catch(() => 0)
+      if (pulled > 0) hydrateAllForProject(currentProjectId, currentUser.id)
     }
+    doPull()
+    const pollInterval = setInterval(doPull, 10_000)
+    return () => clearInterval(pollInterval)
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)

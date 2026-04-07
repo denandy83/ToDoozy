@@ -15,20 +15,34 @@ import {
   selectHasPriorityFilters,
   selectStatusFilters,
   selectHasStatusFilters,
+  selectExcludeLabelFilters,
+  selectHasExcludeLabelFilters,
+  selectExcludeStatusFilters,
+  selectHasExcludeStatusFilters,
+  selectExcludePriorityFilters,
+  selectHasExcludePriorityFilters,
+  selectExcludeAssigneeFilters,
+  selectHasExcludeAssigneeFilters,
   selectDueDatePreset,
+  selectDueDateRange,
   selectKeyword,
-  selectHasAnyFilter
+  selectHasAnyFilter,
+  selectSortRules
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
-import { useSetting } from '../../shared/stores/settingsStore'
-import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
+import { useProjectStore } from '../../shared/stores/projectStore'
+import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
+import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
+import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import type { SortRule } from '../../shared/utils/sortTasks'
+import { createSortComparator } from '../../shared/utils/sortTasks'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskListViewProps {
@@ -50,6 +64,9 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const layoutMode = useViewStore(selectLayoutMode)
+  const project = useProjectStore((s) => s.projects[projectId])
+  const syncStatus = useSyncStore(selectSyncStatus)
+  const isOfflineShared = syncStatus === 'offline' && project?.is_shared === 1
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -66,17 +83,67 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
   const statusFilters = useLabelStore(selectStatusFilters)
   const hasStatusFilters = useLabelStore(selectHasStatusFilters)
+  const excludeLabelFilters = useLabelStore(selectExcludeLabelFilters)
+  const hasExcludeLabelFilters = useLabelStore(selectHasExcludeLabelFilters)
+  const excludeStatusFilters = useLabelStore(selectExcludeStatusFilters)
+  const hasExcludeStatusFilters = useLabelStore(selectHasExcludeStatusFilters)
+  const excludePriorityFilters = useLabelStore(selectExcludePriorityFilters)
+  const hasExcludePriorityFilters = useLabelStore(selectHasExcludePriorityFilters)
+  const excludeAssigneeFilters = useLabelStore(selectExcludeAssigneeFilters)
+  const hasExcludeAssigneeFilters = useLabelStore(selectHasExcludeAssigneeFilters)
   const dueDatePreset = useLabelStore(selectDueDatePreset)
+  const dueDateRange = useLabelStore(selectDueDateRange)
   const keywordFilter = useLabelStore(selectKeyword)
   const hasAnyFilterGlobal = useLabelStore(selectHasAnyFilter)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
-  const { autoSort: priorityAutoSort } = usePrioritySettings()
+  const sortRules = useLabelStore(selectSortRules)
+  const isCustomSort = sortRules.length === 0 || (sortRules.length === 1 && sortRules[0].field === 'custom')
   const { copySelectedTasks } = useCopyTasks()
 
   // Hydrate all task labels for this project
   useEffect(() => {
     if (projectId) hydrateAllTaskLabels(projectId)
   }, [projectId, hydrateAllTaskLabels])
+
+  // Persist sort config when it changes
+  const { setSetting } = useSettingsStore()
+
+  // Load saved sort config for this project (with priority_auto_sort migration)
+  const projectSortSetting = useSetting(`sort_config_${projectId}`)
+  const priorityAutoSortSetting = useSetting('priority_auto_sort')
+  // Load saved sort config when switching projects
+  const loadedProjectRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!projectId) return
+    // Only load on project switch, not on every settings change
+    if (loadedProjectRef.current === projectId) return
+    loadedProjectRef.current = projectId
+    const store = useLabelStore.getState()
+    if (projectSortSetting) {
+      try {
+        const rules = JSON.parse(projectSortSetting) as typeof sortRules
+        store.setSortRules(rules)
+      } catch { store.setSortRules([]) }
+    } else if (priorityAutoSortSetting === 'true') {
+      const migrated: SortRule[] = [{ field: 'priority', direction: 'desc' }]
+      store.setSortRules(migrated)
+      setSetting(`sort_config_${projectId}`, JSON.stringify(migrated))
+    } else {
+      store.setSortRules([])
+    }
+  }, [projectId, projectSortSetting, priorityAutoSortSetting, setSetting])
+
+  // Persist sort config when user changes it
+  useEffect(() => {
+    if (!projectId || loadedProjectRef.current !== projectId) return
+    const json = JSON.stringify(sortRules)
+    const current = useLabelStore.getState().sortRules
+    if (current.length > 0) {
+      setSetting(`sort_config_${projectId}`, json)
+    } else {
+      setSetting(`sort_config_${projectId}`, '')
+    }
+  }, [sortRules, projectId, setSetting])
 
   // Auto-select first task (without opening detail panel) when navigating to project
   // or when selection is cleared (e.g. clicking same project in sidebar)
@@ -108,36 +175,24 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   // Shared filter matching function
   const taskMatchesFilters = useCallback((task: Task): boolean => {
     if (!hasAnyFilter) return true
-    // Label match (OR logic)
+    const labels = taskLabels[task.id] ?? []
+    const labelIds = new Set(labels.map((l) => l.id))
+    // Include filters
     if (hasActiveFilters) {
-      const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
       if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
     }
-    // Assignee match
     if (hasAssigneeFilters && !assigneeFilters.has(task.assigned_to ?? '')) return false
-    // Priority match
     if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
-    // Status match
     if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
-    // Due date preset match
-    if (dueDatePreset) {
-      const now = new Date()
-      const todayStr = now.toISOString().slice(0, 10)
-      if (dueDatePreset === 'no_date') {
-        if (task.due_date) return false
-      } else if (dueDatePreset === 'overdue') {
-        if (!task.due_date || task.due_date >= todayStr) return false
-      } else if (dueDatePreset === 'today') {
-        if (!task.due_date || task.due_date.slice(0, 10) !== todayStr) return false
-      } else if (dueDatePreset === 'this_week') {
-        if (!task.due_date) return false
-        const endOfWeek = new Date(now)
-        endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
-        if (task.due_date.slice(0, 10) > endOfWeek.toISOString().slice(0, 10)) return false
-        if (task.due_date.slice(0, 10) < todayStr) return false
-      }
+    // Exclusion filters
+    if (hasExcludeLabelFilters) {
+      if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
     }
+    if (hasExcludeAssigneeFilters && excludeAssigneeFilters.has(task.assigned_to ?? '')) return false
+    if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
+    if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false
+    // Due date match (preset or custom range)
+    if ((dueDatePreset || dueDateRange) && !matchesDueDateFilter(task.due_date, dueDatePreset, dueDateRange)) return false
     // Keyword match
     if (keywordFilter) {
       const kw = keywordFilter.toLowerCase()
@@ -146,7 +201,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       if (!titleMatch && !descMatch) return false
     }
     return true
-  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, dueDatePreset, keywordFilter])
+  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludeAssigneeFilters, excludeAssigneeFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
 
   const taskFilterOpacity = useMemo(() => {
     if (!hasAnyFilter) return undefined
@@ -166,16 +221,24 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     return tasks.filter(taskMatchesFilters)
   }, [tasks, hasAnyFilter, filterMode, taskMatchesFilters])
 
-  const prioritySortFn = useCallback(
-    (a: Task, b: Task): number => {
-      if (priorityAutoSort) {
-        const priDiff = b.priority - a.priority
-        if (priDiff !== 0) return priDiff
-      }
-      return a.order_index - b.order_index
-    },
-    [priorityAutoSort]
-  )
+  // Build status order map for sort comparator
+  const statusOrderMap = useMemo((): Map<string, number> => {
+    const m = new Map<string, number>()
+    for (const s of statuses) {
+      const order = s.is_default === 1 ? -1000 : s.is_done === 1 ? 1000 : s.order_index
+      m.set(s.id, order)
+    }
+    return m
+  }, [statuses])
+
+  const prioritySortFn = useMemo(() => {
+    // If explicit sort rules are set (not custom), use them
+    if (sortRules.length > 0 && !isCustomSort) {
+      return createSortComparator(sortRules, statusOrderMap)
+    }
+    // Default: order_index (custom sort)
+    return (a: Task, b: Task): number => a.order_index - b.order_index
+  }, [sortRules, isCustomSort, statusOrderMap])
 
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
@@ -217,7 +280,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
-      if (!currentUser) return
+      if (!currentUser || isOfflineShared) return
       const defaultStatus = statuses.find((s) => s.is_default === 1)
       if (!defaultStatus) return
 
@@ -240,12 +303,15 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       for (const label of data.labels) {
         await addLabel(taskId, label.id)
       }
+      // Select the newly created task
+      selectTask(taskId)
     },
-    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition]
+    [currentUser, statuses, tasks, projectId, createTask, addLabel, newTaskPosition, selectTask, isOfflineShared]
   )
 
   const handleStatusChange = useCallback(
     async (taskId: string, newStatusId: string) => {
+      if (isOfflineShared) return
       const newStatus = statuses.find((s) => s.id === newStatusId)
       const update: { status_id: string; completed_date?: string | null; order_index?: number } = {
         status_id: newStatusId
@@ -287,21 +353,23 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
     },
-    [statuses, updateTask, newTaskPosition]
+    [statuses, updateTask, newTaskPosition, isOfflineShared]
   )
 
   const handleTitleChange = useCallback(
     async (taskId: string, newTitle: string) => {
+      if (isOfflineShared) return
       await updateTask(taskId, { title: newTitle })
     },
-    [updateTask]
+    [updateTask, isOfflineShared]
   )
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
+      if (isOfflineShared) return
       setPendingDeleteTask(taskId)
     },
-    [setPendingDeleteTask]
+    [setPendingDeleteTask, isOfflineShared]
   )
 
   const clickOpensDetail = useSetting('click_opens_detail') ?? 'true'
@@ -345,23 +413,26 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   const handleAddLabel = useCallback(
     async (taskId: string, labelId: string) => {
+      if (isOfflineShared) return
       await addLabel(taskId, labelId)
     },
-    [addLabel]
+    [addLabel, isOfflineShared]
   )
 
   const handleRemoveLabel = useCallback(
     async (taskId: string, labelId: string) => {
+      if (isOfflineShared) return
       await removeLabel(taskId, labelId)
     },
-    [removeLabel]
+    [removeLabel, isOfflineShared]
   )
 
   const handleCreateLabel = useCallback(
     async (name: string, color: string) => {
+      if (isOfflineShared) return
       await createOrMatchLabel(name, color)
     },
-    [createOrMatchLabel]
+    [createOrMatchLabel, isOfflineShared]
   )
 
   // Keyboard navigation
@@ -705,9 +776,15 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
-      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} />
+      {isOfflineShared && (
+        <div className="flex items-center gap-2 border-b border-border bg-warning/10 px-4 py-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-warning">Offline</span>
+          <span className="text-[10px] font-light text-warning/80">Shared projects are read-only while offline</span>
+        </div>
+      )}
+      <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} disabled={isOfflineShared} />
 
-      <FilterBar labels={allLabels} projectId={projectId} />
+      <FilterBar labels={allLabels} projectId={projectId} showSort showCustomSort />
 
       {layoutMode === 'kanban' ? (
         <KanbanView
@@ -725,7 +802,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
           {sortedStatuses.map((status) => {
             const statusTasks = filteredTasks.filter(
               (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
-            )
+            ).sort(prioritySortFn)
             return (
               <StatusSection
                 key={status.id}
@@ -744,6 +821,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
                 onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
+                disableDrag={!isCustomSort || isOfflineShared}
+                readOnly={isOfflineShared}
               />
             )
           })}

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'f
 import { execSync } from 'child_process'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
-import { getDatabase } from './database'
+import { getDatabase, switchDatabase } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
@@ -67,6 +67,12 @@ function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:clearSession', () => {
     clearEncryptedSession()
+  })
+
+  ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
+    switchDatabase(userId, email)
+    // Reset repos so they use the new DB
+    repos = null
   })
 
   ipcMain.handle('auth:getSupabaseConfig', () => {
@@ -818,16 +824,16 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Stats ────────────────────────────────────────────────────────
-  ipcMain.handle('stats:completions', (_e, userId: string, projectId: string | null, startDate: string, endDate: string) => {
-    return getRepos().tasks.getCompletionStats(userId, projectId, startDate, endDate)
+  ipcMain.handle('stats:completions', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+    return getRepos().tasks.getCompletionStats(userId, projectIds, startDate, endDate)
   })
 
   ipcMain.handle('stats:streaks', (_e, userId: string) => {
     return getRepos().tasks.getStreakStats(userId)
   })
 
-  ipcMain.handle('stats:focus', (_e, userId: string, projectId: string | null, startDate: string, endDate: string) => {
-    return getRepos().activityLog.getFocusStats(userId, projectId, startDate, endDate)
+  ipcMain.handle('stats:focus', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+    return getRepos().activityLog.getFocusStats(userId, projectIds, startDate, endDate)
   })
 
   ipcMain.handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {

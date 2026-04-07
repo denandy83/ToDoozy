@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ActivityLogEntry } from '../../../../shared/types'
+import { useSetting } from '../../shared/stores/settingsStore'
 
 interface DetailActivityLogProps {
   taskId: string
@@ -38,6 +39,8 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
   const [userMap, setUserMap] = useState<Map<string, UserInfo>>(new Map())
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
+  const timezoneSetting = useSetting('timezone') ?? 'auto'
+  const timezone = timezoneSetting === 'auto' ? undefined : timezoneSetting
 
   useEffect(() => {
     let cancelled = false
@@ -117,7 +120,7 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
             <p className="text-[10px] text-muted/60">No activity recorded</p>
           )}
           {entries.map((entry) => (
-            <ActivityEntry key={entry.id} entry={entry} userName={entry.user_id ? formatUserName(userMap.get(entry.user_id) ?? { display_name: null, email: 'unknown' }) : null} />
+            <ActivityEntry key={entry.id} entry={entry} userName={entry.user_id ? formatUserName(userMap.get(entry.user_id) ?? { display_name: null, email: 'unknown' }) : null} timezone={timezone} />
           ))}
         </div>
       )}
@@ -128,11 +131,13 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
 interface ActivityEntryProps {
   entry: ActivityLogEntry
   userName: string | null
+  timezone: string | undefined
 }
 
-function ActivityEntry({ entry, userName }: ActivityEntryProps): React.JSX.Element {
+function ActivityEntry({ entry, userName, timezone }: ActivityEntryProps): React.JSX.Element {
   const date = new Date(entry.created_at)
   const timeStr = date.toLocaleString(undefined, {
+    timeZone: timezone,
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

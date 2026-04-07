@@ -532,7 +532,10 @@ const tools: ToolDef[] = [
         label_id: str('Filter by label ID'),
         due_before: str('Tasks due before this date (ISO 8601)'),
         due_after: str('Tasks due after this date (ISO 8601)'),
-        keyword: str('Search keyword (matches title and description)')
+        keyword: str('Search keyword (matches title and description)'),
+        exclude_label_id: str('Exclude tasks with this label'),
+        exclude_status_id: str('Exclude tasks with this status'),
+        exclude_priority: num('Exclude tasks with this priority (0-4)')
       }
     }
   },
@@ -1256,6 +1259,9 @@ const handlers: Record<string, Handler> = {
 
   // ── Search ─────────────────────────────────────────────────────
   search_tasks(args) {
+    const excludeLabelId = optStr(args, 'exclude_label_id')
+    const excludeStatusId = optStr(args, 'exclude_status_id')
+    const excludePriority = optNum(args, 'exclude_priority')
     return repos.tasks.search({
       project_id: optStr(args, 'project_id'),
       status_id: optStr(args, 'status_id'),
@@ -1263,7 +1269,10 @@ const handlers: Record<string, Handler> = {
       label_id: optStr(args, 'label_id'),
       due_before: optStr(args, 'due_before'),
       due_after: optStr(args, 'due_after'),
-      keyword: optStr(args, 'keyword')
+      keyword: optStr(args, 'keyword'),
+      exclude_label_ids: excludeLabelId ? [excludeLabelId] : undefined,
+      exclude_status_ids: excludeStatusId ? [excludeStatusId] : undefined,
+      exclude_priorities: excludePriority !== undefined ? [excludePriority] : undefined
     })
   },
 

@@ -1,2 +1,2 @@
-export { Sidebar } from './Sidebar'
+export { Sidebar, useSidebarItems } from './Sidebar'
 export { NavItem } from './NavItem'

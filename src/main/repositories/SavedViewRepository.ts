@@ -87,7 +87,7 @@ export class SavedViewRepository {
     try {
       const config = JSON.parse(filterConfig) as Record<string, unknown>
       let sql = 'SELECT COUNT(DISTINCT t.id) as count FROM tasks t'
-      const conditions: string[] = ['t.is_template = 0', 't.is_archived = 0']
+      const conditions: string[] = ['t.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
       const params: (string | number)[] = []
 
       const labelIds = config.labelIds as string[] | undefined
@@ -124,6 +124,35 @@ export class SavedViewRepository {
         conditions.push('(t.title LIKE ? OR t.description LIKE ?)')
         const kw = `%${keyword}%`
         params.push(kw, kw)
+      }
+
+      // Exclusion filters
+      const excludeLabelIds = config.excludeLabelIds as string[] | undefined
+      if (excludeLabelIds && excludeLabelIds.length > 0) {
+        const placeholders = excludeLabelIds.map(() => '?').join(', ')
+        conditions.push(`t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}))`)
+        params.push(...excludeLabelIds)
+      }
+
+      const excludeStatusIds = config.excludeStatusIds as string[] | undefined
+      if (excludeStatusIds && excludeStatusIds.length > 0) {
+        const placeholders = excludeStatusIds.map(() => '?').join(', ')
+        conditions.push(`t.status_id NOT IN (${placeholders})`)
+        params.push(...excludeStatusIds)
+      }
+
+      const excludePriorities = config.excludePriorities as number[] | undefined
+      if (excludePriorities && excludePriorities.length > 0) {
+        const placeholders = excludePriorities.map(() => '?').join(', ')
+        conditions.push(`t.priority NOT IN (${placeholders})`)
+        params.push(...excludePriorities)
+      }
+
+      const excludeProjectIds = config.excludeProjectIds as string[] | undefined
+      if (excludeProjectIds && excludeProjectIds.length > 0) {
+        const placeholders = excludeProjectIds.map(() => '?').join(', ')
+        conditions.push(`t.project_id NOT IN (${placeholders})`)
+        params.push(...excludeProjectIds)
       }
 
       sql += ' WHERE ' + conditions.join(' AND ')

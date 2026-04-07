@@ -20,16 +20,40 @@ export interface TaskSearchFilters {
   keyword?: string
   is_archived?: number
   owner_id?: string
+  // Exclusion filters
+  exclude_label_ids?: string[]
+  exclude_status_ids?: string[]
+  exclude_priorities?: number[]
+  exclude_assigned_to_ids?: string[]
+  exclude_project_ids?: string[]
 }
 
 export class TaskRepository {
   constructor(private db: DatabaseSync) {}
+
+  /**
+   * Resets any tasks in the given project whose status_id doesn't match
+   * a valid status for that project back to the project's default status.
+   */
+  repairOrphanedStatuses(projectId: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE tasks SET status_id = (
+           SELECT id FROM statuses WHERE project_id = ? AND is_default = 1 LIMIT 1
+         ), updated_at = ?
+         WHERE project_id = ? AND is_template = 0
+         AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)`
+      )
+      .run(projectId, new Date().toISOString(), projectId, projectId)
+    return Number(result.changes)
+  }
 
   findById(id: string): Task | undefined {
     return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as unknown as Task | undefined
   }
 
   findByProjectId(projectId: string): Task[] {
+    this.repairOrphanedStatuses(projectId)
     return this.db
       .prepare(
         'SELECT * FROM tasks WHERE project_id = ? AND is_archived = 0 AND is_template = 0 ORDER BY order_index ASC'
@@ -46,6 +70,17 @@ export class TaskRepository {
   }
 
   findMyDay(userId: string): Task[] {
+    // Repair orphaned statuses across all user's projects before querying
+    this.db
+      .prepare(
+        `UPDATE tasks SET status_id = (
+           SELECT s.id FROM statuses s WHERE s.project_id = tasks.project_id AND s.is_default = 1 LIMIT 1
+         ), updated_at = ?
+         WHERE owner_id = ? AND is_template = 0
+         AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)`
+      )
+      .run(new Date().toISOString(), userId)
+
     return this.db
       .prepare(
         `SELECT * FROM tasks
@@ -369,6 +404,37 @@ export class TaskRepository {
       params.push(filters.owner_id)
     }
 
+    // Exclusion filters
+    if (filters.exclude_label_ids && filters.exclude_label_ids.length > 0) {
+      const placeholders = filters.exclude_label_ids.map(() => '?').join(', ')
+      conditions.push(`t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}))`)
+      params.push(...filters.exclude_label_ids)
+    }
+
+    if (filters.exclude_status_ids && filters.exclude_status_ids.length > 0) {
+      const placeholders = filters.exclude_status_ids.map(() => '?').join(', ')
+      conditions.push(`t.status_id NOT IN (${placeholders})`)
+      params.push(...filters.exclude_status_ids)
+    }
+
+    if (filters.exclude_priorities && filters.exclude_priorities.length > 0) {
+      const placeholders = filters.exclude_priorities.map(() => '?').join(', ')
+      conditions.push(`t.priority NOT IN (${placeholders})`)
+      params.push(...filters.exclude_priorities)
+    }
+
+    if (filters.exclude_assigned_to_ids && filters.exclude_assigned_to_ids.length > 0) {
+      const placeholders = filters.exclude_assigned_to_ids.map(() => '?').join(', ')
+      conditions.push(`(t.assigned_to IS NULL OR t.assigned_to NOT IN (${placeholders}))`)
+      params.push(...filters.exclude_assigned_to_ids)
+    }
+
+    if (filters.exclude_project_ids && filters.exclude_project_ids.length > 0) {
+      const placeholders = filters.exclude_project_ids.map(() => '?').join(', ')
+      conditions.push(`t.project_id NOT IN (${placeholders})`)
+      params.push(...filters.exclude_project_ids)
+    }
+
     sql += ' WHERE ' + conditions.join(' AND ')
     sql += ' ORDER BY t.order_index ASC'
 
@@ -532,7 +598,7 @@ export class TaskRepository {
 
   getCompletionStats(
     userId: string,
-    projectId: string | null,
+    projectIds: string[] | null,
     startDate: string,
     endDate: string
   ): Array<{ date: string; count: number }> {
@@ -545,21 +611,22 @@ export class TaskRepository {
         AND t.is_template = 0
     `
     const params: (string | number)[] = [userId, startDate, endDate]
-    if (projectId) {
-      sql += ' AND t.project_id = ?'
-      params.push(projectId)
+    if (projectIds && projectIds.length > 0) {
+      sql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
     }
     sql += ' GROUP BY date(t.completed_date) ORDER BY date ASC'
     return this.db.prepare(sql).all(...params) as unknown as Array<{ date: string; count: number }>
   }
 
   getStreakStats(userId: string): { current: number; best: number } {
+    // Use activity_log for streaks (same data source as the heatmap) for consistency
     const rows = this.db
       .prepare(
-        `SELECT DISTINCT date(completed_date) as date
-         FROM tasks t
+        `SELECT DISTINCT date(al.created_at) as date
+         FROM activity_log al
+         INNER JOIN tasks t ON t.id = al.task_id
          INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
-         WHERE t.completed_date IS NOT NULL AND t.is_template = 0
          ORDER BY date DESC`
       )
       .all(userId) as unknown as Array<{ date: string }>

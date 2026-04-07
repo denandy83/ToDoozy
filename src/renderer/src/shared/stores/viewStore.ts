@@ -2,7 +2,7 @@ import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import { useTaskStore } from './taskStore'
 
-export type ViewId = 'my-day' | 'calendar' | 'stats' | 'saved-view' | 'project' | 'archive' | 'templates'
+export type ViewId = 'my-day' | 'calendar' | 'stats' | 'saved-view' | 'project' | 'archive' | 'templates' | 'views'
 export type DetailPanelPosition = 'side' | 'bottom'
 export type LayoutMode = 'list' | 'kanban'
 

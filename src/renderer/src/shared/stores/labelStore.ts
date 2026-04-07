@@ -3,12 +3,21 @@ import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { Label, CreateLabelInput, UpdateLabelInput } from '../../../../shared/types'
 import { useAuthStore } from './authStore'
+import type { SortRule } from '../utils/sortTasks'
 
 function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
 }
 
 export type LabelFilterMode = 'hide' | 'blur'
+
+export interface DueDateRange {
+  mode: 'relative' | 'absolute'
+  fromOffset?: number   // relative: days from today (negative = past)
+  toOffset?: number     // relative: days from today (optional, omit = open-ended)
+  fromDate?: string     // absolute: ISO date string
+  toDate?: string       // absolute: ISO date string (optional)
+}
 
 interface LabelState {
   labels: Record<string, Label>
@@ -17,9 +26,18 @@ interface LabelState {
   assigneeFilters: Set<string> // user_ids to filter by
   priorityFilters: Set<number> // priority levels to filter by
   statusFilters: Set<string> // status IDs to filter by
+  projectFilters: Set<string> // project IDs to filter by (for saved views)
+  // Exclusion filters — "is not" counterparts
+  excludeLabelFilters: Set<string>
+  excludeStatusFilters: Set<string>
+  excludePriorityFilters: Set<number>
+  excludeAssigneeFilters: Set<string>
+  excludeProjectFilters: Set<string>
   dueDatePreset: string | null // 'today' | 'this_week' | 'overdue' | 'no_date'
+  dueDateRange: DueDateRange | null // custom date range (relative or absolute)
   keyword: string // search keyword matching title and description
   filterMode: LabelFilterMode
+  sortRules: SortRule[]
   loading: boolean
   error: string | null
 }
@@ -34,13 +52,27 @@ interface LabelActions {
   addToProject(projectId: string, labelId: string): Promise<void>
   reorderLabels(labelIds: string[]): Promise<void>
   toggleLabelFilter(labelId: string): void
+  toggleExcludeLabelFilter(labelId: string): void
+  toggleExcludeStatusFilter(statusId: string): void
+  toggleExcludePriorityFilter(priority: number): void
+  toggleExcludeAssigneeFilter(userId: string): void
+  toggleExcludeProjectFilter(projectId: string): void
+  clearExcludeLabelFilters(): void
+  clearExcludeStatusFilters(): void
+  clearExcludePriorityFilters(): void
+  clearExcludeAssigneeFilters(): void
+  clearExcludeProjectFilters(): void
   clearLabelFilters(): void
   setFilterMode(mode: LabelFilterMode): void
   toggleAssigneeFilter(userId: string): void
   togglePriorityFilter(priority: number): void
   toggleStatusFilter(statusId: string): void
+  toggleProjectFilter(projectId: string): void
   setDueDatePreset(preset: string | null): void
+  setDueDateRange(range: DueDateRange | null): void
   setKeyword(keyword: string): void
+  setSortRules(rules: SortRule[]): void
+  clearSort(): void
   clearAllFilters(): void
   clearError(): void
 }
@@ -54,9 +86,17 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   assigneeFilters: new Set(),
   priorityFilters: new Set(),
   statusFilters: new Set(),
+  projectFilters: new Set(),
+  excludeLabelFilters: new Set(),
+  excludeStatusFilters: new Set(),
+  excludePriorityFilters: new Set(),
+  excludeAssigneeFilters: new Set(),
+  excludeProjectFilters: new Set(),
   dueDatePreset: null,
+  dueDateRange: null,
   keyword: '',
   filterMode: 'hide' as LabelFilterMode,
+  sortRules: [],
   loading: false,
   error: null,
 
@@ -115,6 +155,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         }
         return { labels: labelMap, projectLabels: updatedProjectLabels }
       })
+      // Push to Supabase
+      import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+        pushLabel(label, getUserId()).catch(() => {})
+      })
       return label
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create label'
@@ -130,6 +174,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         set((state) => ({
           labels: { ...state.labels, [label.id]: label }
         }))
+        // Push to Supabase
+        import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+          pushLabel(label, getUserId()).catch(() => {})
+        })
       }
       return label
     } catch (err) {
@@ -164,6 +212,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
             updated[taskId] = labels.filter((l) => l.id !== id)
           }
           return { taskLabels: updated }
+        })
+        // Delete from Supabase
+        import('../../services/PersonalSyncService').then(({ deleteLabelFromSupabase }) => {
+          deleteLabelFromSupabase(id).catch(() => {})
         })
       }
       return result
@@ -231,6 +283,16 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
             updated[labelIds[i]] = { ...label, order_index: i }
           }
         }
+        // Push reordered labels to Supabase
+        const userId = getUserId()
+        if (userId) {
+          import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+            for (const id of labelIds) {
+              const label = updated[id]
+              if (label) pushLabel(label, userId).catch(() => {})
+            }
+          })
+        }
         return { labels: updated }
       })
     } catch (err) {
@@ -243,13 +305,105 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   toggleLabelFilter(labelId: string): void {
     set((state) => {
       const newFilters = new Set(state.activeLabelFilters)
+      const newExclude = new Set(state.excludeLabelFilters)
       if (newFilters.has(labelId)) {
         newFilters.delete(labelId)
       } else {
         newFilters.add(labelId)
+        newExclude.delete(labelId) // last-action-wins: remove from exclude
       }
-      return { activeLabelFilters: newFilters }
+      return { activeLabelFilters: newFilters, excludeLabelFilters: newExclude }
     })
+  },
+
+  toggleExcludeLabelFilter(labelId: string): void {
+    set((state) => {
+      const newExclude = new Set(state.excludeLabelFilters)
+      const newInclude = new Set(state.activeLabelFilters)
+      if (newExclude.has(labelId)) {
+        newExclude.delete(labelId)
+      } else {
+        newExclude.add(labelId)
+        newInclude.delete(labelId) // last-action-wins: remove from include
+      }
+      return { excludeLabelFilters: newExclude, activeLabelFilters: newInclude }
+    })
+  },
+
+  toggleExcludeStatusFilter(statusId: string): void {
+    set((state) => {
+      const newExclude = new Set(state.excludeStatusFilters)
+      const newInclude = new Set(state.statusFilters)
+      if (newExclude.has(statusId)) {
+        newExclude.delete(statusId)
+      } else {
+        newExclude.add(statusId)
+        newInclude.delete(statusId)
+      }
+      return { excludeStatusFilters: newExclude, statusFilters: newInclude }
+    })
+  },
+
+  toggleExcludePriorityFilter(priority: number): void {
+    set((state) => {
+      const newExclude = new Set(state.excludePriorityFilters)
+      const newInclude = new Set(state.priorityFilters)
+      if (newExclude.has(priority)) {
+        newExclude.delete(priority)
+      } else {
+        newExclude.add(priority)
+        newInclude.delete(priority)
+      }
+      return { excludePriorityFilters: newExclude, priorityFilters: newInclude }
+    })
+  },
+
+  toggleExcludeAssigneeFilter(userId: string): void {
+    set((state) => {
+      const newExclude = new Set(state.excludeAssigneeFilters)
+      const newInclude = new Set(state.assigneeFilters)
+      if (newExclude.has(userId)) {
+        newExclude.delete(userId)
+      } else {
+        newExclude.add(userId)
+        newInclude.delete(userId)
+      }
+      return { excludeAssigneeFilters: newExclude, assigneeFilters: newInclude }
+    })
+  },
+
+  toggleExcludeProjectFilter(projectId: string): void {
+    set((state) => {
+      const newExclude = new Set(state.excludeProjectFilters)
+      const newInclude = new Set(state.projectFilters)
+      if (newExclude.has(projectId)) {
+        newExclude.delete(projectId)
+      } else {
+        newExclude.add(projectId)
+        newInclude.delete(projectId)
+      }
+      return { excludeProjectFilters: newExclude, projectFilters: newInclude }
+    })
+  },
+
+  clearExcludeLabelFilters(): void {
+    set({ excludeLabelFilters: new Set() })
+  },
+
+  clearExcludeStatusFilters(): void {
+    set({ excludeStatusFilters: new Set() })
+  },
+
+  clearExcludePriorityFilters(): void {
+    set({ excludePriorityFilters: new Set() })
+  },
+
+  clearExcludeAssigneeFilters(): void {
+    set({ excludeAssigneeFilters: new Set() })
+  },
+
+  clearExcludeProjectFilters(): void {
+    set({ excludeProjectFilters: new Set() })
   },
 
   clearLabelFilters(): void {
@@ -258,7 +412,14 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       assigneeFilters: new Set(),
       priorityFilters: new Set(),
       statusFilters: new Set(),
+      projectFilters: new Set(),
+      excludeLabelFilters: new Set(),
+      excludeStatusFilters: new Set(),
+      excludePriorityFilters: new Set(),
+      excludeAssigneeFilters: new Set(),
+      excludeProjectFilters: new Set(),
       dueDatePreset: null,
+      dueDateRange: null,
       keyword: ''
     })
   },
@@ -270,45 +431,72 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   toggleAssigneeFilter(userId: string): void {
     set((state) => {
       const next = new Set(state.assigneeFilters)
+      const nextExclude = new Set(state.excludeAssigneeFilters)
       if (next.has(userId)) {
         next.delete(userId)
       } else {
         next.add(userId)
+        nextExclude.delete(userId)
       }
-      return { assigneeFilters: next }
+      return { assigneeFilters: next, excludeAssigneeFilters: nextExclude }
     })
   },
 
   togglePriorityFilter(priority: number): void {
     set((state) => {
       const next = new Set(state.priorityFilters)
+      const nextExclude = new Set(state.excludePriorityFilters)
       if (next.has(priority)) {
         next.delete(priority)
       } else {
         next.add(priority)
+        nextExclude.delete(priority)
       }
-      return { priorityFilters: next }
+      return { priorityFilters: next, excludePriorityFilters: nextExclude }
     })
   },
 
   toggleStatusFilter(statusId: string): void {
     set((state) => {
       const next = new Set(state.statusFilters)
+      const nextExclude = new Set(state.excludeStatusFilters)
       if (next.has(statusId)) {
         next.delete(statusId)
       } else {
         next.add(statusId)
+        nextExclude.delete(statusId)
       }
-      return { statusFilters: next }
+      return { statusFilters: next, excludeStatusFilters: nextExclude }
+    })
+  },
+
+  toggleProjectFilter(projectId: string): void {
+    set((state) => {
+      const next = new Set(state.projectFilters)
+      const nextExclude = new Set(state.excludeProjectFilters)
+      if (next.has(projectId)) { next.delete(projectId) } else { next.add(projectId); nextExclude.delete(projectId) }
+      return { projectFilters: next, excludeProjectFilters: nextExclude }
     })
   },
 
   setDueDatePreset(preset: string | null): void {
-    set({ dueDatePreset: preset })
+    set({ dueDatePreset: preset, dueDateRange: null })
+  },
+
+  setDueDateRange(range: DueDateRange | null): void {
+    set({ dueDateRange: range, dueDatePreset: null })
   },
 
   setKeyword(keyword: string): void {
     set({ keyword })
+  },
+
+  setSortRules(rules: SortRule[]): void {
+    set({ sortRules: rules })
+  },
+
+  clearSort(): void {
+    set({ sortRules: [] })
   },
 
   clearAllFilters(): void {
@@ -317,8 +505,16 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       assigneeFilters: new Set(),
       priorityFilters: new Set(),
       statusFilters: new Set(),
+      projectFilters: new Set(),
+      excludeLabelFilters: new Set(),
+      excludeStatusFilters: new Set(),
+      excludePriorityFilters: new Set(),
+      excludeAssigneeFilters: new Set(),
+      excludeProjectFilters: new Set(),
       dueDatePreset: null,
-      keyword: ''
+      dueDateRange: null,
+      keyword: '',
+      sortRules: []
     })
   },
 
@@ -363,16 +559,43 @@ export const selectStatusFilters = (state: LabelState): Set<string> => state.sta
 
 export const selectHasStatusFilters = (state: LabelState): boolean => state.statusFilters.size > 0
 
+export const selectProjectFilters = (state: LabelState): Set<string> => state.projectFilters
+
+export const selectHasProjectFilters = (state: LabelState): boolean => state.projectFilters.size > 0
+
 export const selectDueDatePreset = (state: LabelState): string | null => state.dueDatePreset
 
+export const selectDueDateRange = (state: LabelState): DueDateRange | null => state.dueDateRange
+
 export const selectKeyword = (state: LabelState): string => state.keyword
+
+export const selectExcludeLabelFilters = (state: LabelState): Set<string> => state.excludeLabelFilters
+export const selectHasExcludeLabelFilters = (state: LabelState): boolean => state.excludeLabelFilters.size > 0
+export const selectExcludeStatusFilters = (state: LabelState): Set<string> => state.excludeStatusFilters
+export const selectHasExcludeStatusFilters = (state: LabelState): boolean => state.excludeStatusFilters.size > 0
+export const selectExcludePriorityFilters = (state: LabelState): Set<number> => state.excludePriorityFilters
+export const selectHasExcludePriorityFilters = (state: LabelState): boolean => state.excludePriorityFilters.size > 0
+export const selectExcludeAssigneeFilters = (state: LabelState): Set<string> => state.excludeAssigneeFilters
+export const selectHasExcludeAssigneeFilters = (state: LabelState): boolean => state.excludeAssigneeFilters.size > 0
+export const selectExcludeProjectFilters = (state: LabelState): Set<string> => state.excludeProjectFilters
+export const selectHasExcludeProjectFilters = (state: LabelState): boolean => state.excludeProjectFilters.size > 0
+
+export const selectSortRules = (state: LabelState): SortRule[] => state.sortRules
+export const selectHasSort = (state: LabelState): boolean => state.sortRules.length > 0
 
 export const selectHasAnyFilter = (state: LabelState): boolean =>
   state.activeLabelFilters.size > 0 ||
   state.assigneeFilters.size > 0 ||
   state.priorityFilters.size > 0 ||
   state.statusFilters.size > 0 ||
+  state.projectFilters.size > 0 ||
+  state.excludeLabelFilters.size > 0 ||
+  state.excludeStatusFilters.size > 0 ||
+  state.excludePriorityFilters.size > 0 ||
+  state.excludeAssigneeFilters.size > 0 ||
+  state.excludeProjectFilters.size > 0 ||
   state.dueDatePreset !== null ||
+  state.dueDateRange !== null ||
   state.keyword !== ''
 
 // Hooks — stable selectors for parameterized queries

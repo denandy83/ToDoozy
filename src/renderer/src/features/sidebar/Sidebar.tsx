@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
-import { useDroppable } from '@dnd-kit/core'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent, useDroppable } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import {
   Sun,
   Moon,
@@ -11,8 +13,6 @@ import {
   FolderOpen,
   LayoutGrid,
   Plus,
-  PanelLeftClose,
-  PanelLeft,
   Settings,
   ChevronDown,
   ChevronUp,
@@ -22,7 +22,7 @@ import {
   BarChart3
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
-import { useSettingsStore, selectCurrentTheme } from '../../shared/stores/settingsStore'
+import { useSettingsStore, selectCurrentTheme, useSetting } from '../../shared/stores/settingsStore'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
@@ -32,6 +32,8 @@ import { useAuthStore } from '../../shared/stores/authStore'
 import { useSavedViewStore, selectSavedViews, selectViewCounts } from '../../shared/stores/savedViewStore'
 import { useProjectAreaStore, selectProjectAreas } from '../../shared/stores/projectAreaStore'
 import type { ThemeConfig } from '../../../../shared/types'
+import { useSyncStore, selectSyncStatus, selectLastSyncedAt, selectIsFirstSync, selectFirstSyncProgress } from '../../shared/stores/syncStore'
+import type { SyncStatus } from '../../shared/stores/syncStore'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
@@ -43,36 +45,47 @@ interface SidebarProps {
   onSettings: () => void
   onHelp: () => void
   onNewProject?: () => void
-  collapsed: boolean
-  pinned: boolean
   isDragging?: boolean
-  onTogglePin: () => void
-  onMouseEnter: () => void
-  onMouseLeave: () => void
 }
 
-const TOP_VIEW_ITEMS: Array<{
-  id: ViewId
-  label: string
-  icon: typeof Sun
-  shortcut: string
-  droppableId: string
-}> = [
-  { id: 'my-day', label: 'My Day', icon: Sun, shortcut: '⌘1', droppableId: 'nav-my-day' },
-  { id: 'calendar', label: 'Calendar', icon: Calendar, shortcut: '⌘2', droppableId: 'nav-calendar' },
-  { id: 'stats', label: 'Stats', icon: BarChart3, shortcut: '⌘3', droppableId: 'nav-stats' }
-]
+// All configurable sidebar nav items (default order)
+const DEFAULT_SIDEBAR_ORDER: string[] = ['my-day', 'calendar', 'views', 'projects', 'archive', 'templates']
 
-const BOTTOM_VIEW_ITEMS: Array<{
-  id: ViewId
-  label: string
-  icon: typeof Sun
-  shortcut: string
-  droppableId: string
-}> = [
-  { id: 'archive', label: 'Archive', icon: Archive, shortcut: '⌘5', droppableId: 'nav-archive' },
-  { id: 'templates', label: 'Templates', icon: LayoutTemplate, shortcut: '⌘6', droppableId: 'nav-templates' }
-]
+const NAV_ITEM_CONFIG: Record<string, { label: string; icon: typeof Sun; droppableId: string }> = {
+  'my-day': { label: 'My Day', icon: Sun, droppableId: 'nav-my-day' },
+  'calendar': { label: 'Calendar', icon: Calendar, droppableId: 'nav-calendar' },
+  'views': { label: 'Views', icon: Filter, droppableId: 'nav-views' },
+  'archive': { label: 'Archive', icon: Archive, droppableId: 'nav-archive' },
+  'templates': { label: 'Templates', icon: LayoutTemplate, droppableId: 'nav-templates' }
+}
+
+/** Returns the ordered, visible nav items based on sidebar settings */
+export function useSidebarItems(): Array<{ id: string; shortcut: string }> {
+  const orderJson = useSetting('sidebar_order')
+  const hiddenJson = useSetting('sidebar_hidden')
+
+  return useMemo(() => {
+    let order: string[] = orderJson ? JSON.parse(orderJson) as string[] : DEFAULT_SIDEBAR_ORDER
+    // Ensure any new items from DEFAULT_SIDEBAR_ORDER are included
+    const orderSet = new Set(order)
+    for (const item of DEFAULT_SIDEBAR_ORDER) {
+      if (!orderSet.has(item)) order.push(item)
+    }
+    // Remove items that are no longer in the default set
+    order = order.filter((id) => DEFAULT_SIDEBAR_ORDER.includes(id))
+    const hidden: Set<string> = new Set(hiddenJson ? JSON.parse(hiddenJson) as string[] : [])
+    // My Day is always visible
+    hidden.delete('my-day')
+
+    let shortcutIndex = 1
+    return order
+      .filter((id) => !hidden.has(id))
+      .map((id) => ({
+        id,
+        shortcut: `⌘${shortcutIndex++}`
+      }))
+  }, [orderJson, hiddenJson])
+}
 
 const MAX_VISIBLE_PROJECTS = 5
 
@@ -82,12 +95,7 @@ export function Sidebar({
   projects,
   onSettings,
   onHelp,
-  collapsed,
-  pinned,
-  isDragging,
-  onTogglePin,
-  onMouseEnter,
-  onMouseLeave
+  isDragging
 }: SidebarProps): React.JSX.Element {
   const currentView = useViewStore((s) => s.currentView)
   const selectedProjectId = useViewStore((s) => s.selectedProjectId)
@@ -107,10 +115,13 @@ export function Sidebar({
   const createStatus = useStatusStore((s) => s.createStatus)
   const currentUser = useAuthStore((s) => s.currentUser)
 
+  // Sidebar items based on settings
+  const sidebarNavItems = useSidebarItems()
+
   // Saved views
   const savedViews = useSavedViewStore(selectSavedViews)
   const savedViewCounts = useSavedViewStore(selectViewCounts)
-  const { hydrate: hydrateSavedViews } = useSavedViewStore()
+  const { hydrate: hydrateSavedViews, updateView, reorderViews } = useSavedViewStore()
   const selectedSavedViewId = useViewStore((s) => s.selectedSavedViewId)
   const setSelectedSavedView = useViewStore((s) => s.setSelectedSavedView)
   const [savedViewsCollapsed, setSavedViewsCollapsed] = useState(false)
@@ -127,10 +138,16 @@ export function Sidebar({
     if (s.priorityFilters.size > 0) config.priorities = [...s.priorityFilters]
     if (s.statusFilters.size > 0) config.statusIds = [...s.statusFilters]
     if (s.projectFilters.size > 0) config.projectIds = [...s.projectFilters]
+    if (s.excludeLabelFilters.size > 0) config.excludeLabelIds = [...s.excludeLabelFilters]
+    if (s.excludeStatusFilters.size > 0) config.excludeStatusIds = [...s.excludeStatusFilters]
+    if (s.excludePriorityFilters.size > 0) config.excludePriorities = [...s.excludePriorityFilters]
+    if (s.excludeAssigneeFilters.size > 0) config.excludeAssigneeIds = [...s.excludeAssigneeFilters]
+    if (s.excludeProjectFilters.size > 0) config.excludeProjectIds = [...s.excludeProjectFilters]
     if (s.dueDatePreset) config.dueDatePreset = s.dueDatePreset
     if (s.dueDateRange) config.dueDateRange = s.dueDateRange
     if (s.keyword) config.keyword = s.keyword
     config.filterMode = s.filterMode
+    if (s.sortRules.length > 0) config.sortRules = s.sortRules
     const currentConfig = JSON.stringify(config)
     return { dirty: currentConfig !== activeViewFilterConfig, viewId: selectedSavedViewId, currentConfig }
   }, [currentView, selectedSavedViewId])
@@ -251,9 +268,10 @@ export function Sidebar({
 
   const handleSavedViewClick = useCallback(
     (viewId: string) => {
+      if (currentView === 'saved-view' && selectedSavedViewId === viewId) return
       guardNavigation(() => { clearLabelFilters(); setSelectedSavedView(viewId) })
     },
-    [setSelectedSavedView, clearLabelFilters, guardNavigation]
+    [currentView, selectedSavedViewId, setSelectedSavedView, clearLabelFilters, guardNavigation]
   )
 
   const { createView: createSavedView } = useSavedViewStore()
@@ -296,298 +314,360 @@ export function Sidebar({
     return items.sort((a, b) => a.order - b.order)
   }, [visibleProjects, projectAreas])
 
+  // Saved view context menu (right-click color picker)
+  const [viewContextMenu, setViewContextMenu] = useState<{ viewId: string; x: number; y: number } | null>(null)
+  const viewContextRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!viewContextMenu) return
+    const handler = (e: MouseEvent): void => {
+      if (viewContextRef.current && !viewContextRef.current.contains(e.target as Node)) {
+        setViewContextMenu(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [viewContextMenu])
+
+  const handleViewContextMenu = useCallback((e: React.MouseEvent, viewId: string) => {
+    e.preventDefault()
+    setViewContextMenu({ viewId, x: e.clientX, y: e.clientY })
+  }, [])
+
+  const handleChangeViewColor = useCallback(async (viewId: string, color: string) => {
+    await updateView(viewId, { color })
+    setViewContextMenu(null)
+  }, [updateView])
+
+  // Render the projects section inline in the sidebar order
+  const renderProjectsSection = (): React.JSX.Element => (
+    <div key="projects" className="mt-1 flex flex-col gap-0.5">
+      <div className="group/projects flex items-center gap-3 rounded-lg px-2.5 py-2">
+        <div className="flex flex-1 items-center gap-3">
+          <LayoutGrid size={16} className="text-muted" />
+          <span className="flex-1 select-none text-[13px] font-light tracking-tight text-muted">Projects</span>
+        </div>
+        <button onClick={() => { setAddingArea(true); setTimeout(() => addAreaRef.current?.focus(), 0) }}
+          className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
+          title="New folder" aria-label="New folder" tabIndex={-1}>
+          <Plus size={8} /><span className="text-[7px] font-bold uppercase tracking-wider">Folder</span>
+        </button>
+        <button onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
+          className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
+          title="New project" aria-label="New project" tabIndex={-1}>
+          <Plus size={10} /><span className="text-[8px] font-bold uppercase tracking-wider">Add</span>
+        </button>
+      </div>
+      <div className="flex flex-col gap-0.5 pl-4">
+        {addingArea && (
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background p-2">
+            <input ref={addAreaRef} type="text" value={newAreaName} onChange={(e) => setNewAreaName(e.target.value)} tabIndex={-1}
+              onKeyDown={(e) => { if (e.key === 'Enter' && newAreaName.trim()) handleCreateArea(); if (e.key === 'Escape') { e.stopPropagation(); setAddingArea(false); setNewAreaName('') } }}
+              placeholder="Folder name..." className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none" />
+          </div>
+        )}
+        {addingProject && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
+            <input ref={addProjectRef} type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} tabIndex={-1}
+              onKeyDown={(e) => { if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject(); if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor('#6366f1') } }}
+              placeholder="Project name..." className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none" />
+            <div className="flex items-center gap-1">
+              {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
+                <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
+                  className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
+                  style={{ backgroundColor: c }} />
+              ))}
+            </div>
+          </div>
+        )}
+        {sidebarItems.map((si) => {
+          if (si.type === 'area') {
+            const area = si.data
+            const areaProjects = visibleProjects.filter((p) => p.area_id === area.id)
+            return (
+              <div key={`area-${area.id}`} className="mt-1">
+                <button onClick={() => toggleAreaCollapsed(area.id)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-foreground/6">
+                  <FolderOpen size={12} className="flex-shrink-0 text-muted" />
+                  <span className="flex-1 text-[13px] font-light tracking-tight text-muted">{area.name}</span>
+                  {areaProjects.length > 0 && <span className="text-[10px] font-bold tabular-nums text-muted/60">{areaProjects.length}</span>}
+                  {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted/50" /> : <ChevronUp size={12} className="text-muted/50" />}
+                </button>
+                {area.is_collapsed === 0 && (
+                  <div className="flex flex-col gap-0.5 pl-5">
+                    {areaProjects.map((project) => (
+                      <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+                        active={currentView === 'project' && selectedProjectId === project.id}
+                        onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }
+          const project = si.data as Project
+          return (
+            <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
+              active={currentView === 'project' && selectedProjectId === project.id}
+              onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
+          )
+        })}
+        {hasMoreProjects && (
+          <button onClick={() => setProjectsExpanded(!projectsExpanded)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground" tabIndex={-1}>
+            {projectsExpanded ? (<><ChevronUp size={12} />Less</>) : (<><ChevronDown size={12} />More</>)}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  // Render a nav item for "views" section (special — expands saved views list)
+  const [viewsExpanded, setViewsExpanded] = useState(false)
+  const MAX_VISIBLE_VIEWS = 5
+  const viewSortSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const handleViewDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = savedViews.findIndex((v) => v.id === active.id)
+    const newIndex = savedViews.findIndex((v) => v.id === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+    const reordered = arrayMove(savedViews, oldIndex, newIndex)
+    reorderViews(reordered.map((v) => v.id))
+  }, [savedViews, reorderViews])
+
+  const renderViewsSection = (_shortcut: string): React.JSX.Element => {
+    const visibleViews = viewsExpanded ? savedViews : savedViews.slice(0, MAX_VISIBLE_VIEWS)
+    const hasMoreViews = savedViews.length > MAX_VISIBLE_VIEWS
+
+    return (
+      <div key="views" className="flex flex-col gap-0.5">
+        <div className="group/savedviews flex items-center gap-3 rounded-lg px-2.5 py-2">
+          <button
+            onClick={() => setSavedViewsCollapsed(!savedViewsCollapsed)}
+            className="flex flex-1 items-center gap-3 text-left"
+          >
+            <Filter size={16} className="text-muted" />
+            <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Views</span>
+          </button>
+          <button
+            onClick={handleCreateSavedView}
+            className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted/0 transition-colors group-hover/savedviews:text-muted hover:text-foreground hover:bg-foreground/6"
+            title="New saved view"
+          >
+            <Plus size={10} />
+            Add
+          </button>
+          <button onClick={() => setSavedViewsCollapsed(!savedViewsCollapsed)} className="text-muted" tabIndex={-1}>
+            {savedViewsCollapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+          </button>
+        </div>
+        {!savedViewsCollapsed && savedViews.length > 0 && (
+          <div className="flex flex-col gap-0.5 pl-4">
+            <DndContext sensors={viewSortSensors} collisionDetection={closestCenter} onDragEnd={handleViewDragEnd}>
+              <SortableContext items={visibleViews.map((v) => v.id)} strategy={verticalListSortingStrategy}>
+                {visibleViews.map((view) => (
+                  <SortableViewItem
+                    key={view.id}
+                    view={view}
+                    count={savedViewCounts[view.id] ?? 0}
+                    active={currentView === 'saved-view' && selectedSavedViewId === view.id}
+                    onClick={() => handleSavedViewClick(view.id)}
+                    onContextMenu={(e) => handleViewContextMenu(e, view.id)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+            {hasMoreViews && (
+              <button onClick={() => setViewsExpanded(!viewsExpanded)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground" tabIndex={-1}>
+                {viewsExpanded ? (<><ChevronUp size={12} />Less</>) : (<><ChevronDown size={12} />More</>)}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <aside
       ref={sidebarRef}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
       tabIndex={-1}
-      className={`flex flex-col border-r border-border bg-surface transition-[width] duration-200 ease-out ${
-        collapsed ? 'w-14' : 'w-56'
-      }`}
+      className="flex w-56 flex-col border-r border-border bg-surface select-none"
     >
       {/* Header */}
-      <div className={`flex h-[57px] items-center border-b border-border ${collapsed ? 'justify-center px-2' : 'gap-2 px-3'}`}>
-        {!collapsed && (
-          <>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
-              <img src={appIcon} alt="ToDoozy" className="h-6 w-6" />
-            </div>
-            <span className="flex-1 text-[13px] font-bold tracking-tight text-foreground">
-              ToDoozy
-            </span>
-          </>
-        )}
-        <button
-          onClick={onTogglePin}
-          className="rounded-md p-1.5 text-muted transition-colors hover:bg-foreground/6"
-          title={pinned ? 'Collapse sidebar' : 'Pin sidebar'}
-          tabIndex={-1}
-        >
-          {pinned ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
-        </button>
-      </div>
-
-      {/* Navigation */}
-      <nav className={`flex-1 overflow-y-auto ${collapsed ? 'p-1.5' : 'p-3'}`}>
-        {/* My Day */}
-        <div className="flex flex-col gap-0.5" role="tablist" aria-label="Views">
-          {TOP_VIEW_ITEMS.map((item) => (
-            <NavItem
-              key={item.id}
-              icon={item.icon}
-              label={item.label}
-              count={viewCounts[item.id as keyof typeof viewCounts] ?? 0}
-              active={currentView === item.id}
-              collapsed={collapsed}
-              onClick={() => handleViewClick(item.id)}
-              shortcutHint={item.shortcut}
-              droppableId={isDragging ? item.droppableId : undefined}
-            />
-          ))}
+      <div className="flex h-[57px] items-center gap-2 border-b border-border px-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
+          <img src={appIcon} alt="ToDoozy" className="h-6 w-6" />
         </div>
-
-        {/* Views */}
-        <div className="mt-1 flex flex-col gap-0.5">
-          {!collapsed ? (
-            <div className="group/savedviews flex items-center gap-3 rounded-lg px-2.5 py-2">
-              <button
-                onClick={() => setSavedViewsCollapsed(!savedViewsCollapsed)}
-                className="flex flex-1 items-center gap-3 text-left"
-              >
-                <Filter size={16} className="text-muted" />
-                <span className="flex-1 text-[13px] font-light tracking-tight text-muted">Views</span>
-              </button>
-              <button
-                onClick={handleCreateSavedView}
-                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted/0 transition-colors group-hover/savedviews:text-muted hover:text-foreground hover:bg-foreground/6"
-                title="New saved view"
-              >
-                <Plus size={10} />
-                Add
-              </button>
-              {savedViewsCollapsed ? <ChevronDown size={12} className="text-muted" /> : <ChevronUp size={12} className="text-muted" />}
-            </div>
-          ) : (
-            <div className="flex justify-center rounded-lg px-0 py-2">
-              <Filter size={16} className="text-muted" />
-            </div>
-          )}
-          {!collapsed && !savedViewsCollapsed && savedViews.length > 0 && (
-            <div className="flex flex-col gap-0.5 pl-[38px]">
-              {savedViews.map((view) => (
-                <NavItem
-                  key={view.id}
-                  label={view.name}
-                  count={savedViewCounts[view.id] ?? 0}
-                  active={currentView === 'saved-view' && selectedSavedViewId === view.id}
-                  collapsed={collapsed}
-                  onClick={() => handleSavedViewClick(view.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Projects — header with Add buttons, projects grouped by area */}
-        <div className="mt-1 flex flex-col gap-0.5">
-          {!collapsed ? (
-            <div className="group/projects flex items-center gap-3 rounded-lg px-2.5 py-2">
-              <div className="flex flex-1 items-center gap-3">
-                <LayoutGrid size={16} className="text-muted" />
-                <span className="flex-1 select-none text-[13px] font-light tracking-tight text-muted">Projects</span>
-              </div>
-              <button
-                onClick={() => { setAddingArea(true); setTimeout(() => addAreaRef.current?.focus(), 0) }}
-                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
-                title="New folder"
-                aria-label="New folder"
-                tabIndex={-1}
-              >
-                <Plus size={8} />
-                <span className="text-[7px] font-bold uppercase tracking-wider">Folder</span>
-              </button>
-              <button
-                onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
-                className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
-                title="New project"
-                aria-label="New project"
-                tabIndex={-1}
-              >
-                <Plus size={10} />
-                <span className="text-[8px] font-bold uppercase tracking-wider">Add</span>
-              </button>
-            </div>
-          ) : (
-            <div className="flex justify-center rounded-lg px-0 py-2">
-              <LayoutGrid size={16} className="text-muted" />
-            </div>
-          )}
-          {!collapsed && (
-            <div className="flex flex-col gap-0.5 pl-4">
-              {/* New area input */}
-              {addingArea && (
-                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background p-2">
-                  <input
-                    ref={addAreaRef}
-                    type="text"
-                    value={newAreaName}
-                    onChange={(e) => setNewAreaName(e.target.value)}
-                    tabIndex={-1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newAreaName.trim()) handleCreateArea()
-                      if (e.key === 'Escape') { e.stopPropagation(); setAddingArea(false); setNewAreaName('') }
-                    }}
-                    placeholder="Folder name..."
-                    className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
-                  />
-                </div>
-              )}
-
-              {/* New project input */}
-              {addingProject && (
-                <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
-                  <input
-                    ref={addProjectRef}
-                    type="text"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                    tabIndex={-1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject()
-                      if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor('#6366f1') }
-                    }}
-                    placeholder="Project name..."
-                    className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none"
-                  />
-                  <div className="flex items-center gap-1">
-                    {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
-                      <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
-                        className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
-                        style={{ backgroundColor: c }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Interleaved: ungrouped projects and area groups in unified sidebar_order */}
-              {sidebarItems.map((item) => {
-                if (item.type === 'area') {
-                  const area = item.data
-                  const areaProjects = visibleProjects.filter((p) => p.area_id === area.id)
-                  return (
-                    <div key={`area-${area.id}`} className="mt-1">
-                      <button
-                        onClick={() => toggleAreaCollapsed(area.id)}
-                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-foreground/6"
-                      >
-                        <FolderOpen size={12} className="flex-shrink-0 text-muted" />
-                        <span className="flex-1 text-[13px] font-light tracking-tight text-muted">{area.name}</span>
-                        {areaProjects.length > 0 && (
-                          <span className="text-[10px] font-bold tabular-nums text-muted/60">{areaProjects.length}</span>
-                        )}
-                        {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted/50" /> : <ChevronUp size={12} className="text-muted/50" />}
-                      </button>
-                      {area.is_collapsed === 0 && (
-                        <div className="flex flex-col gap-0.5 pl-5">
-                          {areaProjects.map((project) => (
-                            <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
-                              active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
-                              onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                }
-                const project = item.data as Project
-                return (
-                  <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
-                    active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
-                    onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
-                )
-              })}
-
-              {hasMoreProjects && (
-                <button onClick={() => setProjectsExpanded(!projectsExpanded)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:text-foreground" tabIndex={-1}>
-                  {projectsExpanded ? (<><ChevronUp size={12} />Less</>) : (<><ChevronDown size={12} />More</>)}
-                </button>
-              )}
-            </div>
-          )}
-          {collapsed && (
-            <div className="flex flex-col gap-0.5">
-              {visibleProjects.map((project) => (
-                <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
-                  active={currentView === 'project' && selectedProjectId === project.id} collapsed={collapsed}
-                  onClick={() => handleProjectClick(project.id)} isDragging={isDragging} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Archive & Templates */}
-        <div className="mt-1" />
-        <div className="flex flex-col gap-0.5">
-          {BOTTOM_VIEW_ITEMS.map((item) => (
-            <NavItem
-              key={item.id}
-              icon={item.icon}
-              label={item.label}
-              count={viewCounts[item.id as keyof typeof viewCounts] ?? 0}
-              active={currentView === item.id}
-              collapsed={collapsed}
-              onClick={() => handleViewClick(item.id)}
-              shortcutHint={item.shortcut}
-              droppableId={isDragging ? item.droppableId : undefined}
-            />
-          ))}
-        </div>
-      </nav>
-
-      {/* Footer */}
-      <div className="flex flex-col gap-1 border-t border-border p-1.5">
+        <span className="flex-1 text-[13px] font-bold tracking-tight text-foreground">
+          ToDoozy
+        </span>
+        <SyncStatusIcon />
+        {/* Light/Dark mode toggle — iOS-style sun/moon */}
         <button
           onClick={handleToggleDayNight}
-          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
-            collapsed ? 'justify-center' : ''
-          }`}
+          className="rounded-md p-1.5 text-muted transition-colors hover:bg-foreground/6"
           title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           tabIndex={-1}
         >
           {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
-          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto p-3">
+        {/* Dynamic nav items based on sidebar_order + sidebar_hidden */}
+        <div className="flex flex-col gap-0.5" role="tablist" aria-label="Views">
+          {sidebarNavItems.map((item) => {
+            // "views" is a special section
+            if (item.id === 'views') return renderViewsSection(item.shortcut)
+            if (item.id === 'projects') return renderProjectsSection()
+            const config = NAV_ITEM_CONFIG[item.id]
+            if (!config) return null
+            return (
+              <NavItem
+                key={item.id}
+                icon={config.icon}
+                label={config.label}
+                count={viewCounts[item.id as keyof typeof viewCounts] ?? 0}
+                active={currentView === item.id}
+                collapsed={false}
+                onClick={() => handleViewClick(item.id as ViewId)}
+                shortcutHint={item.shortcut}
+                droppableId={isDragging ? config.droppableId : undefined}
+              />
+            )
+          })}
+        </div>
+      </nav>
+
+      {/* Footer — Stats, Help, Settings, MCP */}
+      <div className="flex flex-col gap-1 border-t border-border p-1.5">
+        <button
+          onClick={() => handleViewClick('stats')}
+          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
+            currentView === 'stats' ? 'bg-accent/12 text-foreground' : ''
+          }`}
+          title="Stats"
+          tabIndex={-1}
+        >
+          <BarChart3 size={14} />
+          <span className="text-[11px] font-bold uppercase tracking-widest">Stats</span>
         </button>
         <button
           onClick={onHelp}
-          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
-            collapsed ? 'justify-center' : ''
-          }`}
-          title="Keyboard shortcuts & help (?)"
+          className="flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
+          title="Keyboard shortcuts (?)"
           tabIndex={-1}
         >
           <HelpCircle size={14} strokeWidth={1.5} />
-          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Help</span>}
+          <span className="text-[11px] font-bold uppercase tracking-widest">Shortcuts</span>
         </button>
         <button
           onClick={onSettings}
-          className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${
-            collapsed ? 'justify-center' : ''
-          }`}
+          className="flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6"
           title="Settings"
           tabIndex={-1}
         >
           <Settings size={14} />
-          {!collapsed && <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>}
+          <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>
         </button>
-        <McpIndicator collapsed={collapsed} />
+        <McpIndicator />
       </div>
+
+      {/* Saved view context menu (color picker) */}
+      {viewContextMenu && (
+        <div
+          ref={viewContextRef}
+          className="fixed z-[100] rounded-lg border border-border bg-surface p-2 shadow-lg"
+          style={{ left: viewContextMenu.x, top: viewContextMenu.y }}
+        >
+          <div className="text-[9px] font-bold uppercase tracking-[0.3em] text-muted mb-1.5">Color</div>
+          <div className="flex flex-wrap gap-1" style={{ maxWidth: 120 }}>
+            {['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16', '#6366f1', '#e11d48'].map((c) => (
+              <button
+                key={c}
+                onClick={() => handleChangeViewColor(viewContextMenu.viewId, c)}
+                className="h-5 w-5 rounded-full transition-transform hover:scale-110"
+                style={{ backgroundColor: c, border: savedViews.find((v) => v.id === viewContextMenu.viewId)?.color === c ? '2px solid var(--foreground)' : '2px solid transparent' }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </aside>
   )
 }
 
-function McpIndicator({ collapsed }: { collapsed: boolean }): React.JSX.Element {
+function SyncStatusIcon(): React.JSX.Element {
+  const syncStatus = useSyncStore(selectSyncStatus)
+  const lastSyncedAt = useSyncStore(selectLastSyncedAt)
+  const isFirstSync = useSyncStore(selectIsFirstSync)
+  const firstSyncProgress = useSyncStore(selectFirstSyncProgress)
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  const formatTime = (iso: string | null): string => {
+    if (!iso) return 'Never'
+    const d = new Date(iso)
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const dotColor: Record<SyncStatus, string> = {
+    synced: '#22c55e',
+    syncing: '#3b82f6',
+    offline: '#f97316',
+    error: '#ef4444'
+  }
+
+  const statusLabel: Record<SyncStatus, string> = {
+    synced: 'Synced',
+    syncing: 'Syncing...',
+    offline: 'Offline',
+    error: 'Sync error'
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setShowTooltip(!showTooltip)}
+        onBlur={() => setShowTooltip(false)}
+        className="flex items-center rounded p-1 text-muted transition-colors hover:bg-foreground/6"
+        title={statusLabel[syncStatus]}
+      >
+        <span
+          className={`inline-block h-2 w-2 rounded-full ${syncStatus === 'syncing' ? 'animate-pulse' : ''}`}
+          style={{ backgroundColor: dotColor[syncStatus] }}
+        />
+      </button>
+      {showTooltip && (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-surface p-2 shadow-lg">
+          <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+            {statusLabel[syncStatus]}
+          </div>
+          {isFirstSync && (
+            <div className="mt-1">
+              <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
+                <div
+                  className="h-full rounded-full bg-accent transition-all"
+                  style={{ width: `${firstSyncProgress}%` }}
+                />
+              </div>
+              <div className="mt-0.5 text-[9px] font-light text-muted">{firstSyncProgress}%</div>
+            </div>
+          )}
+          <div className="mt-1 text-[9px] font-light text-muted">
+            Last synced: {formatTime(lastSyncedAt)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function McpIndicator(): React.JSX.Element {
   const [status, setStatus] = useState<{ running: boolean; instanceCount: number } | null>(null)
 
   useEffect(() => {
@@ -613,15 +693,13 @@ function McpIndicator({ collapsed }: { collapsed: boolean }): React.JSX.Element 
 
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg p-2 ${collapsed ? 'justify-center' : ''}`}
+      className="flex items-center gap-2 rounded-lg p-2"
       title={tooltip}
     >
       <div className={`h-2 w-2 rounded-full ${status.running ? 'bg-success' : 'bg-danger animate-pulse'}`} />
-      {!collapsed && (
-        <span className={`text-[9px] font-bold uppercase tracking-wider ${status.running ? 'text-success/60' : 'text-danger/60'}`}>
-          {label}
-        </span>
-      )}
+      <span className={`text-[9px] font-bold uppercase tracking-wider ${status.running ? 'text-success/60' : 'text-danger/60'}`}>
+        {label}
+      </span>
     </div>
   )
 }
@@ -630,21 +708,59 @@ interface ProjectNavItemProps {
   project: Project
   count: number
   active: boolean
-  collapsed: boolean
   onClick: () => void
   shortcutHint?: string
   isDragging?: boolean
 }
 
+interface SortableViewItemProps {
+  view: { id: string; name: string; color: string }
+  count: number
+  active: boolean
+  onClick: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}
+
+function SortableViewItem({ view, count, active, onClick, onContextMenu }: SortableViewItemProps): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: view.id })
+  const [mouseDown, setMouseDown] = useState(false)
+  const grabbing = isDragging || mouseDown
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onMouseDown={(e) => { setMouseDown(true); listeners?.onMouseDown?.(e) }}
+      onMouseUp={() => setMouseDown(false)}
+      onContextMenu={onContextMenu}
+      className={`${grabbing ? '[&_*]:cursor-grabbing [&]:cursor-grabbing' : '[&_*]:cursor-grab [&]:cursor-grab'}`}
+    >
+      <NavItem
+        label={view.name}
+        count={count}
+        active={active}
+        collapsed={false}
+        onClick={onClick}
+        colorDot={view.color}
+      />
+    </div>
+  )
+}
+
 function ProjectNavItem({
   project,
-  count,
   active,
-  collapsed,
   onClick,
-  shortcutHint,
   isDragging
 }: ProjectNavItemProps): React.JSX.Element {
+  const memberCount = useProjectStore((s) => s.members[project.id]?.length ?? 0)
   const droppableId = isDragging ? `nav-project-${project.id}` : undefined
   const { isOver, setNodeRef } = useDroppable({
     id: droppableId ?? `nav-project-${project.id}`,
@@ -655,12 +771,11 @@ function ProjectNavItem({
     <button
       ref={droppableId ? setNodeRef : undefined}
       onClick={onClick}
-      title={collapsed ? `${project.name}${shortcutHint ? ` (${shortcutHint})` : ''}` : undefined}
       className={`group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${
         active
           ? 'bg-accent/12 text-foreground border border-accent/15'
           : 'border border-transparent text-muted hover:bg-foreground/6 hover:border-border/50'
-      } ${collapsed ? 'justify-center px-0' : ''} ${
+      } ${
         isOver ? 'bg-accent/15 border-accent/30 scale-[1.02]' : ''
       }`}
       role="tab"
@@ -671,33 +786,11 @@ function ProjectNavItem({
         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
         style={{ backgroundColor: project.color }}
       />
-      {!collapsed && (
-        <>
-          <span className="flex-1 truncate text-[13px] font-light tracking-tight">
-            {project.name}
-          </span>
-          {project.is_shared === 1 && (
-            <Users size={12} className="flex-shrink-0 text-muted/50" />
-          )}
-          {count > 0 && (
-            <span
-              className={`text-[10px] font-bold tabular-nums ${
-                active ? 'text-accent' : 'text-muted/60'
-              }`}
-            >
-              {count}
-            </span>
-          )}
-        </>
-      )}
-      {collapsed && count > 0 && (
-        <span
-          className={`absolute bottom-0.5 right-0.5 text-[8px] font-bold tabular-nums leading-none ${
-            active ? 'text-accent' : 'text-muted/60'
-          }`}
-        >
-          {count > 99 ? '99+' : count}
-        </span>
+      <span className="flex-1 truncate text-[13px] font-light tracking-tight">
+        {project.name}
+      </span>
+      {memberCount > 1 && (
+        <Users size={12} className="flex-shrink-0 text-muted/50" />
       )}
     </button>
   )

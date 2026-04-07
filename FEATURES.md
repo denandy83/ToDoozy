@@ -50,12 +50,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ## Views & Navigation
 
 ### Sidebar
-- Collapsible (56px collapsed to 600px expanded), pinnable, hover-to-expand when unpinned
+- Always expanded (collapse removed); light/dark theme toggle replaces the old collapse button
 - PROJECTS section lists all projects with task counts; drag-reorder in project settings
-- Top section: My Day (Cmd+1); Bottom section: Archive (Cmd+2), Templates (Cmd+3)
+- Top section: My Day (Cmd+1); Bottom section: Archive, Templates, Stats in footer
 - Settings gear button at bottom
 - Droppable targets: dragging a task onto a nav item moves it to that view
-- **Status:** Complete
+- Show/hide and reorder nav items in Settings; keyboard shortcuts (Cmd+1, Cmd+2, etc.) update dynamically to match visible items
+- **Status:** Complete (updated 2026-04-04, Story #52)
 
 ### My Day View
 - Cross-project view: tasks that are `is_in_my_day = true` OR `due_date = today`
@@ -75,6 +76,23 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Right-click → context menu (same as other views)
 - Sidebar shortcut: ⌘2
 - **Status:** Complete
+
+### Saved Views / Smart Lists
+- Create custom saved views with persistent filter configurations
+- Filter by labels, priorities, statuses, due dates, and keywords
+- Saved views appear in the sidebar for quick one-click access with colored dots
+- Full TaskRow component with all task info (status, labels, priority, due date, timer, subtasks, recurrence)
+- Multi-sort: stackable sort rules (Priority, Due date, Status, Created, Updated, Title, Project, Custom)
+- Sort persisted per saved view in filter_config JSON
+- Context menu, inline editing, and bulk selection all work in saved views
+- Filter criteria persist across sessions
+- **Status:** Complete (2026-04-04, Story #53)
+
+### Stats Dashboard
+- Productivity stats view with visual analytics powered by Recharts
+- Completion trends, priority distributions, and productivity insights
+- Cross-project analytics for all tasks
+- **Status:** Complete (2026-04-03, Story #48)
 
 ### Per-Project Views
 - Each project in the sidebar has its own task list
@@ -171,10 +189,11 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ### Within a Project
 - @dnd-kit with PointerSensor (8px threshold) and KeyboardSensor
+- Horizontal intent detection: distinguishes between reorder and nesting based on drag direction
+- Full-row ghost rendering during drag for clearer visual feedback
 - Drop intent by Y-position: top 20% = above (reorder), middle 60% = inside (make subtask), bottom 20% = below (reorder)
 - Batch SQLite transactions for reordering
-- Ghost card overlay while dragging
-- **Status:** Complete
+- **Status:** Complete (updated 2026-04-03)
 
 ### Cross-view Drag
 - Drag task onto sidebar nav items (My Day, project) to move it there
@@ -233,6 +252,12 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Hide/blur filter modes; auto-clears on view switch
 - **Status:** Complete
 
+### Expanded Filter System
+- Filter bar supports priority, status, due date, and keyword filters in addition to labels
+- Combine multiple filter types for precise task views
+- **Exclusion filters ("is not"):** Every filter type (labels, status, priority, assignee, projects) supports an "is not" exclusion mode that hides tasks matching the selected criteria. Available in both the filter bar and saved views.
+- **Status:** Complete (2026-04-04, Stories #46, #50)
+
 ---
 
 ## Priority System
@@ -261,6 +286,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Delete project (with confirmation and task cleanup)
 - Default "Personal" project auto-created on first login
 - **Status:** Complete
+
+### Project Areas / Folders
+- Organize projects into areas/folders in the sidebar
+- Group related projects together for a cleaner workspace
+- Drag-and-drop projects into areas
+- Collapsible area groups
+- **Status:** Complete (2026-04-03, Story #49)
 
 ### Configurable Statuses
 - Per-project status CRUD: name, color, type (not_started/in_progress/done)
@@ -363,14 +395,22 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Graceful offline fallback
 - **Status:** Complete
 
+### Supabase Full Sync Engine
+- Write-through sync hooks on all Zustand stores (tasks, labels, projects, settings) push every local write to Supabase in background
+- Sync status indicator shows connection state (synced, syncing, offline, error)
+- Offline detection with automatic queue-and-flush: changes made offline are queued and pushed when connectivity returns
+- Works for personal projects; shared projects use existing Realtime sync
+- **Status:** Complete (2026-04-04, Story #51)
+
 ---
 
 ## AI Integration (MCP Server)
 
 - Standalone MCP server using stdio transport (`@modelcontextprotocol/sdk`)
 - Connect any MCP-compatible AI client (Claude Desktop, etc.)
-- Tools: create/update/delete/list tasks and subtasks, manage projects/labels/statuses, search, My Day management, templates
+- Tools: create/update/delete/list tasks and subtasks, manage projects/labels/statuses, search, My Day management, templates, reorder tasks
 - Enable/disable in Settings > MCP; copy config to clipboard
+- **Activity logging:** All 22 mutating MCP tools (create/update/delete for tasks, subtasks, projects, labels, statuses, etc.) create activity log entries so AI-made changes appear in the activity timeline alongside user actions
 - **Status:** Complete
 
 ---

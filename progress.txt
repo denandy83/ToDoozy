@@ -1,54 +1,38 @@
 # Ralph Progress Log
-Started: Thu Apr  2 23:40:28 CEST 2026
+Started: Sat Apr  4 00:16:32 CEST 2026
 ---
 
-## Story #43 — MCP Activity Logging
-- Added `logActivity()` helper and `PRIORITY_NAMES` map to mcp-server.ts
-- All 22 mutating tools now log activity entries: create_task, delete_task, update_task (per-field), complete_task, reopen_task, set_task_priority, set_task_due_date, set_task_description, set_task_recurrence, add_task_to_my_day, remove_task_from_my_day, snooze_task, archive_task, unarchive_task, duplicate_task, create_subtask, assign_label_to_task, remove_label_from_task, use_task_template
-- save_task_as_template: no logging (template is separate entity, per story spec)
-- No new repo methods or types needed — ActivityLogRepository.create() already existed
-- Typecheck: zero errors. Tests: 377 pass.
+## Story #50 — Exclusion Filters for Saved Views and Filter Bar
+- Added exclude filter sets to labelStore (excludeLabelFilters, excludeStatusFilters, excludePriorityFilters, excludeAssigneeFilters, excludeProjectFilters)
+- Implemented last-action-wins conflict resolution: adding to include removes from exclude and vice versa
+- Extended TaskRepository.search() with NOT IN clauses for all exclusion filter types
+- Added "is"/"is not" operator toggle to all filter pickers (Priority, Status, Labels, Projects)
+- ExcludeFilterChip component shows "is not" prefix in muted-red styling
+- Exclusion filters work in TaskListView, SavedViewListView, MyDayView, CalendarView
+- Saved views serialize/deserialize exclusion filters alongside include filters (backward compatible)
+- MCP search_tasks tool supports exclude_label_id, exclude_status_id, exclude_priority params
+- 6 new tests for exclusion filter SQL logic (by label, status, priority, project, assignee, combined)
+- All 418 tests pass, typecheck clean
 
----
+## Story #53 — Full Task Rows in Saved Views + Multi-Sort (2026-04-04)
+- Most of the story was already implemented by a previous session (SavedViewListView using TaskRow, sort utility, FilterBar sort dropdown, sidebar colored dots, context menu color picker, per-project sort persistence)
+- Migrated `priority_auto_sort` legacy setting to per-project sort config: on first project visit, if no sort_config exists and auto_sort is true, creates priority desc sort rules
+- Removed legacy priority auto-sort fallback code from TaskListView prioritySortFn
+- Removed Auto-Sort toggle from PrioritySettingsContent (replaced by sort dropdown in FilterBar)
+- Kept `autoSort` in usePrioritySettings hook for backward compatibility with StatusSection, MyDayView, KanbanView
+- Added 17 tests for sortTasks.ts utility (all sort fields, directions, multi-sort, defaults, labels)
+- All 435 tests pass, zero typecheck errors
 
-## Story #46 — Expanded Filter System
-- Enhanced TaskRepository.search() with array support: label_ids, status_ids, priorities, assigned_to_ids, project_ids (backward-compatible with single values)
-- Expanded labelStore state: priorityFilters, statusFilters, dueDatePreset, keyword + toggle/set/clear actions + selectors
-- Created FilterBar.tsx (replaces LabelFilterBar usage): label chips + "+" Filter dropdown + priority/status/due date/keyword pickers + removable chips + clear all
-- Updated TaskListView, MyDayView with shared taskMatchesFilters callback (AND between types, OR within labels)
-- Added filter support to CalendarView (was previously unfiltered)
-- Filter logic: priority match, status match, due date presets (today/this_week/overdue/no_date), keyword (title + description)
-- 5 new tests for array search filters (382 total)
-- Decision: expanded labelStore rather than creating separate filterStore — fewer migration changes, backward compat for clearLabelFilters
-- Typecheck: zero errors. Tests: 382 pass.
-
----
-
-## Story #45 — Command Palette Clears Filters on Navigation
-- Added `useLabelStore.getState().clearLabelFilters()` call in handleSelect before setSelectedProject
-- clearLabelFilters() already clears both label and assignee filters
-- Matches sidebar navigation pattern (Sidebar.tsx handleViewClick/handleProjectClick)
-- No new repo methods or utility functions — no new tests needed
-- Typecheck: zero errors. Tests: 377 pass.
-
----
-
-## Story #44 — MCP Task Reorder Tool
-- Added `reorder_tasks` tool definition with array input schema (extended SchemaProp with `items`)
-- Handler validates all task IDs exist, calls TaskRepository.reorder(), checks priority_auto_sort setting
-- No new repo methods needed — reorder() at TaskRepository.ts:148 already existed
-- No activity logging (bulk order_index change, per story spec)
-- Typecheck: zero errors. Tests: 377 pass.
-
----
-Story #42: Settings Menu Reorganization — 2026-04-03
-- Extracted GeneralSettingsContent.tsx (with notifications absorbed as a section, 6 section labels)
-- Extracted ProjectsSettingsContent.tsx (projects tab with all sub-components)
-- Extracted WhatsNewSettingsContent.tsx (WhatsNewDot, WhatsNewContent, useChangelog)
-- Created AppearanceSettingsContent.tsx (Theme | Priority Display subtabs, forwarded theme ref for dirty-state)
-- Created AboutSettingsContent.tsx (Updates | What's New | Integrations | Help subtabs, WhatsNewDot on subtab)
-- Added 5 section labels to TimerSettingsContent.tsx (Presets, Breaks, Repetition, Behavior, Alerts)
-- Rewrote UnifiedSettingsModal.tsx: 1067 lines to 149 lines, 6 tabs + Logout
-- Tab type changed: themes/priorities/mcp/notifications/updates/whatsnew/help to appearance/about
-- Theme dirty-state coupling preserved through AppearanceSettingsHandle forwardRef
-- All 377 existing tests pass, typecheck clean
+## Story #54 — ToDoozy Telegram Bot
+- Created `packages/telegram-bot/` with Node.js + TypeScript + node-telegram-bot-api + @supabase/supabase-js
+- Parser (`parser.ts`) adapted from in-app smartInputParser.ts for Telegram's token-based syntax
+- Supabase client (`supabase.ts`) with CRUD for tasks, projects, labels, statuses — uses service role key
+- Bot entry point (`index.ts`) handles: task creation, /projectname listing, /done, /myday, /help
+- Auth guard via ALLOWED_TELEGRAM_IDS env var
+- Inline keyboard buttons for completing tasks from Telegram
+- Labels auto-created with color cycling when they don't exist
+- Docker deployment: Dockerfile (Node 20 Alpine, arm64 compatible) + docker-compose.yml
+- 27 parser tests added and passing
+- All 463 tests pass, typecheck clean
+- Decision: copied/adapted parser rather than sharing code — bot is a standalone package with its own deps
+- Decision: bot credentials stored in .env.example, not committed to repo
