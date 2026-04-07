@@ -293,9 +293,9 @@ export interface ProjectAreasAPI {
 }
 
 export interface StatsAPI {
-  completions(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+  completions(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
   streaks(userId: string): Promise<{ current: number; best: number }>
-  focus(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
+  focus(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
   heatmap(userId: string, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
 }
 

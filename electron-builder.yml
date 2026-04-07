@@ -25,6 +25,10 @@ mac:
   icon: resources/icon.png
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  identity: "Andy Cassiers (HXNS28BT9C)"
+  notarize: true
   extendInfo:
     - NSDocumentsFolderUsageDescription: Application data storage.
     - NSDownloadsFolderUsageDescription: Export functionality.

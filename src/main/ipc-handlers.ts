@@ -833,7 +833,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('stats:focus', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
-    return getRepos().activityLog.getFocusStats(userId, projectIds, startDate, endDate)
+    return getRepos().activityLog.getFocusStats(userId, projectIds as unknown as string | null, startDate, endDate)
   })
 
   ipcMain.handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {
