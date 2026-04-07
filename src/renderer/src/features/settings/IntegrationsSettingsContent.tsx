@@ -134,8 +134,6 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
 
   const [subTab, setSubTab] = useState<'telegram' | 'shortcut'>('telegram')
 
-  // ── Shortcut deep link ──
-  const shortcutUrl = apiKey ? buildShortcutDeepLink(apiKey) : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -283,65 +281,28 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
 
         {apiKey && (
           <>
-            {/* Install Shortcut button */}
-            {shortcutUrl && (
-              <div className="mb-4">
-                <button
-                  onClick={() => window.open(shortcutUrl, '_blank')}
-                  className="rounded-lg bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80"
-                >
-                  Install Shortcut
-                </button>
-                <p className="text-[10px] font-light text-foreground/40 mt-1">
-                  Opens the Shortcuts app with the shortcut pre-configured
-                </p>
-              </div>
-            )}
-
-            {/* Manual setup instructions */}
+            {/* Setup instructions with inline copy fields */}
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Manual Setup</span>
-              <div className="mt-2 flex flex-col gap-2">
-                {[
-                  ['1', 'Open the Shortcuts app → tap + → New Shortcut'],
-                  ['2', 'Add action: "Dictate Text"'],
-                  ['3', 'Add action: "Get Contents of URL"'],
-                  ['4', `Set URL to: ${SUPABASE_URL}/rest/v1/rpc/quick_add_task`],
-                  ['5', 'Method: POST, Headers: apikey = (copy below), Content-Type = application/json'],
-                  ['6', 'Request Body (JSON): {"p_api_key": "(your API key)", "p_title": "Dictated Text"}'],
-                  ['7', 'Add action: "Show Notification" → "Task added!"'],
-                  ['8', 'Settings → Action Button → assign this shortcut'],
-                ].map(([step, text]) => (
-                  <div key={step} className="flex gap-2">
-                    <span className="text-[10px] font-bold text-accent w-4 flex-shrink-0">{step}</span>
-                    <span className="text-xs font-light text-foreground/60">{text}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Copyable values */}
-              <div className="mt-3 flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted w-16">URL</span>
-                  <code className="flex-1 truncate text-[10px] font-mono text-foreground/50">{SUPABASE_URL}/rest/v1/rpc/quick_add_task</code>
-                  <button onClick={() => handleCopy(`${SUPABASE_URL}/rest/v1/rpc/quick_add_task`, 'url')} className="rounded p-1 text-muted hover:bg-foreground/6">
-                    {copied === 'url' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted w-16">apikey</span>
-                  <code className="flex-1 truncate text-[10px] font-mono text-foreground/50">{ANON_KEY.slice(0, 30)}...</code>
-                  <button onClick={() => handleCopy(ANON_KEY, 'anon')} className="rounded p-1 text-muted hover:bg-foreground/6">
-                    {copied === 'anon' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted w-16">API Key</span>
-                  <code className="flex-1 truncate text-[10px] font-mono text-foreground/50">{apiKey}</code>
-                  <button onClick={() => handleCopy(apiKey, 'key2')} className="rounded p-1 text-muted hover:bg-foreground/6">
-                    {copied === 'key2' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                  </button>
-                </div>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Setup</span>
+              <p className="text-xs font-light text-foreground/50 mt-1 mb-3">
+                Create a Shortcut to add tasks by voice. Assign it to your Action Button.
+              </p>
+              <div className="flex flex-col gap-3">
+                <Step n={1} text='Open Shortcuts app → tap "+" → New Shortcut' />
+                <Step n={2} text='Add action: "Dictate Text"' />
+                <Step n={3} text='Add action: "Get Contents of URL" and paste this URL:'>
+                  <CopyField value={`${SUPABASE_URL}/rest/v1/rpc/quick_add_task`} label="url" copied={copied} onCopy={handleCopy} />
+                </Step>
+                <Step n={4} text="Set Method to POST" />
+                <Step n={5} text="Add a Header — key: apikey, value:">
+                  <CopyField value={ANON_KEY} label="anon" copied={copied} onCopy={handleCopy} truncate />
+                </Step>
+                <Step n={6} text='Set Request Body to JSON, add key p_api_key with your API key:'>
+                  <CopyField value={apiKey} label="key2" copied={copied} onCopy={handleCopy} highlight />
+                </Step>
+                <Step n={7} text='Add another JSON key: p_title — tap the value field and select "Dictated Text" from the variables above' />
+                <Step n={8} text='Add action: "Show Notification" → type "Task added!"' />
+                <Step n={9} text="Done! Go to Settings → Action Button to assign this shortcut" />
               </div>
             </div>
           </>
@@ -371,9 +332,31 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
   )
 }
 
-function buildShortcutDeepLink(_apiKey: string): string {
-  const name = 'ToDoozy Quick Add'
-  // Note: shortcuts:// deep links have limited support for complex actions.
-  // This opens the Shortcuts app to create a new shortcut with the given name.
-  return `shortcuts://create-shortcut?name=${encodeURIComponent(name)}`
+function Step({ n, text, children }: { n: number; text: string; children?: React.ReactNode }): React.JSX.Element {
+  return (
+    <div>
+      <div className="flex gap-2">
+        <span className="text-[10px] font-bold text-accent w-4 flex-shrink-0 mt-0.5">{n}</span>
+        <span className="text-xs font-light text-foreground/60">{text}</span>
+      </div>
+      {children && <div className="ml-6 mt-1">{children}</div>}
+    </div>
+  )
+}
+
+function CopyField({ value, label, copied, onCopy, truncate, highlight }: {
+  value: string; label: string; copied: string | null
+  onCopy: (text: string, label: string) => void
+  truncate?: boolean; highlight?: boolean
+}): React.JSX.Element {
+  return (
+    <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${highlight ? 'border-accent/30 bg-accent/5' : 'border-border bg-surface/50'}`}>
+      <code className={`flex-1 text-[10px] font-mono ${highlight ? 'text-accent' : 'text-foreground/50'} ${truncate ? 'truncate' : 'break-all'}`}>
+        {truncate ? value.slice(0, 40) + '...' : value}
+      </code>
+      <button onClick={() => onCopy(value, label)} className="rounded p-1 text-muted hover:bg-foreground/6 flex-shrink-0">
+        {copied === label ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+      </button>
+    </div>
+  )
 }
