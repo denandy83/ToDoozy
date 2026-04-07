@@ -431,11 +431,21 @@ export async function getRecentlyCompletedTasks(limit: number = 10): Promise<(Su
   const projectIds = projects.map((p) => p.id)
   const projectMap = new Map(projects.map((p) => [p.id, p.name]))
 
+  // Get all done status IDs
+  const { data: doneStatuses } = await supabase
+    .from('statuses')
+    .select('id')
+    .in('project_id', projectIds)
+    .eq('is_done', 1)
+
+  const doneStatusIds = (doneStatuses ?? []).map((s) => s.id)
+  if (doneStatusIds.length === 0) return []
+
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('*')
     .in('project_id', projectIds)
-    .not('completed_date', 'is', null)
+    .in('status_id', doneStatusIds)
     .eq('is_archived', 0)
     .order('completed_date', { ascending: false })
     .limit(limit)
