@@ -24,7 +24,8 @@ import {
   selectDueDatePreset,
   selectDueDateRange,
   selectKeyword,
-  selectHasAnyFilter
+  selectHasAnyFilter,
+  selectLabelFilterLogic
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
@@ -90,6 +91,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   // Filter state
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const filterMode = useLabelStore(selectFilterMode)
   const priorityFilters = useLabelStore(selectPriorityFilters)
   const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
@@ -199,7 +201,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     const labelIds = new Set(labels.map((l) => l.id))
     // Include filters
     if (hasActiveFilters) {
-      if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      if (labelFilterLogic === 'all') {
+        if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+      } else {
+        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      }
     }
     if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
     if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
@@ -215,7 +221,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       if (!task.title.toLowerCase().includes(kw) && !(task.description ?? '').toLowerCase().includes(kw)) return false
     }
     return true
-  }, [hasAnyFilterGlobal, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
+  }, [hasAnyFilterGlobal, hasActiveFilters, activeLabelFilters, labelFilterLogic, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
 
   // Filter tasks by all active filters
   const labelFilteredTasks = useMemo(() => {

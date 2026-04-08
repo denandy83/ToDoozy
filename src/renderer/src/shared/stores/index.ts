@@ -65,6 +65,7 @@ export {
   selectKeyword,
   selectHasAnyFilter,
   selectSortRules,
+  selectLabelFilterLogic,
   useLabelsByProject
 } from './labelStore'
 

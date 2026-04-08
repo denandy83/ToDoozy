@@ -608,6 +608,7 @@ const tools: ToolDef[] = [
         due_before: str('Tasks due before this date (ISO 8601)'),
         due_after: str('Tasks due after this date (ISO 8601)'),
         keyword: str('Search keyword (matches title and description)'),
+        label_logic: str('Label filter logic: "any" (OR, default) or "all" (AND)'),
         exclude_label_id: str('Exclude tasks with this label'),
         exclude_status_id: str('Exclude tasks with this status'),
         exclude_priority: num('Exclude tasks with this priority (0-4)')
@@ -1391,6 +1392,7 @@ const handlers: Record<string, Handler> = {
       status_id: optStr(args, 'status_id'),
       priority: optNum(args, 'priority'),
       label_id: optStr(args, 'label_id'),
+      label_logic: optStr(args, 'label_logic') as 'any' | 'all' | undefined,
       due_before: optStr(args, 'due_before'),
       due_after: optStr(args, 'due_after'),
       keyword: optStr(args, 'keyword'),

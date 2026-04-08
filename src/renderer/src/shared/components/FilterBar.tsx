@@ -15,7 +15,8 @@ import {
   selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter,
-  selectSortRules
+  selectSortRules,
+  selectLabelFilterLogic
 } from '../stores'
 import type { Label, Project } from '../../../../shared/types'
 import type { LabelFilterMode, DueDateRange } from '../stores'
@@ -635,11 +636,15 @@ function ActiveFilterChips({
 
   // Label chips (when labels are in filter menu mode)
   if (labelChips) {
+    const logic = useLabelStore.getState().labelFilterLogic
+    const prefix = labelChips.activeIds.size > 1
+      ? (logic === 'all' ? 'Label is all of' : 'Label is any of')
+      : 'Label'
     for (const id of labelChips.activeIds) {
       const label = labelChips.labels.find((l) => l.id === id)
       if (!label) continue
       chips.push(
-        <FilterChip key={`l-${id}`} label={label.name} color={label.color} prefix="Label" onRemove={() => labelChips.onRemove(id)} />
+        <FilterChip key={`l-${id}`} label={label.name} color={label.color} prefix={prefix} onRemove={() => labelChips.onRemove(id)} />
       )
     }
   }
@@ -799,6 +804,41 @@ function OperatorToggle({ value, onChange }: OperatorToggleProps): React.JSX.Ele
   )
 }
 
+/* ── Label Operator Toggle (is any of / is all of / is not) ────── */
+
+type LabelOperator = 'is_any' | 'is_all' | 'is_not'
+
+function LabelOperatorToggle({ value, onChange }: { value: LabelOperator; onChange: (op: LabelOperator) => void }): React.JSX.Element {
+  return (
+    <div className="mb-1 flex overflow-hidden rounded border border-border">
+      <button
+        onClick={() => onChange('is_any')}
+        className={`flex-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+          value === 'is_any' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+        }`}
+      >
+        is any of
+      </button>
+      <button
+        onClick={() => onChange('is_all')}
+        className={`flex-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+          value === 'is_all' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+        }`}
+      >
+        is all of
+      </button>
+      <button
+        onClick={() => onChange('is_not')}
+        className={`flex-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+          value === 'is_not' ? 'bg-red-500/12 text-red-400' : 'text-muted hover:bg-foreground/6'
+        }`}
+      >
+        is not
+      </button>
+    </div>
+  )
+}
+
 /* ── Priority Filter Picker ─────────────────────────────────────── */
 
 interface PriorityFilterPickerProps {
@@ -859,13 +899,25 @@ interface LabelFilterPickerProps {
 
 function LabelFilterPicker({ labels, active, excluded, onToggle, onExcludeToggle, onClose }: LabelFilterPickerProps): React.JSX.Element {
   const [search, setSearch] = useState('')
-  const [operator, setOperator] = useState<FilterOperator>('is')
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
+  const [operator, setOperator] = useState<LabelOperator>(
+    labelFilterLogic === 'all' ? 'is_all' : 'is_any'
+  )
   const searchRef = useRef<HTMLInputElement>(null)
   const filtered = search
     ? labels.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
     : labels
-  const currentActive = operator === 'is' ? active : excluded
-  const currentToggle = operator === 'is' ? onToggle : onExcludeToggle
+  const currentActive = operator === 'is_not' ? excluded : active
+  const currentToggle = operator === 'is_not' ? onExcludeToggle : onToggle
+
+  const handleOperatorChange = (op: LabelOperator): void => {
+    setOperator(op)
+    if (op === 'is_any') {
+      useLabelStore.getState().setLabelFilterLogic('any')
+    } else if (op === 'is_all') {
+      useLabelStore.getState().setLabelFilterLogic('all')
+    }
+  }
 
   useEffect(() => {
     requestAnimationFrame(() => searchRef.current?.focus())
@@ -887,7 +939,7 @@ function LabelFilterPicker({ labels, active, excluded, onToggle, onExcludeToggle
     <div className="min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-lg">
       <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Labels</div>
       <div className="px-1 pb-1">
-        <OperatorToggle value={operator} onChange={setOperator} />
+        <LabelOperatorToggle value={operator} onChange={handleOperatorChange} />
         <div className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 focus-within:border-accent">
           <Search size={10} className="text-muted" />
           <input

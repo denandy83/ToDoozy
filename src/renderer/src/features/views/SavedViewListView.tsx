@@ -8,7 +8,7 @@ import {
   selectExcludeStatusFilters, selectHasExcludeStatusFilters,
   selectExcludePriorityFilters, selectHasExcludePriorityFilters,
   selectExcludeProjectFilters, selectHasExcludeProjectFilters,
-  selectSortRules
+  selectSortRules, selectLabelFilterLogic
 } from '../../shared/stores'
 import type { DueDateRange } from '../../shared/stores'
 import { useTaskStore } from '../../shared/stores'
@@ -40,6 +40,7 @@ interface FilterConfig {
   keyword?: string
   filterMode?: 'hide' | 'blur'
   sortRules?: SortRule[]
+  labelLogic?: 'any' | 'all'
 }
 
 export function SavedViewListView(): React.JSX.Element {
@@ -143,6 +144,9 @@ export function SavedViewListView(): React.JSX.Element {
       if (config.sortRules && config.sortRules.length > 0) {
         store.setSortRules(config.sortRules)
       }
+      if (config.labelLogic) {
+        store.setLabelFilterLogic(config.labelLogic)
+      }
       // Track the stored config for dirty-state detection — rebuild from applied state
       // so the serialization matches exactly what currentFilterConfig produces
       requestAnimationFrame(() => {
@@ -163,6 +167,7 @@ export function SavedViewListView(): React.JSX.Element {
         if (s.keyword) applied.keyword = s.keyword
         applied.filterMode = s.filterMode
         if (s.sortRules.length > 0) applied.sortRules = s.sortRules
+        if (s.labelFilterLogic !== 'any') applied.labelLogic = s.labelFilterLogic
         useSavedViewStore.getState().setActiveViewFilterConfig(JSON.stringify(applied))
       })
     } catch { /* ignore invalid config */ }
@@ -187,6 +192,7 @@ export function SavedViewListView(): React.JSX.Element {
     if (s.keyword) config.keyword = s.keyword
     config.filterMode = s.filterMode
     if (s.sortRules.length > 0) config.sortRules = s.sortRules
+    if (s.labelFilterLogic !== 'any') config.labelLogic = s.labelFilterLogic
     return JSON.stringify(config)
   })
 
@@ -202,6 +208,7 @@ export function SavedViewListView(): React.JSX.Element {
   // Filter tasks that match (using the active filter store state applied from saved view)
   const activeLabelFilters = useLabelStore((s) => s.activeLabelFilters)
   const hasActiveFilters = useLabelStore((s) => s.activeLabelFilters.size > 0)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const priorityFilters = useLabelStore((s) => s.priorityFilters)
   const hasPriorityFilters = useLabelStore((s) => s.priorityFilters.size > 0)
   const statusFilters = useLabelStore((s) => s.statusFilters)
@@ -228,7 +235,11 @@ export function SavedViewListView(): React.JSX.Element {
       const labelIds = new Set(labels.map((l) => l.id))
       // Include filters
       if (hasActiveFilters) {
-        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if (labelFilterLogic === 'all') {
+          if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+        } else {
+          if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        }
       }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
@@ -252,7 +263,7 @@ export function SavedViewListView(): React.JSX.Element {
     const effectiveRules = sortRules.length > 0 ? sortRules : DEFAULT_SAVED_VIEW_SORT
     const comparator = createSortComparator(effectiveRules, statusOrderMap)
     return [...filtered].sort(comparator)
-  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasActiveFilters, activeLabelFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter, sortRules, statusOrderMap])
+  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasActiveFilters, activeLabelFilters, labelFilterLogic, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter, sortRules, statusOrderMap])
 
   // Keep sidebar count in sync with actual matching tasks
   useEffect(() => {

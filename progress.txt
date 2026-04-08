@@ -24,3 +24,14 @@ Started: Wed Apr  8 15:11:28 CEST 2026
 - Updated quick_add_task Supabase RPC: checks ios_shortcut_default_project first, falls back to telegram_default_project, then first owned project
 - Added 'default', 'list', 'recent' to parser.ts reserved commands list
 - Typecheck clean, all tests pass
+
+## Story #57 — AND/OR Label Filter Logic (2026-04-08)
+- Added labelFilterLogic ('any' | 'all') to labelStore with selector and setter
+- Created LabelOperatorToggle component (3-way: is any of / is all of / is not)
+- Updated LabelFilterPicker to use LabelOperatorToggle instead of OperatorToggle
+- Updated label filter chips to show "Label is any of" / "Label is all of" prefix when 2+ labels selected
+- Updated client-side filtering in SavedViewListView, MyDayView, TaskListView, CalendarView — .every() for AND, .some() for OR
+- Updated TaskRepository.search() SQL — AND uses subquery with HAVING COUNT(DISTINCT)
+- Updated MCP search_tasks tool with label_logic parameter
+- Added labelLogic to saved view FilterConfig serialization/deserialization
+- Typecheck clean, all tests pass

@@ -27,7 +27,8 @@ import {
   selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter,
-  selectSortRules
+  selectSortRules,
+  selectLabelFilterLogic
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
@@ -76,6 +77,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const allLabels = useLabelsByProject(projectId)
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const filterMode = useLabelStore(selectFilterMode)
   const assigneeFilters = useLabelStore(selectAssigneeFilters)
   const hasAssigneeFilters = useLabelStore(selectHasAssigneeFilters)
@@ -179,7 +181,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     const labelIds = new Set(labels.map((l) => l.id))
     // Include filters
     if (hasActiveFilters) {
-      if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      if (labelFilterLogic === 'all') {
+        if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+      } else {
+        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      }
     }
     if (hasAssigneeFilters && !assigneeFilters.has(task.assigned_to ?? '')) return false
     if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
@@ -201,7 +207,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       if (!titleMatch && !descMatch) return false
     }
     return true
-  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludeAssigneeFilters, excludeAssigneeFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
+  }, [hasAnyFilter, hasActiveFilters, activeLabelFilters, labelFilterLogic, taskLabels, hasAssigneeFilters, assigneeFilters, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludeAssigneeFilters, excludeAssigneeFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePreset, dueDateRange, keywordFilter])
 
   const taskFilterOpacity = useMemo(() => {
     if (!hasAnyFilter) return undefined

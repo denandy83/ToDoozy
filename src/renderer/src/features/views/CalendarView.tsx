@@ -23,7 +23,8 @@ import {
   selectDueDatePreset,
   selectDueDateRange,
   selectKeyword,
-  selectHasAnyFilter
+  selectHasAnyFilter,
+  selectLabelFilterLogic
 } from '../../shared/stores'
 import { useSettingsStore } from '../../shared/stores/settingsStore'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
@@ -74,6 +75,7 @@ export function CalendarView(): React.JSX.Element {
   // Filter state
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const filterMode = useLabelStore(selectFilterMode)
   const priorityFilters = useLabelStore(selectPriorityFilters)
   const hasPriorityFilters = useLabelStore(selectHasPriorityFilters)
@@ -107,7 +109,11 @@ export function CalendarView(): React.JSX.Element {
       const labelIds = new Set(labels.map((l) => l.id))
       // Include filters
       if (hasActiveFilters) {
-        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if (labelFilterLogic === 'all') {
+          if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+        } else {
+          if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        }
       }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
@@ -124,7 +130,7 @@ export function CalendarView(): React.JSX.Element {
       }
       return true
     })
-  }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePresetFilter, dueDateRangeFilter, keywordFilter])
+  }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, labelFilterLogic, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePresetFilter, dueDateRangeFilter, keywordFilter])
 
   // Group tasks by date — My Day tasks appear on today (with sun icon) AND on their due date
   // Track which task+date combos are "My Day" entries

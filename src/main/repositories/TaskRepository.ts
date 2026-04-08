@@ -20,6 +20,7 @@ export interface TaskSearchFilters {
   keyword?: string
   is_archived?: number
   owner_id?: string
+  label_logic?: 'any' | 'all'
   // Exclusion filters
   exclude_label_ids?: string[]
   exclude_status_ids?: string[]
@@ -327,12 +328,25 @@ export class TaskRepository {
     const conditions: string[] = ['t.is_template = 0']
     const params: (string | number)[] = []
 
-    // Label filters — single or multiple (OR logic between labels)
+    // Label filters — single or multiple
     if (filters.label_ids && filters.label_ids.length > 0) {
-      sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
-      const placeholders = filters.label_ids.map(() => '?').join(', ')
-      conditions.push(`tl.label_id IN (${placeholders})`)
-      params.push(...filters.label_ids)
+      if (filters.label_logic === 'all') {
+        // AND: task must have ALL selected labels
+        const placeholders = filters.label_ids.map(() => '?').join(', ')
+        conditions.push(`t.id IN (
+          SELECT task_id FROM task_labels
+          WHERE label_id IN (${placeholders})
+          GROUP BY task_id
+          HAVING COUNT(DISTINCT label_id) = ?
+        )`)
+        params.push(...filters.label_ids, filters.label_ids.length)
+      } else {
+        // OR (default): task must have ANY selected label
+        sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
+        const placeholders = filters.label_ids.map(() => '?').join(', ')
+        conditions.push(`tl.label_id IN (${placeholders})`)
+        params.push(...filters.label_ids)
+      }
     } else if (filters.label_id) {
       sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
       conditions.push('tl.label_id = ?')

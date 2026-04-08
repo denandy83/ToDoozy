@@ -33,6 +33,7 @@ interface LabelState {
   excludePriorityFilters: Set<number>
   excludeAssigneeFilters: Set<string>
   excludeProjectFilters: Set<string>
+  labelFilterLogic: 'any' | 'all' // 'any' = OR (default), 'all' = AND
   dueDatePreset: string | null // 'today' | 'this_week' | 'overdue' | 'no_date'
   dueDateRange: DueDateRange | null // custom date range (relative or absolute)
   keyword: string // search keyword matching title and description
@@ -63,6 +64,7 @@ interface LabelActions {
   clearExcludeAssigneeFilters(): void
   clearExcludeProjectFilters(): void
   clearLabelFilters(): void
+  setLabelFilterLogic(logic: 'any' | 'all'): void
   setFilterMode(mode: LabelFilterMode): void
   toggleAssigneeFilter(userId: string): void
   togglePriorityFilter(priority: number): void
@@ -92,6 +94,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   excludePriorityFilters: new Set(),
   excludeAssigneeFilters: new Set(),
   excludeProjectFilters: new Set(),
+  labelFilterLogic: 'any' as const,
   dueDatePreset: null,
   dueDateRange: null,
   keyword: '',
@@ -420,8 +423,13 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       excludeProjectFilters: new Set(),
       dueDatePreset: null,
       dueDateRange: null,
-      keyword: ''
+      keyword: '',
+      labelFilterLogic: 'any'
     })
+  },
+
+  setLabelFilterLogic(logic: 'any' | 'all'): void {
+    set({ labelFilterLogic: logic })
   },
 
   setFilterMode(mode: LabelFilterMode): void {
@@ -514,6 +522,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       dueDatePreset: null,
       dueDateRange: null,
       keyword: '',
+      labelFilterLogic: 'any',
       sortRules: []
     })
   },
@@ -579,6 +588,8 @@ export const selectExcludeAssigneeFilters = (state: LabelState): Set<string> => 
 export const selectHasExcludeAssigneeFilters = (state: LabelState): boolean => state.excludeAssigneeFilters.size > 0
 export const selectExcludeProjectFilters = (state: LabelState): Set<string> => state.excludeProjectFilters
 export const selectHasExcludeProjectFilters = (state: LabelState): boolean => state.excludeProjectFilters.size > 0
+
+export const selectLabelFilterLogic = (state: LabelState): 'any' | 'all' => state.labelFilterLogic
 
 export const selectSortRules = (state: LabelState): SortRule[] => state.sortRules
 export const selectHasSort = (state: LabelState): boolean => state.sortRules.length > 0
