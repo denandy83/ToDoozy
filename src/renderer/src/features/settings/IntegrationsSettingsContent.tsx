@@ -37,7 +37,7 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
           .from('user_settings')
           .select('key, value')
           .eq('user_id', userId)
-          .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids', 'api_key'])
+          .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids', 'api_key', 'ios_shortcut_default_project'])
         if (data && data.length > 0) {
           for (const row of data) {
             if (row.value) await window.api.settings.set(userId, row.key, row.value)
@@ -132,6 +132,7 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     } catch { /* offline */ }
   }, [setSetting, userId])
 
+  const iosDefaultProject = useSetting('ios_shortcut_default_project')
   const [subTab, setSubTab] = useState<'telegram' | 'shortcut'>('telegram')
 
 
@@ -139,24 +140,6 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     <div className="flex flex-col gap-6">
       <div>
         <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-4">Integrations</h3>
-      </div>
-
-      {/* ── Shared Default Project ── */}
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Default Project</h4>
-        <p className="text-xs font-light text-foreground/50 mb-2">
-          Tasks created via Telegram or iOS Shortcut without a project tag go here.
-        </p>
-        <select
-          value={defaultProject ?? ''}
-          onChange={(e) => setSetting('telegram_default_project', e.target.value || null)}
-          className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:border-accent focus:outline-none"
-        >
-          <option value="">Auto (first owned project)</option>
-          {sortedProjects.map((p) => (
-            <option key={p.id} value={p.name}>{p.name}</option>
-          ))}
-        </select>
       </div>
 
       {/* ── Sub-tabs ── */}
@@ -215,6 +198,24 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
           )}
         </div>
 
+        {/* Telegram Default Project */}
+        <div className="mb-4">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Default Project</span>
+          <p className="text-xs font-light text-foreground/50 mb-2 mt-1">
+            Tasks created without a /project tag go here.
+          </p>
+          <select
+            value={defaultProject ?? ''}
+            onChange={(e) => setSetting('telegram_default_project', e.target.value || null)}
+            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:border-accent focus:outline-none"
+          >
+            <option value="">Auto (first owned project)</option>
+            {sortedProjects.map((p) => (
+              <option key={p.id} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+
         {isTelegramConnected && (
           <>
             <div className="rounded-lg border border-accent/15 bg-accent/5 px-4 py-3 mb-4">
@@ -256,6 +257,24 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
         <p className="text-xs font-light text-foreground/50 mb-3">
           Create tasks by voice using your iPhone or Apple Watch Action Button.
         </p>
+
+        {/* iOS Shortcut Default Project */}
+        <div className="mb-4">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Default Project</span>
+          <p className="text-xs font-light text-foreground/50 mb-2 mt-1">
+            Tasks created via iOS Shortcut go here.
+          </p>
+          <select
+            value={iosDefaultProject ?? 'follow_telegram'}
+            onChange={(e) => setSetting('ios_shortcut_default_project', e.target.value === 'follow_telegram' ? null : e.target.value)}
+            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground focus:border-accent focus:outline-none"
+          >
+            <option value="follow_telegram">Follow Telegram default{defaultProject ? ` (${defaultProject})` : ''}</option>
+            {sortedProjects.map((p) => (
+              <option key={p.id} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+        </div>
 
         {/* API Key */}
         <div className="mb-4">

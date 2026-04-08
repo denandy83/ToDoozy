@@ -66,7 +66,7 @@ console.log('ToDoozy Telegram Bot started. Polling for messages...')
 bot.setMyCommands([
   { command: 'help', description: 'Show all commands and syntax' },
   { command: 'list', description: 'Show all projects' },
-  { command: 'default', description: 'Change default project' },
+  { command: 'default', description: 'View/change default projects for Telegram & iOS' },
   { command: 'done', description: 'Show recently completed tasks' },
   { command: 'recent', description: 'Recent open tasks (tap to complete)' },
   { command: 'myday', description: 'Show My Day tasks' },
@@ -195,22 +195,73 @@ bot.on('callback_query', async (query) => {
   }
 
   try {
-    if (query.data.startsWith('def:')) {
-      const projectId = query.data.slice(4)
-      // Look up project name
+    if (query.data.startsWith('defpick:')) {
+      const integration = query.data.slice(8) // 'telegram' or 'ios'
       const projects = await getProjects()
-      const project = projects.find((p) => p.id === projectId)
-      const projectName = project?.name ?? projectId
-      // Save to user_settings
+      const ROW_SIZE = 2
+      const buttons: TelegramBot.InlineKeyboardButton[][] = []
+
+      // iOS gets a "Follow Telegram" option at the top
+      if (integration === 'ios') {
+        buttons.push([{ text: '🔗 Follow Telegram', callback_data: 'defset:ios:follow_telegram' }])
+      }
+
+      const currentDefault = integration === 'telegram'
+        ? await getDefaultProjectName('telegram_default_project')
+        : await getIosDefaultProjectName()
+
+      for (let i = 0; i < projects.length; i += ROW_SIZE) {
+        buttons.push(
+          projects.slice(i, i + ROW_SIZE).map((p) => ({
+            text: `${p.name === currentDefault ? '✅ ' : ''}${p.name}`,
+            callback_data: `defset:${integration}:${p.id}`
+          }))
+        )
+      }
+
+      const label = integration === 'telegram' ? '📱 Telegram' : '🍎 iOS Shortcut'
+      await bot.answerCallbackQuery(query.id)
+      await bot.editMessageText(`${label} — select default project:`, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        reply_markup: { inline_keyboard: buttons }
+      }).catch(() => {})
+      return
+    }
+
+    if (query.data.startsWith('defset:')) {
+      const parts = query.data.split(':')
+      const integration = parts[1] // 'telegram' or 'ios'
+      const value = parts.slice(2).join(':') // project ID or 'follow_telegram'
+
+      const settingKey = integration === 'telegram' ? 'telegram_default_project' : 'ios_shortcut_default_project'
+
+      if (value === 'follow_telegram') {
+        await supabase.from('user_settings').delete()
+          .eq('user_id', userId).eq('key', settingKey)
+        await bot.answerCallbackQuery(query.id, { text: '🍎 Following Telegram default' })
+        await bot.editMessageText('✅ iOS Shortcut now follows Telegram default', {
+          chat_id: chatId,
+          message_id: query.message.message_id
+        }).catch(() => {})
+        return
+      }
+
+      const projects = await getProjects()
+      const project = projects.find((p) => p.id === value)
+      const projectName = project?.name ?? value
+
       await supabase.from('user_settings').upsert({
-        id: `${userId}:telegram_default_project`,
+        id: `${userId}:${settingKey}`,
         user_id: userId,
-        key: 'telegram_default_project',
+        key: settingKey,
         value: projectName,
         updated_at: new Date().toISOString()
       })
+
+      const emoji = integration === 'telegram' ? '📱' : '🍎'
       await bot.answerCallbackQuery(query.id, { text: `Default: ${projectName}` })
-      await bot.editMessageText(`✅ Default project set to *${escapeMarkdownV2(projectName)}*`, {
+      await bot.editMessageText(`✅ ${emoji} Default project set to *${escapeMarkdownV2(projectName)}*`, {
         chat_id: chatId,
         message_id: query.message.message_id,
         parse_mode: 'MarkdownV2'
@@ -288,7 +339,7 @@ async function sendHelp(chatId: number): Promise<void> {
     '`/recent` — recent open tasks \\(tap to complete\\)',
     '`/myday` — show My Day tasks',
     '`/list` — show all projects \\(tap to view tasks\\)',
-    '`/default` — set default project for new tasks \\(if no project named "default"\\)',
+    '`/default` — view/change default projects for Telegram \\& iOS',
     '`/help` — show this help',
     '',
     '*Example:*',
@@ -402,41 +453,50 @@ async function handleCreateTask(chatId: number, text: string): Promise<void> {
 }
 
 async function handleSetDefault(chatId: number): Promise<void> {
-  const projects = await getProjects()
-  if (projects.length === 0) {
-    await bot.sendMessage(chatId, 'No projects found.')
-    return
-  }
+  const telegramDefault = await getDefaultProjectName('telegram_default_project')
+  const iosDisplay = await getIosDefaultDisplay()
 
-  // Show current default
-  const currentDefault = await getDefaultProjectName()
-  const ROW_SIZE = 2
-  const buttons: TelegramBot.InlineKeyboardButton[][] = []
-  for (let i = 0; i < projects.length; i += ROW_SIZE) {
-    buttons.push(
-      projects.slice(i, i + ROW_SIZE).map((p) => ({
-        text: `${p.name === currentDefault ? '✅ ' : ''}${p.name}`,
-        callback_data: `def:${p.id}`
-      }))
-    )
-  }
+  const lines = [
+    '⚙️ *Default Projects*',
+    '',
+    `📱 Telegram: ${escapeMarkdownV2(telegramDefault ?? 'Auto (first owned)')}`,
+    `🍎 iOS Shortcut: ${escapeMarkdownV2(iosDisplay)}`
+  ]
 
-  await bot.sendMessage(chatId, `*Default project:* ${escapeMarkdownV2(currentDefault ?? 'none')}`, {
+  await bot.sendMessage(chatId, lines.join('\n'), {
     parse_mode: 'MarkdownV2',
-    reply_markup: { inline_keyboard: buttons }
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '📱 Change Telegram', callback_data: 'defpick:telegram' },
+          { text: '🍎 Change iOS Shortcut', callback_data: 'defpick:ios' }
+        ]
+      ]
+    }
   })
 }
 
-async function getDefaultProjectName(): Promise<string | null> {
+async function getDefaultProjectName(key: string = 'telegram_default_project'): Promise<string | null> {
   const { data } = await supabase
     .from('user_settings')
     .select('value')
     .eq('user_id', userId)
-    .eq('key', 'telegram_default_project')
+    .eq('key', key)
     .single()
   if (!data?.value) return null
   const proj = await findProjectByName(data.value)
   return proj?.name ?? null
+}
+
+async function getIosDefaultProjectName(): Promise<string | null> {
+  return getDefaultProjectName('ios_shortcut_default_project')
+}
+
+async function getIosDefaultDisplay(): Promise<string> {
+  const iosDefault = await getIosDefaultProjectName()
+  if (iosDefault) return iosDefault
+  const telegramDefault = await getDefaultProjectName('telegram_default_project')
+  return `Following Telegram (${telegramDefault ?? 'Auto'})`
 }
 
 function escapeMarkdownV2(text: string): string {

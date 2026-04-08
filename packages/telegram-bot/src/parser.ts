@@ -161,7 +161,7 @@ export function isStandaloneCommand(text: string): string | null {
   if (trimmed.startsWith('/') && !trimmed.includes(' ') && trimmed.length > 1) {
     const cmd = trimmed.slice(1).toLowerCase()
     // Exclude known bot commands
-    if (['done', 'myday', 'start', 'help'].includes(cmd)) return null
+    if (['done', 'myday', 'start', 'help', 'default', 'list', 'recent'].includes(cmd)) return null
     return cmd
   }
   return null
