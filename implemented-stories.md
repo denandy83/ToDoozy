@@ -410,3 +410,48 @@
 - **Passes:** true
 - **Implemented:** 2026-04-03
 
+---
+
+### #50 — Exclusion Filters for Saved Views and Filter Bar
+- **Description:** Add "is not" (exclusion) filter support across all filter types — labels, status, priority, assignee, and projects.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** is-not filters for all types, separate FilterBar rows, muted-red styling, last-action-wins conflict resolution, works in all views, saved view persistence, TaskRepository.search exclusion support, MCP search_tasks exclusion params.
+- **Passes:** true
+- **Implemented:** 2026-04-08
+
+---
+
+### #51 — Supabase Full Sync Engine
+- **Description:** Sync all data (personal and shared projects, settings, themes, saved views, areas) to Supabase automatically. SQLite local source of truth, background push, Realtime pull.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** All data syncs automatically, new device pull, renamed Supabase tables, Realtime subscriptions, offline detection, personal projects editable offline, shared projects read-only offline, sync status icon, delete propagation.
+- **Passes:** true
+- **Implemented:** 2026-04-08
+
+---
+
+### #52 — Sidebar Customization
+- **Description:** Show/hide and reorder sidebar navigation items, move Stats to footer, replace collapse toggle with light/dark mode toggle.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Toggle Calendar/Stats/Views/Archive/Templates, reorder via drag, My Day always visible, dynamic keyboard shortcuts, Stats in footer, light/dark toggle replaces collapse, sidebar always expanded.
+- **Passes:** true
+- **Implemented:** 2026-04-08
+
+---
+
+### #53 — Full Task Rows in Saved Views + Multi-Sort
+- **Description:** Replace minimal SavedViewTaskRow with full TaskRow component, add multi-sort to saved views and project views, add colored dots to saved view sidebar items.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Full TaskRow in saved views, multi-sort dropdown, stackable sort rules, Custom sort enables drag, sort persistence, saved view color dots, auto-color assignment.
+- **Passes:** true
+- **Implemented:** 2026-04-08
+
+---
+
+### #54 — ToDoozy Telegram Bot
+- **Description:** Node.js Telegram bot as Docker container on Raspberry Pi. Smart input parser for task creation, project listing, My Day, task completion via Supabase.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Smart input parser syntax, formatted confirmations, /project listing with done buttons, /done command, /myday command, whitelisted user IDs, label auto-creation, Docker deployment.
+- **Passes:** true
+- **Implemented:** 2026-04-08
+
