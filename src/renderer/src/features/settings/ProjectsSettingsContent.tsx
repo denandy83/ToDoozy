@@ -244,6 +244,64 @@ export function ProjectsSettingsContent({
           {selectedProject && selectedProjectId && (
             <div className="flex flex-col gap-6">
               <StatusList projectId={selectedProjectId} statuses={statuses} />
+
+              {/* Auto-Archive Settings */}
+              <div>
+                <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">Auto-Archive</h4>
+                {selectedProject.is_shared === 1 ? (
+                  <p className="text-xs font-light text-muted">
+                    Auto-archive is not available for shared projects. Tasks must be archived manually.
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-light text-foreground">Archive after done</p>
+                      <p className="text-[10px] text-muted">Automatically archive completed tasks</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {selectedProject.auto_archive_enabled === 1 && (
+                        <>
+                          <input
+                            type="number"
+                            min={1}
+                            max={999}
+                            value={selectedProject.auto_archive_value ?? 3}
+                            onChange={(e) => updateProject(selectedProjectId, { auto_archive_value: parseInt(e.target.value, 10) || 3 })}
+                            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <select
+                            value={selectedProject.auto_archive_unit ?? 'days'}
+                            onChange={(e) => updateProject(selectedProjectId, { auto_archive_unit: e.target.value })}
+                            className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+                          >
+                            <option value="hours">hours</option>
+                            <option value="days">days</option>
+                          </select>
+                        </>
+                      )}
+                      <div className="flex rounded-lg border border-border overflow-hidden">
+                        <button
+                          onClick={() => updateProject(selectedProjectId, { auto_archive_enabled: 1 })}
+                          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                            selectedProject.auto_archive_enabled === 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+                          }`}
+                        >
+                          On
+                        </button>
+                        <button
+                          onClick={() => updateProject(selectedProjectId, { auto_archive_enabled: 0 })}
+                          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                            selectedProject.auto_archive_enabled !== 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+                          }`}
+                        >
+                          Off
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {selectedProject.is_shared === 1 && (
                 <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
               )}

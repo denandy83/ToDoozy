@@ -25,6 +25,18 @@ Started: Wed Apr  8 15:11:28 CEST 2026
 - Added 'default', 'list', 'recent' to parser.ts reserved commands list
 - Typecheck clean, all tests pass
 
+## Story #58 — Per-Project Auto-Archive (2026-04-08)
+- Added migration_17: auto_archive_enabled/value/unit columns on projects table
+- Migration migrates global auto_archive_* settings to all personal projects, then deletes global keys
+- Updated Project type and UpdateProjectInput with new fields
+- Updated ProjectRepository.update() with new field handlers
+- Refactored checkAutoArchive() in App.tsx to per-project logic (no global settings)
+- Removed global auto-archive UI from GeneralSettingsContent SystemSection
+- Added per-project auto-archive UI in ProjectsSettingsContent (with shared project "manual only" message)
+- Updated PersonalSyncService pushProject to sync auto_archive fields, pull mapping to set them on creation
+- My Day Done bucket now only shows tasks completed today — previous days' done tasks are hidden, not archived
+- Typecheck clean, all tests pass
+
 ## Story #57 — AND/OR Label Filter Logic (2026-04-08)
 - Added labelFilterLogic ('any' | 'all') to labelStore with selector and setter
 - Created LabelOperatorToggle component (3-way: is any of / is all of / is not)

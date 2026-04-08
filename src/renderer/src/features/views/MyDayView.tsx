@@ -141,18 +141,26 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   // My Day tasks — only top-level tasks (no subtasks), consistent with sidebar count
   // Also include archived tasks completed today so My Day shows the full day's work
+  // Done-status tasks from previous days are hidden (not archived, just not shown)
   const myDayTasks = useMemo(() => {
     const today = new Date().toISOString().split('T')[0]
-    return Object.values(allTasks).filter(
-      (t) =>
-        t.is_template === 0 &&
-        t.parent_id === null &&
-        (
-          (t.is_archived === 0 && t.is_in_my_day === 1) ||
-          (t.is_archived === 1 && t.completed_date && t.completed_date.startsWith(today))
-        )
+    const doneStatusIds = new Set(
+      Object.values(allStatuses).filter(s => s.is_done === 1).map(s => s.id)
     )
-  }, [allTasks])
+    return Object.values(allTasks).filter((t) => {
+      if (t.is_template !== 0 || t.parent_id !== null) return false
+      if (t.is_archived === 1) {
+        // Archived tasks: only show if completed today
+        return t.completed_date != null && t.completed_date.startsWith(today)
+      }
+      if (t.is_in_my_day !== 1) return false
+      // Non-archived My Day tasks in done status: only show if completed today
+      if (doneStatusIds.has(t.status_id) && t.completed_date && !t.completed_date.startsWith(today)) {
+        return false
+      }
+      return true
+    })
+  }, [allTasks, allStatuses])
 
   // Aggregate labels from ALL projects with My Day tasks
   const allLabelsAcrossProjects = useMemo(() => {

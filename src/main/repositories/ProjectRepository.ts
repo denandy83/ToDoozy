@@ -81,6 +81,18 @@ export class ProjectRepository {
       sets.push('is_shared = ?')
       values.push(String(input.is_shared))
     }
+    if (input.auto_archive_enabled !== undefined) {
+      sets.push('auto_archive_enabled = ?')
+      values.push(String(input.auto_archive_enabled))
+    }
+    if (input.auto_archive_value !== undefined) {
+      sets.push('auto_archive_value = ?')
+      values.push(String(input.auto_archive_value))
+    }
+    if (input.auto_archive_unit !== undefined) {
+      sets.push('auto_archive_unit = ?')
+      values.push(input.auto_archive_unit)
+    }
 
     values.push(id)
     this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)

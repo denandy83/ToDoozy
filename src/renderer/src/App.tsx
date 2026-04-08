@@ -175,14 +175,6 @@ function App(): React.JSX.Element {
     if (!isAuthenticated) return
 
     const checkAutoArchive = async (): Promise<void> => {
-      const settings = useSettingsStore.getState().settings
-      if (settings['auto_archive_enabled'] !== 'true') return
-
-      const value = parseInt(settings['auto_archive_value'] ?? '3', 10)
-      const unit = settings['auto_archive_unit'] ?? 'days'
-      if (!value || value <= 0) return
-
-      const thresholdMs = unit === 'hours' ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000
       const now = Date.now()
       const allTasks = useTaskStore.getState().tasks
       const { updateTask: doUpdate } = useTaskStore.getState()
@@ -190,8 +182,19 @@ function App(): React.JSX.Element {
 
       for (const task of Object.values(allTasks)) {
         if (task.is_archived === 1 || !task.completed_date) continue
-        // Never auto-archive tasks in shared projects — users have different settings
-        if (allProjects[task.project_id]?.is_shared === 1) continue
+
+        const project = allProjects[task.project_id]
+        if (!project) continue
+        // Never auto-archive tasks in shared projects
+        if (project.is_shared === 1) continue
+        // Check per-project setting
+        if (!project.auto_archive_enabled) continue
+
+        const value = project.auto_archive_value ?? 3
+        const unit = project.auto_archive_unit ?? 'days'
+        if (value <= 0) continue
+
+        const thresholdMs = unit === 'hours' ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000
         const completedAt = new Date(task.completed_date).getTime()
         if (now - completedAt >= thresholdMs) {
           await doUpdate(task.id, { is_archived: 1 })

@@ -333,6 +333,9 @@ export async function pushProject(project: {
   is_default: number
   sidebar_order: number
   area_id: string | null
+  auto_archive_enabled?: number
+  auto_archive_value?: number
+  auto_archive_unit?: string
   created_at: string
   updated_at: string
 }): Promise<void> {
@@ -351,6 +354,17 @@ export async function pushProject(project: {
       console.error('[PersonalSync] pushProject error:', error)
     } else {
       markSynced()
+      // Push auto-archive settings separately (not in RPC)
+      if (project.auto_archive_enabled !== undefined) {
+        await supabase
+          .from('projects')
+          .update({
+            auto_archive_enabled: project.auto_archive_enabled,
+            auto_archive_value: project.auto_archive_value,
+            auto_archive_unit: project.auto_archive_unit
+          })
+          .eq('id', project.id)
+      }
     }
   } catch (err) {
     console.error('[PersonalSync] pushProject failed:', err)
@@ -573,6 +587,15 @@ export async function fullPull(userId: string): Promise<void> {
               is_default: 0
             })
             await window.api.projects.addMember(project.id, userId, project.owner_id === userId ? 'owner' : 'member')
+
+            // Sync auto-archive settings
+            if (project.auto_archive_enabled !== undefined) {
+              await window.api.projects.update(project.id, {
+                auto_archive_enabled: project.auto_archive_enabled ?? 0,
+                auto_archive_value: project.auto_archive_value ?? 3,
+                auto_archive_unit: project.auto_archive_unit ?? 'days'
+              })
+            }
 
             // Sync statuses
             const { data: statuses } = await supabase

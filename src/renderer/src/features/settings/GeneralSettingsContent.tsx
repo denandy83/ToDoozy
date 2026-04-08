@@ -285,13 +285,9 @@ const COMMON_TIMEZONES = [
 function SystemSection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const [openAtLogin, setOpenAtLogin] = useState(false)
-  const enabledSetting = useSetting('auto_archive_enabled') ?? 'false'
-  const valueSetting = useSetting('auto_archive_value') ?? '3'
-  const unitSetting = useSetting('auto_archive_unit') ?? 'days'
   const dateFormat = useSetting('date_format') ?? 'dd/mm/yyyy'
   const weekStart = useSetting('week_start') ?? 'monday'
   const timezone = useSetting('timezone') ?? 'auto'
-  const enabled = enabledSetting === 'true'
 
   useEffect(() => {
     window.api.app.getLoginItemSettings().then((settings) => {
@@ -378,52 +374,6 @@ function SystemSection(): React.JSX.Element {
           >
             Off
           </button>
-        </div>
-      </div>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Auto-archive after done</p>
-          <p className="text-[10px] text-muted">Automatically archive tasks after being done for a set time</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {enabled && (
-            <>
-              <input
-                type="number"
-                min={1}
-                max={999}
-                value={valueSetting}
-                onChange={(e) => setSetting('auto_archive_value', e.target.value)}
-                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <select
-                value={unitSetting}
-                onChange={(e) => setSetting('auto_archive_unit', e.target.value)}
-                className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
-              >
-                <option value="hours">hours</option>
-                <option value="days">days</option>
-              </select>
-            </>
-          )}
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            <button
-              onClick={() => setSetting('auto_archive_enabled', 'true')}
-              className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-                enabled ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
-              }`}
-            >
-              On
-            </button>
-            <button
-              onClick={() => setSetting('auto_archive_enabled', 'false')}
-              className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-                !enabled ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
-              }`}
-            >
-              Off
-            </button>
-          </div>
         </div>
       </div>
     </>

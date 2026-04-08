@@ -21,6 +21,9 @@ export interface Project {
   is_shared: number
   sidebar_order: number
   area_id: string | null
+  auto_archive_enabled: number
+  auto_archive_value: number
+  auto_archive_unit: string
   created_at: string
   updated_at: string
 }
@@ -165,6 +168,9 @@ export interface UpdateProjectInput {
   sidebar_order?: number
   is_default?: number
   is_shared?: number
+  auto_archive_enabled?: number
+  auto_archive_value?: number
+  auto_archive_unit?: string
 }
 
 export interface CreateStatusInput {

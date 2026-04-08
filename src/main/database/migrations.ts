@@ -437,4 +437,23 @@ const migration_16: Migration = (db) => {
   db.exec(`ALTER TABLE tasks ADD COLUMN my_day_dismissed_date TEXT DEFAULT NULL`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16]
+const migration_17: Migration = (db) => {
+  db.exec(`ALTER TABLE projects ADD COLUMN auto_archive_enabled INTEGER NOT NULL DEFAULT 0`)
+  db.exec(`ALTER TABLE projects ADD COLUMN auto_archive_value INTEGER NOT NULL DEFAULT 3`)
+  db.exec(`ALTER TABLE projects ADD COLUMN auto_archive_unit TEXT NOT NULL DEFAULT 'days'`)
+
+  // Migrate global setting to all personal projects
+  const settings = db.prepare("SELECT key, value FROM settings WHERE key IN ('auto_archive_enabled', 'auto_archive_value', 'auto_archive_unit')").all() as { key: string; value: string }[]
+  const settingsMap = new Map(settings.map(s => [s.key, s.value]))
+
+  if (settingsMap.get('auto_archive_enabled') === 'true') {
+    const value = parseInt(settingsMap.get('auto_archive_value') ?? '3', 10)
+    const unit = settingsMap.get('auto_archive_unit') ?? 'days'
+    db.prepare(`UPDATE projects SET auto_archive_enabled = 1, auto_archive_value = ?, auto_archive_unit = ? WHERE is_shared = 0`).run(value, unit)
+  }
+
+  // Delete global settings
+  db.exec("DELETE FROM settings WHERE key IN ('auto_archive_enabled', 'auto_archive_value', 'auto_archive_unit')")
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17]
