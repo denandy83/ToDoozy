@@ -335,18 +335,34 @@ export async function completeTask(taskId: string): Promise<boolean> {
 }
 
 export async function getMyDayTasks(): Promise<(SupabaseTask & { project_name: string; labels: SupabaseLabel[] })[]> {
-  // Get all tasks marked as My Day
-  const { data: tasks, error } = await supabase
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Get tasks pinned to My Day
+  const { data: pinned } = await supabase
     .from('tasks')
     .select('*')
     .eq('is_in_my_day', 1)
     .eq('is_archived', 0)
 
-  if (error) throw error
-  if (!tasks || tasks.length === 0) return []
+  // Get tasks due today or overdue
+  const { data: dueTasks } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('is_archived', 0)
+    .not('due_date', 'is', null)
+    .lte('due_date', today + 'T23:59:59.999Z')
+
+  // Merge and deduplicate
+  const map = new Map<string, SupabaseTask>()
+  for (const t of [...(pinned ?? []), ...(dueTasks ?? [])]) {
+    map.set(t.id, t)
+  }
+  const allTasks = Array.from(map.values())
+
+  if (allTasks.length === 0) return []
 
   // Get projects
-  const projectIds = [...new Set(tasks.map((t) => t.project_id))]
+  const projectIds = [...new Set(allTasks.map((t) => t.project_id))]
   const { data: projects } = await supabase
     .from('projects')
     .select('id, name')
@@ -355,14 +371,14 @@ export async function getMyDayTasks(): Promise<(SupabaseTask & { project_name: s
   const projectMap = new Map((projects ?? []).map((p) => [p.id, p.name]))
 
   // Filter out done tasks
-  const statusIds = [...new Set(tasks.map((t) => t.status_id))]
+  const statusIds = [...new Set(allTasks.map((t) => t.status_id))]
   const { data: statuses } = await supabase
     .from('statuses')
     .select('id, is_done')
     .in('id', statusIds)
 
   const doneStatusIds = new Set((statuses ?? []).filter((s) => s.is_done).map((s) => s.id))
-  const nonDoneTasks = tasks.filter((t) => !doneStatusIds.has(t.status_id))
+  const nonDoneTasks = allTasks.filter((t) => !doneStatusIds.has(t.status_id))
 
   // Get labels
   const taskIds = nonDoneTasks.map((t) => t.id)
@@ -374,17 +390,24 @@ export async function getMyDayTasks(): Promise<(SupabaseTask & { project_name: s
   const allLabels = await getLabels()
   const labelMap = new Map(allLabels.map((l) => [l.id, l]))
 
-  return nonDoneTasks.map((t) => {
-    const tLabels = (taskLabels ?? [])
-      .filter((tl) => tl.task_id === t.id)
-      .map((tl) => labelMap.get(tl.label_id))
-      .filter((l): l is SupabaseLabel => l !== undefined)
-    return {
-      ...t,
-      project_name: projectMap.get(t.project_id) ?? 'Unknown',
-      labels: tLabels
-    }
-  })
+  return nonDoneTasks
+    .map((t) => {
+      const tLabels = (taskLabels ?? [])
+        .filter((tl) => tl.task_id === t.id)
+        .map((tl) => labelMap.get(tl.label_id))
+        .filter((l): l is SupabaseLabel => l !== undefined)
+      return {
+        ...t,
+        project_name: projectMap.get(t.project_id) ?? 'Unknown',
+        labels: tLabels
+      }
+    })
+    .sort((a, b) => {
+      if (!a.due_date && !b.due_date) return 0
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return a.due_date.localeCompare(b.due_date)
+    })
 }
 
 export async function getRecentTasks(limit: number = 10): Promise<(SupabaseTask & { project_name: string })[]> {

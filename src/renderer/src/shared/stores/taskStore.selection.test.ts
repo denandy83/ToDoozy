@@ -20,6 +20,7 @@ function makeFakeTask(overrides: Partial<Task> & { id: string }): Task {
     completed_date: null,
     recurrence_rule: null,
     reference_url: null,
+    my_day_dismissed_date: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     ...overrides

@@ -146,7 +146,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         t.is_template === 0 &&
         t.parent_id === null &&
         (
-          (t.is_archived === 0 && (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))) ||
+          (t.is_archived === 0 && t.is_in_my_day === 1) ||
           (t.is_archived === 1 && t.completed_date && t.completed_date.startsWith(today))
         )
     )

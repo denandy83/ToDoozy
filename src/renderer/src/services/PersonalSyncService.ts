@@ -68,6 +68,7 @@ export async function pushTask(task: Task): Promise<void> {
       completed_date: task.completed_date,
       recurrence_rule: task.recurrence_rule,
       reference_url: task.reference_url,
+      my_day_dismissed_date: task.my_day_dismissed_date ?? null,
       label_names: JSON.stringify(labelData),
       created_at: task.created_at,
       updated_at: task.updated_at
@@ -795,7 +796,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           is_in_my_day: rt.is_in_my_day ?? 0,
           completed_date: rt.completed_date,
           recurrence_rule: rt.recurrence_rule,
-          reference_url: rt.reference_url
+          reference_url: rt.reference_url,
+          my_day_dismissed_date: rt.my_day_dismissed_date ?? null
         }).catch(() => {})
         changed++
       } else if (rt.updated_at && existing.updated_at && rt.updated_at > existing.updated_at) {
@@ -813,7 +815,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           is_in_my_day: rt.is_in_my_day ?? 0,
           completed_date: rt.completed_date,
           recurrence_rule: rt.recurrence_rule,
-          reference_url: rt.reference_url
+          reference_url: rt.reference_url,
+          my_day_dismissed_date: rt.my_day_dismissed_date ?? null
         }).catch(() => {})
         changed++
       }

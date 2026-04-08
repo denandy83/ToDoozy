@@ -85,7 +85,7 @@ export class TaskRepository {
       .prepare(
         `SELECT * FROM tasks
          WHERE owner_id = ? AND is_archived = 0 AND is_template = 0
-         AND (is_in_my_day = 1 OR (due_date IS NOT NULL AND date(due_date) = date('now')))
+         AND is_in_my_day = 1
          ORDER BY order_index ASC`
       )
       .all(userId) as unknown as Task[]
@@ -664,5 +664,47 @@ export class TaskRepository {
     }
     best = Math.max(best, streak)
     return { current, best }
+  }
+
+  autoAddMyDayTasks(userId: string, mode: 'off' | 'due_today' | 'due_today_or_overdue'): string[] {
+    if (mode === 'off') return []
+
+    const today = new Date().toISOString().slice(0, 10)
+    const dateCondition = mode === 'due_today'
+      ? `date(t.due_date) = date('now')`
+      : `date(t.due_date) <= date('now')`
+
+    const sql = `
+      SELECT t.id FROM tasks t
+      JOIN statuses s ON t.status_id = s.id
+      WHERE t.owner_id = ?
+        AND t.is_archived = 0
+        AND t.is_template = 0
+        AND t.is_in_my_day = 0
+        AND t.parent_id IS NULL
+        AND s.is_done = 0
+        AND t.due_date IS NOT NULL
+        AND ${dateCondition}
+        AND (
+          t.my_day_dismissed_date IS NULL
+          OR (t.my_day_dismissed_date != '9999-12-31' AND t.my_day_dismissed_date != ?)
+        )
+    `
+    const rows = this.db.prepare(sql).all(userId, today) as { id: string }[]
+
+    if (rows.length === 0) return []
+
+    const now = new Date().toISOString()
+    const updateStmt = this.db.prepare(
+      `UPDATE tasks SET is_in_my_day = 1, my_day_dismissed_date = NULL, updated_at = ? WHERE id = ?`
+    )
+
+    const ids: string[] = []
+    for (const row of rows) {
+      updateStmt.run(now, row.id)
+      ids.push(row.id)
+    }
+
+    return ids
   }
 }

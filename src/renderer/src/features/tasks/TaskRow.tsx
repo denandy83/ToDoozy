@@ -13,6 +13,7 @@ import { PRIORITY_LEVELS } from '../../shared/components/PriorityIndicator'
 import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { useTaskStore, useSubtasks, useChildCount, useTaskLabelsHook } from '../../shared/stores'
+import { useSettingsStore } from '../../shared/stores/settingsStore'
 import { useLabelStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
@@ -455,7 +456,15 @@ export function TaskRow({
         ) : (
           <MyDayIndicator
             visible={task.is_in_my_day === 1}
-            onToggle={() => useTaskStore.getState().updateTask(task.id, { is_in_my_day: task.is_in_my_day === 1 ? 0 : 1 })}
+            onToggle={() => {
+              if (task.is_in_my_day === 1) {
+                const readdDismissed = useSettingsStore.getState().getSetting('myday_readd_dismissed') !== 'false'
+                const dismissedDate = readdDismissed ? new Date().toISOString().slice(0, 10) : '9999-12-31'
+                useTaskStore.getState().updateTask(task.id, { is_in_my_day: 0, my_day_dismissed_date: dismissedDate })
+              } else {
+                useTaskStore.getState().updateTask(task.id, { is_in_my_day: 1, my_day_dismissed_date: null })
+              }
+            }}
           />
         )}
 

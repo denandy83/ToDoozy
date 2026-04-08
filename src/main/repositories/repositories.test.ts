@@ -827,6 +827,125 @@ describe('TaskRepository', () => {
       expect(results).toHaveLength(0)
     })
   })
+
+  describe('autoAddMyDayTasks', () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+
+    it('returns empty array when mode is off', () => {
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Due today', status_id: statusId, due_date: today })
+      const result = repo.autoAddMyDayTasks(userId, 'off')
+      expect(result).toEqual([])
+    })
+
+    it('auto-adds tasks due today in due_today mode', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Due today', status_id: statusId, due_date: today })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).toContain(id)
+      expect(repo.findById(id)!.is_in_my_day).toBe(1)
+    })
+
+    it('does not auto-add tasks due tomorrow in due_today mode', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Due tomorrow', status_id: statusId, due_date: tomorrow })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('auto-adds overdue tasks in due_today_or_overdue mode', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Overdue', status_id: statusId, due_date: yesterday })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today_or_overdue')
+      expect(result).toContain(id)
+    })
+
+    it('does not auto-add overdue tasks in due_today mode', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Overdue', status_id: statusId, due_date: yesterday })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('does not auto-add tasks already in my day', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Already in', status_id: statusId, due_date: today, is_in_my_day: 1 })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('does not auto-add subtasks', () => {
+      const parentId = randomUUID()
+      const childId = randomUUID()
+      repo.create({ id: parentId, project_id: projectId, owner_id: userId, title: 'Parent', status_id: statusId })
+      repo.create({ id: childId, project_id: projectId, owner_id: userId, title: 'Child', status_id: statusId, due_date: today, parent_id: parentId })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(childId)
+    })
+
+    it('does not auto-add done-status tasks', () => {
+      const doneStatusId = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO statuses (id, project_id, name, is_done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+        doneStatusId, projectId, 'Done', 1, now, now
+      )
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Done', status_id: doneStatusId, due_date: today })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('does not auto-add archived tasks', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Archived', status_id: statusId, due_date: today, is_archived: 1 })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('does not auto-add tasks dismissed today', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Dismissed today', status_id: statusId, due_date: today })
+      repo.update(id, { my_day_dismissed_date: today })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('auto-adds tasks dismissed yesterday (re-add)', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Dismissed yesterday', status_id: statusId, due_date: today })
+      repo.update(id, { my_day_dismissed_date: yesterday })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).toContain(id)
+    })
+
+    it('does not auto-add permanently dismissed tasks (9999-12-31)', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Permanent dismiss', status_id: statusId, due_date: today })
+      repo.update(id, { my_day_dismissed_date: '9999-12-31' })
+      const result = repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(result).not.toContain(id)
+    })
+
+    it('clears my_day_dismissed_date when auto-adding', () => {
+      const id = randomUUID()
+      repo.create({ id, project_id: projectId, owner_id: userId, title: 'Was dismissed', status_id: statusId, due_date: today })
+      repo.update(id, { my_day_dismissed_date: yesterday })
+      repo.autoAddMyDayTasks(userId, 'due_today')
+      expect(repo.findById(id)!.my_day_dismissed_date).toBeNull()
+    })
+  })
+
+  describe('findMyDay', () => {
+    it('only returns tasks with is_in_my_day = 1', () => {
+      const today = new Date().toISOString().slice(0, 10)
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'In My Day', status_id: statusId, is_in_my_day: 1 })
+      repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Due today but not in My Day', status_id: statusId, due_date: today })
+      const results = repo.findMyDay(userId)
+      expect(results).toHaveLength(1)
+      expect(results[0].title).toBe('In My Day')
+    })
+  })
 })
 
 describe('LabelRepository', () => {

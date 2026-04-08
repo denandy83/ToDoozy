@@ -47,6 +47,7 @@ export interface TasksAPI {
   findByProjectId(projectId: string): Promise<Task[]>
   findByStatusId(statusId: string): Promise<Task[]>
   findMyDay(userId: string): Promise<Task[]>
+  autoAddMyDay(userId: string, mode: string): Promise<string[]>
   findArchived(projectId: string): Promise<Task[]>
   findTemplates(projectId: string): Promise<Task[]>
   findSubtasks(parentId: string): Promise<Task[]>

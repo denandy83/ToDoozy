@@ -433,4 +433,8 @@ const migration_15: Migration = (db) => {
   db.exec(`ALTER TABLE projects ADD COLUMN area_id TEXT REFERENCES project_areas(id) ON DELETE SET NULL`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15]
+const migration_16: Migration = (db) => {
+  db.exec(`ALTER TABLE tasks ADD COLUMN my_day_dismissed_date TEXT DEFAULT NULL`)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16]

@@ -39,30 +39,15 @@ export class SupabaseTaskRepository implements AsyncTaskRepository {
   }
 
   async findMyDay(userId: string): Promise<Task[]> {
-    const today = new Date().toISOString().slice(0, 10)
-    // Fetch tasks pinned to My Day
-    const { data: pinned } = await this.client
+    const { data, error } = await this.client
       .from('tasks')
       .select('*')
       .eq('owner_id', userId)
       .eq('is_archived', 0)
       .eq('is_template', 0)
       .eq('is_in_my_day', 1)
-    // Fetch tasks due today
-    const { data: dueToday } = await this.client
-      .from('tasks')
-      .select('*')
-      .eq('owner_id', userId)
-      .eq('is_archived', 0)
-      .eq('is_template', 0)
-      .gte('due_date', today)
-      .lt('due_date', today + 'T23:59:59.999Z')
-    // Merge and deduplicate
-    const map = new Map<string, Task>()
-    for (const t of [...(pinned ?? []), ...(dueToday ?? [])]) {
-      map.set(t.id, t)
-    }
-    return Array.from(map.values())
+    if (error) throw error
+    return data ?? []
   }
 
   async findArchived(projectId: string): Promise<Task[]> {

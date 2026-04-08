@@ -8,6 +8,7 @@ const api: TodoozyAPI = {
     findByProjectId: (projectId) => ipcRenderer.invoke('tasks:findByProjectId', projectId),
     findByStatusId: (statusId) => ipcRenderer.invoke('tasks:findByStatusId', statusId),
     findMyDay: (userId) => ipcRenderer.invoke('tasks:findMyDay', userId),
+    autoAddMyDay: (userId, mode) => ipcRenderer.invoke('tasks:autoAddMyDay', userId, mode),
     findArchived: (projectId) => ipcRenderer.invoke('tasks:findArchived', projectId),
     findTemplates: (projectId) => ipcRenderer.invoke('tasks:findTemplates', projectId),
     findSubtasks: (parentId) => ipcRenderer.invoke('tasks:findSubtasks', parentId),

@@ -7,6 +7,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useFocusRestore } from '../hooks/useFocusRestore'
 import { useContextMenuStore } from '../stores/contextMenuStore'
 import { useTaskStore } from '../stores/taskStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
@@ -145,7 +146,15 @@ export function BulkContextMenu(): React.JSX.Element | null {
       <MenuItem
         icon={<Sun size={14} />}
         label={anyInMyDay ? 'Remove from My Day' : 'Add to My Day'}
-        onClick={() => handleAction(() => bulkUpdateTasks(bulkTaskIds, { is_in_my_day: anyInMyDay ? 0 : 1 }))}
+        onClick={() => {
+          if (anyInMyDay) {
+            const readdDismissed = useSettingsStore.getState().getSetting('myday_readd_dismissed') !== 'false'
+            const dismissedDate = readdDismissed ? new Date().toISOString().slice(0, 10) : '9999-12-31'
+            handleAction(() => bulkUpdateTasks(bulkTaskIds, { is_in_my_day: 0, my_day_dismissed_date: dismissedDate }))
+          } else {
+            handleAction(() => bulkUpdateTasks(bulkTaskIds, { is_in_my_day: 1, my_day_dismissed_date: null }))
+          }
+        }}
       />
       <Divider />
 

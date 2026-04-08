@@ -28,6 +28,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     completed_date: null,
     recurrence_rule: null,
     reference_url: null,
+    my_day_dismissed_date: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ...overrides

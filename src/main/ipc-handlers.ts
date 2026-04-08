@@ -193,6 +193,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.findMyDay(userId)
   })
 
+  ipcMain.handle('tasks:autoAddMyDay', (_e, userId: string, mode: string) => {
+    return getRepos().tasks.autoAddMyDayTasks(userId, mode as 'off' | 'due_today' | 'due_today_or_overdue')
+  })
+
   ipcMain.handle('tasks:findArchived', (_e, projectId: string) => {
     return getRepos().tasks.findArchived(projectId)
   })

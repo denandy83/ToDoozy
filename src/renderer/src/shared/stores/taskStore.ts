@@ -8,6 +8,7 @@ import type {
   Label,
   TaskLabelMapping
 } from '../../../../shared/types'
+import { useSettingsStore } from './settingsStore'
 import { useAuthStore } from './authStore'
 
 function getUserId(): string {
@@ -159,6 +160,13 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async hydrateMyDay(userId: string): Promise<void> {
     try {
+      // Auto-add tasks based on due date setting
+      const { getSetting } = useSettingsStore.getState()
+      const autoAddMode = getSetting('myday_auto_add') ?? 'due_today'
+      if (autoAddMode !== 'off') {
+        await window.api.tasks.autoAddMyDay(userId, autoAddMode)
+      }
+
       const tasks = await window.api.tasks.findMyDay(userId)
       set((state) => {
         const updated = { ...state.tasks }

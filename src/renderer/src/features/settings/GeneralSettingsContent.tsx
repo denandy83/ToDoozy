@@ -140,22 +140,60 @@ export function MyDaySection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const projects = useProjectStore(selectAllProjects)
   const myDayDefaultProject = useSetting('myday_default_project') ?? ''
+  const autoAddMode = useSetting('myday_auto_add') ?? 'due_today'
+  const readdDismissed = useSetting('myday_readd_dismissed') !== 'false'
 
   return (
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm font-light text-foreground">My Day default project</p>
-        <p className="text-[10px] text-muted">Pre-selected project when adding tasks in My Day</p>
+    <div className="space-y-4">
+      {/* Auto-add mode */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Auto-add to My Day</p>
+          <p className="text-[10px] text-muted">Automatically add tasks based on due date</p>
+        </div>
+        <select
+          value={autoAddMode}
+          onChange={(e) => setSetting('myday_auto_add', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          <option value="off">Don&apos;t auto-add</option>
+          <option value="due_today">Due today</option>
+          <option value="due_today_or_overdue">Due today or overdue</option>
+        </select>
       </div>
-      <select
-        value={myDayDefaultProject || (projects.find((p) => p.is_default === 1)?.id ?? projects[0]?.id ?? '')}
-        onChange={(e) => setSetting('myday_default_project', e.target.value)}
-        className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
-      >
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
-      </select>
+
+      {/* Re-add dismissed toggle — only show when auto-add is enabled */}
+      {autoAddMode !== 'off' && (
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-light text-foreground">Re-add dismissed tasks</p>
+            <p className="text-[10px] text-muted">Tasks removed from My Day reappear the next day</p>
+          </div>
+          <button
+            onClick={() => setSetting('myday_readd_dismissed', readdDismissed ? 'false' : 'true')}
+            className={`relative h-5 w-9 rounded-full transition-colors ${readdDismissed ? 'bg-accent' : 'bg-border'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${readdDismissed ? 'translate-x-4' : ''}`} />
+          </button>
+        </div>
+      )}
+
+      {/* Default project */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">My Day default project</p>
+          <p className="text-[10px] text-muted">Pre-selected project when adding tasks in My Day</p>
+        </div>
+        <select
+          value={myDayDefaultProject || (projects.find((p) => p.is_default === 1)?.id ?? projects[0]?.id ?? '')}
+          onChange={(e) => setSetting('myday_default_project', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
     </div>
   )
 }

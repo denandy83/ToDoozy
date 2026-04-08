@@ -66,6 +66,7 @@ export interface Task {
   completed_date: string | null
   recurrence_rule: string | null
   reference_url: string | null
+  my_day_dismissed_date: string | null
   created_at: string
   updated_at: string
 }
@@ -204,6 +205,7 @@ export interface CreateTaskInput {
   completed_date?: string | null
   recurrence_rule?: string | null
   reference_url?: string | null
+  my_day_dismissed_date?: string | null
 }
 
 // Column whitelist for task updates (SQL injection prevention)
@@ -222,7 +224,8 @@ export const TASK_UPDATABLE_COLUMNS = [
   'is_archived',
   'completed_date',
   'recurrence_rule',
-  'reference_url'
+  'reference_url',
+  'my_day_dismissed_date'
 ] as const
 
 export type TaskUpdatableColumn = (typeof TASK_UPDATABLE_COLUMNS)[number]
