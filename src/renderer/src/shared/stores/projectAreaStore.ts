@@ -93,6 +93,13 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
 
   async assignProject(projectId: string, areaId: string | null): Promise<void> {
     await window.api.projectAreas.assignProject(projectId, areaId)
+    // Sync the updated project to Supabase (area_id changed)
+    const project = await window.api.projects.findById(projectId)
+    if (project) {
+      import('../../services/PersonalSyncService').then(({ pushProject }) => {
+        pushProject(project).catch((err) => console.error('[ProjectAreaStore] pushProject failed:', err))
+      })
+    }
   },
 
   toggleCollapsed(id: string): void {

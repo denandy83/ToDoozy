@@ -34,6 +34,18 @@ describe('startOfWeek', () => {
     const sun = new Date(2026, 2, 15)
     expect(toYMD(startOfWeek(sun))).toBe('2026-03-09')
   })
+
+  it('returns Sunday for a Wednesday when weekStartsOn=0', () => {
+    // March 18, 2026 is a Wednesday
+    const wed = new Date(2026, 2, 18)
+    expect(toYMD(startOfWeek(wed, 0))).toBe('2026-03-15')
+  })
+
+  it('returns same day for a Sunday when weekStartsOn=0', () => {
+    // March 15, 2026 is a Sunday
+    const sun = new Date(2026, 2, 15)
+    expect(toYMD(startOfWeek(sun, 0))).toBe('2026-03-15')
+  })
 })
 
 describe('getMonthDays', () => {
@@ -65,11 +77,18 @@ describe('getMonthDays', () => {
   })
 
   it('first day is always a Monday', () => {
-    // Check multiple months
     for (let m = 0; m < 12; m++) {
       const days = getMonthDays(new Date(2026, m, 1), todayStr)
       const firstDate = new Date(days[0].date + 'T00:00:00')
       expect(firstDate.getDay()).toBe(1) // Monday
+    }
+  })
+
+  it('first day is always a Sunday when weekStartsOn=0', () => {
+    for (let m = 0; m < 12; m++) {
+      const days = getMonthDays(new Date(2026, m, 1), todayStr, 0)
+      const firstDate = new Date(days[0].date + 'T00:00:00')
+      expect(firstDate.getDay()).toBe(0) // Sunday
     }
   })
 
@@ -103,6 +122,13 @@ describe('getWeekDays', () => {
   it('ends on Sunday', () => {
     const days = getWeekDays(new Date(2026, 2, 15), todayStr)
     expect(days[6].date).toBe('2026-03-15')
+  })
+
+  it('starts on Sunday when weekStartsOn=0', () => {
+    // March 18, 2026 is Wednesday; week starts March 15 (Sunday)
+    const days = getWeekDays(new Date(2026, 2, 18), todayStr, 0)
+    expect(days[0].date).toBe('2026-03-15')
+    expect(days[6].date).toBe('2026-03-21')
   })
 
   it('marks today correctly', () => {

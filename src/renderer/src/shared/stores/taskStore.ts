@@ -493,6 +493,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           }
           return { tasks: updated }
         })
+
+        // Sync template to Supabase
+        syncIfShared(template, 'INSERT')
       }
       return template
     } catch (err) {

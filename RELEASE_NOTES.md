@@ -8,6 +8,16 @@ User-facing changes by date. Most recent first.
 
 - **Settings reorganization** — The Settings modal is now cleaner with 7 tabs instead of 11. Themes and Priority Display are grouped under Appearance. Updates, What's New, Integrations, and Help are grouped under About. Section labels make each tab easier to scan.
 - **MCP activity logging** — Changes made by AI assistants via MCP (creating tasks, updating statuses, assigning labels, etc.) now appear in the activity timeline, so you can see exactly what your AI did.
+- **iOS Shortcut integration** — Connect ToDoozy to iOS Shortcuts for hands-free task capture from your iPhone or iPad. Find the setup instructions and API endpoint in Settings > Integrations > iOS Shortcut.
+- **Telegram Bot — In-App Settings** — Configure your Telegram Bot connection directly in Settings > Integrations > Telegram Bot. Connect your Telegram ID, choose a default project, and manage bot settings without editing any config files.
+- **Telegram /done and /recent** — Use `/done` to see your recently completed tasks, and `/recent` to see tasks you added recently. When you complete a task from the list, a checkmark replaces it inline so you can keep going.
+- **Telegram command menu** — The bot now registers commands with Telegram, so you get an autocomplete suggestion menu when you type `/` or `.`. New commands: `.list` to see all projects, `.default` to set your default project, `.prefix` to set a command prefix.
+- **Force Full Sync** — A new button in Settings > General lets you trigger a full Supabase sync on demand, useful if you suspect data is out of date.
+- **Smarter database naming** — Your local database file is now named after your account email, making it easy to identify when working with multiple accounts. No stale database files created before login.
+- **Real-time sync improvements** — ToDoozy now polls Supabase every 10 seconds for changes made from other devices or integrations. Project metadata (name, color, icon) also syncs down. Offline detection is more reliable — sync operations skip gracefully when there's no connection.
+- **Fix: accidental text selection** — Mouse navigation no longer highlights text across the app. Text selection only works where you'd expect it: in inputs and the task description editor.
+- **Fix: offline banner** — The offline notification banner now displays with the correct layout (no stray borders).
+- **Fix: tray badge** — The menu bar task count updates instantly when you toggle My Day or change a task status.
 
 ## v1.0.7
 

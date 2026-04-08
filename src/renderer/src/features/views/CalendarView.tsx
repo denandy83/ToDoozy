@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Repeat } from 'lucide-react'
 import { useDroppable, useDraggable } from '@dnd-kit/core'
 import { useTaskStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
@@ -30,9 +30,11 @@ import { useSettingsStore } from '../../shared/stores/settingsStore'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
 import { useContextMenuStore } from '../../shared/stores/contextMenuStore'
 import type { Task, Project } from '../../../../shared/types'
-import { useCalendar, type CalendarLayout } from './useCalendar'
+import { useCalendar, type CalendarLayout, toYMD } from './useCalendar'
+import { getNextOccurrence, parseRecurrence } from '../../../../shared/recurrenceUtils'
 
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const WEEKDAY_LABELS_MONDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const WEEKDAY_LABELS_SUNDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function getISOWeekNumber(dateStr: string): number {
   const d = new Date(dateStr + 'T00:00:00')
@@ -55,9 +57,12 @@ function sortTasksByStatus(tasks: Task[], allStatuses: Record<string, { is_done?
 export function CalendarView(): React.JSX.Element {
   const calendarLayoutSetting = useSettingsStore((s) => s.settings['calendar_layout'] ?? 'month')
   const layout = (calendarLayoutSetting === 'week' ? 'week' : 'month') as CalendarLayout
+  const weekStartSetting = useSettingsStore((s) => s.settings['week_start'] ?? 'monday')
+  const weekStartsOn = weekStartSetting === 'sunday' ? 0 : 1
+  const weekdayLabels = weekStartsOn === 0 ? WEEKDAY_LABELS_SUNDAY : WEEKDAY_LABELS_MONDAY
   const { setSetting } = useSettingsStore()
 
-  const { days, title, goNext, goPrev, goToday } = useCalendar(layout)
+  const { days, title, goNext, goPrev, goToday } = useCalendar(layout, weekStartsOn)
 
   const allTasks = useTaskStore((s) => s.tasks)
   const allProjects = useProjectStore(selectAllProjects)
@@ -133,11 +138,13 @@ export function CalendarView(): React.JSX.Element {
   }, [allCalendarTasks, hasAnyFilter, filterMode, hasActiveFilters, activeLabelFilters, labelFilterLogic, taskLabels, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, dueDatePresetFilter, dueDateRangeFilter, keywordFilter])
 
   // Group tasks by date — My Day tasks appear on today (with sun icon) AND on their due date
-  // Track which task+date combos are "My Day" entries
+  // Track which task+date combos are "My Day" entries or recurrence projections
   const myDayEntries = useMemo(() => new Set<string>(), [])
+  const recurrenceEntries = useMemo(() => new Set<string>(), [])
   const tasksByDate = useMemo(() => {
     const grouped: Record<string, Task[]> = {}
     myDayEntries.clear()
+    recurrenceEntries.clear()
     const addToDate = (dateKey: string, task: Task, isMyDayEntry: boolean): void => {
       if (!grouped[dateKey]) grouped[dateKey] = []
       // Avoid duplicates (same task on same date)
@@ -146,6 +153,11 @@ export function CalendarView(): React.JSX.Element {
         if (isMyDayEntry) myDayEntries.add(`${task.id}:${dateKey}`)
       }
     }
+
+    // Determine the date range of the current calendar grid
+    const gridStart = days.length > 0 ? days[0].date : todayStr
+    const gridEnd = days.length > 0 ? days[days.length - 1].date : todayStr
+
     for (const task of calendarTasks) {
       // Add to due date
       if (task.due_date) {
@@ -155,11 +167,30 @@ export function CalendarView(): React.JSX.Element {
       if (task.is_in_my_day === 1) {
         const dueDateStr = task.due_date ? task.due_date.split('T')[0] : null
         if (dueDateStr !== todayStr) {
-          // Different day or no due date — show on today as My Day entry
           addToDate(todayStr, task, true)
         } else {
-          // Due today AND in My Day — mark the today entry as My Day
           myDayEntries.add(`${task.id}:${todayStr}`)
+        }
+      }
+
+      // Expand recurring tasks into future occurrences within the grid range
+      if (task.recurrence_rule && task.due_date) {
+        const config = parseRecurrence(task.recurrence_rule)
+        if (config && !config.afterCompletion) {
+          const dueDateStr = task.due_date.split('T')[0]
+          let cursor = new Date(dueDateStr + 'T00:00:00')
+          // Generate up to 60 occurrences to cover the visible grid
+          for (let i = 0; i < 60; i++) {
+            const next = getNextOccurrence(task.recurrence_rule, cursor)
+            if (!next) break
+            const nextStr = toYMD(next)
+            if (nextStr > gridEnd) break
+            if (nextStr >= gridStart && nextStr !== dueDateStr) {
+              addToDate(nextStr, task, false)
+              recurrenceEntries.add(`${task.id}:${nextStr}`)
+            }
+            cursor = next
+          }
         }
       }
     }
@@ -168,7 +199,7 @@ export function CalendarView(): React.JSX.Element {
       grouped[date].sort((a, b) => a.order_index - b.order_index)
     }
     return grouped
-  }, [calendarTasks, todayStr, myDayEntries])
+  }, [calendarTasks, todayStr, myDayEntries, recurrenceEntries, days])
 
   // Hydrate labels and statuses for all projects that have calendar tasks
   const calendarProjectIds = useMemo(() => {
@@ -258,7 +289,7 @@ export function CalendarView(): React.JSX.Element {
       {/* Weekday labels */}
       <div className="grid" style={{ gridTemplateColumns: '2rem repeat(7, 1fr)' }}>
         <div className="py-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-muted/40">Wk</div>
-        {WEEKDAY_LABELS.map((label) => (
+        {weekdayLabels.map((label) => (
           <div
             key={label}
             className="py-1.5 text-center text-[10px] font-bold uppercase tracking-[0.3em] text-muted"
@@ -270,9 +301,9 @@ export function CalendarView(): React.JSX.Element {
 
       {/* Calendar grid */}
       {layout === 'month' ? (
-        <MonthGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} />
+        <MonthGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} recurrenceEntries={recurrenceEntries} />
       ) : (
-        <WeekGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} />
+        <WeekGrid days={days} tasksByDate={tasksByDate} projectMap={projectMap} todayStr={todayStr} allStatuses={allStatuses} myDayEntries={myDayEntries} recurrenceEntries={recurrenceEntries} />
       )}
     </div>
   )
@@ -287,9 +318,10 @@ interface GridProps {
   todayStr: string
   allStatuses: Record<string, { is_done?: number; is_default?: number }>
   myDayEntries: Set<string>
+  recurrenceEntries: Set<string>
 }
 
-function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries }: GridProps): React.JSX.Element {
+function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries, recurrenceEntries }: GridProps): React.JSX.Element {
   const rows: Array<Array<typeof days[number]>> = []
   for (let i = 0; i < days.length; i += 7) {
     rows.push(days.slice(i, i + 7))
@@ -311,6 +343,7 @@ function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDay
               todayStr={todayStr}
               allStatuses={allStatuses}
               myDayEntries={myDayEntries}
+              recurrenceEntries={recurrenceEntries}
               compact
             />
           ))}
@@ -322,7 +355,7 @@ function MonthGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDay
 
 // --- Week Grid ---
 
-function WeekGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries }: GridProps): React.JSX.Element {
+function WeekGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayEntries, recurrenceEntries }: GridProps): React.JSX.Element {
   return (
     <div className="grid flex-1 overflow-hidden" style={{ gridTemplateColumns: '2rem repeat(7, 1fr)' }}>
       <div className="flex items-start justify-center pt-2 text-[9px] font-bold text-muted/30">
@@ -337,6 +370,7 @@ function WeekGrid({ days, tasksByDate, projectMap, todayStr, allStatuses, myDayE
           todayStr={todayStr}
           allStatuses={allStatuses}
           myDayEntries={myDayEntries}
+          recurrenceEntries={recurrenceEntries}
           compact={false}
         />
       ))}
@@ -353,10 +387,11 @@ interface DayCellProps {
   todayStr: string
   allStatuses: Record<string, { is_done?: number }>
   myDayEntries: Set<string>
+  recurrenceEntries: Set<string>
   compact: boolean
 }
 
-function DayCell({ day, tasks, projectMap, todayStr, allStatuses, myDayEntries, compact }: DayCellProps): React.JSX.Element {
+function DayCell({ day, tasks, projectMap, todayStr, allStatuses, myDayEntries, recurrenceEntries, compact }: DayCellProps): React.JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: `calendar-day-${day.date}`,
     data: { type: 'calendar-day', date: day.date }
@@ -394,6 +429,7 @@ function DayCell({ day, tasks, projectMap, todayStr, allStatuses, myDayEntries, 
             isDone={allStatuses[task.status_id]?.is_done === 1}
             isOverdue={isOverdue && allStatuses[task.status_id]?.is_done !== 1}
             isMyDay={myDayEntries.has(`${task.id}:${day.date}`)}
+            isRecurrence={recurrenceEntries.has(`${task.id}:${day.date}`)}
           />
         ))}
       </div>
@@ -409,9 +445,10 @@ interface CalendarTaskItemProps {
   isDone: boolean
   isOverdue: boolean
   isMyDay?: boolean
+  isRecurrence?: boolean
 }
 
-function CalendarTaskItem({ task, project, isDone, isOverdue, isMyDay }: CalendarTaskItemProps): React.JSX.Element {
+function CalendarTaskItem({ task, project, isDone, isOverdue, isMyDay, isRecurrence }: CalendarTaskItemProps): React.JSX.Element {
   const { selectTask } = useTaskStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const openContextMenu = useContextMenuStore((s) => s.open)
@@ -449,6 +486,7 @@ function CalendarTaskItem({ task, project, isDone, isOverdue, isMyDay }: Calenda
       isDone={isDone}
       isOverdue={isOverdue}
       isMyDay={isMyDay}
+      isRecurrence={isRecurrence}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     />
@@ -461,6 +499,7 @@ function CalendarTaskButton({
   isSelected,
   isDone,
   isOverdue,
+  isRecurrence,
   onClick,
   onContextMenu
 }: {
@@ -470,6 +509,7 @@ function CalendarTaskButton({
   isDone: boolean
   isOverdue: boolean
   isMyDay?: boolean
+  isRecurrence?: boolean
   onClick: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
@@ -529,6 +569,9 @@ function CalendarTaskButton({
         >
           {task.title}
         </span>
+        {isRecurrence && (
+          <Repeat size={9} className="ml-auto flex-shrink-0 text-muted" />
+        )}
       </button>
       {hover && createPortal(
         <div

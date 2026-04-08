@@ -25,11 +25,12 @@ export function toYMD(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-export function startOfWeek(d: Date): Date {
+/** @param weekStartsOn 0 = Sunday, 1 = Monday (default) */
+export function startOfWeek(d: Date, weekStartsOn = 1): Date {
   const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day // Monday is first day
+  const diff = (day - weekStartsOn + 7) % 7
   const result = new Date(d)
-  result.setDate(d.getDate() + diff)
+  result.setDate(d.getDate() - diff)
   return result
 }
 
@@ -42,18 +43,20 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
 ]
 
-export function getMonthDays(anchorDate: Date, todayStr: string): CalendarDay[] {
+export function getMonthDays(anchorDate: Date, todayStr: string, weekStartsOn = 1): CalendarDay[] {
   const year = anchorDate.getFullYear()
   const month = anchorDate.getMonth()
   const firstOfMonth = new Date(year, month, 1)
   const lastOfMonth = new Date(year, month + 1, 0)
 
-  const gridStart = startOfWeek(firstOfMonth)
+  const gridStart = startOfWeek(firstOfMonth, weekStartsOn)
 
   const lastDay = lastOfMonth.getDay()
+  const weekEndDay = (weekStartsOn + 6) % 7
   const gridEnd = new Date(lastOfMonth)
-  if (lastDay !== 0) {
-    gridEnd.setDate(lastOfMonth.getDate() + (7 - lastDay))
+  if (lastDay !== weekEndDay) {
+    const daysToAdd = (weekEndDay - lastDay + 7) % 7
+    gridEnd.setDate(lastOfMonth.getDate() + daysToAdd)
   }
 
   const result: CalendarDay[] = []
@@ -71,8 +74,8 @@ export function getMonthDays(anchorDate: Date, todayStr: string): CalendarDay[] 
   return result
 }
 
-export function getWeekDays(anchorDate: Date, todayStr: string): CalendarDay[] {
-  const weekStart = startOfWeek(anchorDate)
+export function getWeekDays(anchorDate: Date, todayStr: string, weekStartsOn = 1): CalendarDay[] {
+  const weekStart = startOfWeek(anchorDate, weekStartsOn)
   const result: CalendarDay[] = []
   for (let i = 0; i < 7; i++) {
     const d = new Date(weekStart)
@@ -88,11 +91,11 @@ export function getWeekDays(anchorDate: Date, todayStr: string): CalendarDay[] {
   return result
 }
 
-export function getCalendarTitle(anchorDate: Date, layout: CalendarLayout): string {
+export function getCalendarTitle(anchorDate: Date, layout: CalendarLayout, weekStartsOn = 1): string {
   if (layout === 'month') {
     return `${MONTHS[anchorDate.getMonth()]} ${anchorDate.getFullYear()}`
   }
-  const weekStart = startOfWeek(anchorDate)
+  const weekStart = startOfWeek(anchorDate, weekStartsOn)
   const weekEnd = new Date(weekStart)
   weekEnd.setDate(weekStart.getDate() + 6)
   if (weekStart.getMonth() === weekEnd.getMonth()) {
@@ -101,7 +104,7 @@ export function getCalendarTitle(anchorDate: Date, layout: CalendarLayout): stri
   return `${weekStart.getDate()} ${SHORT_MONTHS[weekStart.getMonth()]} \u2013 ${weekEnd.getDate()} ${SHORT_MONTHS[weekEnd.getMonth()]} ${weekStart.getFullYear()}`
 }
 
-export function useCalendar(layout: CalendarLayout): UseCalendarReturn {
+export function useCalendar(layout: CalendarLayout, weekStartsOn = 1): UseCalendarReturn {
   const [anchorDate, setAnchorDate] = useState(() => new Date())
   const todayStr = useMemo(() => toYMD(new Date()), [])
 
@@ -134,11 +137,11 @@ export function useCalendar(layout: CalendarLayout): UseCalendarReturn {
   }, [])
 
   const days = useMemo(
-    () => layout === 'month' ? getMonthDays(anchorDate, todayStr) : getWeekDays(anchorDate, todayStr),
-    [anchorDate, layout, todayStr]
+    () => layout === 'month' ? getMonthDays(anchorDate, todayStr, weekStartsOn) : getWeekDays(anchorDate, todayStr, weekStartsOn),
+    [anchorDate, layout, todayStr, weekStartsOn]
   )
 
-  const title = useMemo(() => getCalendarTitle(anchorDate, layout), [anchorDate, layout])
+  const title = useMemo(() => getCalendarTitle(anchorDate, layout, weekStartsOn), [anchorDate, layout, weekStartsOn])
 
   return { days, title, goNext, goPrev, goToday, anchorDate }
 }

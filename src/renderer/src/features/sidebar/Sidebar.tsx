@@ -390,11 +390,12 @@ export function Sidebar({
                   className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-foreground/6">
                   <FolderOpen size={12} className="flex-shrink-0 text-muted" />
                   <span className="flex-1 text-[13px] font-light tracking-tight text-muted">{area.name}</span>
-                  {areaProjects.length > 0 && <span className="text-[10px] font-bold tabular-nums text-muted/60">{areaProjects.length}</span>}
+                  {/* no count for folders */}
                   {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted/50" /> : <ChevronUp size={12} className="text-muted/50" />}
                 </button>
                 {area.is_collapsed === 0 && (
-                  <div className="flex flex-col gap-0.5 pl-5">
+                  <div className="relative flex flex-col gap-0.5 pl-5">
+                    <div className="absolute left-[16px] top-0 bottom-1 w-px bg-muted/40" />
                     {areaProjects.map((project) => (
                       <ProjectNavItem key={project.id} project={project} count={projectCounts[project.id] ?? 0}
                         active={currentView === 'project' && selectedProjectId === project.id}
@@ -756,6 +757,7 @@ function SortableViewItem({ view, count, active, onClick, onContextMenu }: Sorta
 
 function ProjectNavItem({
   project,
+  count,
   active,
   onClick,
   isDragging
@@ -791,6 +793,9 @@ function ProjectNavItem({
       </span>
       {memberCount > 1 && (
         <Users size={12} className="flex-shrink-0 text-muted/50" />
+      )}
+      {count > 0 && (
+        <span className="text-[10px] font-bold tabular-nums text-muted/50">{count}</span>
       )}
     </button>
   )

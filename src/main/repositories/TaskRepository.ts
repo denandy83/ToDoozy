@@ -689,13 +689,12 @@ export class TaskRepository {
       : `date(t.due_date) <= date('now')`
 
     const sql = `
-      SELECT t.id FROM tasks t
+      SELECT t.id, t.parent_id FROM tasks t
       JOIN statuses s ON t.status_id = s.id
       WHERE t.owner_id = ?
         AND t.is_archived = 0
         AND t.is_template = 0
         AND t.is_in_my_day = 0
-        AND t.parent_id IS NULL
         AND s.is_done = 0
         AND t.due_date IS NOT NULL
         AND ${dateCondition}
@@ -704,7 +703,7 @@ export class TaskRepository {
           OR (t.my_day_dismissed_date != '9999-12-31' AND t.my_day_dismissed_date != ?)
         )
     `
-    const rows = this.db.prepare(sql).all(userId, today) as { id: string }[]
+    const rows = this.db.prepare(sql).all(userId, today) as { id: string; parent_id: string | null }[]
 
     if (rows.length === 0) return []
 
@@ -714,9 +713,22 @@ export class TaskRepository {
     )
 
     const ids: string[] = []
+    const parentIds = new Set<string>()
     for (const row of rows) {
       updateStmt.run(now, row.id)
       ids.push(row.id)
+      if (row.parent_id) parentIds.add(row.parent_id)
+    }
+
+    // Auto-flag parents of auto-added subtasks
+    for (const parentId of parentIds) {
+      if (!ids.includes(parentId)) {
+        const parent = this.db.prepare(`SELECT is_in_my_day FROM tasks WHERE id = ?`).get(parentId) as { is_in_my_day: number } | undefined
+        if (parent && parent.is_in_my_day !== 1) {
+          updateStmt.run(now, parentId)
+          ids.push(parentId)
+        }
+      }
     }
 
     return ids

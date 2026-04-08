@@ -52,6 +52,9 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
       set((state) => ({
         statuses: { ...state.statuses, [status.id]: status }
       }))
+      import('../../services/PersonalSyncService').then(({ pushStatus }) => {
+        pushStatus(status).catch((err) => console.error('[StatusStore] push failed:', err))
+      })
       return status
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create status'
@@ -67,6 +70,9 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         set((state) => ({
           statuses: { ...state.statuses, [status.id]: status }
         }))
+        import('../../services/PersonalSyncService').then(({ pushStatus }) => {
+          pushStatus(status).catch((err) => console.error('[StatusStore] push failed:', err))
+        })
       }
       return status
     } catch (err) {
@@ -84,6 +90,9 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
           const { [id]: _, ...remaining } = state.statuses
           return { statuses: remaining }
         })
+        import('../../services/PersonalSyncService').then(({ deleteStatusFromSupabase }) => {
+          deleteStatusFromSupabase(id).catch((err) => console.error('[StatusStore] delete sync failed:', err))
+        })
       }
       return result
     } catch (err) {
@@ -100,6 +109,9 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         set((state) => {
           const { [statusId]: _, ...remaining } = state.statuses
           return { statuses: remaining }
+        })
+        import('../../services/PersonalSyncService').then(({ deleteStatusFromSupabase }) => {
+          deleteStatusFromSupabase(statusId).catch((err) => console.error('[StatusStore] delete sync failed:', err))
         })
       }
       return result

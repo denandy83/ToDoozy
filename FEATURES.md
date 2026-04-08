@@ -400,7 +400,12 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Sync status indicator shows connection state (synced, syncing, offline, error)
 - Offline detection with automatic queue-and-flush: changes made offline are queued and pushed when connectivity returns
 - Works for personal projects; shared projects use existing Realtime sync
-- **Status:** Complete (2026-04-04, Story #51)
+- **Force Full Sync** button in Settings > General triggers a complete Supabase re-sync on demand
+- Polls Supabase every 10s for externally created/updated tasks; `pullNewTasks` detects remote updates via `updated_at`
+- `syncProjectDown` and `discoverRemoteMemberships` skip gracefully when offline
+- Project metadata (name, color, icon) pulled from Supabase on sync
+- Project renames/edits push to Supabase immediately
+- **Status:** Complete (updated 2026-04-07)
 
 ---
 
@@ -412,6 +417,28 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Enable/disable in Settings > MCP; copy config to clipboard
 - **Activity logging:** All 22 mutating MCP tools (create/update/delete for tasks, subtasks, projects, labels, statuses, etc.) create activity log entries so AI-made changes appear in the activity timeline alongside user actions
 - **Status:** Complete
+
+---
+
+## Integrations
+
+### iOS Shortcut Integration
+- Create tasks from iOS Shortcuts (iPhone/iPad) using the ToDoozy API endpoint
+- Setup instructions in Settings > Integrations > iOS Shortcut tab
+- Inline copy-able API endpoint; no manual URL editing needed
+- **Status:** Complete (2026-04-07)
+
+### Telegram Bot
+- Standalone bot (Node.js, runs separately from the Electron app) for managing tasks via Telegram
+- Commands: `/` — list projects or tasks; `.list` — list all projects; `.default` — set default project; `.prefix` — set command prefix; `.settings` — interactive settings menu; `/done` — show recently completed tasks; `/recent` — show recently added open tasks
+- Slash prefix (`/`) checks project names first, then falls back to built-in commands; dot prefix (`.`) always runs built-in commands
+- Task list persists after completing a task — checkmark replaces the done item inline
+- Bot commands registered with Telegram for autocomplete suggestion menu
+- PID file lock prevents duplicate bot instances
+- Respects `new_task_position` setting for task ordering
+- **In-app configuration:** Settings > Integrations > Telegram Bot — connect Telegram ID, set default project, manage settings without editing config files
+- Telegram ID removal also cleans up from Supabase; settings pulled from Supabase on tab open
+- **Status:** Complete (2026-04-05 to 2026-04-07)
 
 ---
 
@@ -481,6 +508,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Multiple users can share the same database without data leakage
 - Repositories filter all queries by the current authenticated user
 - **Status:** Complete (2026-03-31)
+
+### Email-Based DB Naming
+- Database file named after the authenticated user's email (e.g., `todoozy-user@example.com.db`)
+- In-memory database used before authentication to avoid creating stale `todoozy.db` files
+- Separate auth session files for dev and production environments
+- Robust DB name resolution: email-named DB always preferred over UUID-named fallback
+- **Status:** Complete (2026-04-06/07)
 
 ---
 

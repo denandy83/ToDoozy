@@ -39,15 +39,38 @@ When grill-me completes, extract the `title`, `description`, and `acceptance_cri
 
 ---
 
+## Phase 1.5: Elaborate the Story (CRITICAL)
+
+The story will be implemented by ralph after a `/clear` — ralph has ZERO context from this conversation. The story description must be **completely self-contained** with every detail needed to implement in one shot.
+
+After grill-me and before presenting to the user, use an Explore agent to gather **exact code context** for every file that will be modified. Then rewrite the description to include:
+
+1. **Exact file paths** for every file that needs changes (e.g., `src/main/repositories/TaskRepository.ts`)
+2. **Exact current code snippets** with line numbers for sections that will be modified — ralph needs to see what's there NOW to know what to change
+3. **Exact new code** or pseudocode for each change, written against the actual current code (not hypothetical)
+4. **Database migrations** — exact SQL, exact migration function name (check current schema version in `migrations.ts`), exact placement in the migrations array
+5. **Type changes** — exact interface names, exact fields to add, exact file locations
+6. **Sync engine changes** — exact column mappings to update in `PersonalSyncService.ts` (push and pull)
+7. **IPC handler and preload bridge** — if new IPC methods are needed, specify the handler signature and preload method
+8. **Store changes** — exact Zustand store methods to modify, with current code and proposed changes
+9. **UI components** — exact component code with imports, using the same patterns as surrounding code
+10. **Edge cases checklist** — concrete list of what NOT to do (e.g., "do NOT auto-add subtasks")
+
+The description should read like a **detailed implementation guide** — a developer who has never seen the codebase should be able to follow it step by step. Number each change. Include "search for X to find the exact location" hints when line numbers might shift.
+
+**Do NOT write a vague description and hope ralph figures it out.** Every ambiguity in the story becomes a bug in the implementation.
+
+---
+
 ## Phase 2: Confirm the Story
 
-Present the story to the user in this format:
+Present the elaborated story to the user in this format:
 
 ```
 ### Story: <title>
 
 **Description:**
-<description>
+<description — the full elaborated implementation guide>
 
 **Acceptance Criteria:**
 - <criterion 1>

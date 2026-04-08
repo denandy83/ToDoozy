@@ -138,10 +138,6 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-4">Integrations</h3>
-      </div>
-
       {/* ── Sub-tabs ── */}
       <div className="flex gap-1 border-b border-border">
         {(['telegram', 'shortcut'] as const).map((tab) => (
@@ -162,8 +158,6 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
       {/* ══════════════ TELEGRAM BOT ══════════════ */}
       {subTab === 'telegram' && (
       <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">Telegram Bot</h4>
-
         {/* Telegram ID */}
         <div className="mb-4">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Your Telegram ID</span>
@@ -253,7 +247,6 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
       {/* ══════════════ iOS SHORTCUT ══════════════ */}
       {subTab === 'shortcut' && (
       <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">iOS Shortcut</h4>
         <p className="text-xs font-light text-foreground/50 mb-3">
           Create tasks by voice using your iPhone or Apple Watch Action Button.
         </p>

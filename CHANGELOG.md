@@ -8,6 +8,24 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 - **Settings reorganization** — Reorganized Settings modal from 11 tabs to 7: General, Projects, Appearance (Theme + Priority Display subtabs), Labels, Timer, About (Updates + What's New + Integrations + Help subtabs). Added section labels throughout. No settings removed or renamed.
 - **MCP activity logging** — All 22 mutating MCP tools now create activity log entries, so AI-made changes (task creation, updates, label changes, etc.) appear in the activity timeline alongside user actions.
+- **iOS Shortcut integration** — New Integrations tab in Settings with iOS Shortcut setup instructions and an inline copy-able API endpoint. Sub-tabs added to Integrations: Telegram Bot | iOS Shortcut.
+- **Telegram Bot settings in-app** — Full Telegram Bot configuration tab in Settings: connect your Telegram ID, set a default project, manage bot settings without editing config files.
+- **Telegram /done and /recent commands** — `/done` shows recently completed tasks (filtered to done-status tasks only); `/recent` shows open tasks added recently. Task list persists after completing — a checkmark replaces the done task inline.
+- **Telegram bot commands menu** — Bot commands registered with Telegram for autocomplete menu support. `.list`, `.default`, `.prefix`, `.settings` commands added. Dot-prefixed commands always run built-in bot commands; slash prefix checks project names first.
+- **Telegram PID file lock** — Prevents duplicate bot instances from starting.
+- **Force Full Sync button** — Added to Settings > General > Sync section for manually triggering a complete Supabase sync.
+- **Supabase project metadata sync** — Project name, color, and icon now pulled from Supabase on sync, keeping local data in sync with remote changes.
+- **Email-based DB filename** — Database file now named after the authenticated user's email address (e.g., `todoozy-user@example.com.db`) instead of a UUID, making it easier to identify. In-memory DB used before auth to avoid creating stale files.
+- **Separate auth session files** — Dev and production environments now use separate session storage files to prevent cross-contamination.
+- **Sync: poll for remote updates** — Supabase polled every 10s for externally created/updated tasks. `pullNewTasks` also detects remote updates via `updated_at`. `syncProjectDown` and `discoverRemoteMemberships` skip gracefully when offline.
+- **Sync: push project updates** — Project renames and edits now push to Supabase.
+- **Sync: pull new tasks on project switch** — New tasks from Supabase are fetched when switching projects.
+- **Fix: text selection** — Text selection disabled globally; allowed only in editable areas (inputs, textareas, detail panel editor). Prevents accidental text highlighting during mouse navigation.
+- **Fix: offline banner** — Offline banner uses `border-border` for flush layout; removed extraneous borders.
+- **Fix: tray badge refresh** — Tray badge count updates instantly on My Day toggle and status change.
+- **Fix: notarization** — Notarization temporarily disabled (was causing build hang); will be re-enabled once the hang is diagnosed.
+- **Fix: Settings logging** — Added logging for Supabase settings pull failures to aid debugging.
+- **Fix: sync store exports** — Added missing `syncStore` exports and `selectSortRules` to barrel file.
 
 ## v1.0.7
 

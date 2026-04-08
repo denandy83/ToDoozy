@@ -293,6 +293,32 @@ export async function pushTheme(theme: {
 }
 
 /**
+ * Delete a theme from Supabase.
+ */
+export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
+  try {
+    const supabase = await getSupabase()
+    await supabase.from('user_themes').delete().eq('id', themeId)
+    markSynced()
+  } catch (err) {
+    console.error('[PersonalSync] deleteTheme failed:', err)
+  }
+}
+
+/**
+ * Delete a setting from user_settings in Supabase.
+ */
+export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
+  try {
+    const supabase = await getSupabase()
+    await supabase.from('user_settings').delete().eq('id', `${userId}:${key}`)
+    markSynced()
+  } catch (err) {
+    console.error('[PersonalSync] deleteSetting failed:', err)
+  }
+}
+
+/**
  * Delete a status from Supabase.
  */
 export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
@@ -775,6 +801,11 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
         description: remote.description
       })
       return true
+    }
+
+    // Local is newer — push local state to Supabase (covers failed prior pushes)
+    if (local.updated_at && remote.updated_at && local.updated_at > remote.updated_at) {
+      await pushProject(local)
     }
     return false
   } catch {

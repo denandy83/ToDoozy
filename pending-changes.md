@@ -42,3 +42,10 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
+
+## 2026-04-08 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- c93d169 feat: per-project auto-archive and My Day done-today filter (#58) (2026-04-08) — files: 10
+- afea9bd feat: AND/OR label filter logic with three-way operator toggle (#57) (2026-04-08) — files: 11
+- cf125a9 feat: per-integration default project for Telegram & iOS Shortcut (#56) (2026-04-08) — files: 5
+- 7a2bbdf feat: My Day auto-add based on due date (#55) (2026-04-08) — files: 21

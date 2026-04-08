@@ -4,6 +4,28 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-04-08 — Telegram Bot Polish, iOS Shortcut, Sync Improvements, DB Naming (v1.1.0)
+
+**Session type:** Feature polish + bug fixes
+
+**What was built/fixed:**
+
+- **iOS Shortcut integration** — New Integrations tab in Settings with setup instructions and inline copy-able API endpoint. Sub-tabs: Telegram Bot | iOS Shortcut.
+- **Telegram Bot in-app settings** — Full Telegram Bot settings tab: connect Telegram ID, set default project, Supabase-backed storage, destructive remove with undo toast. Settings pulled from Supabase on tab open; removing ID also deletes from Supabase.
+- **Telegram command improvements** — `/done` and `/recent` commands added. Bot commands registered with Telegram for autocomplete menu. `.list`, `.default`, `.prefix`, `.settings` commands. Dot prefix always runs built-in commands; slash checks project names first. Task list persists after completing (inline checkmark). PID file lock prevents duplicate instances.
+- **Force Full Sync** — Manual sync trigger button in Settings > General.
+- **Supabase sync improvements** — Polls every 10s for external changes; detects remote updates via `updated_at`; project metadata (name/color/icon) pulled from Supabase; project renames push to Supabase; `syncProjectDown`/`discoverRemoteMemberships` skip when offline.
+- **Email-based DB naming** — DB file named after user email; in-memory DB before auth; separate session files for dev/prod; robust DB name resolution.
+- **UX: text selection** — Disabled globally, allowed only in editable areas (prevents accidental selection during mouse navigation).
+- **UX: offline banner** — Fixed layout (flush, no stray borders).
+- **UX: tray badge** — Instant refresh on My Day toggle and status change.
+- **Notarization disabled temporarily** — Was causing build hang; to be re-enabled after diagnosis.
+- **Version bumped to 1.1.0**
+
+**Key commits:** df508f4 (iOS Shortcut), 68b7404 (Telegram settings tab), f979ca0 (email DB), b00e9fb (force sync), 9db6bd0 (project metadata sync), 7d18cbe (Telegram /done /recent), 3165239 (bot commands), 889c361 (inline checkmarks), 227bfe6 (text selection), 74f9f7c (notarization), 31cf94a (version bump)
+
+---
+
 ## 2026-04-04 — Full Task Rows in Saved Views + Multi-Sort (#53)
 
 **Session type:** Feature implementation

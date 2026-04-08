@@ -634,28 +634,32 @@ function ActiveFilterChips({
 }: ActiveFilterChipsProps): React.JSX.Element | null {
   const chips: React.JSX.Element[] = []
 
-  // Label chips (when labels are in filter menu mode)
-  if (labelChips) {
+  // Label chips — consolidated into a single chip
+  if (labelChips && labelChips.activeIds.size > 0) {
     const logic = useLabelStore.getState().labelFilterLogic
     const prefix = labelChips.activeIds.size > 1
       ? (logic === 'all' ? 'Label is all of' : 'Label is any of')
       : 'Label'
-    for (const id of labelChips.activeIds) {
-      const label = labelChips.labels.find((l) => l.id === id)
-      if (!label) continue
+    const names = [...labelChips.activeIds]
+      .map((id) => labelChips.labels.find((l) => l.id === id)?.name)
+      .filter(Boolean)
+      .join(', ')
+    if (names) {
       chips.push(
-        <FilterChip key={`l-${id}`} label={label.name} color={label.color} prefix={prefix} onRemove={() => labelChips.onRemove(id)} />
+        <GroupFilterChip key="labels" prefix={prefix} names={names} ids={[...labelChips.activeIds]} onRemove={labelChips.onRemove} />
       )
     }
   }
 
-  // Exclude label chips
-  if (excludeLabelChips) {
-    for (const id of excludeLabelChips.activeIds) {
-      const label = excludeLabelChips.labels.find((l) => l.id === id)
-      if (!label) continue
+  // Exclude label chips — consolidated
+  if (excludeLabelChips && excludeLabelChips.activeIds.size > 0) {
+    const names = [...excludeLabelChips.activeIds]
+      .map((id) => excludeLabelChips.labels.find((l) => l.id === id)?.name)
+      .filter(Boolean)
+      .join(', ')
+    if (names) {
       chips.push(
-        <ExcludeFilterChip key={`xl-${id}`} label={label.name} color={label.color} prefix="Label" onRemove={() => excludeLabelChips.onRemove(id)} />
+        <GroupFilterChip key="exclude-labels" prefix="Label is not" names={names} ids={[...excludeLabelChips.activeIds]} onRemove={excludeLabelChips.onRemove} exclude />
       )
     }
   }
@@ -766,6 +770,32 @@ function ExcludeFilterChip({ label, color, prefix, onRemove }: FilterChipProps):
       <span className="text-red-400/80">{prefix} is not:</span>
       {label}
       <button onClick={onRemove} className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10">
+        <X size={8} />
+      </button>
+    </span>
+  )
+}
+
+function GroupFilterChip({ prefix, names, ids, onRemove, exclude }: {
+  prefix: string
+  names: string
+  ids: string[]
+  onRemove: (id: string) => void
+  exclude?: boolean
+}): React.JSX.Element {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${
+        exclude ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-accent/10 text-accent border border-accent/20'
+      }`}
+    >
+      <span className="opacity-60">{prefix}:</span>
+      {names}
+      <button
+        onClick={() => ids.forEach((id) => onRemove(id))}
+        className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10"
+        title="Clear all"
+      >
         <X size={8} />
       </button>
     </span>
@@ -904,10 +934,15 @@ function LabelFilterPicker({ labels, active, excluded, onToggle, onExcludeToggle
     labelFilterLogic === 'all' ? 'is_all' : 'is_any'
   )
   const searchRef = useRef<HTMLInputElement>(null)
-  const filtered = search
+  const currentActive = operator === 'is_not' ? excluded : active
+  const filtered = (search
     ? labels.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
     : labels
-  const currentActive = operator === 'is_not' ? excluded : active
+  ).slice().sort((a, b) => {
+    const aActive = currentActive.has(a.id) ? 0 : 1
+    const bActive = currentActive.has(b.id) ? 0 : 1
+    return aActive - bActive
+  })
   const currentToggle = operator === 'is_not' ? onExcludeToggle : onToggle
 
   const handleOperatorChange = (op: LabelOperator): void => {

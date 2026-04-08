@@ -144,6 +144,23 @@ function App(): React.JSX.Element {
     return unsub
   }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
 
+  // Re-run My Day auto-add on app resume (sleep/wake) and window refocus
+  const currentView = useViewStore((s) => s.currentView)
+  useEffect(() => {
+    if (!currentUser) return
+    const onVisible = (): void => {
+      if (!document.hidden) hydrateMyDay(currentUser.id)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [currentUser, hydrateMyDay])
+
+  // Re-run My Day auto-add when navigating to My Day view
+  useEffect(() => {
+    if (!currentUser || currentView !== 'my-day') return
+    hydrateMyDay(currentUser.id)
+  }, [currentUser, currentView, hydrateMyDay])
+
   // Refresh tray badge when tasks change
   useEffect(() => {
     const unsub = useTaskStore.subscribe(() => {

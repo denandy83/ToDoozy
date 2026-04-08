@@ -103,6 +103,8 @@ npm run build
 | **Global app toggle** | Cmd+Shift+B (configurable) shows/hides the main window |
 | **macOS tray** | Menu bar icon with badge count, My Day tasks, quick access menu |
 | **MCP server** | AI integration via stdio — full CRUD tools for all entities |
+| **Telegram Bot** | Manage tasks from Telegram — add, list, complete, with per-project routing |
+| **iOS Shortcut integration** | Create tasks from iPhone/iPad via iOS Shortcuts using the API endpoint |
 | **iCloud attachments** | File attachments synced to iCloud Drive with local-first offline support |
 | **Supabase auth** | Email/password + Google OAuth, encrypted session storage, auto-login |
 | **Focus management** | Full keyboard navigation, focus traps in overlays, Tab cycles through detail fields |

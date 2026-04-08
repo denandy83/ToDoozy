@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ToDoozy MCP Server — Model Context Protocol server for AI integration
-// Dual-mode: Supabase (preferred) or SQLite fallback (dev)
+// Supabase-only: authenticates via session file written by the Electron app
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -8,13 +8,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
-import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { createRepositories, type Repositories } from './repositories'
 import type { AsyncRepositories } from './supabase-repos'
 import { createSupabaseRepositories } from './supabase-repos'
 import type { ProjectTemplateData, ProjectTemplateTask } from '../shared/types'
@@ -36,32 +34,11 @@ function getMcpSessionPath(): string {
   return join(getUserDataDir(), 'mcp-session.json')
 }
 
-function getDbPath(): string {
-  const dir = getUserDataDir()
-  try {
-    const { readdirSync, statSync } = require('fs') as typeof import('fs')
-    const files = readdirSync(dir).filter(
-      (f: string) => f.startsWith('todoozy-') && f.endsWith('.db') && !f.endsWith('-wal') && !f.endsWith('-shm')
-    )
-    if (files.length > 0) {
-      const sorted = files
-        .map((f: string) => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs }))
-        .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime)
-      return join(dir, sorted[0].name)
-    }
-  } catch {
-    // Directory doesn't exist or can't be read
-  }
-  return join(dir, 'todoozy.db')
-}
+// ── Initialization ────────────────────────────────────────────────
 
-// ── Dual-Mode Initialization ───────────────────────────────────────
-
-let supabaseMode = false
 let supabaseClient: SupabaseClient | null = null
 let supabaseUserId: string | null = null
 let asyncRepos: AsyncRepositories | null = null
-let sqliteRepos: Repositories | null = null
 
 function loadEnvFile(): Record<string, string> {
   const envVars: Record<string, string> = {}
@@ -138,43 +115,21 @@ async function initSupabaseMode(): Promise<boolean> {
   supabaseClient = client
   supabaseUserId = user.id
   asyncRepos = createSupabaseRepositories(client, user.id)
-  supabaseMode = true
   process.stderr.write(`MCP server: Supabase mode (user ${user.email})\n`)
-  return true
-}
-
-function initSqliteMode(): boolean {
-  const dbPath = process.env.TODOOZY_DEV_DB || getDbPath()
-  if (!existsSync(dbPath)) return false
-
-  const db = new DatabaseSync(dbPath)
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA foreign_keys = ON')
-  sqliteRepos = createRepositories(db)
-  process.stderr.write(`MCP server: SQLite mode (${dbPath})\n`)
   return true
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
 async function getUser(): Promise<{ id: string }> {
-  if (supabaseMode) {
-    if (supabaseUserId) return { id: supabaseUserId }
-    const { data: { user } } = await supabaseClient!.auth.getUser()
-    if (!user) throw new Error('Not authenticated. Sign into ToDoozy first.')
-    return { id: user.id }
-  }
-  const users = sqliteRepos!.users.list()
-  if (users.length === 0) throw new Error('No user found. Launch ToDoozy and sign in first.')
-  return users[0]
+  if (supabaseUserId) return { id: supabaseUserId }
+  const { data: { user } } = await supabaseClient!.auth.getUser()
+  if (!user) throw new Error('Not authenticated. Sign into ToDoozy first.')
+  return { id: user.id }
 }
 
-// Unified repo accessor — wraps SQLite sync calls as async when needed
 function getRepos(): AsyncRepositories {
-  if (supabaseMode) return asyncRepos!
-  // Wrap SQLite repos: each method returns its result as a resolved promise
-  // This is handled by the handler layer which awaits everything
-  return sqliteRepos! as unknown as AsyncRepositories
+  return asyncRepos!
 }
 
 interface ToolResult {
@@ -1268,28 +1223,6 @@ const handlers: Record<string, Handler> = {
     const user = await getUser()
     const projectId = randomUUID()
 
-    if (supabaseMode) {
-      // Supabase: share_project RPC handles project + membership atomically
-      const project = await repos.projects.create({
-        id: projectId,
-        name: requireStr(args, 'name'),
-        owner_id: user.id,
-        color: optStr(args, 'color'),
-        description: optStr(args, 'description')
-      })
-
-      // Create default statuses
-      const notStartedId = randomUUID()
-      const inProgressId = randomUUID()
-      const doneId = randomUUID()
-      await repos.statuses.create({ id: notStartedId, project_id: projectId, name: 'Not Started', color: '#888888', icon: 'circle', order_index: 0, is_default: 1 })
-      await repos.statuses.create({ id: inProgressId, project_id: projectId, name: 'In Progress', color: '#3b82f6', icon: 'circle-dot', order_index: 1 })
-      await repos.statuses.create({ id: doneId, project_id: projectId, name: 'Done', color: '#22c55e', icon: 'check-circle-2', order_index: 2, is_done: 1 })
-
-      return project
-    }
-
-    // SQLite mode
     const project = await repos.projects.create({
       id: projectId,
       name: requireStr(args, 'name'),
@@ -1297,8 +1230,8 @@ const handlers: Record<string, Handler> = {
       color: optStr(args, 'color'),
       description: optStr(args, 'description')
     })
-    await repos.projects.addMember(projectId, user.id, 'owner')
 
+    // Create default statuses
     const notStartedId = randomUUID()
     const inProgressId = randomUUID()
     const doneId = randomUUID()
@@ -1491,10 +1424,6 @@ const handlers: Record<string, Handler> = {
       color: optStr(args, 'color') ?? template.color,
       owner_id: user.id
     })
-    if (!supabaseMode) {
-      await repos.projects.addMember(projectId, user.id, 'owner')
-    }
-
     await deployTemplate(data, projectId, user.id)
     return project
   },
@@ -1631,30 +1560,13 @@ const handlers: Record<string, Handler> = {
 
       if (error) {
         process.stderr.write(`Supabase upsert failed: ${error.message}\n`)
-        if (!supabaseMode) {
-          sqliteRepos!.settings.set('', 'whats_new', `## ${version}\n${content}`)
-        }
-        return { success: true, content, version, storage: 'local-fallback', error: error.message }
-      }
-
-      // Sync all versions to local cache
-      const { data } = await client
-        .from('release_notes')
-        .select('version, content')
-        .order('published_at', { ascending: false })
-
-      if (data && data.length > 0 && !supabaseMode) {
-        const markdown = data.map((row: { version: string; content: string }) => `## ${row.version}\n${row.content}`).join('\n\n')
-        sqliteRepos!.settings.set('', 'whats_new', markdown)
+        return { success: false, content, version, error: error.message }
       }
 
       return { success: true, content, version, storage: 'supabase' }
     }
 
-    if (!supabaseMode) {
-      sqliteRepos!.settings.set('', 'whats_new', `## ${version}\n${content}`)
-    }
-    return { success: true, content, version, storage: supabaseMode ? 'supabase-only' : 'local-only' }
+    return { success: true, content, version, storage: 'supabase-only' }
   }
 }
 
@@ -1680,17 +1592,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 })
 
 async function main(): Promise<void> {
-  // Try Supabase mode first, then fall back to SQLite
   const supabaseOk = await initSupabaseMode()
   if (!supabaseOk) {
-    const sqliteOk = initSqliteMode()
-    if (!sqliteOk) {
-      process.stderr.write(
-        'ToDoozy MCP server: No Supabase session and no SQLite database found.\n' +
-        'Sign into the ToDoozy app first, or set TODOOZY_DEV_DB for dev mode.\n'
-      )
-      process.exit(1)
-    }
+    process.stderr.write(
+      'ToDoozy MCP server: No Supabase session found.\n' +
+      'Sign into the ToDoozy app first.\n'
+    )
+    process.exit(1)
   }
 
   const transport = new StdioServerTransport()

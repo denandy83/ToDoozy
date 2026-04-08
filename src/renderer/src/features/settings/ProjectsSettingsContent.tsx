@@ -19,7 +19,7 @@ interface ProjectsSettingsContentProps {
   onClose: () => void
 }
 
-type ProjectsSubtab = 'project' | 'myday' | 'sidebar'
+type ProjectsSubtab = 'project' | 'myday' | 'sidebar' | 'archive'
 
 export function ProjectsSettingsContent({
   projects,
@@ -155,6 +155,14 @@ export function ProjectsSettingsContent({
         >
           Sidebar & Folders
         </button>
+        <button
+          onClick={() => setSubtab('archive')}
+          className={`px-1 pb-2 text-[11px] font-bold uppercase tracking-widest transition-colors border-b-2 -mb-px ${
+            subtab === 'archive' ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground/80'
+          }`}
+        >
+          Archive
+        </button>
       </div>
 
       {subtab === 'project' && (
@@ -245,63 +253,6 @@ export function ProjectsSettingsContent({
             <div className="flex flex-col gap-6">
               <StatusList projectId={selectedProjectId} statuses={statuses} />
 
-              {/* Auto-Archive Settings */}
-              <div>
-                <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-3">Auto-Archive</h4>
-                {selectedProject.is_shared === 1 ? (
-                  <p className="text-xs font-light text-muted">
-                    Auto-archive is not available for shared projects. Tasks must be archived manually.
-                  </p>
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-light text-foreground">Archive after done</p>
-                      <p className="text-[10px] text-muted">Automatically archive completed tasks</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {selectedProject.auto_archive_enabled === 1 && (
-                        <>
-                          <input
-                            type="number"
-                            min={1}
-                            max={999}
-                            value={selectedProject.auto_archive_value ?? 3}
-                            onChange={(e) => updateProject(selectedProjectId, { auto_archive_value: parseInt(e.target.value, 10) || 3 })}
-                            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                          <select
-                            value={selectedProject.auto_archive_unit ?? 'days'}
-                            onChange={(e) => updateProject(selectedProjectId, { auto_archive_unit: e.target.value })}
-                            className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
-                          >
-                            <option value="hours">hours</option>
-                            <option value="days">days</option>
-                          </select>
-                        </>
-                      )}
-                      <div className="flex rounded-lg border border-border overflow-hidden">
-                        <button
-                          onClick={() => updateProject(selectedProjectId, { auto_archive_enabled: 1 })}
-                          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-                            selectedProject.auto_archive_enabled === 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
-                          }`}
-                        >
-                          On
-                        </button>
-                        <button
-                          onClick={() => updateProject(selectedProjectId, { auto_archive_enabled: 0 })}
-                          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-                            selectedProject.auto_archive_enabled !== 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
-                          }`}
-                        >
-                          Off
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {selectedProject.is_shared === 1 && (
                 <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
               )}
@@ -321,6 +272,10 @@ export function ProjectsSettingsContent({
           sensors={sensors}
           handleDragEnd={handleDragEnd}
         />
+      )}
+
+      {subtab === 'archive' && (
+        <ArchiveSection projects={sortedProjects} />
       )}
 
     </div>
@@ -806,6 +761,71 @@ function ProjectDeleteSection({ project, isLastProject, onClose, addToast }: Pro
           <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted hover:bg-foreground/6">Cancel</button>
         </div>
       )}
+    </div>
+  )
+}
+
+// --- Archive Section ---
+
+function ArchiveSection({ projects }: { projects: Project[] }): React.JSX.Element {
+  const updateProject = useProjectStore((s) => s.updateProject)
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mb-2">Auto-Archive per Project</p>
+      <p className="text-xs font-light text-muted mb-4">Automatically archive completed tasks after a set duration. Shared projects cannot be auto-archived.</p>
+      {projects.map((project) => (
+        <div key={project.id} className="flex items-center justify-between rounded-lg px-3 py-2.5 hover:bg-foreground/4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: project.color }} />
+            <span className="truncate text-sm font-light text-foreground">{project.name}</span>
+          </div>
+          {project.is_shared === 1 ? (
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted/50">Manual only</span>
+          ) : (
+            <div className="flex items-center gap-2">
+              {project.auto_archive_enabled === 1 && (
+                <>
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={project.auto_archive_value ?? 3}
+                    onChange={(e) => updateProject(project.id, { auto_archive_value: parseInt(e.target.value, 10) || 3 })}
+                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <select
+                    value={project.auto_archive_unit ?? 'days'}
+                    onChange={(e) => updateProject(project.id, { auto_archive_unit: e.target.value })}
+                    className="rounded-lg border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+                  >
+                    <option value="hours">hours</option>
+                    <option value="days">days</option>
+                  </select>
+                </>
+              )}
+              <div className="flex rounded-lg border border-border overflow-hidden">
+                <button
+                  onClick={() => updateProject(project.id, { auto_archive_enabled: 1 })}
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                    project.auto_archive_enabled === 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+                  }`}
+                >
+                  On
+                </button>
+                <button
+                  onClick={() => updateProject(project.id, { auto_archive_enabled: 0 })}
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                    project.auto_archive_enabled !== 1 ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+                  }`}
+                >
+                  Off
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

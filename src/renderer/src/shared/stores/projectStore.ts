@@ -88,6 +88,12 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       set((state) => ({
         projects: { ...state.projects, [project.id]: project }
       }))
+      // Sync to Supabase
+      import('../../services/PersonalSyncService').then(({ pushProject }) => {
+        pushProject(project).catch((err) => {
+          console.error('[ProjectStore] pushProject failed after create:', err)
+        })
+      })
       return project
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create project'
@@ -105,7 +111,9 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         }))
         // Sync to Supabase
         import('../../services/PersonalSyncService').then(({ pushProject }) => {
-          pushProject(project).catch(() => {})
+          pushProject(project).catch((err) => {
+            console.error('[ProjectStore] pushProject failed after update:', err)
+          })
         })
       }
       return project
@@ -132,6 +140,12 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
             members: remainingMembers,
             currentProjectId: newCurrentId
           }
+        })
+        // Sync deletion to Supabase
+        import('../../services/PersonalSyncService').then(({ deleteProjectFromSupabase }) => {
+          deleteProjectFromSupabase(id).catch((err) => {
+            console.error('[ProjectStore] deleteProjectFromSupabase failed:', err)
+          })
         })
       }
       return result

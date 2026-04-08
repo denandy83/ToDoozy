@@ -171,7 +171,11 @@ export function SavedViewListView(): React.JSX.Element {
         useSavedViewStore.getState().setActiveViewFilterConfig(JSON.stringify(applied))
       })
     } catch { /* ignore invalid config */ }
-    return () => { useSavedViewStore.getState().setActiveViewFilterConfig(null) }
+    return () => {
+      useSavedViewStore.getState().setActiveViewFilterConfig(null)
+      // Revert sidebar counts to saved filter values
+      useSavedViewStore.getState().hydrateCounts(userId)
+    }
   }, [currentView?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Get current filter config (including sort) for comparison with stored

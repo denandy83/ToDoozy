@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Archive, Trash2,
-  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer
+  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer, ExternalLink
 } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useFocusRestore } from '../hooks/useFocusRestore'
@@ -172,6 +172,19 @@ export function ContextMenu(): React.JSX.Element | null {
           }
         }}
       />
+      {/* Go to Task (My Day only) */}
+      {isMyDay && task.project_id && (
+        <MenuItem
+          icon={<ExternalLink size={14} />}
+          label="Go to Task"
+          onClick={() => {
+            handleAction(() => {
+              useViewStore.getState().setSelectedProject(task.project_id)
+              useTaskStore.getState().selectTask(task.id)
+            })
+          }}
+        />
+      )}
       {/* Add Subtask */}
       <MenuItem
         icon={<Plus size={14} />}

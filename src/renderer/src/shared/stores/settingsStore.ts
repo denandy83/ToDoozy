@@ -127,6 +127,11 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
           const { [key]: _, ...remaining } = state.settings
           return { settings: remaining }
         })
+        // Delete from Supabase
+        const uid = userId
+        import('../../services/PersonalSyncService').then(({ deleteSettingFromSupabase }) => {
+          deleteSettingFromSupabase(key, uid).catch(() => {})
+        })
       }
       return result
     } catch (err) {
@@ -158,6 +163,25 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       set((state) => ({
         themes: { ...state.themes, [theme.id]: theme }
       }))
+      // Push to Supabase
+      try {
+        const config = JSON.parse(theme.config) as Record<string, string>
+        import('../../services/PersonalSyncService').then(({ pushTheme }) => {
+          pushTheme({
+            id: theme.id,
+            user_id: userId,
+            name: theme.name,
+            mode: theme.mode,
+            bg: config.bg ?? '',
+            fg: config.fg ?? '',
+            accent: config.accent ?? '',
+            surface: config.fgSecondary ?? '',
+            muted: config.muted ?? '',
+            border: config.border ?? '',
+            updated_at: theme.updated_at
+          }).catch(() => {})
+        })
+      } catch { /* skip if config parse fails */ }
       return theme
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create theme'
@@ -168,11 +192,31 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async updateTheme(id: string, input: UpdateThemeInput): Promise<Theme | null> {
     try {
+      const { userId } = get()
       const theme = await window.api.themes.update(id, input)
       if (theme) {
         set((state) => ({
           themes: { ...state.themes, [theme.id]: theme }
         }))
+        // Push to Supabase
+        try {
+          const config = JSON.parse(theme.config) as Record<string, string>
+          import('../../services/PersonalSyncService').then(({ pushTheme }) => {
+            pushTheme({
+              id: theme.id,
+              user_id: userId,
+              name: theme.name,
+              mode: theme.mode,
+              bg: config.bg ?? '',
+              fg: config.fg ?? '',
+              accent: config.accent ?? '',
+              surface: config.fgSecondary ?? '',
+              muted: config.muted ?? '',
+              border: config.border ?? '',
+              updated_at: theme.updated_at
+            }).catch(() => {})
+          })
+        } catch { /* skip if config parse fails */ }
       }
       return theme
     } catch (err) {
@@ -189,6 +233,10 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
         set((state) => {
           const { [id]: _, ...remaining } = state.themes
           return { themes: remaining }
+        })
+        // Delete from Supabase
+        import('../../services/PersonalSyncService').then(({ deleteThemeFromSupabase }) => {
+          deleteThemeFromSupabase(id).catch(() => {})
         })
       }
       return result

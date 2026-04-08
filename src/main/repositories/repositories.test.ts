@@ -875,13 +875,15 @@ describe('TaskRepository', () => {
       expect(result).not.toContain(id)
     })
 
-    it('does not auto-add subtasks', () => {
+    it('auto-adds subtasks with due dates and flags their parent', () => {
       const parentId = randomUUID()
       const childId = randomUUID()
       repo.create({ id: parentId, project_id: projectId, owner_id: userId, title: 'Parent', status_id: statusId })
       repo.create({ id: childId, project_id: projectId, owner_id: userId, title: 'Child', status_id: statusId, due_date: today, parent_id: parentId })
       const result = repo.autoAddMyDayTasks(userId, 'due_today')
-      expect(result).not.toContain(childId)
+      expect(result).toContain(childId)
+      expect(result).toContain(parentId)
+      expect(repo.findById(parentId)!.is_in_my_day).toBe(1)
     })
 
     it('does not auto-add done-status tasks', () => {
