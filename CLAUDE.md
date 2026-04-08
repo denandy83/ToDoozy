@@ -46,15 +46,7 @@ Never run migrations or destructive operations against the production database. 
 - `npm run dist:mac` — Build macOS distributable (DMG + ZIP in `dist/`)
 
 ## Distribution Build
-After `npm run dist:mac`, the app must be re-signed before it will launch on macOS:
-```bash
-codesign --force --deep --sign - dist/mac-arm64/ToDoozy.app
-```
-If installing to `/Applications`, re-sign there instead:
-```bash
-codesign --force --deep --sign - /Applications/ToDoozy.app
-```
-Without this step, macOS rejects the app at launch due to mismatched ad-hoc code signatures between the main binary and Electron Framework. The DMG itself also needs re-signing if you plan to redistribute it after this fix — rebuild with `npm run dist:mac` and sign the `.app` inside `dist/mac-arm64/` **before** distributing.
+`npm run dist:mac` builds and signs with the Developer ID certificate automatically. No manual re-signing needed.
 
 ## Scope File (`scope.md`)
 When investigating bugs, planning features, or exploring the codebase for any multi-file change:
