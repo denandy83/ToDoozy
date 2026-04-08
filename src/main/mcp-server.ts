@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ToDoozy MCP Server — Model Context Protocol server for AI integration
-// Standalone Node.js script, communicates via stdio, accesses the same SQLite database
+// Dual-mode: Supabase (preferred) or SQLite fallback (dev)
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -14,49 +14,57 @@ import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { createRepositories } from './repositories'
+import { createRepositories, type Repositories } from './repositories'
+import type { AsyncRepositories } from './supabase-repos'
+import { createSupabaseRepositories } from './supabase-repos'
 import type { ProjectTemplateData, ProjectTemplateTask } from '../shared/types'
 
-// ── Database Setup ──────────────────────────────────────────────────
+// ── Platform Paths ─────────────────────────────────────────────────
 
-function getDbPath(): string {
+function getUserDataDir(): string {
   const home = homedir()
   if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'todoozy', 'todoozy.db')
+    return join(home, 'Library', 'Application Support', 'todoozy')
   }
   if (process.platform === 'win32') {
-    return join(
-      process.env.APPDATA || join(home, 'AppData', 'Roaming'),
-      'todoozy',
-      'todoozy.db'
-    )
+    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'todoozy')
   }
-  return join(
-    process.env.XDG_CONFIG_HOME || join(home, '.config'),
-    'todoozy',
-    'todoozy.db'
-  )
+  return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'todoozy')
 }
 
-const dbPath = process.env.TODOOZY_DEV_DB || getDbPath()
-if (!existsSync(dbPath)) {
-  process.stderr.write(
-    `ToDoozy database not found at ${dbPath}. Launch the ToDoozy app first to initialize it.\n`
-  )
-  process.exit(1)
+function getMcpSessionPath(): string {
+  return join(getUserDataDir(), 'mcp-session.json')
 }
 
-const db = new DatabaseSync(dbPath)
-db.exec('PRAGMA journal_mode = WAL')
-db.exec('PRAGMA foreign_keys = ON')
+function getDbPath(): string {
+  const dir = getUserDataDir()
+  try {
+    const { readdirSync, statSync } = require('fs') as typeof import('fs')
+    const files = readdirSync(dir).filter(
+      (f: string) => f.startsWith('todoozy-') && f.endsWith('.db') && !f.endsWith('-wal') && !f.endsWith('-shm')
+    )
+    if (files.length > 0) {
+      const sorted = files
+        .map((f: string) => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs }))
+        .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime)
+      return join(dir, sorted[0].name)
+    }
+  } catch {
+    // Directory doesn't exist or can't be read
+  }
+  return join(dir, 'todoozy.db')
+}
 
-const repos = createRepositories(db)
+// ── Dual-Mode Initialization ───────────────────────────────────────
 
-// ── Supabase Client (for release notes) ─────────────────────────────
+let supabaseMode = false
+let supabaseClient: SupabaseClient | null = null
+let supabaseUserId: string | null = null
+let asyncRepos: AsyncRepositories | null = null
+let sqliteRepos: Repositories | null = null
 
 function loadEnvFile(): Record<string, string> {
   const envVars: Record<string, string> = {}
-  // Try loading .env from project root (dev) or app directory
   const candidates = [
     join(process.cwd(), '.env'),
     join(__dirname, '../../.env'),
@@ -75,31 +83,98 @@ function loadEnvFile(): Record<string, string> {
   return envVars
 }
 
-let supabaseClient: SupabaseClient | null = null
-
-function getSupabaseClient(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient
+function getSupabaseCredentials(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_ANON_KEY
-  if (url && key) {
-    supabaseClient = createClient(url, key)
-    return supabaseClient
-  }
-  // Try loading from .env file
+  if (url && key) return { url, key }
   const env = loadEnvFile()
   if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
-    supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY)
-    return supabaseClient
+    return { url: env.SUPABASE_URL, key: env.SUPABASE_ANON_KEY }
   }
   return null
 }
 
+function readMcpSession(): { access_token: string; refresh_token: string; expires_at?: number } | null {
+  // Try env vars first
+  const envToken = process.env.TODOOZY_ACCESS_TOKEN
+  const envRefresh = process.env.TODOOZY_REFRESH_TOKEN
+  if (envToken && envRefresh) {
+    return { access_token: envToken, refresh_token: envRefresh }
+  }
+
+  // Try session file
+  const sessionPath = getMcpSessionPath()
+  if (!existsSync(sessionPath)) return null
+  try {
+    return JSON.parse(readFileSync(sessionPath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+async function initSupabaseMode(): Promise<boolean> {
+  const creds = getSupabaseCredentials()
+  if (!creds) return false
+
+  const session = readMcpSession()
+  if (!session) return false
+
+  const client = createClient(creds.url, creds.key)
+  const { error } = await client.auth.setSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token
+  })
+  if (error) {
+    process.stderr.write(`Supabase auth failed: ${error.message}\n`)
+    return false
+  }
+
+  const { data: { user } } = await client.auth.getUser()
+  if (!user) {
+    process.stderr.write('Supabase: no user after setSession\n')
+    return false
+  }
+
+  supabaseClient = client
+  supabaseUserId = user.id
+  asyncRepos = createSupabaseRepositories(client, user.id)
+  supabaseMode = true
+  process.stderr.write(`MCP server: Supabase mode (user ${user.email})\n`)
+  return true
+}
+
+function initSqliteMode(): boolean {
+  const dbPath = process.env.TODOOZY_DEV_DB || getDbPath()
+  if (!existsSync(dbPath)) return false
+
+  const db = new DatabaseSync(dbPath)
+  db.exec('PRAGMA journal_mode = WAL')
+  db.exec('PRAGMA foreign_keys = ON')
+  sqliteRepos = createRepositories(db)
+  process.stderr.write(`MCP server: SQLite mode (${dbPath})\n`)
+  return true
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function getUser(): { id: string } {
-  const users = repos.users.list()
+async function getUser(): Promise<{ id: string }> {
+  if (supabaseMode) {
+    if (supabaseUserId) return { id: supabaseUserId }
+    const { data: { user } } = await supabaseClient!.auth.getUser()
+    if (!user) throw new Error('Not authenticated. Sign into ToDoozy first.')
+    return { id: user.id }
+  }
+  const users = sqliteRepos!.users.list()
   if (users.length === 0) throw new Error('No user found. Launch ToDoozy and sign in first.')
   return users[0]
+}
+
+// Unified repo accessor — wraps SQLite sync calls as async when needed
+function getRepos(): AsyncRepositories {
+  if (supabaseMode) return asyncRepos!
+  // Wrap SQLite repos: each method returns its result as a resolved promise
+  // This is handled by the handler layer which awaits everything
+  return sqliteRepos! as unknown as AsyncRepositories
 }
 
 interface ToolResult {
@@ -581,7 +656,7 @@ const tools: ToolDef[] = [
     }
   },
 
-  // Settings — What's New (writes to Supabase release_notes table)
+  // Settings — What's New
   {
     name: 'set_whats_new',
     description:
@@ -698,18 +773,19 @@ const tools: ToolDef[] = [
 
 // ── Subtask Copy Helper ─────────────────────────────────────────────
 
-function copyTemplateSubtasks(
+async function copyTemplateSubtasks(
   templateParentId: string,
   newParentId: string,
   projectId: string,
   ownerId: string,
   defaultStatusId: string,
   targetLabels: Array<{ id: string; name: string; color: string }>
-): void {
-  const subtasks = repos.tasks.findSubtasks(templateParentId)
+): Promise<void> {
+  const repos = getRepos()
+  const subtasks = await repos.tasks.findSubtasks(templateParentId)
   for (const subtask of subtasks) {
     const subtaskId = randomUUID()
-    repos.tasks.create({
+    await repos.tasks.create({
       id: subtaskId,
       project_id: projectId,
       owner_id: ownerId,
@@ -723,17 +799,18 @@ function copyTemplateSubtasks(
     })
 
     // Copy labels
-    const subtaskLabels = repos.labels.findByTaskId(subtask.id)
+    const subtaskLabels = await repos.labels.findByTaskId(subtask.id)
     for (const sl of subtaskLabels) {
       let target = targetLabels.find((l) => l.name === sl.name)
       if (!target) {
-        const existing = repos.labels.findByName(getUser().id, sl.name)
+        const user = await getUser()
+        const existing = await repos.labels.findByName(user.id, sl.name)
         if (existing) {
-          repos.labels.addToProject(projectId, existing.id)
+          await repos.labels.addToProject(projectId, existing.id)
           targetLabels.push(existing)
           target = existing
         } else {
-          const newLabel = repos.labels.create({
+          const newLabel = await repos.labels.create({
             id: randomUUID(),
             project_id: projectId,
             name: sl.name,
@@ -743,27 +820,29 @@ function copyTemplateSubtasks(
           target = newLabel
         }
       }
-      repos.tasks.addLabel(subtaskId, target.id)
+      await repos.tasks.addLabel(subtaskId, target.id)
     }
 
     // Recurse
-    copyTemplateSubtasks(subtask.id, subtaskId, projectId, ownerId, defaultStatusId, targetLabels)
+    await copyTemplateSubtasks(subtask.id, subtaskId, projectId, ownerId, defaultStatusId, targetLabels)
   }
 }
 
 // ── Deploy Project Template Helper ──────────────────────────────────
 
-function deployTemplate(
+async function deployTemplate(
   data: ProjectTemplateData,
   projectId: string,
   ownerId: string
-): { defaultStatusId: string; labelMap: Record<string, string> } {
+): Promise<{ defaultStatusId: string; labelMap: Record<string, string> }> {
+  const repos = getRepos()
+
   // Create statuses
   const statusMap: Record<number, string> = {}
   let defaultStatusId = ''
   for (const s of data.statuses) {
     const statusId = randomUUID()
-    repos.statuses.create({
+    await repos.statuses.create({
       id: statusId,
       project_id: projectId,
       name: s.name,
@@ -781,15 +860,16 @@ function deployTemplate(
   }
 
   // Create or reuse global labels and link to project
+  const user = await getUser()
   const labelMap: Record<string, string> = {}
   for (const l of data.labels) {
-    const existing = repos.labels.findByName(getUser().id, l.name)
+    const existing = await repos.labels.findByName(user.id, l.name)
     if (existing) {
-      repos.labels.addToProject(projectId, existing.id)
+      await repos.labels.addToProject(projectId, existing.id)
       labelMap[l.name] = existing.id
     } else {
       const labelId = randomUUID()
-      repos.labels.create({
+      await repos.labels.create({
         id: labelId,
         project_id: projectId,
         name: l.name,
@@ -800,10 +880,10 @@ function deployTemplate(
   }
 
   // Create tasks recursively
-  function createTasks(tasks: ProjectTemplateTask[], parentId: string | null): void {
+  async function createTasks(tasks: ProjectTemplateTask[], parentId: string | null): Promise<void> {
     for (const t of tasks) {
       const taskId = randomUUID()
-      repos.tasks.create({
+      await repos.tasks.create({
         id: taskId,
         project_id: projectId,
         owner_id: ownerId,
@@ -817,15 +897,15 @@ function deployTemplate(
       })
       for (const labelName of t.labels) {
         const labelId = labelMap[labelName]
-        if (labelId) repos.tasks.addLabel(taskId, labelId)
+        if (labelId) await repos.tasks.addLabel(taskId, labelId)
       }
       if (t.subtasks.length > 0) {
-        createTasks(t.subtasks, taskId)
+        await createTasks(t.subtasks, taskId)
       }
     }
   }
 
-  createTasks(data.tasks, null)
+  await createTasks(data.tasks, null)
   return { defaultStatusId, labelMap }
 }
 
@@ -839,36 +919,49 @@ const PRIORITY_NAMES: Record<number, string> = {
   4: 'urgent'
 }
 
-function logActivity(
+async function logActivity(
   taskId: string,
   userId: string,
   action: string,
   oldValue?: string | null,
-  newValue?: string | null
-): void {
-  repos.activityLog.create({
+  newValue?: string | null,
+  projectId?: string
+): Promise<void> {
+  const repos = getRepos()
+  await repos.activityLog.create({
     id: randomUUID(),
     task_id: taskId,
     user_id: userId,
     action,
     old_value: oldValue ?? null,
-    new_value: newValue ?? null
+    new_value: newValue ?? null,
+    project_id: projectId
   })
+}
+
+// ── Supabase Client for release notes ──────────────────────────────
+
+function getAnonymousSupabaseClient(): SupabaseClient | null {
+  if (supabaseClient) return supabaseClient
+  const creds = getSupabaseCredentials()
+  if (!creds) return null
+  return createClient(creds.url, creds.key)
 }
 
 // ── Tool Handlers ───────────────────────────────────────────────────
 
-type Handler = (args: Record<string, unknown>) => unknown
+type Handler = (args: Record<string, unknown>) => Promise<unknown>
 
 const handlers: Record<string, Handler> = {
   // ── Tasks — CRUD ────────────────────────────────────────────────
-  create_task(args) {
-    const user = getUser()
+  async create_task(args) {
+    const repos = getRepos()
+    const user = await getUser()
     const projectId = requireStr(args, 'project_id')
-    const defaultStatus = repos.statuses.findDefault(projectId)
+    const defaultStatus = await repos.statuses.findDefault(projectId)
     if (!defaultStatus) throw new Error('No default status found for project')
 
-    const task = repos.tasks.create({
+    const task = await repos.tasks.create({
       id: randomUUID(),
       project_id: projectId,
       owner_id: user.id,
@@ -879,28 +972,31 @@ const handlers: Record<string, Handler> = {
       due_date: optStr(args, 'due_date') ?? null,
       parent_id: optStr(args, 'parent_id') ?? null
     })
-    logActivity(task.id, user.id, 'created')
+    await logActivity(task.id, user.id, 'created', null, null, projectId)
     return task
   },
 
-  list_tasks(args) {
-    return repos.tasks.findByProjectId(requireStr(args, 'project_id'))
+  async list_tasks(args) {
+    const repos = getRepos()
+    return await repos.tasks.findByProjectId(requireStr(args, 'project_id'))
   },
 
-  get_task(args) {
+  async get_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const labels = repos.labels.findByTaskId(taskId)
-    const subtaskCount = repos.tasks.getSubtaskCount(taskId)
+    const labels = await repos.labels.findByTaskId(taskId)
+    const subtaskCount = await repos.tasks.getSubtaskCount(taskId)
     return { ...task, labels, subtask_count: subtaskCount }
   },
 
-  update_task(args) {
+  async update_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const oldTask = repos.tasks.findById(taskId)
+    const oldTask = await repos.tasks.findById(taskId)
     if (!oldTask) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
 
     const input: Record<string, string | number | null> = {}
     const title = optStr(args, 'title')
@@ -914,211 +1010,226 @@ const handlers: Record<string, Handler> = {
     const statusId = optStr(args, 'status_id')
     if (statusId !== undefined) input.status_id = statusId
 
-    const result = repos.tasks.update(taskId, input)
+    const result = await repos.tasks.update(taskId, input)
     if (!result) throw new Error(`Task not found: ${taskId}`)
 
     // Log per changed field
     if (title !== undefined && title !== oldTask.title) {
-      logActivity(taskId, user.id, 'title_changed', oldTask.title, title)
+      await logActivity(taskId, user.id, 'title_changed', oldTask.title, title, oldTask.project_id)
     }
     if (description !== undefined && description !== oldTask.description) {
-      logActivity(taskId, user.id, 'description_changed', oldTask.description ?? '', description)
+      await logActivity(taskId, user.id, 'description_changed', oldTask.description ?? '', description, oldTask.project_id)
     }
     if (priority !== undefined && priority !== oldTask.priority) {
-      logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[oldTask.priority] ?? '', PRIORITY_NAMES[priority] ?? '')
+      await logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[oldTask.priority] ?? '', PRIORITY_NAMES[priority] ?? '', oldTask.project_id)
     }
     if (dueDate !== undefined) {
       const newDue = dueDate === '' ? null : dueDate
       if (newDue !== oldTask.due_date) {
-        logActivity(taskId, user.id, 'due_date_changed', oldTask.due_date ?? '', newDue ?? '')
+        await logActivity(taskId, user.id, 'due_date_changed', oldTask.due_date ?? '', newDue ?? '', oldTask.project_id)
       }
     }
     if (statusId !== undefined && statusId !== oldTask.status_id) {
-      const oldStatus = repos.statuses.findById(oldTask.status_id)
-      const newStatus = repos.statuses.findById(statusId)
-      logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
+      const oldStatus = await repos.statuses.findById(oldTask.status_id)
+      const newStatus = await repos.statuses.findById(statusId)
+      await logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '', oldTask.project_id)
     }
     return result
   },
 
-  delete_task(args) {
+  async delete_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
-    logActivity(taskId, user.id, 'deleted', task.title, null)
+    const user = await getUser()
+    await logActivity(taskId, user.id, 'deleted', task.title, null, task.project_id)
     // Delete subtasks first
-    const subtasks = repos.tasks.findSubtasks(taskId)
+    const subtasks = await repos.tasks.findSubtasks(taskId)
     for (const sub of subtasks) {
-      repos.tasks.delete(sub.id)
+      await repos.tasks.delete(sub.id)
     }
-    repos.tasks.delete(taskId)
+    await repos.tasks.delete(taskId)
     return { deleted: true, task_id: taskId }
   },
 
   // ── Tasks — Status changes ──────────────────────────────────────
-  complete_task(args) {
+  async complete_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
-    const oldStatus = repos.statuses.findById(task.status_id)
-    const doneStatus = repos.statuses.findDone(task.project_id)
+    const user = await getUser()
+    const oldStatus = await repos.statuses.findById(task.status_id)
+    const doneStatus = await repos.statuses.findDone(task.project_id)
     if (!doneStatus) throw new Error('No done status found for project')
-    const result = repos.tasks.update(taskId, {
+    const result = await repos.tasks.update(taskId, {
       status_id: doneStatus.id,
       completed_date: new Date().toISOString()
     })
-    logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', doneStatus.name)
+    await logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', doneStatus.name, task.project_id)
     return result
   },
 
-  reopen_task(args) {
+  async reopen_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
-    const oldStatus = repos.statuses.findById(task.status_id)
-    const defaultStatus = repos.statuses.findDefault(task.project_id)
+    const user = await getUser()
+    const oldStatus = await repos.statuses.findById(task.status_id)
+    const defaultStatus = await repos.statuses.findDefault(task.project_id)
     if (!defaultStatus) throw new Error('No default status found for project')
-    const result = repos.tasks.update(taskId, {
+    const result = await repos.tasks.update(taskId, {
       status_id: defaultStatus.id,
       completed_date: null
     })
-    logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', defaultStatus.name)
+    await logActivity(taskId, user.id, 'status_changed', oldStatus?.name ?? '', defaultStatus.name, task.project_id)
     return result
   },
 
   // ── Tasks — Field setters ──────────────────────────────────────
-  set_task_priority(args) {
+  async set_task_priority(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
     const priority = optNum(args, 'priority') ?? 0
-    const result = repos.tasks.update(taskId, { priority })
+    const result = await repos.tasks.update(taskId, { priority })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[task.priority] ?? '', PRIORITY_NAMES[priority] ?? '')
+    await logActivity(taskId, user.id, 'priority_changed', PRIORITY_NAMES[task.priority] ?? '', PRIORITY_NAMES[priority] ?? '', task.project_id)
     return result
   },
 
-  set_task_due_date(args) {
+  async set_task_due_date(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
     const dueDate = optStr(args, 'due_date') ?? ''
     const newDue = dueDate === '' ? null : dueDate
-    const result = repos.tasks.update(taskId, { due_date: newDue })
+    const result = await repos.tasks.update(taskId, { due_date: newDue })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', newDue ?? '')
+    await logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', newDue ?? '', task.project_id)
     return result
   },
 
-  set_task_description(args) {
+  async set_task_description(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
     const description = optStr(args, 'description') ?? ''
-    const result = repos.tasks.update(taskId, { description })
+    const result = await repos.tasks.update(taskId, { description })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'description_changed', task.description ?? '', description)
+    await logActivity(taskId, user.id, 'description_changed', task.description ?? '', description, task.project_id)
     return result
   },
 
-  set_task_recurrence(args) {
+  async set_task_recurrence(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
     const rule = optStr(args, 'recurrence_rule') ?? ''
     const newRule = rule === '' ? null : rule
-    const result = repos.tasks.update(taskId, { recurrence_rule: newRule })
+    const result = await repos.tasks.update(taskId, { recurrence_rule: newRule })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'recurrence_changed', task.recurrence_rule ?? '', newRule ?? '')
+    await logActivity(taskId, user.id, 'recurrence_changed', task.recurrence_rule ?? '', newRule ?? '', task.project_id)
     return result
   },
 
   // ── Tasks — My Day ─────────────────────────────────────────────
-  add_task_to_my_day(args) {
+  async add_task_to_my_day(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const user = getUser()
-    const result = repos.tasks.update(taskId, { is_in_my_day: 1 })
+    const user = await getUser()
+    const result = await repos.tasks.update(taskId, { is_in_my_day: 1 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'pinned_to_my_day')
+    await logActivity(taskId, user.id, 'pinned_to_my_day', null, null, result.project_id)
     return result
   },
 
-  remove_task_from_my_day(args) {
+  async remove_task_from_my_day(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const user = getUser()
-    const result = repos.tasks.update(taskId, { is_in_my_day: 0 })
+    const user = await getUser()
+    const result = await repos.tasks.update(taskId, { is_in_my_day: 0 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'unpinned_from_my_day')
+    await logActivity(taskId, user.id, 'unpinned_from_my_day', null, null, result.project_id)
     return result
   },
 
   // ── Tasks — Other actions ──────────────────────────────────────
-  snooze_task(args) {
+  async snooze_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const task = repos.tasks.findById(taskId)
+    const task = await repos.tasks.findById(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
-    const user = getUser()
+    const user = await getUser()
     const snoozeUntil = requireStr(args, 'snooze_until')
-    const result = repos.tasks.update(taskId, {
+    const result = await repos.tasks.update(taskId, {
       due_date: snoozeUntil,
       is_in_my_day: 0
     })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', snoozeUntil)
+    await logActivity(taskId, user.id, 'due_date_changed', task.due_date ?? '', snoozeUntil, task.project_id)
     return result
   },
 
-  archive_task(args) {
+  async archive_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const user = getUser()
-    const result = repos.tasks.update(taskId, { is_archived: 1 })
+    const user = await getUser()
+    const result = await repos.tasks.update(taskId, { is_archived: 1 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'archived')
+    await logActivity(taskId, user.id, 'archived', null, null, result.project_id)
     return result
   },
 
-  unarchive_task(args) {
+  async unarchive_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const user = getUser()
-    const result = repos.tasks.update(taskId, { is_archived: 0 })
+    const user = await getUser()
+    const result = await repos.tasks.update(taskId, { is_archived: 0 })
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(taskId, user.id, 'unarchived')
+    await logActivity(taskId, user.id, 'unarchived', null, null, result.project_id)
     return result
   },
 
-  duplicate_task(args) {
+  async duplicate_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const user = getUser()
-    const result = repos.tasks.duplicate(taskId, randomUUID())
+    const user = await getUser()
+    const result = await repos.tasks.duplicate(taskId, randomUUID())
     if (!result) throw new Error(`Task not found: ${taskId}`)
-    logActivity(result.id, user.id, 'created')
+    await logActivity(result.id, user.id, 'created', null, null, result.project_id)
     return result
   },
 
-  save_task_as_template(args) {
+  async save_task_as_template(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
-    const result = repos.tasks.saveAsTemplate(taskId, randomUUID())
+    const result = await repos.tasks.saveAsTemplate(taskId, randomUUID())
     if (!result) throw new Error(`Task not found: ${taskId}`)
     return result
   },
 
   // ── Subtasks ───────────────────────────────────────────────────
-  create_subtask(args) {
+  async create_subtask(args) {
+    const repos = getRepos()
     const parentId = requireStr(args, 'parent_id')
-    const parent = repos.tasks.findById(parentId)
+    const parent = await repos.tasks.findById(parentId)
     if (!parent) throw new Error(`Parent task not found: ${parentId}`)
-    const user = getUser()
-    const defaultStatus = repos.statuses.findDefault(parent.project_id)
+    const user = await getUser()
+    const defaultStatus = await repos.statuses.findDefault(parent.project_id)
     if (!defaultStatus) throw new Error('No default status found for project')
 
-    const subtask = repos.tasks.create({
+    const subtask = await repos.tasks.create({
       id: randomUUID(),
       project_id: parent.project_id,
       owner_id: user.id,
@@ -1126,75 +1237,79 @@ const handlers: Record<string, Handler> = {
       status_id: defaultStatus.id,
       parent_id: parentId
     })
-    logActivity(subtask.id, user.id, 'created')
+    await logActivity(subtask.id, user.id, 'created', null, null, parent.project_id)
     return subtask
   },
 
-  list_subtasks(args) {
-    return repos.tasks.findSubtasks(requireStr(args, 'parent_id'))
+  async list_subtasks(args) {
+    const repos = getRepos()
+    return await repos.tasks.findSubtasks(requireStr(args, 'parent_id'))
   },
 
   // ── Projects ───────────────────────────────────────────────────
-  list_projects() {
-    return repos.projects.list()
+  async list_projects() {
+    const repos = getRepos()
+    return await repos.projects.list()
   },
 
-  get_project(args) {
+  async get_project(args) {
+    const repos = getRepos()
     const projectId = requireStr(args, 'project_id')
-    const project = repos.projects.findById(projectId)
+    const project = await repos.projects.findById(projectId)
     if (!project) throw new Error(`Project not found: ${projectId}`)
-    const statuses = repos.statuses.findByProjectId(projectId)
-    const labels = repos.labels.findByProjectId(projectId)
+    const statuses = await repos.statuses.findByProjectId(projectId)
+    const labels = await repos.labels.findByProjectId(projectId)
     return { ...project, statuses, labels }
   },
 
-  create_project(args) {
-    const user = getUser()
+  async create_project(args) {
+    const repos = getRepos()
+    const user = await getUser()
     const projectId = randomUUID()
-    const project = repos.projects.create({
+
+    if (supabaseMode) {
+      // Supabase: share_project RPC handles project + membership atomically
+      const project = await repos.projects.create({
+        id: projectId,
+        name: requireStr(args, 'name'),
+        owner_id: user.id,
+        color: optStr(args, 'color'),
+        description: optStr(args, 'description')
+      })
+
+      // Create default statuses
+      const notStartedId = randomUUID()
+      const inProgressId = randomUUID()
+      const doneId = randomUUID()
+      await repos.statuses.create({ id: notStartedId, project_id: projectId, name: 'Not Started', color: '#888888', icon: 'circle', order_index: 0, is_default: 1 })
+      await repos.statuses.create({ id: inProgressId, project_id: projectId, name: 'In Progress', color: '#3b82f6', icon: 'circle-dot', order_index: 1 })
+      await repos.statuses.create({ id: doneId, project_id: projectId, name: 'Done', color: '#22c55e', icon: 'check-circle-2', order_index: 2, is_done: 1 })
+
+      return project
+    }
+
+    // SQLite mode
+    const project = await repos.projects.create({
       id: projectId,
       name: requireStr(args, 'name'),
       owner_id: user.id,
       color: optStr(args, 'color'),
       description: optStr(args, 'description')
     })
-    repos.projects.addMember(projectId, user.id, 'owner')
+    await repos.projects.addMember(projectId, user.id, 'owner')
 
-    // Create default statuses
     const notStartedId = randomUUID()
     const inProgressId = randomUUID()
     const doneId = randomUUID()
-    repos.statuses.create({
-      id: notStartedId,
-      project_id: projectId,
-      name: 'Not Started',
-      color: '#888888',
-      icon: 'circle',
-      order_index: 0,
-      is_default: 1
-    })
-    repos.statuses.create({
-      id: inProgressId,
-      project_id: projectId,
-      name: 'In Progress',
-      color: '#3b82f6',
-      icon: 'circle-dot',
-      order_index: 1
-    })
-    repos.statuses.create({
-      id: doneId,
-      project_id: projectId,
-      name: 'Done',
-      color: '#22c55e',
-      icon: 'check-circle-2',
-      order_index: 2,
-      is_done: 1
-    })
+    await repos.statuses.create({ id: notStartedId, project_id: projectId, name: 'Not Started', color: '#888888', icon: 'circle', order_index: 0, is_default: 1 })
+    await repos.statuses.create({ id: inProgressId, project_id: projectId, name: 'In Progress', color: '#3b82f6', icon: 'circle-dot', order_index: 1 })
+    await repos.statuses.create({ id: doneId, project_id: projectId, name: 'Done', color: '#22c55e', icon: 'check-circle-2', order_index: 2, is_done: 1 })
 
     return project
   },
 
-  update_project(args) {
+  async update_project(args) {
+    const repos = getRepos()
     const projectId = requireStr(args, 'project_id')
     const input: Record<string, string | undefined> = {}
     const name = optStr(args, 'name')
@@ -1204,25 +1319,28 @@ const handlers: Record<string, Handler> = {
     const description = optStr(args, 'description')
     if (description !== undefined) input.description = description
 
-    const result = repos.projects.update(projectId, input)
+    const result = await repos.projects.update(projectId, input)
     if (!result) throw new Error(`Project not found: ${projectId}`)
     return result
   },
 
-  delete_project(args) {
+  async delete_project(args) {
+    const repos = getRepos()
     const projectId = requireStr(args, 'project_id')
-    const deleted = repos.projects.delete(projectId)
+    const deleted = await repos.projects.delete(projectId)
     if (!deleted) throw new Error(`Project not found: ${projectId}`)
     return { deleted: true, project_id: projectId }
   },
 
   // ── Labels ─────────────────────────────────────────────────────
-  list_labels(args) {
-    return repos.labels.findByProjectId(requireStr(args, 'project_id'))
+  async list_labels(args) {
+    const repos = getRepos()
+    return await repos.labels.findByProjectId(requireStr(args, 'project_id'))
   },
 
-  create_label(args) {
-    return repos.labels.create({
+  async create_label(args) {
+    const repos = getRepos()
+    return await repos.labels.create({
       id: randomUUID(),
       project_id: requireStr(args, 'project_id'),
       name: requireStr(args, 'name'),
@@ -1230,39 +1348,45 @@ const handlers: Record<string, Handler> = {
     })
   },
 
-  assign_label_to_task(args) {
+  async assign_label_to_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
     const labelId = requireStr(args, 'label_id')
-    const user = getUser()
-    repos.tasks.addLabel(taskId, labelId)
-    const label = repos.labels.findById(labelId)
-    logActivity(taskId, user.id, 'label_added', null, label?.name ?? labelId)
+    const user = await getUser()
+    await repos.tasks.addLabel(taskId, labelId)
+    const label = await repos.labels.findById(labelId)
+    const task = await repos.tasks.findById(taskId)
+    await logActivity(taskId, user.id, 'label_added', null, label?.name ?? labelId, task?.project_id)
     return { assigned: true, task_id: taskId, label_id: labelId }
   },
 
-  remove_label_from_task(args) {
+  async remove_label_from_task(args) {
+    const repos = getRepos()
     const taskId = requireStr(args, 'task_id')
     const labelId = requireStr(args, 'label_id')
-    const user = getUser()
-    const label = repos.labels.findById(labelId)
-    const removed = repos.tasks.removeLabel(taskId, labelId)
+    const user = await getUser()
+    const label = await repos.labels.findById(labelId)
+    const task = await repos.tasks.findById(taskId)
+    const removed = await repos.tasks.removeLabel(taskId, labelId)
     if (removed) {
-      logActivity(taskId, user.id, 'label_removed', label?.name ?? labelId, null)
+      await logActivity(taskId, user.id, 'label_removed', label?.name ?? labelId, null, task?.project_id)
     }
     return { removed, task_id: taskId, label_id: labelId }
   },
 
   // ── Statuses ───────────────────────────────────────────────────
-  list_statuses(args) {
-    return repos.statuses.findByProjectId(requireStr(args, 'project_id'))
+  async list_statuses(args) {
+    const repos = getRepos()
+    return await repos.statuses.findByProjectId(requireStr(args, 'project_id'))
   },
 
   // ── Search ─────────────────────────────────────────────────────
-  search_tasks(args) {
+  async search_tasks(args) {
+    const repos = getRepos()
     const excludeLabelId = optStr(args, 'exclude_label_id')
     const excludeStatusId = optStr(args, 'exclude_status_id')
     const excludePriority = optNum(args, 'exclude_priority')
-    return repos.tasks.search({
+    return await repos.tasks.search({
       project_id: optStr(args, 'project_id'),
       status_id: optStr(args, 'status_id'),
       priority: optNum(args, 'priority'),
@@ -1277,32 +1401,35 @@ const handlers: Record<string, Handler> = {
   },
 
   // ── My Day ─────────────────────────────────────────────────────
-  list_my_day() {
-    const user = getUser()
-    return repos.tasks.findMyDay(user.id)
+  async list_my_day() {
+    const repos = getRepos()
+    const user = await getUser()
+    return await repos.tasks.findMyDay(user.id)
   },
 
   // ── Templates ──────────────────────────────────────────────────
-  list_templates() {
-    const user = getUser()
-    const taskTemplates = repos.tasks.findAllTemplates(user.id)
-    const projectTemplates = repos.projectTemplates.findByOwnerId(user.id)
+  async list_templates() {
+    const repos = getRepos()
+    const user = await getUser()
+    const taskTemplates = await repos.tasks.findAllTemplates(user.id)
+    const projectTemplates = await repos.projectTemplates.findByOwnerId(user.id)
     return { task_templates: taskTemplates, project_templates: projectTemplates }
   },
 
-  use_task_template(args) {
+  async use_task_template(args) {
+    const repos = getRepos()
     const templateId = requireStr(args, 'template_id')
     const projectId = requireStr(args, 'project_id')
 
-    const template = repos.tasks.findById(templateId)
+    const template = await repos.tasks.findById(templateId)
     if (!template || !template.is_template) throw new Error(`Task template not found: ${templateId}`)
 
-    const user = getUser()
-    const defaultStatus = repos.statuses.findDefault(projectId)
+    const user = await getUser()
+    const defaultStatus = await repos.statuses.findDefault(projectId)
     if (!defaultStatus) throw new Error('No default status found for target project')
 
     const newId = randomUUID()
-    const newTask = repos.tasks.create({
+    const newTask = await repos.tasks.create({
       id: newId,
       project_id: projectId,
       owner_id: user.id,
@@ -1315,19 +1442,18 @@ const handlers: Record<string, Handler> = {
     })
 
     // Copy labels — reuse existing global labels or create new ones
-    const templateLabels = repos.labels.findByTaskId(templateId)
-    const targetLabels = [...repos.labels.findByProjectId(projectId)]
+    const templateLabels = await repos.labels.findByTaskId(templateId)
+    const targetLabels = [...(await repos.labels.findByProjectId(projectId))]
     for (const tl of templateLabels) {
       let target = targetLabels.find((l) => l.name === tl.name)
       if (!target) {
-        // Check for existing global label by name
-        const existing = repos.labels.findByName(getUser().id, tl.name)
+        const existing = await repos.labels.findByName(user.id, tl.name)
         if (existing) {
-          repos.labels.addToProject(projectId, existing.id)
+          await repos.labels.addToProject(projectId, existing.id)
           targetLabels.push(existing)
           target = existing
         } else {
-          const created = repos.labels.create({
+          const created = await repos.labels.create({
             id: randomUUID(),
             project_id: projectId,
             name: tl.name,
@@ -1337,44 +1463,48 @@ const handlers: Record<string, Handler> = {
           target = created
         }
       }
-      repos.tasks.addLabel(newId, target.id)
+      await repos.tasks.addLabel(newId, target.id)
     }
 
     // Copy subtasks recursively
-    copyTemplateSubtasks(templateId, newId, projectId, user.id, defaultStatus.id, targetLabels)
+    await copyTemplateSubtasks(templateId, newId, projectId, user.id, defaultStatus.id, targetLabels)
 
-    logActivity(newId, user.id, 'created')
+    await logActivity(newId, user.id, 'created', null, null, projectId)
     return newTask
   },
 
-  deploy_project_template(args) {
+  async deploy_project_template(args) {
+    const repos = getRepos()
     const templateId = requireStr(args, 'template_id')
-    const template = repos.projectTemplates.findById(templateId)
+    const template = await repos.projectTemplates.findById(templateId)
     if (!template) throw new Error(`Project template not found: ${templateId}`)
 
     const data = JSON.parse(template.data) as ProjectTemplateData
-    const user = getUser()
+    const user = await getUser()
 
     const projectId = randomUUID()
-    const project = repos.projects.create({
+    const project = await repos.projects.create({
       id: projectId,
       name: optStr(args, 'name') ?? template.name,
       color: optStr(args, 'color') ?? template.color,
       owner_id: user.id
     })
-    repos.projects.addMember(projectId, user.id, 'owner')
+    if (!supabaseMode) {
+      await repos.projects.addMember(projectId, user.id, 'owner')
+    }
 
-    deployTemplate(data, projectId, user.id)
+    await deployTemplate(data, projectId, user.id)
     return project
   },
 
   // ── Project Areas ──────────────────────────────────────────────
-  create_area(args) {
-    const user = getUser()
+  async create_area(args) {
+    const repos = getRepos()
+    const user = await getUser()
     const name = requireStr(args, 'name')
     const color = optStr(args, 'color')
-    const existing = repos.projectAreas.findByUserId(user.id)
-    return repos.projectAreas.create({
+    const existing = await repos.projectAreas.findByUserId(user.id)
+    return await repos.projectAreas.create({
       id: randomUUID(),
       user_id: user.id,
       name,
@@ -1383,52 +1513,56 @@ const handlers: Record<string, Handler> = {
     })
   },
 
-  list_areas() {
-    const user = getUser()
-    const areas = repos.projectAreas.findByUserId(user.id)
-    // Add project counts
+  async list_areas() {
+    const repos = getRepos()
+    const user = await getUser()
+    const areas = await repos.projectAreas.findByUserId(user.id)
+    const projects = await repos.projects.list()
     return areas.map((area) => {
-      const projects = repos.projects.list().filter((p) => p.area_id === area.id)
-      return { ...area, project_count: projects.length }
+      const areaProjects = projects.filter((p) => p.area_id === area.id)
+      return { ...area, project_count: areaProjects.length }
     })
   },
 
-  update_area(args) {
+  async update_area(args) {
+    const repos = getRepos()
     const areaId = requireStr(args, 'area_id')
-    const area = repos.projectAreas.findById(areaId)
+    const area = await repos.projectAreas.findById(areaId)
     if (!area) throw new Error(`Area not found: ${areaId}`)
     const input: Record<string, string> = {}
     const name = optStr(args, 'name')
     if (name !== undefined) input.name = name
     const color = optStr(args, 'color')
     if (color !== undefined) input.color = color
-    return repos.projectAreas.update(areaId, input)
+    return await repos.projectAreas.update(areaId, input)
   },
 
-  delete_area(args) {
+  async delete_area(args) {
+    const repos = getRepos()
     const areaId = requireStr(args, 'area_id')
-    const area = repos.projectAreas.findById(areaId)
+    const area = await repos.projectAreas.findById(areaId)
     if (!area) throw new Error(`Area not found: ${areaId}`)
-    repos.projectAreas.delete(areaId)
+    await repos.projectAreas.delete(areaId)
     return { deleted: true, area_id: areaId }
   },
 
-  assign_project_to_area(args) {
+  async assign_project_to_area(args) {
+    const repos = getRepos()
     const projectId = requireStr(args, 'project_id')
     const areaId = optStr(args, 'area_id')
-    repos.projectAreas.assignProject(projectId, areaId && areaId !== '' ? areaId : null)
+    await repos.projectAreas.assignProject(projectId, areaId && areaId !== '' ? areaId : null)
     return { assigned: true, project_id: projectId, area_id: areaId || null }
   },
 
   // ── Saved Views ────────────────────────────────────────────────
-  create_saved_view(args) {
-    const user = getUser()
+  async create_saved_view(args) {
+    const repos = getRepos()
+    const user = await getUser()
     const name = requireStr(args, 'name')
     const filterConfig = requireStr(args, 'filter_config')
-    // Validate JSON
     try { JSON.parse(filterConfig) } catch { throw new Error('filter_config must be valid JSON') }
-    const existing = repos.savedViews.findByUserId(user.id)
-    return repos.savedViews.create({
+    const existing = await repos.savedViews.findByUserId(user.id)
+    return await repos.savedViews.create({
       id: randomUUID(),
       user_id: user.id,
       name,
@@ -1437,38 +1571,39 @@ const handlers: Record<string, Handler> = {
     })
   },
 
-  list_saved_views() {
-    const user = getUser()
-    return repos.savedViews.findByUserId(user.id)
+  async list_saved_views() {
+    const repos = getRepos()
+    const user = await getUser()
+    return await repos.savedViews.findByUserId(user.id)
   },
 
-  delete_saved_view(args) {
+  async delete_saved_view(args) {
+    const repos = getRepos()
     const viewId = requireStr(args, 'view_id')
-    const view = repos.savedViews.findById(viewId)
+    const view = await repos.savedViews.findById(viewId)
     if (!view) throw new Error(`Saved view not found: ${viewId}`)
-    repos.savedViews.delete(viewId)
+    await repos.savedViews.delete(viewId)
     return { deleted: true, view_id: viewId }
   },
 
   // ── Tasks — Reorder ─────────────────────────────────────────────
-  reorder_tasks(args) {
+  async reorder_tasks(args) {
+    const repos = getRepos()
     const taskIds = args.task_ids
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       throw new Error('task_ids must be a non-empty array of task IDs')
     }
     const ids = taskIds.map(String)
 
-    // Validate all task IDs exist
     for (const id of ids) {
-      const task = repos.tasks.findById(id)
+      const task = await repos.tasks.findById(id)
       if (!task) throw new Error(`Task not found: ${id}`)
     }
 
-    repos.tasks.reorder(ids)
+    await repos.tasks.reorder(ids)
 
-    // Check if priority auto-sort is enabled
-    const user = getUser()
-    const autoSort = repos.settings.get(user.id, 'priority_auto_sort')
+    const user = await getUser()
+    const autoSort = await repos.settings.get(user.id, 'priority_auto_sort')
     const warning =
       autoSort === 'true'
         ? 'Note: priority auto-sort is enabled in the user\'s settings — the visual order in the app may differ from the requested order'
@@ -1486,16 +1621,17 @@ const handlers: Record<string, Handler> = {
     const content = requireStr(args, 'content')
     const version = optStr(args, 'version') ?? readPackageVersion()
 
-    const client = getSupabaseClient()
+    const client = getAnonymousSupabaseClient()
     if (client) {
       const { error } = await client
         .from('release_notes')
         .upsert({ version, content, published_at: new Date().toISOString() }, { onConflict: 'version' })
 
       if (error) {
-        // Fall back to local SQLite
         process.stderr.write(`Supabase upsert failed: ${error.message}\n`)
-        repos.settings.set('', 'whats_new', `## ${version}\n${content}`)
+        if (!supabaseMode) {
+          sqliteRepos!.settings.set('', 'whats_new', `## ${version}\n${content}`)
+        }
         return { success: true, content, version, storage: 'local-fallback', error: error.message }
       }
 
@@ -1505,17 +1641,18 @@ const handlers: Record<string, Handler> = {
         .select('version, content')
         .order('published_at', { ascending: false })
 
-      if (data && data.length > 0) {
+      if (data && data.length > 0 && !supabaseMode) {
         const markdown = data.map((row: { version: string; content: string }) => `## ${row.version}\n${row.content}`).join('\n\n')
-        repos.settings.set('', 'whats_new', markdown)
+        sqliteRepos!.settings.set('', 'whats_new', markdown)
       }
 
       return { success: true, content, version, storage: 'supabase' }
     }
 
-    // No Supabase — write locally only
-    repos.settings.set('', 'whats_new', `## ${version}\n${content}`)
-    return { success: true, content, version, storage: 'local-only' }
+    if (!supabaseMode) {
+      sqliteRepos!.settings.set('', 'whats_new', `## ${version}\n${content}`)
+    }
+    return { success: true, content, version, storage: supabaseMode ? 'supabase-only' : 'local-only' }
   }
 }
 
@@ -1533,7 +1670,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const handler = handlers[name]
   if (!handler) return fail(`Unknown tool: ${name}`)
   try {
-    const result = await Promise.resolve(handler(args ?? {}))
+    const result = await handler(args ?? {})
     return ok(result)
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e))
@@ -1541,6 +1678,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 })
 
 async function main(): Promise<void> {
+  // Try Supabase mode first, then fall back to SQLite
+  const supabaseOk = await initSupabaseMode()
+  if (!supabaseOk) {
+    const sqliteOk = initSqliteMode()
+    if (!sqliteOk) {
+      process.stderr.write(
+        'ToDoozy MCP server: No Supabase session and no SQLite database found.\n' +
+        'Sign into the ToDoozy app first, or set TODOOZY_DEV_DB for dev mode.\n'
+      )
+      process.exit(1)
+    }
+  }
+
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }

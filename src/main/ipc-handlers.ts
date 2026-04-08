@@ -60,9 +60,39 @@ function clearEncryptedSession(): void {
   }
 }
 
+// ── MCP session file bridge ─────────────────────────────────────────
+// Write a plaintext session file so the standalone MCP server can authenticate
+// with Supabase without needing Electron's safeStorage.
+const getMcpSessionPath = (): string => join(app.getPath('userData'), 'mcp-session.json')
+
+function writeMcpSession(sessionJson: string): void {
+  try {
+    const parsed = JSON.parse(sessionJson)
+    writeFileSync(
+      getMcpSessionPath(),
+      JSON.stringify({
+        access_token: parsed.access_token,
+        refresh_token: parsed.refresh_token,
+        expires_at: parsed.expires_at
+      })
+    )
+  } catch {
+    // Non-fatal — MCP server will fall back to SQLite
+  }
+}
+
+function deleteMcpSession(): void {
+  try {
+    unlinkSync(getMcpSessionPath())
+  } catch {
+    // File may not exist — ignore
+  }
+}
+
 function registerAuthHandlers(): void {
   ipcMain.handle('auth:storeSession', (_e, sessionJson: string) => {
     storeEncryptedSession(sessionJson)
+    writeMcpSession(sessionJson)
   })
 
   ipcMain.handle('auth:getSession', () => {
@@ -71,6 +101,7 @@ function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:clearSession', () => {
     clearEncryptedSession()
+    deleteMcpSession()
   })
 
   ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {

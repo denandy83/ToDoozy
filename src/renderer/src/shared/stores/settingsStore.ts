@@ -77,6 +77,13 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       set((state) => ({
         settings: { ...state.settings, [key]: value }
       }))
+      // Push to Supabase
+      if (value !== null) {
+        const uid = userId
+        import('../../services/PersonalSyncService').then(({ pushSetting }) => {
+          pushSetting(key, value, uid).catch(() => {})
+        })
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save setting'
       set({ error: message })
@@ -94,6 +101,15 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
           updated[setting.key] = setting.value
         }
         return { settings: updated }
+      })
+      // Push to Supabase
+      const uid = userId
+      import('../../services/PersonalSyncService').then(({ pushSetting }) => {
+        for (const setting of settings) {
+          if (setting.value !== null) {
+            pushSetting(setting.key, setting.value, uid).catch(() => {})
+          }
+        }
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save settings'
