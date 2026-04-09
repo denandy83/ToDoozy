@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { DatabaseSync } from 'node:sqlite'
 import { SettingsRepository } from '../repositories/SettingsRepository'
+import { getDatabase } from '../database'
 
 interface SupabaseReleaseNote {
   version: string
@@ -11,7 +11,6 @@ interface SupabaseReleaseNote {
 const SUPABASE_TABLE = 'release_notes'
 
 let supabase: SupabaseClient | null = null
-let settingsRepo: SettingsRepository | null = null
 
 function getClient(): SupabaseClient {
   if (!supabase) {
@@ -23,14 +22,9 @@ function getClient(): SupabaseClient {
   return supabase
 }
 
+/** Get a fresh SettingsRepository using the current (possibly switched) database */
 function getSettings(): SettingsRepository {
-  if (!settingsRepo) throw new Error('ReleaseNotesService not initialized')
-  return settingsRepo
-}
-
-/** Initialize the service with the local database for caching */
-export function initReleaseNotes(db: DatabaseSync): void {
-  settingsRepo = new SettingsRepository(db)
+  return new SettingsRepository(getDatabase())
 }
 
 /**
@@ -47,7 +41,7 @@ export async function syncReleaseNotes(): Promise<void> {
       .order('published_at', { ascending: false })
 
     if (error) {
-      console.error('Failed to fetch release notes from Supabase:', error.message)
+      console.error('[ReleaseNotes] Failed to fetch from Supabase:', error.message)
       return
     }
 
@@ -60,7 +54,7 @@ export async function syncReleaseNotes(): Promise<void> {
 
     getSettings().set('', 'whats_new', markdown)
   } catch (err) {
-    console.error('Release notes sync error:', err instanceof Error ? err.message : err)
+    console.error('[ReleaseNotes] Sync error:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -72,7 +66,6 @@ export async function syncReleaseNotes(): Promise<void> {
 export async function fetchVersionNotes(version: string): Promise<string | null> {
   try {
     const client = getClient()
-    // Normalize: try with and without 'v' prefix
     const versions = version.startsWith('v') ? [version, version.slice(1)] : [`v${version}`, version]
 
     for (const v of versions) {
@@ -87,7 +80,7 @@ export async function fetchVersionNotes(version: string): Promise<string | null>
 
     return null
   } catch (err) {
-    console.error('Failed to fetch version notes:', err instanceof Error ? err.message : err)
+    console.error('[ReleaseNotes] Failed to fetch version notes:', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -104,13 +97,13 @@ export async function upsertReleaseNotes(version: string, content: string): Prom
       .upsert({ version, content, published_at: new Date().toISOString() }, { onConflict: 'version' })
 
     if (error) {
-      console.error('Failed to upsert release notes:', error.message)
+      console.error('[ReleaseNotes] Failed to upsert:', error.message)
       return false
     }
 
     return true
   } catch (err) {
-    console.error('Release notes upsert error:', err instanceof Error ? err.message : err)
+    console.error('[ReleaseNotes] Upsert error:', err instanceof Error ? err.message : err)
     return false
   }
 }

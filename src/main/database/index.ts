@@ -135,14 +135,10 @@ function runMigrations(database: DatabaseSync): void {
 
   for (let i = currentVersion; i < migrations.length; i++) {
     const version = i + 1
-    console.log(`Running migration ${version}...`)
-
     withTransaction(database, () => {
       migrations[i](database)
       database.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version)
     })
-
-    console.log(`Migration ${version} complete.`)
   }
 }
 

@@ -10,7 +10,6 @@ import { useTimerStore } from './shared/stores/timerStore'
 import { useUpdateStore } from './shared/stores/updateStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
-import { UpdateDialog } from './shared/components/UpdateDialog'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
 import { useViewStore } from './shared/stores/viewStore'
@@ -365,7 +364,6 @@ function App(): React.JSX.Element {
   return (
     <>
       <AppLayout />
-      <UpdateDialog />
       {inviteState && (
         <InviteDialog
           projectName={inviteState.projectName}

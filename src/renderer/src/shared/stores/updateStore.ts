@@ -13,14 +13,11 @@ export type UpdateStatus =
 interface UpdateState {
   status: UpdateStatus
   appVersion: string
-  dialogOpen: boolean
 }
 
 interface UpdateActions {
   setStatus(status: UpdateStatus): void
   setAppVersion(version: string): void
-  openDialog(): void
-  closeDialog(): void
   checkForUpdates(): Promise<void>
   downloadUpdate(): Promise<void>
   installUpdate(): Promise<void>
@@ -33,26 +30,23 @@ export type UpdateStore = UpdateState & UpdateActions
 export const useUpdateStore = createWithEqualityFn<UpdateStore>((set, get) => ({
   status: { state: 'idle' },
   appVersion: '',
-  dialogOpen: false,
 
   setStatus(status: UpdateStatus): void {
     set({ status })
-    // Auto-open dialog when update is available
-    if (status.state === 'available') {
-      set({ dialogOpen: true })
+    // Notify via bell when download finishes
+    if (status.state === 'downloaded') {
+      import('./notificationStore').then(({ useNotificationStore }) => {
+        useNotificationStore.getState().createNotification({
+          id: crypto.randomUUID(),
+          type: 'update',
+          message: `Update v${status.version} is ready to install. Restart to apply.`
+        })
+      })
     }
   },
 
   setAppVersion(version: string): void {
     set({ appVersion: version })
-  },
-
-  openDialog(): void {
-    set({ dialogOpen: true })
-  },
-
-  closeDialog(): void {
-    set({ dialogOpen: false })
   },
 
   async checkForUpdates(): Promise<void> {
@@ -69,19 +63,15 @@ export const useUpdateStore = createWithEqualityFn<UpdateStore>((set, get) => ({
 
   async dismissUpdate(version: string): Promise<void> {
     await window.api.updater.dismiss(version)
-    set({ dialogOpen: false })
   },
 
   async init(): Promise<() => void> {
-    // Get current app version
     const version = await window.api.updater.getVersion()
     set({ appVersion: version })
 
-    // Get initial status
     const status = await window.api.updater.getStatus()
     set({ status })
 
-    // Listen for status updates from main process
     const unsub = window.api.updater.onStatus((status) => {
       get().setStatus(status)
     })

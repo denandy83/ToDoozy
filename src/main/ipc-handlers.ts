@@ -761,19 +761,17 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('app:getChangelog', async () => {
-    // 1. Try DB cache (populated by Supabase sync on startup)
-    try {
-      const cached = getRepos().settings.get('', 'whats_new')
-      if (cached) return cached
-    } catch { /* fall through */ }
-    // 2. No cache — sync from Supabase now
+    // Always sync from Supabase first to get the latest release notes
     try {
       const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
       await syncReleaseNotes()
-      const fresh = getRepos().settings.get('', 'whats_new')
-      if (fresh) return fresh
-    } catch { /* fall through */ }
-    return ''
+    } catch { /* sync failed — fall through to cache */ }
+    // Return whatever is in the cache (fresh from sync, or stale if offline)
+    try {
+      return getRepos().settings.get('', 'whats_new') ?? ''
+    } catch {
+      return ''
+    }
   })
 
   // ── Notifications ──────────────────────────────────────────────────

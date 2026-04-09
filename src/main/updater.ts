@@ -109,7 +109,8 @@ export function initUpdater(): void {
   })
 
   ipcMain.handle('updater:install', () => {
-    autoUpdater.quitAndInstall()
+    // isSilent=false shows install progress, isForceRunAfter=true ensures app relaunches on macOS
+    autoUpdater.quitAndInstall(false, true)
   })
 
   ipcMain.handle('updater:dismiss', (_e, version: string) => {
