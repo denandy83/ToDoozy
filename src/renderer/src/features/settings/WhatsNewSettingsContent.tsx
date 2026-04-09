@@ -78,8 +78,6 @@ export function WhatsNewSettingsContent(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{"What's New"}</p>
-
       {sections.length > 0 ? (
         sections.map((section) => (
           <div key={section.version} className="flex flex-col gap-1">
