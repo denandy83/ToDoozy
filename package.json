@@ -1,6 +1,6 @@
 {
   "name": "todoozy",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A collaborative, keyboard-driven, AI-native task manager",
   "main": "./out/main/index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "test": "vitest run",
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder",
-    "dist:mac": "bash scripts/bundle-release-notes.sh && electron-vite build && electron-builder --mac"
+    "dist:mac": "electron-vite build && electron-builder --mac"
   },
   "repository": {
     "type": "git",

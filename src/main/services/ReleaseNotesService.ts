@@ -1,23 +1,14 @@
-import { net } from 'electron'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { DatabaseSync } from 'node:sqlite'
 import { SettingsRepository } from '../repositories/SettingsRepository'
 
-interface ReleaseNoteRow {
+interface SupabaseReleaseNote {
   version: string
   content: string
   published_at: string
 }
 
-interface GitHubRelease {
-  tag_name: string
-  body: string | null
-  published_at: string
-  draft: boolean
-  prerelease: boolean
-}
-
-const GITHUB_RELEASES_URL = 'https://api.github.com/repos/denandy83/ToDoozy/releases'
+const SUPABASE_TABLE = 'release_notes'
 
 let supabase: SupabaseClient | null = null
 let settingsRepo: SettingsRepository | null = null
@@ -43,36 +34,28 @@ export function initReleaseNotes(db: DatabaseSync): void {
 }
 
 /**
- * Fetch published releases from GitHub, concatenate into versioned markdown,
- * and cache in local whats_new setting. Non-blocking — errors are logged, not thrown.
+ * Fetch all published release notes from Supabase, concatenate into versioned
+ * markdown, and cache in the local whats_new setting.
+ * Non-blocking — errors are logged, not thrown.
  */
 export async function syncReleaseNotes(): Promise<void> {
   try {
-    const response = await net.fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'ToDoozy-App' }
-    })
+    const client = getClient()
+    const { data, error } = await client
+      .from(SUPABASE_TABLE)
+      .select('version, content, published_at')
+      .order('published_at', { ascending: false })
 
-    if (!response.ok) {
-      console.error('Failed to fetch GitHub releases:', response.status, response.statusText)
+    if (error) {
+      console.error('Failed to fetch release notes from Supabase:', error.message)
       return
     }
 
-    const releases = (await response.json()) as GitHubRelease[]
+    const releases = data as SupabaseReleaseNote[]
+    if (releases.length === 0) return
 
-    const published = releases.filter((r) => !r.draft && !r.prerelease)
-    if (published.length === 0) return
-
-    const markdown = published
-      .map((r) => {
-        // Strip ## headers from body to avoid collision with version headers
-        const body = (r.body ?? '')
-          .split('\n')
-          .filter((line) => !line.trim().startsWith('## '))
-          .map((line) => (line.startsWith('* ') ? `- ${line.slice(2)}` : line))
-          .join('\n')
-          .trim()
-        return `## ${r.tag_name}\n${body || 'No release notes.'}`
-      })
+    const markdown = releases
+      .map((r) => `## ${r.version}\n${r.content.trim()}`)
       .join('\n\n')
 
     getSettings().set('', 'whats_new', markdown)
@@ -94,12 +77,12 @@ export async function fetchVersionNotes(version: string): Promise<string | null>
 
     for (const v of versions) {
       const { data, error } = await client
-        .from('release_notes')
+        .from(SUPABASE_TABLE)
         .select('content')
         .eq('version', v)
         .single()
 
-      if (!error && data) return (data as ReleaseNoteRow).content
+      if (!error && data) return (data as SupabaseReleaseNote).content
     }
 
     return null
@@ -117,7 +100,7 @@ export async function upsertReleaseNotes(version: string, content: string): Prom
   try {
     const client = getClient()
     const { error } = await client
-      .from('release_notes')
+      .from(SUPABASE_TABLE)
       .upsert({ version, content, published_at: new Date().toISOString() }, { onConflict: 'version' })
 
     if (error) {

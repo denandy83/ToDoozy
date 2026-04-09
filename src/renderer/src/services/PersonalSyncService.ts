@@ -17,6 +17,9 @@ function markSynced(): void {
 /** Track which projects have been confirmed in Supabase this session */
 const confirmedProjects = new Set<string>()
 
+/** Recently deleted task IDs — prevents pull from resurrecting tasks before Supabase delete completes */
+const recentlyDeletedIds = new Set<string>()
+
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
 async function ensureProjectInSupabase(projectId: string): Promise<void> {
   if (confirmedProjects.has(projectId)) return
@@ -87,6 +90,7 @@ export async function pushTask(task: Task): Promise<void> {
  * Delete a task from Supabase.
  */
 export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
+  recentlyDeletedIds.add(taskId)
   try {
     const supabase = await getSupabase()
     await supabase.from('tasks').delete().eq('id', taskId)
@@ -825,6 +829,7 @@ export async function pullNewTasks(projectId: string): Promise<number> {
 
     let changed = 0
     for (const rt of remoteTasks) {
+      if (recentlyDeletedIds.has(rt.id)) continue
       const existing = await window.api.tasks.findById(rt.id)
       if (!existing) {
         // New task — create locally

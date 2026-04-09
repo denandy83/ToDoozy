@@ -761,24 +761,17 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('app:getChangelog', async () => {
-    // 1. Try DB cache (populated by background GitHub sync)
+    // 1. Try DB cache (populated by Supabase sync on startup)
     try {
       const cached = getRepos().settings.get('', 'whats_new')
       if (cached) return cached
     } catch { /* fall through */ }
-    // 2. No cache — try syncing from GitHub now
+    // 2. No cache — sync from Supabase now
     try {
       const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
       await syncReleaseNotes()
       const fresh = getRepos().settings.get('', 'whats_new')
       if (fresh) return fresh
-    } catch { /* fall through */ }
-    // 3. GitHub unavailable — fall back to bundled release notes
-    const bundledPath = app.isPackaged
-      ? join(process.resourcesPath, 'release-notes.md')
-      : join(app.getAppPath(), 'resources', 'release-notes.md')
-    try {
-      return readFileSync(bundledPath, 'utf-8')
     } catch { /* fall through */ }
     return ''
   })
