@@ -197,8 +197,9 @@ export async function createTask(params: {
   referenceUrl: string | null
   statusId: string | null
   labelIds: string[]
+  recurrenceRule?: string | null
 }): Promise<SupabaseTask> {
-  const { projectId, title, priority, dueDate, referenceUrl, statusId, labelIds } = params
+  const { projectId, title, priority, dueDate, referenceUrl, statusId, labelIds, recurrenceRule } = params
 
   // Get default status if none specified
   let finalStatusId = statusId
@@ -244,6 +245,7 @@ export async function createTask(params: {
       priority,
       due_date: dueDate,
       reference_url: referenceUrl,
+      recurrence_rule: recurrenceRule ?? null,
       is_in_my_day: 0,
       is_archived: 0,
       parent_id: null,

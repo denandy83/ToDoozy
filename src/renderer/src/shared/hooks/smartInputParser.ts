@@ -1,4 +1,5 @@
 import type { Label, Project } from '../../../../shared/types'
+import { parseNlpDate } from '../../../../shared/nlpDateParser'
 
 export const LABEL_AUTO_COLORS = [
   '#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899',
@@ -265,6 +266,18 @@ export function filterDates(query: string, dateFormat?: string): DateOption[] {
           formatted: formatUserDate(d, fmt)
         })
       }
+    }
+  }
+
+  // NLP fallback via chrono-node if no presets/explicit dates matched
+  if (results.length === 0 && q) {
+    const nlpResult = parseNlpDate(query)
+    if (nlpResult) {
+      results.push({
+        label: nlpResult.text,
+        date: nlpResult.hasTime ? nlpResult.date.toISOString() : formatIso(nlpResult.date),
+        formatted: formatDateDisplay(nlpResult.date)
+      })
     }
   }
 

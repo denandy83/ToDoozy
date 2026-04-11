@@ -12,14 +12,18 @@
  *   Everything else = task title
  */
 
+import * as chrono from 'chrono-node'
+import { RRule } from 'rrule'
+
 export interface ParsedMessage {
   title: string
   labels: string[]
   project: string | null
-  dueDate: string | null   // ISO YYYY-MM-DD
+  dueDate: string | null   // ISO YYYY-MM-DD or full ISO string with time
   priority: number
   referenceUrl: string | null
   status: string | null
+  recurrenceRule: string | null
 }
 
 const PRIORITY_ALIASES: Record<string, number> = {
@@ -91,15 +95,85 @@ export function parseMessage(text: string): ParsedMessage {
     titleParts.push(token)
   }
 
+  let title = titleParts.join(' ').trim()
+  const titleBeforeNlp = title
+  let recurrenceRule: string | null = null
+
+  // NLP: Check for recurring patterns in title (before chrono to avoid conflicts)
+  if (!recurrenceRule) {
+    const everyMatch = title.match(
+      /\b(every\s+(?:other\s+)?(?:day|week(?:day)?|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d+\s+(?:days?|weeks?|months?|years?))(?:\s+(?:on|at)\s+[\w,\s]+)?)\b/i
+    )
+    if (everyMatch) {
+      try {
+        const rruleOpts = RRule.parseText(everyMatch[1])
+        if (rruleOpts) {
+          recurrenceRule = rruleOptsToCanonical(rruleOpts)
+          title = title.replace(everyMatch[1], '').replace(/\s+/g, ' ').trim()
+          // Set due date to next occurrence if not already set
+          if (!dueDate) {
+            const rr = new RRule({ ...rruleOpts, dtstart: new Date() })
+            const next = rr.after(new Date(), true)
+            if (next) dueDate = formatIso(next)
+          }
+        }
+      } catch { /* ignore parse failures */ }
+    }
+  }
+
+  // NLP: Try chrono-node for natural language dates if no explicit d: date found
+  if (!dueDate) {
+    const chronoResults = chrono.parse(title, new Date(), { forwardDate: true })
+    if (chronoResults.length > 0) {
+      const r = chronoResults[0]
+      // Avoid false positives: skip if detected text is >= 80% of title
+      if (r.text.length < title.length * 0.8) {
+        if (r.start.isCertain('hour')) {
+          dueDate = r.start.date().toISOString()
+        } else {
+          dueDate = formatIso(r.start.date())
+        }
+        title = (title.slice(0, r.index) + title.slice(r.index + r.text.length)).replace(/\s+/g, ' ').trim()
+      }
+    }
+  }
+
+  // Only use "Untitled" if NLP stripping emptied the title (not if it was originally empty)
+  if (!title && titleBeforeNlp) title = 'Untitled'
+
   return {
-    title: titleParts.join(' ').trim(),
+    title,
     labels,
     project,
     dueDate,
     priority,
     referenceUrl,
-    status
+    status,
+    recurrenceRule
   }
+}
+
+const RRULE_WEEKDAY_MAP: Record<number, string> = {
+  0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'
+}
+
+function rruleOptsToCanonical(opts: ReturnType<typeof RRule.parseText>): string | null {
+  if (!opts || opts.freq === undefined) return null
+  const freq = opts.freq
+  const interval = opts.interval ?? 1
+  const prefix = 'every'
+
+  if (freq === RRule.DAILY) return `${prefix}:${interval}:days`
+  if (freq === RRule.WEEKLY) {
+    const bywd = opts.byweekday as Array<{ weekday: number }> | undefined
+    const days = bywd?.map((d) => RRULE_WEEKDAY_MAP[d.weekday]).filter(Boolean)
+    let rule = `${prefix}:${interval}:weeks`
+    if (days && days.length > 0) rule += ':' + days.join(',')
+    return rule
+  }
+  if (freq === RRule.MONTHLY) return `${prefix}:${interval}:months`
+  if (freq === RRule.YEARLY) return `${prefix}:${interval}:years`
+  return null
 }
 
 function parseDateToken(value: string): string | null {

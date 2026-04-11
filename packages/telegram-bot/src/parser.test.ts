@@ -102,6 +102,44 @@ describe('parseMessage', () => {
     const result = parseMessage('task d:mon')
     expect(result.dueDate).not.toBeNull()
   })
+
+  it('NLP: detects "tomorrow" without d: prefix', () => {
+    const result = parseMessage('buy milk tomorrow')
+    expect(result.dueDate).not.toBeNull()
+    expect(result.title).toBe('buy milk')
+  })
+
+  it('NLP: explicit d: takes priority over NLP', () => {
+    const result = parseMessage('buy milk d:today tomorrow')
+    // d:today should be set, "tomorrow" stays in title
+    const today = new Date()
+    const expected = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    expect(result.dueDate).toBe(expected)
+  })
+
+  it('NLP: detects "every monday" as recurrence', () => {
+    const result = parseMessage('standup every monday')
+    expect(result.recurrenceRule).toBe('every:1:weeks:mon')
+    expect(result.title).toBe('standup')
+    expect(result.dueDate).not.toBeNull()
+  })
+
+  it('NLP: detects "every day" as recurrence', () => {
+    const result = parseMessage('exercise every day')
+    expect(result.recurrenceRule).toBe('every:1:days')
+    expect(result.title).toBe('exercise')
+  })
+
+  it('NLP: detects "every weekday" as recurrence', () => {
+    const result = parseMessage('standup every weekday')
+    expect(result.recurrenceRule).toBe('every:1:weeks:mon,tue,wed,thu,fri')
+    expect(result.title).toBe('standup')
+  })
+
+  it('includes recurrenceRule field as null when not recurring', () => {
+    const result = parseMessage('buy groceries')
+    expect(result.recurrenceRule).toBeNull()
+  })
 })
 
 describe('isStandaloneCommand', () => {

@@ -29,3 +29,28 @@ Started: Sat Apr 11 22:32:43 CEST 2026
 - Created migration 004 updating `quick_add_task` function to use `api_keys` table with backward compatibility
 - Decision: deploy_project_template handler throws "not available via remote" since ProjectTemplateRepository is local-only
 - Note: `.mcp.json` update was denied by permission system — user needs to add ToDoozy entry manually
+
+## Story #60: Natural Language Date & Recurrence Parsing
+
+### What was built
+- Created `src/shared/nlpDateParser.ts` — shared utility using chrono-node and rrule.js for NLP date detection
+- Integrated NLP into `smartInputParser.ts` filterDates() as fallback when presets/explicit formats don't match
+- Added always-on NLP detection to `useSmartInput.ts` (Todoist-style inline detection)
+- Added NLP date chip to `AddTaskInput.tsx` — shows detected date with dismiss button
+- Added `recurrenceRule` to `SmartTaskData` interface and wired through TaskListView and MyDayView
+- Integrated NLP into Telegram bot parser — detects dates and recurring patterns from plain text
+- Added NLP fallback to MCP `set_task_recurrence` handler via rrule.js in Supabase Edge Function
+
+### Key decisions
+- Used chrono-node for one-time dates (robust NLP parser) and rrule.js for recurring patterns ("every ..." syntax)
+- 80% length threshold to avoid false positives (e.g., "Call May" won't match)
+- NLP dismissed state resets on input clear; explicit d: operator always takes priority
+- Date chip (not inline highlight) for NLP — simpler implementation, consistent with existing chip pattern
+- Time preserved in due_date as full ISO string when chrono detects time; date-only uses YYYY-MM-DD
+- Telegram bot: "Untitled" fallback only when NLP stripping empties title, not when operators consume all input
+- MCP handler: rrule.js NLP via npm: specifier in Deno edge function; chrono-node not needed (rrule covers "every ..." patterns)
+
+### Tests added
+- `src/shared/nlpDateParser.test.ts`: 15 tests covering parseNlpDate, stripDateFromTitle, formatNlpDate, rruleOptsToCanonical
+- `packages/telegram-bot/src/parser.test.ts`: 7 new NLP tests (total 35 tests in file)
+- All 506 tests pass

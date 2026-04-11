@@ -426,7 +426,8 @@ async function handleCreateTask(chatId: number, text: string): Promise<void> {
     dueDate: parsed.dueDate,
     referenceUrl: parsed.referenceUrl,
     statusId,
-    labelIds
+    labelIds,
+    recurrenceRule: parsed.recurrenceRule
   })
 
   // Build confirmation

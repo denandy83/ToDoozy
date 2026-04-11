@@ -303,7 +303,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         status_id: defaultStatus.id,
         order_index: orderIndex,
         priority: data.priority,
-        due_date: data.dueDate
+        due_date: data.dueDate,
+        recurrence_rule: data.recurrenceRule ?? undefined
       })
       // Assign labels
       for (const label of data.labels) {

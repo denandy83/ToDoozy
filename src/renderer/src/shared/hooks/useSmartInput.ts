@@ -6,6 +6,7 @@ import {
   type OperatorType,
   type ActiveOperator
 } from './smartInputParser'
+import { parseNlpDate, stripDateFromTitle, formatNlpDate, type NlpDateResult } from '../../../../shared/nlpDateParser'
 
 export interface PopupState {
   type: OperatorType
@@ -22,6 +23,7 @@ export interface SmartInputState {
   selectedProject: Project | null
   referenceUrl: string | null
   popupState: PopupState | null
+  nlpDateResult: NlpDateResult | null
 }
 
 export interface SmartInputActions {
@@ -39,9 +41,10 @@ export interface SmartInputActions {
   selectProject: (project: Project) => void
   removeProject: () => void
   dismissPopup: () => void
+  dismissNlpDate: () => void
   removeLastChip: () => void
   reset: () => void
-  getSubmitData: () => { title: string; extractedReferenceUrl: string | null }
+  getSubmitData: () => { title: string; extractedReferenceUrl: string | null; nlpDate: string | null; nlpRecurrenceRule: string | null }
 }
 
 export type SmartInput = SmartInputState & SmartInputActions
@@ -54,6 +57,8 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [popupState, setPopupState] = useState<PopupState | null>(null)
+  const [nlpDateResult, setNlpDateResult] = useState<NlpDateResult | null>(null)
+  const nlpDismissedRef = useRef(false)
   const suppressedPositionsRef = useRef<Set<number>>(new Set())
   const inputValueRef = useRef('')
   const justSelectedRef = useRef(false)
@@ -108,7 +113,22 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setInputValueRaw(value)
     inputValueRef.current = value
     updatePopup(value, cursorPos)
-  }, [updatePopup])
+
+    // Always-on NLP detection: only when no explicit d: operator and no date already selected
+    if (!selectedDate && !value.includes('d:') && !nlpDismissedRef.current) {
+      const nlp = parseNlpDate(value)
+      // Avoid false positives: skip if detected text is >= 80% of input length
+      if (nlp && nlp.text.length < value.trim().length * 0.8) {
+        setNlpDateResult(nlp)
+      } else {
+        setNlpDateResult(null)
+      }
+    } else if (!selectedDate && !value.includes('d:')) {
+      // NLP dismissed but text changed — re-check on significant changes
+    } else {
+      setNlpDateResult(null)
+    }
+  }, [updatePopup, selectedDate])
 
   const handleCursorMove = useCallback((cursorPos: number) => {
     updatePopup(inputValueRef.current, cursorPos)
@@ -222,6 +242,11 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setPopupState(null)
   }, [popupState])
 
+  const dismissNlpDate = useCallback(() => {
+    setNlpDateResult(null)
+    nlpDismissedRef.current = true
+  }, [])
+
   const removeLastChip = useCallback(() => {
     // Remove last label, then priority, then date
     setAttachedLabels((prev) => {
@@ -239,6 +264,8 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     setReferenceUrl(null)
     setSelectedProject(null)
     setPopupState(null)
+    setNlpDateResult(null)
+    nlpDismissedRef.current = false
     suppressedPositionsRef.current = new Set()
   }, [])
 
@@ -246,12 +273,30 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     const text = inputValueRef.current
     // Extract any pending r: operator before submit
     const rMatch = text.match(/(^|\s)r:(\S+)/)
+    let title: string
+    let extractedReferenceUrl: string | null = null
     if (rMatch && rMatch[2]) {
       const cleaned = text.slice(0, rMatch.index! + (rMatch[1] ? 1 : 0)) + text.slice(rMatch.index! + rMatch[0].length)
-      return { title: cleaned.replace(/  +/g, ' ').trim(), extractedReferenceUrl: rMatch[2] }
+      title = cleaned.replace(/  +/g, ' ').trim()
+      extractedReferenceUrl = rMatch[2]
+    } else {
+      title = text.trim()
     }
-    return { title: text.trim(), extractedReferenceUrl: null }
-  }, [])
+
+    // Apply NLP date stripping if NLP detected and no explicit date
+    let nlpDate: string | null = null
+    let nlpRecurrenceRule: string | null = null
+    if (nlpDateResult && !selectedDate) {
+      title = stripDateFromTitle(title, nlpDateResult)
+      nlpDate = formatNlpDate(nlpDateResult)
+      nlpRecurrenceRule = nlpDateResult.recurrenceRule
+
+      // Empty title after stripping = use "Untitled"
+      if (!title) title = 'Untitled'
+    }
+
+    return { title, extractedReferenceUrl, nlpDate, nlpRecurrenceRule }
+  }, [nlpDateResult, selectedDate])
 
   return {
     inputValue,
@@ -261,6 +306,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     selectedProject,
     referenceUrl,
     popupState,
+    nlpDateResult,
     setInputValue,
     handleInputChange,
     handleCursorMove,
@@ -275,6 +321,7 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     selectProject,
     removeProject,
     dismissPopup,
+    dismissNlpDate,
     removeLastChip,
     reset,
     getSubmitData

@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "chrono-node": "^2.9.0",
     "node-telegram-bot-api": "^0.66.0",
+    "rrule": "^2.8.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

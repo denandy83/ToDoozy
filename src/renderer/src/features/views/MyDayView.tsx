@@ -371,7 +371,8 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         order_index: orderIndex,
         is_in_my_day: 1,
         priority: data.priority,
-        due_date: data.dueDate
+        due_date: data.dueDate,
+        recurrence_rule: data.recurrenceRule ?? undefined
       })
       for (const label of data.labels) {
         await addLabel(taskId, label.id)

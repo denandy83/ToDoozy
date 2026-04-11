@@ -1,5 +1,5 @@
 import { useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
-import { Plus, Calendar, X } from 'lucide-react'
+import { Plus, Calendar, X, RefreshCw } from 'lucide-react'
 import type { Label, Project } from '../../../../shared/types'
 import { useSmartInput } from '../../shared/hooks/useSmartInput'
 import { InputSuggestionPopup, type SuggestionData, type InputSuggestionPopupProps } from '../../shared/components/InputSuggestionPopup'
@@ -20,6 +20,7 @@ export interface SmartTaskData {
   labels: Label[]
   priority: number
   dueDate: string | null
+  recurrenceRule: string | null
 }
 
 interface AddTaskInputProps {
@@ -47,17 +48,18 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
       focus: () => inputRef.current?.focus()
     }))
 
-    const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null
+    const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.nlpDateResult !== null
 
     const handleSubmit = useCallback(() => {
       if (smart.popupState) return // Let popup handle Enter
-      const { title } = smart.getSubmitData()
+      const { title, nlpDate, nlpRecurrenceRule } = smart.getSubmitData()
       if (!title) return
       onSubmit({
         title,
         labels: smart.attachedLabels,
         priority: smart.selectedPriority ?? 0,
-        dueDate: smart.selectedDate
+        dueDate: smart.selectedDate ?? nlpDate,
+        recurrenceRule: nlpRecurrenceRule
       })
       smart.reset()
     }, [smart, onSubmit])
@@ -245,6 +247,17 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
                   <X size={10} />
                 </button>
               </span>
+            )}
+            {smart.nlpDateResult && !smart.selectedDate && (
+              <button
+                onClick={smart.dismissNlpDate}
+                className="inline-flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[10px] font-bold text-accent"
+                title="Click to remove detected date"
+              >
+                {smart.nlpDateResult.recurrenceRule ? <RefreshCw size={10} /> : <Calendar size={10} />}
+                {smart.nlpDateResult.text}
+                <X size={10} />
+              </button>
             )}
           </div>
         )}

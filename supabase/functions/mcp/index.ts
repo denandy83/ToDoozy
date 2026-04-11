@@ -2,6 +2,7 @@
 // Streamable HTTP transport with API key authentication
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { RRule } from 'npm:rrule@2'
 import { Server } from 'npm:@modelcontextprotocol/sdk@1/server/index.js'
 import { StreamableHTTPServerTransport } from 'npm:@modelcontextprotocol/sdk@1/server/streamableHttp.js'
 import {
@@ -79,6 +80,32 @@ function parseRecurrence(rule: string | null): RecurrenceConfig | null {
     if (!isNaN(day) && day >= 1 && day <= 31) config.yearDay = day
   }
   return config
+}
+
+const RRULE_WEEKDAY_MAP: Record<number, string> = {
+  0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'
+}
+
+/** Try to parse a natural language recurrence string (e.g. "every Monday") into canonical format via rrule.js NLP. */
+function tryNlpRecurrence(input: string): string | null {
+  if (input.startsWith('every:') || input.startsWith('every!:')) return input // already canonical
+  try {
+    const opts = RRule.parseText(input)
+    if (!opts || opts.freq === undefined) return null
+    const freq = opts.freq
+    const interval = opts.interval ?? 1
+    if (freq === RRule.DAILY) return `every:${interval}:days`
+    if (freq === RRule.WEEKLY) {
+      const bywd = opts.byweekday as Array<{ weekday: number }> | undefined
+      const days = bywd?.map((d) => RRULE_WEEKDAY_MAP[d.weekday]).filter(Boolean)
+      let rule = `every:${interval}:weeks`
+      if (days && days.length > 0) rule += ':' + days.join(',')
+      return rule
+    }
+    if (freq === RRule.MONTHLY) return `every:${interval}:months`
+    if (freq === RRule.YEARLY) return `every:${interval}:years`
+  } catch { /* ignore */ }
+  return null
 }
 
 function getNextOccurrence(rule: string, fromDate: Date): Date | null {
@@ -677,7 +704,7 @@ const tools: ToolDef[] = [
   { name: 'set_task_priority', description: 'Set the priority of a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), priority: num('Priority: 0=none, 1=low, 2=normal, 3=high, 4=urgent') }, required: ['task_id', 'priority'] } },
   { name: 'set_task_due_date', description: 'Set or clear the due date of a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), due_date: str('Due date in ISO 8601 format, or empty string to clear') }, required: ['task_id', 'due_date'] } },
   { name: 'set_task_description', description: 'Set the description of a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), description: str('Description text (markdown)') }, required: ['task_id', 'description'] } },
-  { name: 'set_task_recurrence', description: 'Set or clear the recurrence rule of a task. Uses canonical format: "every:N:unit[:details][|until:YYYY-MM-DD]". Examples: "every:1:days", "every:2:weeks:mon,wed", "every:1:months:15". Empty string to clear.', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), recurrence_rule: str('Canonical recurrence rule or empty string to clear') }, required: ['task_id', 'recurrence_rule'] } },
+  { name: 'set_task_recurrence', description: 'Set or clear the recurrence rule of a task. Accepts canonical format ("every:N:unit[:details][|until:YYYY-MM-DD]") or natural language ("every Monday", "every 2 weeks"). Examples: "every:1:days", "every Monday", "every 2 weeks", "every weekday". Empty string to clear.', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), recurrence_rule: str('Canonical recurrence rule, natural language (e.g. "every Monday"), or empty string to clear') }, required: ['task_id', 'recurrence_rule'] } },
   { name: 'add_task_to_my_day', description: 'Add a task to the My Day view', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
   { name: 'remove_task_from_my_day', description: 'Remove a task from the My Day view', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
   { name: 'snooze_task', description: 'Snooze a task until a given date (sets due date, removes from My Day)', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), snooze_until: str('Date to snooze until in ISO 8601 format') }, required: ['task_id', 'snooze_until'] } },
@@ -866,7 +893,13 @@ function createHandlers(repos: Repos, userId: string) {
     async set_task_recurrence(args) {
       const taskId = requireStr(args, 'task_id')
       const task = await repos.tasks.findById(taskId); if (!task) throw new Error(`Task not found: ${taskId}`)
-      const rule = optStr(args, 'recurrence_rule') ?? ''; const newRule = rule === '' ? null : rule
+      let rule = optStr(args, 'recurrence_rule') ?? ''
+      // Try NLP fallback if not already in canonical format
+      if (rule && !rule.startsWith('every:') && !rule.startsWith('every!:')) {
+        const canonical = tryNlpRecurrence(rule)
+        if (canonical) rule = canonical
+      }
+      const newRule = rule === '' ? null : rule
       const result = await repos.tasks.update(taskId, { recurrence_rule: newRule }); if (!result) throw new Error(`Task not found: ${taskId}`)
       await logActivity(taskId, userId, 'recurrence_changed', task.recurrence_rule ?? '', newRule ?? '', task.project_id)
       return result
