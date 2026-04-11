@@ -455,3 +455,39 @@
 - **Passes:** true
 - **Implemented:** 2026-04-08
 
+
+---
+
+### #55 — My Day Auto-Add
+- **Description:** Automatically add tasks to My Day based on their due date, controlled by a global user setting.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** myday_auto_add setting, myday_readd_dismissed setting, auto-add on launch, dismissed date tracking, simplified findMyDay queries
+- **Passes:** true
+- **Implemented:** 2026-04-11
+
+---
+
+### #56 — Per-Integration Default Project
+- **Description:** Split shared Default Project setting into per-integration defaults for Telegram and iOS Shortcut.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Per-integration dropdowns, iOS follow Telegram option, updated /default command, quick_add_task RPC update
+- **Passes:** true
+- **Implemented:** 2026-04-11
+
+---
+
+### #57 — AND/OR Label Filter Logic
+- **Description:** Add "is all of" (AND) mode for label filters, matching Linear's pattern.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Three-way operator toggle, AND filtering across all views, saved view persistence, MCP search support
+- **Passes:** true
+- **Implemented:** 2026-04-11
+
+---
+
+### #58 — Per-Project Auto-Archive
+- **Description:** Auto-archive completed tasks per project with configurable timeframe.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Per-project auto-archive settings, configurable timeframe, auto-archive on app launch
+- **Passes:** true
+- **Implemented:** 2026-04-11

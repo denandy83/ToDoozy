@@ -1,0 +1,99 @@
+# Ralph Progress Log
+Started: Thu Apr  2 23:40:28 CEST 2026
+---
+
+## Story #43 — MCP Activity Logging
+- Added `logActivity()` helper and `PRIORITY_NAMES` map to mcp-server.ts
+- All 22 mutating tools now log activity entries: create_task, delete_task, update_task (per-field), complete_task, reopen_task, set_task_priority, set_task_due_date, set_task_description, set_task_recurrence, add_task_to_my_day, remove_task_from_my_day, snooze_task, archive_task, unarchive_task, duplicate_task, create_subtask, assign_label_to_task, remove_label_from_task, use_task_template
+- save_task_as_template: no logging (template is separate entity, per story spec)
+- No new repo methods or types needed — ActivityLogRepository.create() already existed
+- Typecheck: zero errors. Tests: 377 pass.
+
+---
+
+## Story #49 — Project Areas / Folders
+- Migration 15: project_areas table + area_id column on projects (ON DELETE SET NULL)
+- ProjectAreaRepository: CRUD, reorder, assignProject
+- IPC handlers: 6 methods
+- Preload: ProjectAreasAPI interface + implementation
+- projectAreaStore (Zustand): hydrate, createArea, updateArea, deleteArea, reorderAreas, assignProject, toggleCollapsed
+- Sidebar: projects grouped by area — ungrouped first, then collapsible area headers with color dot/name/count
+- "New Area" button added next to "Add Project" in sidebar header
+- MCP tools: create_area, list_areas, update_area, delete_area, assign_project_to_area
+- 5 new ProjectAreaRepository tests (394 total pass)
+- Typecheck: zero errors. Tests: 394 pass.
+
+---
+
+## Story #48 — Productivity Stats Dashboard
+- Installed recharts package
+- TaskRepository: getCompletionStats() (daily counts from completed_date), getStreakStats() (consecutive days)
+- ActivityLogRepository: getFocusStats() (parse 'Completed X min focus session' pattern), getActivityHeatmap() (daily activity counts)
+- IPC handlers: stats:completions, stats:streaks, stats:focus, stats:heatmap
+- Preload: StatsAPI interface + implementation
+- StatsView: overview cards, Recharts BarChart for completions + focus, streaks with Flame/Trophy icons, 90-day heatmap grid
+- Sidebar: Stats added as 3rd top view with ⌘3, Archive shifted to ⌘5, Templates to ⌘6
+- ViewId: added 'stats' to union and VIEW_ORDER
+- 2 new stats tests (389 total pass)
+- Typecheck: zero errors. Tests: 389 pass.
+
+---
+
+## Story #47 — Saved Views / Smart Lists
+- Migration 14: created saved_views table (id, user_id, project_id, name, color, icon, sidebar_order, filter_config, timestamps)
+- SavedViewRepository: CRUD, reorder, countMatchingTasks (filter config → SQL count)
+- IPC handlers: 7 methods (findById, findByUserId, create, update, delete, reorder, countMatching)
+- Preload bridge: SavedViewsAPI interface + implementation
+- savedViewStore (Zustand): hydrate, createView, updateView, deleteView, reorderViews
+- viewStore: added 'saved-view' to ViewId, selectedSavedViewId state, setSelectedSavedView action
+- SavedViewListView: renders matching tasks with filter bar, "Update View" button when filters differ from stored config
+- Sidebar: collapsible "Saved Views" section between Calendar and Projects
+- FilterBar: "Save as View" button with inline name input when any filter is active
+- MCP tools: create_saved_view, list_saved_views, delete_saved_view
+- 5 new SavedViewRepository tests (387 total pass)
+- Note: broken filter handling (warning for deleted labels) not yet implemented — would need label existence checks during render
+- Typecheck: zero errors. Tests: 387 pass.
+
+---
+
+## Story #46 — Expanded Filter System
+- Enhanced TaskRepository.search() with array support: label_ids, status_ids, priorities, assigned_to_ids, project_ids (backward-compatible with single values)
+- Expanded labelStore state: priorityFilters, statusFilters, dueDatePreset, keyword + toggle/set/clear actions + selectors
+- Created FilterBar.tsx (replaces LabelFilterBar usage): label chips + "+" Filter dropdown + priority/status/due date/keyword pickers + removable chips + clear all
+- Updated TaskListView, MyDayView with shared taskMatchesFilters callback (AND between types, OR within labels)
+- Added filter support to CalendarView (was previously unfiltered)
+- Filter logic: priority match, status match, due date presets (today/this_week/overdue/no_date), keyword (title + description)
+- 5 new tests for array search filters (382 total)
+- Decision: expanded labelStore rather than creating separate filterStore — fewer migration changes, backward compat for clearLabelFilters
+- Typecheck: zero errors. Tests: 382 pass.
+
+---
+
+## Story #45 — Command Palette Clears Filters on Navigation
+- Added `useLabelStore.getState().clearLabelFilters()` call in handleSelect before setSelectedProject
+- clearLabelFilters() already clears both label and assignee filters
+- Matches sidebar navigation pattern (Sidebar.tsx handleViewClick/handleProjectClick)
+- No new repo methods or utility functions — no new tests needed
+- Typecheck: zero errors. Tests: 377 pass.
+
+---
+
+## Story #44 — MCP Task Reorder Tool
+- Added `reorder_tasks` tool definition with array input schema (extended SchemaProp with `items`)
+- Handler validates all task IDs exist, calls TaskRepository.reorder(), checks priority_auto_sort setting
+- No new repo methods needed — reorder() at TaskRepository.ts:148 already existed
+- No activity logging (bulk order_index change, per story spec)
+- Typecheck: zero errors. Tests: 377 pass.
+
+---
+Story #42: Settings Menu Reorganization — 2026-04-03
+- Extracted GeneralSettingsContent.tsx (with notifications absorbed as a section, 6 section labels)
+- Extracted ProjectsSettingsContent.tsx (projects tab with all sub-components)
+- Extracted WhatsNewSettingsContent.tsx (WhatsNewDot, WhatsNewContent, useChangelog)
+- Created AppearanceSettingsContent.tsx (Theme | Priority Display subtabs, forwarded theme ref for dirty-state)
+- Created AboutSettingsContent.tsx (Updates | What's New | Integrations | Help subtabs, WhatsNewDot on subtab)
+- Added 5 section labels to TimerSettingsContent.tsx (Presets, Breaks, Repetition, Behavior, Alerts)
+- Rewrote UnifiedSettingsModal.tsx: 1067 lines to 149 lines, 6 tabs + Logout
+- Tab type changed: themes/priorities/mcp/notifications/updates/whatsnew/help to appearance/about
+- Theme dirty-state coupling preserved through AppearanceSettingsHandle forwardRef
+- All 377 existing tests pass, typecheck clean

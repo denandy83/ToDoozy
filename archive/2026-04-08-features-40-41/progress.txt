@@ -1,0 +1,38 @@
+# Ralph Progress Log
+Started: Sat Apr  4 00:16:32 CEST 2026
+---
+
+## Story #50 — Exclusion Filters for Saved Views and Filter Bar
+- Added exclude filter sets to labelStore (excludeLabelFilters, excludeStatusFilters, excludePriorityFilters, excludeAssigneeFilters, excludeProjectFilters)
+- Implemented last-action-wins conflict resolution: adding to include removes from exclude and vice versa
+- Extended TaskRepository.search() with NOT IN clauses for all exclusion filter types
+- Added "is"/"is not" operator toggle to all filter pickers (Priority, Status, Labels, Projects)
+- ExcludeFilterChip component shows "is not" prefix in muted-red styling
+- Exclusion filters work in TaskListView, SavedViewListView, MyDayView, CalendarView
+- Saved views serialize/deserialize exclusion filters alongside include filters (backward compatible)
+- MCP search_tasks tool supports exclude_label_id, exclude_status_id, exclude_priority params
+- 6 new tests for exclusion filter SQL logic (by label, status, priority, project, assignee, combined)
+- All 418 tests pass, typecheck clean
+
+## Story #53 — Full Task Rows in Saved Views + Multi-Sort (2026-04-04)
+- Most of the story was already implemented by a previous session (SavedViewListView using TaskRow, sort utility, FilterBar sort dropdown, sidebar colored dots, context menu color picker, per-project sort persistence)
+- Migrated `priority_auto_sort` legacy setting to per-project sort config: on first project visit, if no sort_config exists and auto_sort is true, creates priority desc sort rules
+- Removed legacy priority auto-sort fallback code from TaskListView prioritySortFn
+- Removed Auto-Sort toggle from PrioritySettingsContent (replaced by sort dropdown in FilterBar)
+- Kept `autoSort` in usePrioritySettings hook for backward compatibility with StatusSection, MyDayView, KanbanView
+- Added 17 tests for sortTasks.ts utility (all sort fields, directions, multi-sort, defaults, labels)
+- All 435 tests pass, zero typecheck errors
+
+## Story #54 — ToDoozy Telegram Bot
+- Created `packages/telegram-bot/` with Node.js + TypeScript + node-telegram-bot-api + @supabase/supabase-js
+- Parser (`parser.ts`) adapted from in-app smartInputParser.ts for Telegram's token-based syntax
+- Supabase client (`supabase.ts`) with CRUD for tasks, projects, labels, statuses — uses service role key
+- Bot entry point (`index.ts`) handles: task creation, /projectname listing, /done, /myday, /help
+- Auth guard via ALLOWED_TELEGRAM_IDS env var
+- Inline keyboard buttons for completing tasks from Telegram
+- Labels auto-created with color cycling when they don't exist
+- Docker deployment: Dockerfile (Node 20 Alpine, arm64 compatible) + docker-compose.yml
+- 27 parser tests added and passing
+- All 463 tests pass, typecheck clean
+- Decision: copied/adapted parser rather than sharing code — bot is a standalone package with its own deps
+- Decision: bot credentials stored in .env.example, not committed to repo
