@@ -17,7 +17,8 @@ if (process.env.TODOOZY_USER_DATA) {
 }
 
 let mainWindow: BrowserWindow | null = null
-let isQuitting = false
+export let isQuitting = false
+export function setQuitting(): void { isQuitting = true }
 let currentShortcut: string | null = null
 let currentAppToggleShortcut: string | null = null
 

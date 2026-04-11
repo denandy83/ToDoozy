@@ -1,6 +1,7 @@
 import { autoUpdater, type UpdateInfo, type ProgressInfo } from 'electron-updater'
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { fetchVersionNotes } from './services/ReleaseNotesService'
+import { setQuitting } from './index'
 
 export type UpdateStatus =
   | { state: 'idle' }
@@ -109,8 +110,15 @@ export function initUpdater(): void {
   })
 
   ipcMain.handle('updater:install', () => {
-    // isSilent=false shows install progress, isForceRunAfter=true ensures app relaunches on macOS
+    // Set isQuitting so the macOS close handler lets the window close instead of hiding it
+    setQuitting()
     autoUpdater.quitAndInstall(false, true)
+  })
+
+  // TEMP: test quit button — remove after verifying
+  ipcMain.handle('updater:test-quit', () => {
+    setQuitting()
+    app.quit()
   })
 
   ipcMain.handle('updater:dismiss', (_e, version: string) => {
