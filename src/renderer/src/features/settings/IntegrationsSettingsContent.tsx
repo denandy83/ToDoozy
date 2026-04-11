@@ -320,8 +320,9 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
                   <CopyField value={apiKey} label="key2" copied={copied} onCopy={handleCopy} highlight />
                 </Step>
                 <Step n={9} text='Add another JSON key: p_title — tap the value field and select "Dictated Text" from the variables above' />
-                <Step n={10} text='Add action: "Show Notification" → type "Task added!"' />
-                <Step n={11} text="Done! Go to Settings → Action Button to assign this shortcut" />
+                <Step n={10} text='Add action: "Get Dictionary Value" — set Key to project_name, Dictionary to the URL result' />
+                <Step n={11} text='Add action: "Show Notification" — set title to "Task added to" followed by the Dictionary Value variable' />
+                <Step n={12} text="Done! Go to Settings → Action Button to assign this shortcut" />
               </div>
             </div>
           </>
