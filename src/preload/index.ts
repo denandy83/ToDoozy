@@ -262,7 +262,9 @@ const api: TodoozyAPI = {
     completionsByDayOfWeek: (userId, projectIds, startDate, endDate) =>
       ipcRenderer.invoke('stats:completionsByDayOfWeek', userId, projectIds, startDate, endDate),
     projectBreakdown: (userId) =>
-      ipcRenderer.invoke('stats:projectBreakdown', userId)
+      ipcRenderer.invoke('stats:projectBreakdown', userId),
+    taskList: (userId, filter, projectIds, startDate, endDate) =>
+      ipcRenderer.invoke('stats:taskList', userId, filter, projectIds, startDate, endDate)
   },
 
   savedViews: {

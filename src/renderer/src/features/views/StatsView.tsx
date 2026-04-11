@@ -3,9 +3,13 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts'
-import { Flame, Trophy, AlertTriangle, CheckCircle2, Clock, ListTodo } from 'lucide-react'
+import { Flame, Trophy, AlertTriangle, CheckCircle2, Clock, ListTodo, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
+import { Modal } from '../../shared/components/Modal'
+
+type StatsFilter = 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue'
+interface StatsTask { id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }
 
 type TimeRange = 7 | 30 | 90
 
@@ -40,6 +44,10 @@ export function StatsView(): React.JSX.Element {
   const [priorityData, setPriorityData] = useState<PriorityData[]>([])
   const [dayOfWeekData, setDayOfWeekData] = useState<DayOfWeekData[]>([])
   const [projectData, setProjectData] = useState<ProjectData[]>([])
+
+  const [drillDown, setDrillDown] = useState<{ filter: StatsFilter; label: string } | null>(null)
+  const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
+  const [drillLoading, setDrillLoading] = useState(false)
 
   const projectIds = useMemo(() => projectFilter ? [projectFilter] : null, [projectFilter])
 
@@ -141,6 +149,22 @@ export function StatsView(): React.JSX.Element {
   // Completion rate
   const completionRate = summary.total > 0 ? Math.round((summary.completed / summary.total) * 100) : 0
 
+  const openDrillDown = useCallback(async (filter: StatsFilter, label: string) => {
+    if (!userId) return
+    setDrillDown({ filter, label })
+    setDrillLoading(true)
+    try {
+      const tasks = await window.api.stats.taskList(
+        userId, filter, projectIds,
+        filter === 'completed_range' ? startDate : undefined,
+        filter === 'completed_range' ? endDate : undefined
+      )
+      setDrillTasks(tasks)
+    } finally {
+      setDrillLoading(false)
+    }
+  }, [userId, projectIds, startDate, endDate])
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       {/* Header */}
@@ -184,11 +208,11 @@ export function StatsView(): React.JSX.Element {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-6 gap-3">
-          <OverviewCard label="Completed Today" value={todayCount} icon={<CheckCircle2 size={14} className="text-emerald-400" />} />
-          <OverviewCard label="This Week" value={weekCount} icon={<CheckCircle2 size={14} className="text-emerald-400" />} />
-          <OverviewCard label={`Last ${timeRange}d`} value={totalRange} icon={<CheckCircle2 size={14} className="text-accent" />} />
-          <OverviewCard label="Open Tasks" value={summary.open} icon={<ListTodo size={14} className="text-accent" />} />
-          <OverviewCard label="Overdue" value={summary.overdue} icon={<AlertTriangle size={14} className={summary.overdue > 0 ? 'text-red-400' : 'text-muted'} />} highlight={summary.overdue > 0} />
+          <OverviewCard label="Completed Today" value={todayCount} icon={<CheckCircle2 size={14} className="text-emerald-400" />} onClick={() => openDrillDown('completed_today', 'Completed Today')} />
+          <OverviewCard label="This Week" value={weekCount} icon={<CheckCircle2 size={14} className="text-emerald-400" />} onClick={() => openDrillDown('completed_week', 'Completed This Week')} />
+          <OverviewCard label={`Last ${timeRange}d`} value={totalRange} icon={<CheckCircle2 size={14} className="text-accent" />} onClick={() => openDrillDown('completed_range', `Completed Last ${timeRange} Days`)} />
+          <OverviewCard label="Open Tasks" value={summary.open} icon={<ListTodo size={14} className="text-accent" />} onClick={() => openDrillDown('open', 'Open Tasks')} />
+          <OverviewCard label="Overdue" value={summary.overdue} icon={<AlertTriangle size={14} className={summary.overdue > 0 ? 'text-red-400' : 'text-muted'} />} highlight={summary.overdue > 0} onClick={() => openDrillDown('overdue', 'Overdue Tasks')} />
           <OverviewCard label="Avg Days to Done" value={summary.avgCompletionDays > 0 ? `${summary.avgCompletionDays}d` : '—'} icon={<Clock size={14} className="text-muted" />} />
         </div>
 
@@ -269,6 +293,26 @@ export function StatsView(): React.JSX.Element {
           <ProjectBreakdown data={projectData} />
         </div>
       </div>
+
+      {/* Drill-down modal */}
+      <Modal open={drillDown !== null} onClose={() => setDrillDown(null)} title={drillDown?.label} size="large">
+        {drillLoading ? (
+          <div className="flex h-32 items-center justify-center text-[11px] text-muted">Loading...</div>
+        ) : drillTasks.length === 0 ? (
+          <div className="flex h-32 items-center justify-center text-[11px] text-muted">No tasks</div>
+        ) : (
+          <div className="max-h-[60vh] overflow-y-auto">
+            <div className="space-y-0.5">
+              {drillTasks.map((task) => (
+                <StatsTaskRow key={task.id} task={task} />
+              ))}
+            </div>
+            {drillTasks.length >= 200 && (
+              <div className="mt-3 text-center text-[9px] text-muted">Showing first 200 tasks</div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -280,14 +324,23 @@ interface OverviewCardProps {
   value: number | string
   icon?: React.ReactNode
   highlight?: boolean
+  onClick?: () => void
 }
 
-function OverviewCard({ label, value, icon, highlight }: OverviewCardProps): React.JSX.Element {
+function OverviewCard({ label, value, icon, highlight, onClick }: OverviewCardProps): React.JSX.Element {
+  const clickable = onClick !== undefined
   return (
-    <div className={`rounded-lg border px-4 py-3 ${highlight ? 'border-red-400/30 bg-red-400/5' : 'border-border bg-background'}`}>
+    <div
+      className={`rounded-lg border px-4 py-3 transition-colors ${highlight ? 'border-red-400/30 bg-red-400/5' : 'border-border bg-background'} ${clickable ? 'cursor-pointer hover:border-accent/30 hover:bg-accent/5' : ''}`}
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+    >
       <div className="flex items-center gap-2">
         {icon}
         <span className="text-2xl font-light text-foreground">{value}</span>
+        {clickable && <ArrowRight size={12} className="ml-auto text-muted opacity-0 transition-opacity group-hover:opacity-100" />}
       </div>
       <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">{label}</div>
     </div>
@@ -523,6 +576,33 @@ function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
         ))}
         <span className="ml-1 text-[8px] text-muted">More</span>
       </div>
+    </div>
+  )
+}
+
+const PRIORITY_DOTS: Record<number, string> = { 0: '', 1: 'text-blue-400', 2: 'text-violet-400', 3: 'text-orange-400', 4: 'text-red-400' }
+
+function StatsTaskRow({ task }: { task: StatsTask }): React.JSX.Element {
+  const dateStr = task.completedDate
+    ? new Date(task.completedDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : task.dueDate
+      ? new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : null
+
+  const isOverdue = task.dueDate && !task.completedDate && new Date(task.dueDate) < new Date()
+
+  return (
+    <div className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/6">
+      {task.priority > 0 && (
+        <div className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOTS[task.priority] ?? ''}`} style={{ backgroundColor: PRIORITY_COLORS[task.priority] }} />
+      )}
+      <span className="min-w-0 flex-1 truncate text-[13px] font-light text-foreground">{task.title}</span>
+      <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">{task.projectName}</span>
+      {dateStr && (
+        <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wider ${isOverdue ? 'text-red-400' : 'text-muted'}`}>
+          {dateStr}
+        </span>
+      )}
     </div>
   )
 }

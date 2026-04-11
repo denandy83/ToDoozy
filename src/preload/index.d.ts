@@ -302,6 +302,7 @@ export interface StatsAPI {
   priorityBreakdown(userId: string, projectIds: string[] | null): Promise<Array<{ priority: number; count: number }>>
   completionsByDayOfWeek(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ dayOfWeek: number; count: number }>>
   projectBreakdown(userId: string): Promise<Array<{ projectId: string; projectName: string; open: number; completed: number }>>
+  taskList(userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string): Promise<Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>>
 }
 
 export interface SavedViewsAPI {

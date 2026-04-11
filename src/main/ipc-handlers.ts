@@ -805,6 +805,10 @@ export function registerIpcHandlers(): void {
     return getRepos().activityLog.getActivityHeatmap(userId, startDate, endDate)
   })
 
+  ipcMain.handle('stats:taskList', (_e, userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string) => {
+    return getRepos().tasks.getStatsTaskList(userId, filter as 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue', projectIds, startDate, endDate)
+  })
+
   ipcMain.handle('stats:summary', (_e, userId: string, projectIds: string[] | null) => {
     return getRepos().tasks.getTaskSummaryStats(userId, projectIds)
   })

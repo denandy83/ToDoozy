@@ -680,6 +680,57 @@ export class TaskRepository {
     return { current, best }
   }
 
+  getStatsTaskList(
+    userId: string,
+    filter: 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue',
+    projectIds: string[] | null,
+    startDate?: string,
+    endDate?: string
+  ): Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }> {
+    const today = new Date().toISOString().slice(0, 10)
+    const weekStartDate = new Date()
+    weekStartDate.setDate(weekStartDate.getDate() - weekStartDate.getDay())
+    const weekStart = weekStartDate.toISOString().slice(0, 10)
+
+    let where: string
+    switch (filter) {
+      case 'completed_today':
+        where = `AND s.is_done = 1 AND date(t.completed_date) = '${today}'`
+        break
+      case 'completed_week':
+        where = `AND s.is_done = 1 AND date(t.completed_date) >= '${weekStart}'`
+        break
+      case 'completed_range':
+        where = `AND s.is_done = 1 AND t.completed_date >= ? AND t.completed_date <= ?`
+        break
+      case 'open':
+        where = 'AND s.is_done = 0'
+        break
+      case 'overdue':
+        where = `AND s.is_done = 0 AND t.due_date IS NOT NULL AND date(t.due_date) < '${today}'`
+        break
+    }
+
+    let sql = `
+      SELECT t.id, t.title, p.name as projectName, t.completed_date as completedDate, t.due_date as dueDate, t.priority
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      INNER JOIN statuses s ON s.id = t.status_id
+      INNER JOIN projects p ON p.id = t.project_id
+      WHERE t.is_template = 0 AND t.is_archived = 0 ${where}
+    `
+    const params: string[] = [userId]
+    if (filter === 'completed_range' && startDate && endDate) {
+      params.push(startDate, endDate)
+    }
+    if (projectIds && projectIds.length > 0) {
+      sql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
+    }
+    sql += ' ORDER BY t.updated_at DESC LIMIT 200'
+    return this.db.prepare(sql).all(...params) as Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>
+  }
+
   getTaskSummaryStats(
     userId: string,
     projectIds: string[] | null
