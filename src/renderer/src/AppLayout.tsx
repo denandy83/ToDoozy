@@ -10,6 +10,7 @@ import {
 import { LayoutList, LayoutGrid, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink, Copy, Filter } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
+import { UpdateAvailableModal } from './features/settings/UpdateAvailableModal'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { KanbanCard } from './features/tasks/KanbanCard'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
@@ -1276,6 +1277,7 @@ export function AppLayout(): React.JSX.Element {
         </main>
 
         {/* Modals */}
+        <UpdateAvailableModal />
         <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
         <UnifiedSettingsModal
           open={settingsOpen}
