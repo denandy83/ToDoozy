@@ -12,6 +12,10 @@ export interface TimerSettings {
   soundEnabled: boolean
   notificationEnabled: boolean
   autoBreak: boolean
+  flowtimeEnabled: boolean
+  longBreakEnabled: boolean
+  longBreakMinutes: number
+  longBreakInterval: number
 }
 
 export function useTimerSettings(): TimerSettings {
@@ -24,6 +28,10 @@ export function useTimerSettings(): TimerSettings {
   const soundEnabled = useSetting('timer_sound')
   const notificationEnabled = useSetting('timer_notification')
   const autoBreak = useSetting('timer_auto_break')
+  const flowtimeEnabled = useSetting('timer_flowtime_enabled')
+  const longBreakEnabled = useSetting('timer_long_break_enabled')
+  const longBreakMinutesRaw = useSetting('timer_long_break_minutes')
+  const longBreakIntervalRaw = useSetting('timer_long_break_interval')
 
   return useMemo(() => {
     let presets: TimerPreset[]
@@ -45,7 +53,11 @@ export function useTimerSettings(): TimerSettings {
       perpetualMode: perpetualMode === 'true',
       soundEnabled: (soundEnabled ?? 'true') !== 'false',
       notificationEnabled: (notificationEnabled ?? 'true') !== 'false',
-      autoBreak: (autoBreak ?? 'true') !== 'false'
+      autoBreak: (autoBreak ?? 'true') !== 'false',
+      flowtimeEnabled: flowtimeEnabled === 'true',
+      longBreakEnabled: longBreakEnabled === 'true',
+      longBreakMinutes: parseInt(longBreakMinutesRaw ?? '15', 10) || 15,
+      longBreakInterval: parseInt(longBreakIntervalRaw ?? '4', 10) || 4
     }
-  }, [presetsRaw, defaultPresetId, breakMinutesRaw, repetitionEnabled, defaultRepsRaw, perpetualMode, soundEnabled, notificationEnabled, autoBreak])
+  }, [presetsRaw, defaultPresetId, breakMinutesRaw, repetitionEnabled, defaultRepsRaw, perpetualMode, soundEnabled, notificationEnabled, autoBreak, flowtimeEnabled, longBreakEnabled, longBreakMinutesRaw, longBreakIntervalRaw])
 }

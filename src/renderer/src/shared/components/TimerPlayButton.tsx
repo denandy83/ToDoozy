@@ -28,7 +28,6 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
 
   const autoMoveToInProgress = useCallback(() => {
     if (!task) return
-    // Find the first in-progress status (non-default, non-done)
     const defaultStatus = statuses.find((s) => s.is_default === 1)
     const isNotStarted = defaultStatus && task.status_id === defaultStatus.id
     if (!isNotStarted) return
@@ -40,7 +39,7 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
   }, [task, statuses, updateTask])
 
   const handleStartTimer = useCallback(
-    (minutes: number, reps: number, isPerpetual: boolean) => {
+    (minutes: number, reps: number, isPerpetual: boolean, isFlowtime: boolean = false) => {
       if (!currentUser) return
       autoMoveToInProgress()
       startTimer({
@@ -53,7 +52,10 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         soundEnabled: settings.soundEnabled,
         notificationEnabled: settings.notificationEnabled,
         autoBreak: settings.autoBreak,
-        userId: currentUser.id
+        userId: currentUser.id,
+        isFlowtime,
+        longBreakMinutes: settings.longBreakEnabled ? settings.longBreakMinutes : 0,
+        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0
       })
       setPopupOpen(false)
     },
@@ -65,22 +67,18 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
       e.stopPropagation()
       if (isTimerRunning) return
 
-      if (!settings.repetitionEnabled) {
-        // Start default timer immediately
-        handleStartTimer(
-          settings.defaultPreset.minutes,
-          1,
-          false
-        )
+      // Direct start only if neither repetition nor flowtime is enabled
+      if (!settings.repetitionEnabled && !settings.flowtimeEnabled) {
+        handleStartTimer(settings.defaultPreset.minutes, 1, false, false)
         return
       }
 
-      // Show popup for rep count editing
+      // Show popup
       const btn = btnRef.current
       if (btn) {
         const rect = btn.getBoundingClientRect()
         const popupW = 200
-        const popupH = 120
+        const popupH = 160
         let top = rect.bottom + 4
         let left = rect.left - popupW / 2 + rect.width / 2
 
@@ -146,7 +144,7 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
 interface TimerPopupProps {
   position: { top: number; left: number }
   settings: ReturnType<typeof import('../hooks/useTimerSettings').useTimerSettings>
-  onStart: (minutes: number, reps: number, isPerpetual: boolean) => void
+  onStart: (minutes: number, reps: number, isPerpetual: boolean, isFlowtime: boolean) => void
   onClose: () => void
 }
 
@@ -157,6 +155,7 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
   ref
 ) {
   const [reps, setReps] = useState(settings.defaultReps)
+  const [isFlowtime, setIsFlowtime] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -166,10 +165,11 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
   const handleConfirm = useCallback(() => {
     onStart(
       settings.defaultPreset.minutes,
-      settings.perpetualMode ? 0 : reps,
-      settings.perpetualMode
+      isFlowtime ? 0 : (settings.perpetualMode ? 0 : reps),
+      isFlowtime ? false : settings.perpetualMode,
+      isFlowtime
     )
-  }, [settings, reps, onStart])
+  }, [settings, reps, isFlowtime, onStart])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -195,32 +195,52 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
         Start Timer
       </p>
-      <p className="mb-3 text-sm font-light text-foreground">
-        {settings.defaultPreset.name} ({settings.defaultPreset.minutes}m)
-      </p>
 
-      {settings.perpetualMode ? (
-        <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">
-          Perpetual mode
-        </p>
-      ) : (
-        <div className="mb-3 flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Reps</span>
-          <input
-            ref={inputRef}
-            type="number"
-            min={1}
-            max={99}
-            value={reps}
-            onChange={(e) => setReps(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            onKeyDown={handleKeyDown}
-            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
+      {/* Flowtime toggle */}
+      {settings.flowtimeEnabled && (
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Flowtime</span>
+          <button
+            onClick={() => setIsFlowtime(!isFlowtime)}
+            className={`relative h-5 w-9 rounded-full transition-colors ${isFlowtime ? 'bg-accent' : 'bg-border'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${isFlowtime ? 'translate-x-4' : ''}`} />
+          </button>
         </div>
+      )}
+
+      {/* Preset info and reps — hidden when flowtime is on */}
+      {!isFlowtime && (
+        <>
+          <p className="mb-3 text-sm font-light text-foreground">
+            {settings.defaultPreset.name} ({settings.defaultPreset.minutes}m)
+          </p>
+
+          {settings.perpetualMode ? (
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">
+              Perpetual mode
+            </p>
+          ) : settings.repetitionEnabled ? (
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Reps</span>
+              <input
+                ref={inputRef}
+                type="number"
+                min={1}
+                max={99}
+                value={reps}
+                onChange={(e) => setReps(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                onKeyDown={handleKeyDown}
+                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+          ) : null}
+        </>
       )}
 
       <button
         onClick={handleConfirm}
+        onKeyDown={handleKeyDown}
         className="w-full rounded-lg bg-accent/12 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/20"
       >
         Start

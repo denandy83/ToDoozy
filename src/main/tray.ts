@@ -225,8 +225,13 @@ export function updateTrayBadge(): void {
 
   if (timerState) {
     // Show countdown in menu bar with phase indicator
-    const timeStr = formatTimerDisplay(timerState.remainingSeconds)
-    const phaseIcon = timerState.phase === 'break' ? '☕' : '⏱'
+    const displaySeconds = (timerState.isFlowtime && timerState.phase === 'work')
+      ? timerState.elapsedSeconds
+      : timerState.remainingSeconds
+    const timeStr = formatTimerDisplay(displaySeconds)
+    const phaseIcon = timerState.phase === 'break'
+      ? (timerState.isLongBreak ? '\ud83e\uddd8' : '\u2615')
+      : (timerState.isFlowtime ? '\ud83c\udf0a' : '\u23f1')
     const repStr = timerState.isPerpetual
       ? ` ${timerState.currentRep}`
       : timerState.totalReps > 1

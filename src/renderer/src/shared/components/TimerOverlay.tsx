@@ -10,35 +10,47 @@ export function TimerOverlay(): React.JSX.Element | null {
   const currentRep = useTimerStore((s) => s.currentRep)
   const totalReps = useTimerStore((s) => s.totalReps)
   const isPerpetual = useTimerStore((s) => s.isPerpetual)
+  const isFlowtime = useTimerStore((s) => s.isFlowtime)
+  const elapsedSeconds = useTimerStore((s) => s.elapsedSeconds)
+  const isLongBreak = useTimerStore((s) => s.isLongBreak)
+  const sessionsCompleted = useTimerStore((s) => s.sessionsCompleted)
+  const totalFocusSecondsToday = useTimerStore((s) => s.totalFocusSecondsToday)
   const pause = useTimerStore((s) => s.pause)
   const resume = useTimerStore((s) => s.resume)
   const stop = useTimerStore((s) => s.stop)
 
   if (!isRunning) return null
 
-  const minutes = Math.floor(remainingSeconds / 60)
-  const seconds = remainingSeconds % 60
+  const displaySeconds = (isFlowtime && phase === 'work') ? elapsedSeconds : remainingSeconds
+  const minutes = Math.floor(displaySeconds / 60)
+  const seconds = displaySeconds % 60
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
 
   const isBreak = phase === 'break'
   const showReps = isPerpetual || totalReps > 1
 
+  const phaseLabel = phase === 'work'
+    ? (isFlowtime ? 'Flowtime' : 'Focus')
+    : isLongBreak
+      ? 'Long Break'
+      : 'Break'
+
+  const phaseColor = phase === 'work'
+    ? 'text-accent'
+    : isLongBreak
+      ? 'text-amber-400'
+      : 'text-emerald-400'
+
   return (
     <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center backdrop-blur-xl bg-background/80">
       {/* Phase label */}
-      <p
-        className={`mb-4 text-[11px] font-bold uppercase tracking-widest ${
-          isBreak ? 'text-emerald-400' : 'text-accent'
-        }`}
-      >
-        {isBreak ? 'Break' : 'Focus'}
+      <p className={`mb-4 text-[11px] font-bold uppercase tracking-widest ${phaseColor}`}>
+        {phaseLabel}
       </p>
 
       {/* Countdown */}
       <p
-        className={`font-light tabular-nums ${
-          isBreak ? 'text-emerald-400' : 'text-foreground'
-        }`}
+        className={`font-light tabular-nums ${isBreak ? (isLongBreak ? 'text-amber-400' : 'text-emerald-400') : 'text-foreground'}`}
         style={{ fontSize: '8rem', lineHeight: 1 }}
       >
         {timeStr}
@@ -75,6 +87,13 @@ export function TimerOverlay(): React.JSX.Element | null {
           <Square size={18} />
         </button>
       </div>
+
+      {/* Session stats */}
+      {sessionsCompleted > 0 && (
+        <p className="mt-8 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+          {sessionsCompleted} {sessionsCompleted === 1 ? 'session' : 'sessions'} &middot; {Math.round(totalFocusSecondsToday / 60)}m focused today
+        </p>
+      )}
     </div>
   )
 }

@@ -207,6 +207,11 @@ export interface TimerTrayState {
   totalReps: number
   isPerpetual: boolean
   taskTitle: string
+  isFlowtime: boolean
+  elapsedSeconds: number
+  isLongBreak: boolean
+  sessionsCompleted: number
+  totalFocusSecondsToday: number
 }
 
 export interface TimerAPI {
@@ -289,10 +294,14 @@ export interface ProjectAreasAPI {
 }
 
 export interface StatsAPI {
-  completions(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+  completions(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
   streaks(userId: string): Promise<{ current: number; best: number }>
-  focus(userId: string, projectId: string | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
+  focus(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
   heatmap(userId: string, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+  summary(userId: string, projectIds: string[] | null): Promise<{ total: number; open: number; overdue: number; completed: number; avgCompletionDays: number }>
+  priorityBreakdown(userId: string, projectIds: string[] | null): Promise<Array<{ priority: number; count: number }>>
+  completionsByDayOfWeek(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ dayOfWeek: number; count: number }>>
+  projectBreakdown(userId: string): Promise<Array<{ projectId: string; projectName: string; open: number; completed: number }>>
 }
 
 export interface SavedViewsAPI {

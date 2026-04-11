@@ -217,6 +217,58 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_auto_break" defaultValue="true" />
       </div>
 
+      {/* Long Break — only visible when auto-break is on */}
+      {(useSetting('timer_auto_break') ?? 'true') !== 'false' && (
+        <>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-light text-foreground">Long break</p>
+              <p className="text-[10px] text-muted">Longer rest after several work sessions</p>
+            </div>
+            <ToggleButton settingKey="timer_long_break_enabled" defaultValue="false" />
+          </div>
+
+          {(useSetting('timer_long_break_enabled') ?? 'false') === 'true' && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-light text-foreground">Long break duration</p>
+                  <p className="text-[10px] text-muted">Duration of the long break</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={useSetting('timer_long_break_minutes') ?? '15'}
+                    onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
+                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-light text-foreground">Long break every</p>
+                  <p className="text-[10px] text-muted">Work sessions before long break</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={2}
+                    max={10}
+                    value={useSetting('timer_long_break_interval') ?? '4'}
+                    onChange={(e) => setSetting('timer_long_break_interval', e.target.value)}
+                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">sessions</span>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Repetition</p>
 
       {/* Repetition mode */}
@@ -253,6 +305,17 @@ export function TimerSettingsContent(): React.JSX.Element {
           <p className="text-[10px] text-muted">Run indefinitely until manually stopped</p>
         </div>
         <ToggleButton settingKey="timer_perpetual" defaultValue="false" />
+      </div>
+
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Flowtime</p>
+
+      {/* Flowtime */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Flowtime mode</p>
+          <p className="text-[10px] text-muted">Open-ended focus — timer counts up, you decide when to stop</p>
+        </div>
+        <ToggleButton settingKey="timer_flowtime_enabled" defaultValue="false" />
       </div>
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Behavior</p>

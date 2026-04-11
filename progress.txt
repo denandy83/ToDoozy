@@ -54,3 +54,31 @@ Started: Sat Apr 11 22:32:43 CEST 2026
 - `src/shared/nlpDateParser.test.ts`: 15 tests covering parseNlpDate, stripDateFromTitle, formatNlpDate, rruleOptsToCanonical
 - `packages/telegram-bot/src/parser.test.ts`: 7 new NLP tests (total 35 tests in file)
 - All 506 tests pass
+
+## Story #61 — Enhanced Timer: Long Break, Flowtime Mode, Session Stats
+
+### What was built
+- **Long Break**: After N configurable work sessions, the break phase uses a longer duration with amber "Long Break" label in overlay and yoga emoji in tray
+- **Flowtime Mode**: Open-ended focus mode where timer counts UP instead of down; user decides when to stop; logs elapsed time as focus session if > 1 minute
+- **Session Stats**: Overlay footer shows "N sessions · Xm focused today"; stats reset when date changes
+
+### Files modified
+- `src/renderer/src/shared/stores/timerStore.ts` — Extended TimerState with 8 new fields, updated startTimer/tick/stop/completePhase for flowtime counting up, long break transitions, session tracking
+- `src/renderer/src/shared/hooks/useTimerSettings.ts` — Added flowtimeEnabled, longBreakEnabled, longBreakMinutes, longBreakInterval settings
+- `src/renderer/src/shared/components/TimerOverlay.tsx` — Flowtime display (count up), long break amber styling, session stats footer
+- `src/renderer/src/shared/components/TimerPlayButton.tsx` — Flowtime toggle in popup, conditional preset/rep hiding, updated onStart signature
+- `src/renderer/src/features/settings/TimerSettingsContent.tsx` — Long break settings (toggle, duration, interval), flowtime toggle
+- `src/preload/index.d.ts` — Extended TimerTrayState with 5 new fields
+- `src/main/tray.ts` — Flowtime count-up display, long break yoga emoji, flowtime wave emoji
+
+### Key decisions
+- Session stats not persisted to DB — resets on app restart (acceptable for v1, kept simple)
+- Long break interval = 0 disables long breaks entirely
+- Flowtime hides preset and rep controls in popup (irrelevant in open-ended mode)
+- Direct start (no popup) only when both repetition AND flowtime are disabled
+- Session stats preserved across stop() calls within same day but reset on date change
+- Tray syncs every 5 seconds in flowtime to avoid excessive IPC
+
+### Tests added
+- 8 new tests in timerStore.test.ts covering flowtime tick counting, pause behavior, long break params, session stats preservation, date reset, default isFlowtime
+- All 514 tests pass (21 test files)

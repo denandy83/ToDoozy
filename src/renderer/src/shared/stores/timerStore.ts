@@ -36,6 +36,22 @@ interface TimerState {
   soundEnabled: boolean
   notificationEnabled: boolean
   autoBreak: boolean
+  /** Flowtime: counts up instead of down */
+  isFlowtime: boolean
+  /** Flowtime: seconds elapsed in work phase */
+  elapsedSeconds: number
+  /** Long break duration in seconds */
+  longBreakSeconds: number
+  /** Work sessions before long break (0 = disabled) */
+  longBreakInterval: number
+  /** Currently in a long break */
+  isLongBreak: boolean
+  /** Work sessions completed today */
+  sessionsCompleted: number
+  /** Total focus seconds today */
+  totalFocusSecondsToday: number
+  /** ISO date for daily reset */
+  statsDate: string | null
 }
 
 interface TimerActions {
@@ -57,6 +73,9 @@ export interface StartTimerParams {
   notificationEnabled: boolean
   autoBreak: boolean
   userId: string
+  isFlowtime?: boolean
+  longBreakMinutes?: number
+  longBreakInterval?: number
 }
 
 export type TimerStore = TimerState & TimerActions
@@ -96,7 +115,15 @@ const initialState: TimerState = {
   isPerpetual: false,
   soundEnabled: true,
   notificationEnabled: true,
-  autoBreak: true
+  autoBreak: true,
+  isFlowtime: false,
+  elapsedSeconds: 0,
+  longBreakSeconds: 900,
+  longBreakInterval: 0,
+  isLongBreak: false,
+  sessionsCompleted: 0,
+  totalFocusSecondsToday: 0,
+  statsDate: null
 }
 
 export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
@@ -105,6 +132,13 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   startTimer(params): void {
     clearTickInterval()
     cachedUserId = params.userId
+
+    // Daily stats reset
+    const today = new Date().toISOString().slice(0, 10)
+    const prevState = get()
+    if (prevState.statsDate !== today) {
+      set({ sessionsCompleted: 0, totalFocusSecondsToday: 0, statsDate: today })
+    }
 
     const workSec = params.minutes * 60
     const breakSec = params.breakMinutes * 60
@@ -122,7 +156,12 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       isPerpetual: params.isPerpetual,
       soundEnabled: params.soundEnabled,
       notificationEnabled: params.notificationEnabled,
-      autoBreak: params.autoBreak
+      autoBreak: params.autoBreak,
+      isFlowtime: params.isFlowtime ?? false,
+      elapsedSeconds: 0,
+      longBreakSeconds: (params.longBreakMinutes ?? 0) * 60,
+      longBreakInterval: params.longBreakInterval ?? 0,
+      isLongBreak: false
     })
 
     startTickInterval()
@@ -147,17 +186,33 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
 
   stop(): void {
     clearTickInterval()
-    // Log elapsed time before resetting
     const state = get()
-    if (state.isRunning && state.taskId && cachedUserId && state.phase === 'work') {
-      const elapsedSeconds = state.workSeconds - state.remainingSeconds
-      const minutes = Math.round(elapsedSeconds / 60)
-      if (minutes > 0) {
-        logFocusSession(state.taskId, cachedUserId, minutes)
+
+    if (state.isRunning && state.phase === 'work') {
+      if (state.isFlowtime && state.elapsedSeconds > 60) {
+        // Flowtime: log elapsed time if > 1 minute
+        const minutes = Math.round(state.elapsedSeconds / 60)
+        if (state.taskId && cachedUserId && minutes > 0) {
+          logFocusSession(state.taskId, cachedUserId, minutes)
+        }
+        set((s) => ({
+          sessionsCompleted: s.sessionsCompleted + 1,
+          totalFocusSecondsToday: s.totalFocusSecondsToday + state.elapsedSeconds
+        }))
+      } else if (!state.isFlowtime && state.taskId && cachedUserId) {
+        // Normal: log elapsed countdown time
+        const elapsedSeconds = state.workSeconds - state.remainingSeconds
+        const minutes = Math.round(elapsedSeconds / 60)
+        if (minutes > 0) {
+          logFocusSession(state.taskId, cachedUserId, minutes)
+        }
       }
     }
+
+    // Preserve session stats across stops
+    const { sessionsCompleted, totalFocusSecondsToday, statsDate } = get()
     cachedUserId = null
-    set(initialState)
+    set({ ...initialState, sessionsCompleted, totalFocusSecondsToday, statsDate })
     syncTrayTimer(initialState)
   },
 
@@ -165,12 +220,21 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     const state = get()
     if (!state.isRunning || state.isPaused) return
 
-    const next = state.remainingSeconds - 1
-    if (next <= 0) {
-      completePhase(get, set)
+    if (state.isFlowtime && state.phase === 'work') {
+      // Flowtime: count UP
+      const next = state.elapsedSeconds + 1
+      set({ elapsedSeconds: next })
+      // Sync tray every 5 seconds to avoid excessive IPC
+      if (next % 5 === 0) syncTrayTimer({ ...state, elapsedSeconds: next })
     } else {
-      set({ remainingSeconds: next })
-      syncTrayTimer({ ...state, remainingSeconds: next })
+      // Normal: count DOWN
+      const next = state.remainingSeconds - 1
+      if (next <= 0) {
+        completePhase(get, set)
+      } else {
+        set({ remainingSeconds: next })
+        syncTrayTimer({ ...state, remainingSeconds: next })
+      }
     }
   }
 }), shallow)
@@ -179,7 +243,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
 
 function completePhase(
   get: () => TimerStore,
-  set: (partial: Partial<TimerState>) => void
+  set: (partial: Partial<TimerState> | ((s: TimerState) => Partial<TimerState>)) => void
 ): void {
   const state = get()
 
@@ -196,14 +260,30 @@ function completePhase(
       logFocusSession(state.taskId, cachedUserId, minutes)
     }
 
+    // Track session stats
+    set((s) => ({
+      sessionsCompleted: s.sessionsCompleted + 1,
+      totalFocusSecondsToday: s.totalFocusSecondsToday + state.workSeconds
+    }))
+
     // Start break if auto-break enabled
-    if (state.autoBreak && state.breakSeconds > 0) {
-      set({
-        phase: 'break',
-        remainingSeconds: state.breakSeconds
-      })
-      syncTrayTimer(get())
-      return
+    if (state.autoBreak) {
+      const updatedState = get()
+      const isLongBreak = state.longBreakInterval > 0
+        && updatedState.sessionsCompleted > 0
+        && updatedState.sessionsCompleted % state.longBreakInterval === 0
+
+      const breakDuration = isLongBreak ? state.longBreakSeconds : state.breakSeconds
+
+      if (breakDuration > 0) {
+        set({
+          phase: 'break',
+          remainingSeconds: breakDuration,
+          isLongBreak
+        })
+        syncTrayTimer(get())
+        return
+      }
     }
 
     // No auto-break — go to next rep or stop
@@ -226,7 +306,8 @@ function advanceRepOrStop(
     set({
       phase: 'work',
       remainingSeconds: state.workSeconds,
-      currentRep: state.currentRep + 1
+      currentRep: state.currentRep + 1,
+      isLongBreak: false
     })
     syncTrayTimer(get())
   } else {
@@ -244,6 +325,11 @@ export interface TrayTimerState {
   totalReps: number
   isPerpetual: boolean
   taskTitle: string
+  isFlowtime: boolean
+  elapsedSeconds: number
+  isLongBreak: boolean
+  sessionsCompleted: number
+  totalFocusSecondsToday: number
 }
 
 function syncTrayTimer(state: TimerState): void {
@@ -259,7 +345,12 @@ function syncTrayTimer(state: TimerState): void {
       currentRep: state.currentRep,
       totalReps: state.totalReps,
       isPerpetual: state.isPerpetual,
-      taskTitle: state.taskTitle ?? ''
+      taskTitle: state.taskTitle ?? '',
+      isFlowtime: state.isFlowtime,
+      elapsedSeconds: state.elapsedSeconds,
+      isLongBreak: state.isLongBreak,
+      sessionsCompleted: state.sessionsCompleted,
+      totalFocusSecondsToday: state.totalFocusSecondsToday
     })
   }
 }

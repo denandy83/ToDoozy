@@ -210,4 +210,223 @@ describe('useTimerStore', () => {
 
     useTimerStore.getState().stop()
   })
+
+  it('starts flowtime mode correctly', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Flowtime Test',
+      minutes: 25,
+      reps: 0,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1',
+      isFlowtime: true
+    })
+
+    const state = useTimerStore.getState()
+    expect(state.isFlowtime).toBe(true)
+    expect(state.elapsedSeconds).toBe(0)
+    expect(state.phase).toBe('work')
+
+    useTimerStore.getState().stop()
+  })
+
+  it('flowtime tick counts up instead of down', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Flowtime Test',
+      minutes: 25,
+      reps: 0,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1',
+      isFlowtime: true
+    })
+
+    expect(useTimerStore.getState().elapsedSeconds).toBe(0)
+    useTimerStore.getState().tick()
+    expect(useTimerStore.getState().elapsedSeconds).toBe(1)
+    useTimerStore.getState().tick()
+    expect(useTimerStore.getState().elapsedSeconds).toBe(2)
+    // remainingSeconds should NOT change in flowtime work mode
+    expect(useTimerStore.getState().remainingSeconds).toBe(25 * 60)
+
+    useTimerStore.getState().stop()
+  })
+
+  it('flowtime pauses the elapsed counter', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Flowtime Pause Test',
+      minutes: 25,
+      reps: 0,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1',
+      isFlowtime: true
+    })
+
+    useTimerStore.getState().tick()
+    useTimerStore.getState().tick()
+    expect(useTimerStore.getState().elapsedSeconds).toBe(2)
+
+    useTimerStore.getState().pause()
+    useTimerStore.getState().tick()
+    expect(useTimerStore.getState().elapsedSeconds).toBe(2) // unchanged
+
+    useTimerStore.getState().resume()
+    useTimerStore.getState().tick()
+    expect(useTimerStore.getState().elapsedSeconds).toBe(3)
+
+    useTimerStore.getState().stop()
+  })
+
+  it('starts with long break params', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Long Break Test',
+      minutes: 25,
+      reps: 1,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1',
+      longBreakMinutes: 15,
+      longBreakInterval: 4
+    })
+
+    const state = useTimerStore.getState()
+    expect(state.longBreakSeconds).toBe(900) // 15 * 60
+    expect(state.longBreakInterval).toBe(4)
+    expect(state.isLongBreak).toBe(false)
+
+    useTimerStore.getState().stop()
+  })
+
+  it('long break interval of 0 disables long breaks', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'No Long Break',
+      minutes: 25,
+      reps: 1,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1',
+      longBreakMinutes: 0,
+      longBreakInterval: 0
+    })
+
+    const state = useTimerStore.getState()
+    expect(state.longBreakSeconds).toBe(0)
+    expect(state.longBreakInterval).toBe(0)
+
+    useTimerStore.getState().stop()
+  })
+
+  it('preserves session stats across stops', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    // Manually set some session stats
+    useTimerStore.setState({
+      sessionsCompleted: 3,
+      totalFocusSecondsToday: 4500,
+      statsDate: new Date().toISOString().slice(0, 10)
+    })
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Stats Preserve Test',
+      minutes: 25,
+      reps: 1,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: false,
+      userId: 'user-1'
+    })
+
+    useTimerStore.getState().stop()
+
+    const state = useTimerStore.getState()
+    // Session stats should be preserved even after stop
+    expect(state.sessionsCompleted).toBe(3)
+    expect(state.totalFocusSecondsToday).toBe(4500)
+  })
+
+  it('resets session stats when date changes', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    // Set stats from yesterday
+    useTimerStore.setState({
+      sessionsCompleted: 5,
+      totalFocusSecondsToday: 9000,
+      statsDate: '2020-01-01'
+    })
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Date Reset Test',
+      minutes: 25,
+      reps: 1,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: false,
+      userId: 'user-1'
+    })
+
+    const state = useTimerStore.getState()
+    expect(state.sessionsCompleted).toBe(0)
+    expect(state.totalFocusSecondsToday).toBe(0)
+    expect(state.statsDate).toBe(new Date().toISOString().slice(0, 10))
+
+    useTimerStore.getState().stop()
+  })
+
+  it('defaults isFlowtime to false when not specified', async () => {
+    const { useTimerStore } = await import('./timerStore')
+
+    useTimerStore.getState().startTimer({
+      taskId: 'task-1',
+      taskTitle: 'Default Flowtime Test',
+      minutes: 25,
+      reps: 1,
+      isPerpetual: false,
+      breakMinutes: 5,
+      soundEnabled: false,
+      notificationEnabled: false,
+      autoBreak: true,
+      userId: 'user-1'
+    })
+
+    expect(useTimerStore.getState().isFlowtime).toBe(false)
+
+    useTimerStore.getState().stop()
+  })
 })
