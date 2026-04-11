@@ -606,14 +606,26 @@ export function Sidebar({
 function SyncStatusIcon(): React.JSX.Element {
   const syncStatus = useSyncStore(selectSyncStatus)
   const lastSyncedAt = useSyncStore(selectLastSyncedAt)
+  const errorMessage = useSyncStore((s) => s.errorMessage)
   const isFirstSync = useSyncStore(selectIsFirstSync)
   const firstSyncProgress = useSyncStore(selectFirstSyncProgress)
   const [showTooltip, setShowTooltip] = useState(false)
 
+  // Detect stale sync — if last sync was >5 minutes ago and status claims "synced", something is wrong
+  const isStale = syncStatus === 'synced' && lastSyncedAt && (Date.now() - new Date(lastSyncedAt).getTime() > 5 * 60 * 1000)
+  const effectiveStatus = isStale ? 'error' as SyncStatus : syncStatus
+
   const formatTime = (iso: string | null): string => {
     if (!iso) return 'Never'
     const d = new Date(iso)
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
   }
 
   const dotColor: Record<SyncStatus, string> = {
@@ -630,24 +642,32 @@ function SyncStatusIcon(): React.JSX.Element {
     error: 'Sync error'
   }
 
+  const effectiveLabel = isStale ? 'Sync stale' : statusLabel[syncStatus]
+  const effectiveMessage = errorMessage ?? (isStale ? 'Sync has not completed recently — check your connection or re-login' : null)
+
   return (
     <div className="relative">
       <button
         onClick={() => setShowTooltip(!showTooltip)}
         onBlur={() => setShowTooltip(false)}
         className="flex items-center rounded p-1 text-muted transition-colors hover:bg-foreground/6"
-        title={statusLabel[syncStatus]}
+        title={effectiveLabel}
       >
         <span
-          className={`inline-block h-2 w-2 rounded-full ${syncStatus === 'syncing' ? 'animate-pulse' : ''}`}
-          style={{ backgroundColor: dotColor[syncStatus] }}
+          className={`inline-block h-2 w-2 rounded-full ${effectiveStatus === 'syncing' ? 'animate-pulse' : ''} ${effectiveStatus === 'error' ? 'animate-pulse' : ''}`}
+          style={{ backgroundColor: dotColor[effectiveStatus] }}
         />
       </button>
       {showTooltip && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-surface p-2 shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-lg border border-border bg-surface p-2 shadow-lg">
           <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-            {statusLabel[syncStatus]}
+            {effectiveLabel}
           </div>
+          {effectiveMessage && (
+            <div className="mt-1 rounded bg-danger/10 px-2 py-1 text-[10px] font-light text-danger">
+              {effectiveMessage}
+            </div>
+          )}
           {isFirstSync && (
             <div className="mt-1">
               <div className="h-1 overflow-hidden rounded-full bg-foreground/10">

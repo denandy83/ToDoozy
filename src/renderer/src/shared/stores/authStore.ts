@@ -382,6 +382,65 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       return
     }
 
+    // Check Supabase before creating — the project may exist remotely but not locally yet
+    try {
+      const supabase = await getSupabase()
+      const { data: memberships } = await supabase
+        .from('project_members')
+        .select('project_id')
+        .eq('user_id', userId)
+
+      if (memberships && memberships.length > 0) {
+        // Projects exist in Supabase — pull the first one and mark as default locally
+        const { data: project } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('id', memberships[0].project_id)
+          .single()
+
+        if (project) {
+          const localProject = await window.api.projects.findById(project.id)
+          if (!localProject) {
+            await window.api.projects.create({
+              id: project.id,
+              name: project.name,
+              description: project.description,
+              color: project.color ?? '#6366f1',
+              icon: project.icon ?? 'folder',
+              owner_id: project.owner_id,
+              is_default: 1
+            })
+            await window.api.projects.addMember(project.id, userId, 'owner', userId)
+
+            // Pull statuses for this project
+            const { data: statuses } = await supabase
+              .from('statuses')
+              .select('*')
+              .eq('project_id', project.id)
+
+            if (statuses) {
+              for (const s of statuses) {
+                const existingStatus = await window.api.statuses.findById(s.id)
+                if (!existingStatus) {
+                  await window.api.statuses.create({
+                    id: s.id, project_id: s.project_id, name: s.name, color: s.color,
+                    icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default
+                  })
+                }
+              }
+            }
+          } else {
+            // Exists locally but is_default wasn't set — fix it
+            await window.api.projects.update(project.id, { is_default: 1 })
+          }
+          return
+        }
+      }
+    } catch (err) {
+      console.warn('[Auth] Supabase check failed during ensureDefaultProject, creating locally:', err)
+    }
+
+    // No project found locally or remotely — create fresh
     const crypto = globalThis.crypto
     const id = crypto.randomUUID()
     await window.api.projects.create({

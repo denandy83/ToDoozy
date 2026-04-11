@@ -6,6 +6,7 @@ import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useToast } from '../../shared/components/Toast'
 import { getSupabase } from '../../lib/supabase'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { McpSettingsContent } from './McpSettingsContent'
 
 const SUPABASE_URL = 'https://znmgsyjkaftbnhtlcxrm.supabase.co'
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpubWdzeWprYWZ0Ym5odGxjeHJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MjA2MTUsImV4cCI6MjA4OTM5NjYxNX0.FzDK5NRvauwrwgM7oaMqZqosYaY2nSeBlFsSQfzoDM0'
@@ -133,14 +134,14 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
   }, [setSetting, userId])
 
   const iosDefaultProject = useSetting('ios_shortcut_default_project')
-  const [subTab, setSubTab] = useState<'telegram' | 'shortcut'>('telegram')
+  const [subTab, setSubTab] = useState<'telegram' | 'shortcut' | 'mcp'>('telegram')
 
 
   return (
     <div className="flex flex-col gap-6">
       {/* ── Sub-tabs ── */}
       <div className="flex gap-1 border-b border-border">
-        {(['telegram', 'shortcut'] as const).map((tab) => (
+        {(['telegram', 'shortcut', 'mcp'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setSubTab(tab)}
@@ -150,7 +151,7 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
                 : 'text-muted hover:text-foreground'
             }`}
           >
-            {tab === 'telegram' ? 'Telegram Bot' : 'iOS Shortcut'}
+            {tab === 'telegram' ? 'Telegram Bot' : tab === 'shortcut' ? 'iOS Shortcut' : 'MCP Server'}
           </button>
         ))}
       </div>
@@ -306,15 +307,21 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
                   <CopyField value={`${SUPABASE_URL}/rest/v1/rpc/quick_add_task`} label="url" copied={copied} onCopy={handleCopy} />
                 </Step>
                 <Step n={4} text="Set Method to POST" />
-                <Step n={5} text="Add a Header — key: apikey, value:">
+                <Step n={5} text="Add Header — key: apikey, value:">
                   <CopyField value={ANON_KEY} label="anon" copied={copied} onCopy={handleCopy} truncate />
                 </Step>
-                <Step n={6} text='Set Request Body to JSON, add key p_api_key with your API key:'>
+                <Step n={6} text="Add Header — key: Authorization, value:">
+                  <CopyField value={`Bearer ${ANON_KEY}`} label="auth" copied={copied} onCopy={handleCopy} truncate />
+                </Step>
+                <Step n={7} text="Add Header — key: Content-Type, value:">
+                  <CopyField value="application/json" label="ctype" copied={copied} onCopy={handleCopy} />
+                </Step>
+                <Step n={8} text='Set Request Body to JSON, add key p_api_key with your API key:'>
                   <CopyField value={apiKey} label="key2" copied={copied} onCopy={handleCopy} highlight />
                 </Step>
-                <Step n={7} text='Add another JSON key: p_title — tap the value field and select "Dictated Text" from the variables above' />
-                <Step n={8} text='Add action: "Show Notification" → type "Task added!"' />
-                <Step n={9} text="Done! Go to Settings → Action Button to assign this shortcut" />
+                <Step n={9} text='Add another JSON key: p_title — tap the value field and select "Dictated Text" from the variables above' />
+                <Step n={10} text='Add action: "Show Notification" → type "Task added!"' />
+                <Step n={11} text="Done! Go to Settings → Action Button to assign this shortcut" />
               </div>
             </div>
           </>
@@ -322,6 +329,9 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
       </div>
 
       )}
+
+      {/* ══════════════ MCP SERVER ══════════════ */}
+      {subTab === 'mcp' && <McpSettingsContent />}
 
       {/* ══════════════ SMART SYNTAX (shown in telegram tab) ══════════════ */}
       {subTab === 'telegram' && isTelegramConnected && (

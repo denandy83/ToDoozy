@@ -14,6 +14,34 @@ function markSynced(): void {
   useSyncStore.getState().setLastSynced()
 }
 
+/** Track consecutive auth failures — surface after 2 in a row to avoid false alarms */
+let authFailureCount = 0
+
+function handleSyncError(context: string, error: { message?: string; code?: string; status?: number } | unknown): void {
+  const err = error as { message?: string; code?: string; status?: number }
+  const isAuth = err?.status === 401 || err?.code === 'PGRST301' || err?.message?.includes('JWT')
+    || err?.message?.includes('expired') || err?.message?.includes('unauthorized')
+  if (isAuth) {
+    authFailureCount++
+    if (authFailureCount >= 2) {
+      useSyncStore.getState().setError('Authentication expired — sign out and back in to restore sync')
+    }
+    console.error(`[PersonalSync] Auth failure in ${context}:`, err)
+  } else {
+    console.error(`[PersonalSync] ${context} failed:`, err)
+  }
+}
+
+function clearAuthFailures(): void {
+  if (authFailureCount > 0) {
+    authFailureCount = 0
+    const store = useSyncStore.getState()
+    if (store.status === 'error' && store.errorMessage?.includes('Authentication')) {
+      store.setError(null)
+    }
+  }
+}
+
 /** Track which projects have been confirmed in Supabase this session */
 const confirmedProjects = new Set<string>()
 
@@ -792,7 +820,11 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
       .eq('id', projectId)
       .single()
 
-    if (error || !remote) return false
+    if (error) {
+      handleSyncError('pullProjectMetadata', error)
+      return false
+    }
+    if (!remote) return false
 
     const local = await window.api.projects.findById(projectId)
     if (!local) return false
@@ -812,20 +844,77 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
       await pushProject(local)
     }
     return false
-  } catch {
+  } catch (err) {
+    handleSyncError('pullProjectMetadata', err)
     return false
+  }
+}
+
+/**
+ * Pull statuses from Supabase and upsert locally.
+ * Must run before pullNewTasks to satisfy FK constraints.
+ */
+export async function pullStatuses(projectId: string): Promise<number> {
+  try {
+    const supabase = await getSupabase()
+    const { data: remoteStatuses, error } = await supabase
+      .from('statuses')
+      .select('*')
+      .eq('project_id', projectId)
+
+    if (error || !remoteStatuses) return 0
+
+    let changed = 0
+    for (const rs of remoteStatuses) {
+      const existing = await window.api.statuses.findById(rs.id)
+      if (!existing) {
+        await window.api.statuses.create({
+          id: rs.id,
+          project_id: rs.project_id,
+          name: rs.name,
+          color: rs.color,
+          icon: rs.icon,
+          order_index: rs.order_index,
+          is_done: rs.is_done,
+          is_default: rs.is_default
+        })
+        changed++
+      } else if (rs.updated_at && existing.updated_at && rs.updated_at > existing.updated_at) {
+        await window.api.statuses.update(rs.id, {
+          name: rs.name,
+          color: rs.color,
+          icon: rs.icon,
+          order_index: rs.order_index,
+          is_done: rs.is_done,
+          is_default: rs.is_default
+        })
+        changed++
+      }
+    }
+    if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for project ${projectId}`)
+    return changed
+  } catch (err) {
+    handleSyncError('pullStatuses', err)
+    return 0
   }
 }
 
 export async function pullNewTasks(projectId: string): Promise<number> {
   try {
+    // Ensure statuses exist locally before inserting tasks (FK constraint)
+    await pullStatuses(projectId)
+
     const supabase = await getSupabase()
     const { data: remoteTasks, error } = await supabase
       .from('tasks')
       .select('*')
       .eq('project_id', projectId)
 
-    if (error || !remoteTasks) return 0
+    if (error) {
+      handleSyncError('pullNewTasks', error)
+      return 0
+    }
+    if (!remoteTasks) return 0
 
     let changed = 0
     for (const rt of remoteTasks) {
@@ -836,53 +925,64 @@ export async function pullNewTasks(projectId: string): Promise<number> {
         const ownerId = rt.owner_id as string
         const localOwner = await window.api.users.findById(ownerId)
         if (!localOwner) {
-          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch((e) => console.warn('[PersonalSync] Failed to create local user:', e))
         }
-        await window.api.tasks.create({
-          id: rt.id,
-          project_id: rt.project_id,
-          owner_id: ownerId,
-          title: rt.title,
-          description: rt.description,
-          status_id: rt.status_id,
-          priority: rt.priority ?? 0,
-          due_date: rt.due_date,
-          parent_id: rt.parent_id,
-          order_index: rt.order_index ?? 0,
-          assigned_to: rt.assigned_to,
-          is_template: rt.is_template ?? 0,
-          is_archived: rt.is_archived ?? 0,
-          is_in_my_day: rt.is_in_my_day ?? 0,
-          completed_date: rt.completed_date,
-          recurrence_rule: rt.recurrence_rule,
-          reference_url: rt.reference_url,
-          my_day_dismissed_date: rt.my_day_dismissed_date ?? null
-        }).catch(() => {})
-        changed++
+        try {
+          await window.api.tasks.create({
+            id: rt.id,
+            project_id: rt.project_id,
+            owner_id: ownerId,
+            title: rt.title,
+            description: rt.description,
+            status_id: rt.status_id,
+            priority: rt.priority ?? 0,
+            due_date: rt.due_date,
+            parent_id: rt.parent_id,
+            order_index: rt.order_index ?? 0,
+            assigned_to: rt.assigned_to,
+            is_template: rt.is_template ?? 0,
+            is_archived: rt.is_archived ?? 0,
+            is_in_my_day: rt.is_in_my_day ?? 0,
+            completed_date: rt.completed_date,
+            recurrence_rule: rt.recurrence_rule,
+            reference_url: rt.reference_url,
+            my_day_dismissed_date: rt.my_day_dismissed_date ?? null
+          })
+          changed++
+        } catch (e) {
+          console.error(`[PersonalSync] Failed to create task "${rt.title}" (${rt.id}):`, e)
+        }
       } else if (rt.updated_at && existing.updated_at && rt.updated_at > existing.updated_at) {
         // Remote is newer — update locally
-        await window.api.tasks.update(rt.id, {
-          title: rt.title,
-          description: rt.description,
-          status_id: rt.status_id,
-          priority: rt.priority ?? 0,
-          due_date: rt.due_date,
-          parent_id: rt.parent_id,
-          order_index: rt.order_index ?? 0,
-          assigned_to: rt.assigned_to,
-          is_archived: rt.is_archived ?? 0,
-          is_in_my_day: rt.is_in_my_day ?? 0,
-          completed_date: rt.completed_date,
-          recurrence_rule: rt.recurrence_rule,
-          reference_url: rt.reference_url,
-          my_day_dismissed_date: rt.my_day_dismissed_date ?? null
-        }).catch(() => {})
-        changed++
+        try {
+          await window.api.tasks.update(rt.id, {
+            title: rt.title,
+            description: rt.description,
+            status_id: rt.status_id,
+            priority: rt.priority ?? 0,
+            due_date: rt.due_date,
+            parent_id: rt.parent_id,
+            order_index: rt.order_index ?? 0,
+            assigned_to: rt.assigned_to,
+            is_archived: rt.is_archived ?? 0,
+            is_in_my_day: rt.is_in_my_day ?? 0,
+            completed_date: rt.completed_date,
+            recurrence_rule: rt.recurrence_rule,
+            reference_url: rt.reference_url,
+            my_day_dismissed_date: rt.my_day_dismissed_date ?? null
+          })
+          changed++
+        } catch (e) {
+          console.error(`[PersonalSync] Failed to update task "${rt.title}" (${rt.id}):`, e)
+        }
       }
     }
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} tasks for project ${projectId}`)
+    // Supabase responded successfully — clear any auth failure state
+    clearAuthFailures()
     return changed
-  } catch {
+  } catch (err) {
+    handleSyncError('pullNewTasks', err)
     return 0
   }
 }

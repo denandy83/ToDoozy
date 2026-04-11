@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { UpdateSettingsContent } from './UpdateSettingsContent'
 import { WhatsNewSettingsContent, WhatsNewDot } from './WhatsNewSettingsContent'
-import { McpSettingsContent } from './McpSettingsContent'
 import { HelpSettingsContent } from '../help/HelpSettingsContent'
 
-type AboutSubtab = 'updates' | 'whatsnew' | 'integrations' | 'help'
+type AboutSubtab = 'updates' | 'whatsnew' | 'help'
 
 export function AboutSettingsContent(): React.JSX.Element {
   const [subtab, setSubtab] = useState<AboutSubtab>('updates')
@@ -30,14 +29,6 @@ export function AboutSettingsContent(): React.JSX.Element {
           {subtab !== 'whatsnew' && <WhatsNewDot />}
         </button>
         <button
-          onClick={() => setSubtab('integrations')}
-          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
-            subtab === 'integrations' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
-          }`}
-        >
-          Integrations
-        </button>
-        <button
           onClick={() => setSubtab('help')}
           className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
             subtab === 'help' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
@@ -49,7 +40,6 @@ export function AboutSettingsContent(): React.JSX.Element {
 
       {subtab === 'updates' && <UpdateSettingsContent />}
       {subtab === 'whatsnew' && <WhatsNewSettingsContent />}
-      {subtab === 'integrations' && <McpSettingsContent />}
       {subtab === 'help' && <HelpSettingsContent />}
     </div>
   )
