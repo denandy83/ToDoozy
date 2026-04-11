@@ -16,15 +16,51 @@ function markSynced(): void {
 
 /** Track consecutive auth failures — surface after 2 in a row to avoid false alarms */
 let authFailureCount = 0
+let refreshAttemptedThisCycle = false
+
+async function attemptSessionRefresh(): Promise<boolean> {
+  if (refreshAttemptedThisCycle) return false
+  refreshAttemptedThisCycle = true
+  try {
+    const supabase = await getSupabase()
+    const { data, error } = await supabase.auth.refreshSession()
+    if (error || !data.session) {
+      console.error('[PersonalSync] Session refresh failed:', error?.message)
+      return false
+    }
+    // Store the refreshed session for persistence across restarts
+    await window.api.auth.storeSession(JSON.stringify({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token
+    }))
+    console.log('[PersonalSync] Session refreshed successfully')
+    authFailureCount = 0
+    return true
+  } catch (err) {
+    console.error('[PersonalSync] Session refresh threw:', err)
+    return false
+  }
+}
+
+/** Reset the refresh gate so next sync cycle can attempt again */
+export function resetRefreshGate(): void {
+  refreshAttemptedThisCycle = false
+}
 
 function handleSyncError(context: string, error: { message?: string; code?: string; status?: number } | unknown): void {
   const err = error as { message?: string; code?: string; status?: number }
-  const isAuth = err?.status === 401 || err?.code === 'PGRST301' || err?.message?.includes('JWT')
-    || err?.message?.includes('expired') || err?.message?.includes('unauthorized')
+  const isAuth = err?.status === 401 || err?.code === 'PGRST301' || err?.code === '42501'
+    || err?.message?.includes('JWT') || err?.message?.includes('expired')
+    || err?.message?.includes('unauthorized') || err?.message?.includes('row-level security')
   if (isAuth) {
     authFailureCount++
     if (authFailureCount >= 2) {
-      useSyncStore.getState().setError('Authentication expired — sign out and back in to restore sync')
+      // Try to refresh the session automatically before surfacing error
+      attemptSessionRefresh().then((refreshed) => {
+        if (!refreshed) {
+          useSyncStore.getState().setError('Authentication expired — sign out and back in to restore sync')
+        }
+      })
     }
     console.error(`[PersonalSync] Auth failure in ${context}:`, err)
   } else {
