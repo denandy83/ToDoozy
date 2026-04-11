@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, copyFileSync } from 'fs'
+import { existsSync, copyFileSync, unlinkSync } from 'fs'
 import { migrations } from './migrations'
 import { withTransaction } from './transaction'
 
@@ -70,17 +70,31 @@ export function switchDatabase(userId: string, email?: string): DatabaseSync {
 
   // Determine which DB to use (priority: email-named > UUID-named > create new)
   let userDbPath: string
+
+  // Helper to remove UUID DB files after migration
+  const removeUuidDb = (): void => {
+    try {
+      if (existsSync(uuidDbPath)) unlinkSync(uuidDbPath)
+      if (existsSync(uuidDbPath + '-wal')) unlinkSync(uuidDbPath + '-wal')
+      if (existsSync(uuidDbPath + '-shm')) unlinkSync(uuidDbPath + '-shm')
+      console.log(`[Database] Removed legacy UUID DB: ${uuidDbPath}`)
+    } catch (e) {
+      console.warn('[Database] Failed to remove UUID DB:', e)
+    }
+  }
+
   if (emailDbPath && existsSync(emailDbPath)) {
     userDbPath = emailDbPath
+    // Clean up leftover UUID DB if it still exists
+    if (existsSync(uuidDbPath)) removeUuidDb()
   } else if (existsSync(uuidDbPath)) {
     if (emailDbPath) {
-      // Rename UUID DB to email-named
-      console.log(`[Database] Renaming UUID DB to email-named: ${emailDbPath}`)
+      // Migrate UUID DB to email-named
+      console.log(`[Database] Migrating UUID DB to email-named: ${emailDbPath}`)
       copyFileSync(uuidDbPath, emailDbPath)
-      const walPath = uuidDbPath + '-wal'
-      const shmPath = uuidDbPath + '-shm'
-      if (existsSync(walPath)) copyFileSync(walPath, emailDbPath + '-wal')
-      if (existsSync(shmPath)) copyFileSync(shmPath, emailDbPath + '-shm')
+      if (existsSync(uuidDbPath + '-wal')) copyFileSync(uuidDbPath + '-wal', emailDbPath + '-wal')
+      if (existsSync(uuidDbPath + '-shm')) copyFileSync(uuidDbPath + '-shm', emailDbPath + '-shm')
+      removeUuidDb()
       userDbPath = emailDbPath
     } else {
       userDbPath = uuidDbPath
