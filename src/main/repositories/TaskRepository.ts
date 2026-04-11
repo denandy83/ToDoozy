@@ -680,6 +680,98 @@ export class TaskRepository {
     return { current, best }
   }
 
+  getTaskSummaryStats(
+    userId: string,
+    projectIds: string[] | null
+  ): { total: number; open: number; overdue: number; completed: number; avgCompletionDays: number } {
+    let baseSql = `
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      INNER JOIN statuses s ON s.id = t.status_id
+      WHERE t.is_template = 0 AND t.is_archived = 0
+    `
+    const params: string[] = [userId]
+    if (projectIds && projectIds.length > 0) {
+      baseSql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
+    }
+
+    const total = (this.db.prepare(`SELECT COUNT(*) as c ${baseSql}`).get(...params) as { c: number }).c
+    const open = (this.db.prepare(`SELECT COUNT(*) as c ${baseSql} AND s.is_done = 0`).get(...params) as { c: number }).c
+    const completed = (this.db.prepare(`SELECT COUNT(*) as c ${baseSql} AND s.is_done = 1`).get(...params) as { c: number }).c
+
+    const today = new Date().toISOString().slice(0, 10)
+    const overdue = (this.db.prepare(
+      `SELECT COUNT(*) as c ${baseSql} AND s.is_done = 0 AND t.due_date IS NOT NULL AND date(t.due_date) < ?`
+    ).get(...params, today) as { c: number }).c
+
+    const avgRow = this.db.prepare(
+      `SELECT AVG(julianday(t.completed_date) - julianday(t.created_at)) as avg_days ${baseSql} AND t.completed_date IS NOT NULL`
+    ).get(...params) as { avg_days: number | null }
+
+    return { total, open, overdue, completed, avgCompletionDays: Math.round((avgRow.avg_days ?? 0) * 10) / 10 }
+  }
+
+  getPriorityBreakdown(
+    userId: string,
+    projectIds: string[] | null
+  ): Array<{ priority: number; count: number }> {
+    let sql = `
+      SELECT t.priority, COUNT(*) as count
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      INNER JOIN statuses s ON s.id = t.status_id
+      WHERE t.is_template = 0 AND t.is_archived = 0 AND s.is_done = 0
+    `
+    const params: string[] = [userId]
+    if (projectIds && projectIds.length > 0) {
+      sql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
+    }
+    sql += ' GROUP BY t.priority ORDER BY t.priority DESC'
+    return this.db.prepare(sql).all(...params) as Array<{ priority: number; count: number }>
+  }
+
+  getCompletionsByDayOfWeek(
+    userId: string,
+    projectIds: string[] | null,
+    startDate: string,
+    endDate: string
+  ): Array<{ dayOfWeek: number; count: number }> {
+    let sql = `
+      SELECT CAST(strftime('%w', t.completed_date) AS INTEGER) as dayOfWeek, COUNT(*) as count
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      WHERE t.completed_date IS NOT NULL
+        AND t.completed_date >= ? AND t.completed_date <= ?
+        AND t.is_template = 0
+    `
+    const params: (string | number)[] = [userId, startDate, endDate]
+    if (projectIds && projectIds.length > 0) {
+      sql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
+    }
+    sql += ' GROUP BY dayOfWeek ORDER BY dayOfWeek ASC'
+    return this.db.prepare(sql).all(...params) as Array<{ dayOfWeek: number; count: number }>
+  }
+
+  getProjectBreakdown(
+    userId: string
+  ): Array<{ projectId: string; projectName: string; open: number; completed: number }> {
+    return this.db.prepare(`
+      SELECT t.project_id as projectId, p.name as projectName,
+        SUM(CASE WHEN s.is_done = 0 THEN 1 ELSE 0 END) as open,
+        SUM(CASE WHEN s.is_done = 1 THEN 1 ELSE 0 END) as completed
+      FROM tasks t
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      INNER JOIN statuses s ON s.id = t.status_id
+      INNER JOIN projects p ON p.id = t.project_id
+      WHERE t.is_template = 0 AND t.is_archived = 0
+      GROUP BY t.project_id
+      ORDER BY (open + completed) DESC
+    `).all(userId) as Array<{ projectId: string; projectName: string; open: number; completed: number }>
+  }
+
   autoAddMyDayTasks(userId: string, mode: 'off' | 'due_today' | 'due_today_or_overdue'): string[] {
     if (mode === 'off') return []
 

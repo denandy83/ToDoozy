@@ -805,6 +805,22 @@ export function registerIpcHandlers(): void {
     return getRepos().activityLog.getActivityHeatmap(userId, startDate, endDate)
   })
 
+  ipcMain.handle('stats:summary', (_e, userId: string, projectIds: string[] | null) => {
+    return getRepos().tasks.getTaskSummaryStats(userId, projectIds)
+  })
+
+  ipcMain.handle('stats:priorityBreakdown', (_e, userId: string, projectIds: string[] | null) => {
+    return getRepos().tasks.getPriorityBreakdown(userId, projectIds)
+  })
+
+  ipcMain.handle('stats:completionsByDayOfWeek', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+    return getRepos().tasks.getCompletionsByDayOfWeek(userId, projectIds, startDate, endDate)
+  })
+
+  ipcMain.handle('stats:projectBreakdown', (_e, userId: string) => {
+    return getRepos().tasks.getProjectBreakdown(userId)
+  })
+
   // ── Saved Views ──────────────────────────────────────────────────
   ipcMain.handle('savedViews:findById', (_e, id: string) => {
     return getRepos().savedViews.findById(id) ?? null

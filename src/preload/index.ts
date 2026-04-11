@@ -254,7 +254,15 @@ const api: TodoozyAPI = {
     focus: (userId, projectId, startDate, endDate) =>
       ipcRenderer.invoke('stats:focus', userId, projectId, startDate, endDate),
     heatmap: (userId, startDate, endDate) =>
-      ipcRenderer.invoke('stats:heatmap', userId, startDate, endDate)
+      ipcRenderer.invoke('stats:heatmap', userId, startDate, endDate),
+    summary: (userId, projectIds) =>
+      ipcRenderer.invoke('stats:summary', userId, projectIds),
+    priorityBreakdown: (userId, projectIds) =>
+      ipcRenderer.invoke('stats:priorityBreakdown', userId, projectIds),
+    completionsByDayOfWeek: (userId, projectIds, startDate, endDate) =>
+      ipcRenderer.invoke('stats:completionsByDayOfWeek', userId, projectIds, startDate, endDate),
+    projectBreakdown: (userId) =>
+      ipcRenderer.invoke('stats:projectBreakdown', userId)
   },
 
   savedViews: {
