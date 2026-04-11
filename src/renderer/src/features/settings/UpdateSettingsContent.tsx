@@ -38,14 +38,6 @@ export function UpdateSettingsContent(): React.JSX.Element {
         </div>
       </div>
 
-      {/* TEMP: test quit button */}
-      <button
-        onClick={() => window.electron.ipcRenderer.invoke('updater:test-quit')}
-        className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger"
-      >
-        Test Quit (remove me)
-      </button>
-
       {/* Check for updates */}
       <div className="flex items-center justify-between">
         <div>
