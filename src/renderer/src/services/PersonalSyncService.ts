@@ -889,6 +889,10 @@ export async function pullStatuses(projectId: string): Promise<number> {
           is_default: rs.is_default
         })
         changed++
+      } else if (existing.updated_at && rs.updated_at && existing.updated_at > rs.updated_at) {
+        // Local is newer — push to Supabase
+        await pushStatus(existing)
+        changed++
       }
     }
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for project ${projectId}`)
@@ -974,6 +978,14 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           changed++
         } catch (e) {
           console.error(`[PersonalSync] Failed to update task "${rt.title}" (${rt.id}):`, e)
+        }
+      } else if (existing.updated_at && rt.updated_at && existing.updated_at > rt.updated_at) {
+        // Local is newer — push to Supabase
+        try {
+          await pushTask(existing)
+          changed++
+        } catch (e) {
+          console.error(`[PersonalSync] Failed to push task "${existing.title}" (${existing.id}):`, e)
         }
       }
     }
