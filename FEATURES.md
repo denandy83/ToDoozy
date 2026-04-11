@@ -60,9 +60,11 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ### My Day View
 - Cross-project view: tasks that are `is_in_my_day = true` OR `due_date = today`
+- **Auto-add by due date:** Tasks with a due date matching today are automatically included in My Day
+- **Done today filter:** My Day shows a separate section for tasks completed during the current day
 - Tasks grouped by project buckets, each bucket showing the project's status sections
 - Supports both list and kanban layout
-- **Status:** Complete
+- **Status:** Complete (updated 2026-04-08, Story #55)
 
 ### Calendar View
 - Cross-project view showing all non-archived, non-template tasks with a due_date
@@ -250,7 +252,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Filter bar in every view: click a label chip to filter, click again to clear
 - Filter only shows labels assigned to active (non-archived) tasks in the current project
 - Hide/blur filter modes; auto-clears on view switch
-- **Status:** Complete
+- **AND/OR operator toggle:** Three-way toggle switches label filter logic between AND (task must have all selected labels) and OR (task must have any selected label)
+- **Status:** Complete (updated 2026-04-08, Story #57)
 
 ### Expanded Filter System
 - Filter bar supports priority, status, due date, and keyword filters in addition to labels
@@ -301,6 +304,12 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Status order: default first, middle by `order_index`, done last — enforced everywhere
 - Drag-reorder in project settings
 - **Status:** Complete
+
+### Per-Project Auto-Archive
+- Projects can be configured to automatically archive completed tasks after a configurable number of days
+- Archived tasks move to the Archive view automatically
+- Configured per-project in project settings
+- **Status:** Complete (2026-04-08, Story #58)
 
 ---
 
@@ -426,7 +435,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Create tasks from iOS Shortcuts (iPhone/iPad) using the ToDoozy API endpoint
 - Setup instructions in Settings > Integrations > iOS Shortcut tab
 - Inline copy-able API endpoint; no manual URL editing needed
-- **Status:** Complete (2026-04-07)
+- **Per-integration default project:** iOS Shortcut has its own default project setting so tasks land in the right place
+- **Status:** Complete (updated 2026-04-08, Story #56)
 
 ### Telegram Bot
 - Standalone bot (Node.js, runs separately from the Electron app) for managing tasks via Telegram
@@ -437,8 +447,9 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - PID file lock prevents duplicate bot instances
 - Respects `new_task_position` setting for task ordering
 - **In-app configuration:** Settings > Integrations > Telegram Bot — connect Telegram ID, set default project, manage settings without editing config files
+- **Per-integration default project:** Telegram Bot has its own default project setting independent of the global default
 - Telegram ID removal also cleans up from Supabase; settings pulled from Supabase on tab open
-- **Status:** Complete (2026-04-05 to 2026-04-07)
+- **Status:** Complete (updated 2026-04-08, Story #56)
 
 ---
 
@@ -524,12 +535,12 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Uses electron-updater with GitHub Releases as the update provider
 - Checks for updates on app launch (background, non-blocking) and every 4 hours
 - Manual check via Settings > Updates > "Check for Updates" button
-- Update-available dialog shows current version, new version, release notes, and Install & Restart / Not Now buttons
+- **Update available modal:** Shows current version, new version, and formatted release notes with Install & Restart / Not Now buttons
 - Download progress bar with percentage during update download
 - Dismissed updates only re-prompt on next launch or manual check (not on periodic checks)
 - Settings displays current app version from `app.getVersion()`
 - macOS platform only
-- **Status:** Complete (2026-04-02, Story #40)
+- **Status:** Complete (updated 2026-04-11)
 
 ---
 

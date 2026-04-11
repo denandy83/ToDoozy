@@ -576,7 +576,6 @@ export function Sidebar({
           <Settings size={14} />
           <span className="text-[11px] font-bold uppercase tracking-widest">Settings</span>
         </button>
-        <McpIndicator />
       </div>
 
       {/* Saved view context menu (color picker) */}
@@ -684,43 +683,6 @@ function SyncStatusIcon(): React.JSX.Element {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function McpIndicator(): React.JSX.Element {
-  const [status, setStatus] = useState<{ running: boolean; instanceCount: number } | null>(null)
-
-  useEffect(() => {
-    const check = (): void => {
-      window.api.mcp.isRunning().then(setStatus).catch(() => setStatus({ running: false, instanceCount: 0 }))
-    }
-    check()
-    const interval = setInterval(check, 15_000)
-    return () => clearInterval(interval)
-  }, [])
-
-  if (status === null) return <></>
-
-  const label = status.running
-    ? status.instanceCount > 1
-      ? `MCP (${status.instanceCount})`
-      : 'MCP'
-    : 'MCP Offline'
-
-  const tooltip = status.running
-    ? `MCP server running (${status.instanceCount} instance${status.instanceCount > 1 ? 's' : ''})`
-    : 'MCP server not running — restart Claude Code or Desktop to reconnect'
-
-  return (
-    <div
-      className="flex items-center gap-2 rounded-lg p-2"
-      title={tooltip}
-    >
-      <div className={`h-2 w-2 rounded-full ${status.running ? 'bg-success' : 'bg-danger animate-pulse'}`} />
-      <span className={`text-[9px] font-bold uppercase tracking-wider ${status.running ? 'text-success/60' : 'text-danger/60'}`}>
-        {label}
-      </span>
     </div>
   )
 }

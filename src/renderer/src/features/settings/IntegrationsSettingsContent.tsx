@@ -34,19 +34,28 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     const pull = async (): Promise<void> => {
       try {
         const supabase = await getSupabase()
+        // Pull regular settings
         const { data } = await supabase
           .from('user_settings')
           .select('key, value')
           .eq('user_id', userId)
-          .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids', 'api_key', 'ios_shortcut_default_project'])
+          .in('key', ['telegram_default_project', 'telegram_user_id', 'telegram_allowed_ids', 'ios_shortcut_default_project'])
         if (data && data.length > 0) {
           for (const row of data) {
             if (row.value) await window.api.settings.set(userId, row.key, row.value)
           }
-          hydrateSettings()
-        } else {
-          console.log('[Integrations] No settings returned from Supabase (auth may not be ready)')
         }
+        // Pull API key from api_keys table
+        const { data: keyData } = await supabase
+          .from('api_keys')
+          .select('key')
+          .eq('user_id', userId)
+          .limit(1)
+          .single()
+        if (keyData?.key) {
+          await window.api.settings.set(userId, 'api_key', keyData.key)
+        }
+        hydrateSettings()
       } catch (err) { console.warn('[Integrations] Failed to pull settings from Supabase:', err) }
     }
     pull()
@@ -108,30 +117,30 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     })
   }, [doRemoveTelegramId, telegramId, addToast, setSetting, userId])
 
-  // ── API Key handlers ──
+  // ── API Key handlers (writes to api_keys table) ──
   const handleGenerateApiKey = useCallback(async () => {
     const key = crypto.randomUUID()
     setSetting('api_key', key)
-    // Also push to Supabase
     try {
       const supabase = await getSupabase()
       if (userId) {
-        await supabase.from('user_settings').upsert({
-          id: `${userId}:api_key`, user_id: userId, key: 'api_key', value: key, updated_at: new Date().toISOString()
+        await supabase.from('api_keys').insert({
+          user_id: userId, key, name: 'Default'
         })
       }
     } catch { /* offline */ }
   }, [setSetting, userId])
 
   const handleRevokeApiKey = useCallback(async () => {
+    const currentKey = apiKey
     setSetting('api_key', null)
     try {
       const supabase = await getSupabase()
-      if (userId) {
-        await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
+      if (userId && currentKey) {
+        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key', currentKey)
       }
     } catch { /* offline */ }
-  }, [setSetting, userId])
+  }, [setSetting, userId, apiKey])
 
   const iosDefaultProject = useSetting('ios_shortcut_default_project')
   const [subTab, setSubTab] = useState<'telegram' | 'shortcut' | 'mcp'>('telegram')
@@ -139,6 +148,29 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* ── Shared API Key Section ── */}
+      <div>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted">API Key</span>
+        <p className="text-xs font-light text-foreground/50 mb-2 mt-1">
+          Used by MCP Server, iOS Shortcut, and other integrations.
+        </p>
+        {!apiKey ? (
+          <button onClick={handleGenerateApiKey} className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6">
+            Generate API Key
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <code className="flex-1 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-[11px] font-mono text-foreground/60 truncate">{apiKey}</code>
+            <button onClick={() => handleCopy(apiKey, 'apikey')} className="rounded p-1.5 text-muted hover:bg-foreground/6 transition-colors" title="Copy">
+              {copied === 'apikey' ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+            </button>
+            <button onClick={handleRevokeApiKey} className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger transition-colors" title="Revoke">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* ── Sub-tabs ── */}
       <div className="flex gap-1 border-b border-border">
         {(['telegram', 'shortcut', 'mcp'] as const).map((tab) => (
@@ -270,35 +302,13 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
           </select>
         </div>
 
-        {/* API Key */}
-        <div className="mb-4">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">API Key</span>
-          {!apiKey ? (
-            <div className="mt-2">
-              <button onClick={handleGenerateApiKey} className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6">
-                Generate API Key
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 mt-2">
-              <code className="flex-1 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-[11px] font-mono text-foreground/60 truncate">{apiKey}</code>
-              <button onClick={() => handleCopy(apiKey, 'apikey')} className="rounded p-1.5 text-muted hover:bg-foreground/6 transition-colors" title="Copy">
-                {copied === 'apikey' ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-              </button>
-              <button onClick={handleRevokeApiKey} className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger transition-colors" title="Revoke">
-                <RefreshCw size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-
         {apiKey && (
           <>
             {/* Setup instructions with inline copy fields */}
             <div>
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Setup</span>
               <p className="text-xs font-light text-foreground/50 mt-1 mb-3">
-                Create a Shortcut to add tasks by voice. Assign it to your Action Button.
+                Create a Shortcut to add tasks by voice. Assign it to your Action Button. Use your API key from above.
               </p>
               <div className="flex flex-col gap-3">
                 <Step n={1} text='Open Shortcuts app → tap "+" → New Shortcut' />
@@ -327,12 +337,17 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
             </div>
           </>
         )}
+        {!apiKey && (
+          <p className="text-xs font-light text-foreground/50">
+            Generate an API key above to see setup instructions.
+          </p>
+        )}
       </div>
 
       )}
 
       {/* ══════════════ MCP SERVER ══════════════ */}
-      {subTab === 'mcp' && <McpSettingsContent />}
+      {subTab === 'mcp' && <McpSettingsContent apiKey={apiKey} />}
 
       {/* ══════════════ SMART SYNTAX (shown in telegram tab) ══════════════ */}
       {subTab === 'telegram' && isTelegramConnected && (

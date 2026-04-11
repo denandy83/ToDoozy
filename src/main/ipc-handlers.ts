@@ -1,6 +1,5 @@
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
-import { execSync } from 'child_process'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
 import { getDatabase, switchDatabase } from './database'
@@ -60,39 +59,10 @@ function clearEncryptedSession(): void {
   }
 }
 
-// ── MCP session file bridge ─────────────────────────────────────────
-// Write a plaintext session file so the standalone MCP server can authenticate
-// with Supabase without needing Electron's safeStorage.
-const getMcpSessionPath = (): string => join(app.getPath('userData'), 'mcp-session.json')
-
-function writeMcpSession(sessionJson: string): void {
-  try {
-    const parsed = JSON.parse(sessionJson)
-    writeFileSync(
-      getMcpSessionPath(),
-      JSON.stringify({
-        access_token: parsed.access_token,
-        refresh_token: parsed.refresh_token,
-        expires_at: parsed.expires_at
-      })
-    )
-  } catch {
-    // Non-fatal — MCP server will fall back to SQLite
-  }
-}
-
-function deleteMcpSession(): void {
-  try {
-    unlinkSync(getMcpSessionPath())
-  } catch {
-    // File may not exist — ignore
-  }
-}
 
 function registerAuthHandlers(): void {
   ipcMain.handle('auth:storeSession', (_e, sessionJson: string) => {
     storeEncryptedSession(sessionJson)
-    writeMcpSession(sessionJson)
   })
 
   ipcMain.handle('auth:getSession', () => {
@@ -101,7 +71,6 @@ function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:clearSession', () => {
     clearEncryptedSession()
-    deleteMcpSession()
   })
 
   ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
@@ -643,40 +612,6 @@ export function registerIpcHandlers(): void {
       return result
     }
   )
-
-  // ── MCP ───────────────────────────────────────────────────────────
-  ipcMain.handle('mcp:getInfo', () => {
-    // app.getAppPath() returns app.asar in packaged builds, project root in dev
-    const actualPath = join(app.getAppPath(), 'out', 'main', 'mcp-server.js')
-
-    // Use the real Electron binary with ELECTRON_RUN_AS_NODE=1 so node:sqlite built-in is available
-    const devElectronBin = join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
-    const actualElectron = existsSync(devElectronBin) ? devElectronBin : app.getPath('exe')
-
-    const config = {
-      mcpServers: {
-        ToDoozy: {
-          command: actualElectron,
-          args: [actualPath],
-          env: { ELECTRON_RUN_AS_NODE: '1' }
-        }
-      }
-    }
-    return {
-      serverPath: actualPath,
-      configJson: JSON.stringify(config, null, 2)
-    }
-  })
-
-  ipcMain.handle('mcp:isRunning', (): { running: boolean; instanceCount: number } => {
-    try {
-      const result = execSync('ps aux | grep "mcp-server.js" | grep -v grep', { encoding: 'utf8' })
-      const lines = result.trim().split('\n').filter(Boolean)
-      return { running: lines.length > 0, instanceCount: lines.length }
-    } catch {
-      return { running: false, instanceCount: 0 }
-    }
-  })
 
   // ── Tray ──────────────────────────────────────────────────────────
   ipcMain.handle('tray:setUserId', (_e, userId: string) => {

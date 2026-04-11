@@ -114,3 +114,7 @@ npm run build
 | **Auto-update** | Sparkle-style auto-update via electron-updater with GitHub Releases, download progress, and manual check |
 | **Distribution build** | Production macOS build (DMG + ZIP) via electron-builder with code signing |
 | **Multi-user isolation** | All data scoped per authenticated user for safe multi-user database sharing |
+| **My Day auto-add** | Tasks due today are automatically included in My Day |
+| **AND/OR label filters** | Toggle between AND (all match) and OR (any match) logic for label filters |
+| **Per-project auto-archive** | Automatically archive completed tasks after a configurable number of days |
+| **Per-integration defaults** | Telegram Bot and iOS Shortcut each have their own default project |

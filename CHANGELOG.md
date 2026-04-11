@@ -4,6 +4,24 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.1.6
+
+- **My Day auto-add based on due date** — Tasks with a due date matching today are automatically added to the My Day view (#55)
+- **Per-integration default project for Telegram and iOS Shortcut** — Each integration (Telegram Bot, iOS Shortcut) can now have its own default project for task creation (#56)
+- **AND/OR label filter logic** — Label filters now support AND/OR operator toggle, letting you require all selected labels or match any of them (#57)
+- **Per-project auto-archive and My Day done-today filter** — Projects can auto-archive completed tasks after a configurable period; My Day shows tasks completed today in a separate section (#58)
+- **Update available modal with release notes** — The auto-updater now shows a modal with formatted release notes when an update is available
+- **Fix: updater restart** — Updater restart now properly quits and relaunches the app on macOS instead of just hiding the window
+- **Fix: UUID DB cleanup** — Stale UUID-named database files are deleted after migrating to the email-named database
+- **Fix: bidirectional sync** — Locally-newer tasks and statuses are now pushed to Supabase during sync, not just pulled
+- **Fix: iOS Shortcut instructions** — Updated iOS Shortcut setup instructions to include project name in the notification
+- **Fix: sync FK failures and stale detection** — Fixed foreign key constraint failures during sync, improved stale sync detection, moved MCP tab, and fixed iOS Shortcut headers
+- **Fix: redundant section titles** — Removed duplicate section titles in Settings > About (v1.1.4)
+- **Fix: inline updater and notification bell** — Fixed inline updater display, restart behavior, notification bell, and release notes DB storage (v1.1.3)
+- **Fix: release notes and delete resurrection** — Release notes now load from Supabase correctly; fixed deleted tasks reappearing after sync (v1.1.2)
+- **Notarization enabled** — Built-in notarization re-enabled in electron-builder
+- **Fix: verification, sync gaps, calendar and UX** — Fixed verification flow issues, sync gaps, calendar display bugs, and miscellaneous UX improvements (v1.1.1)
+
 ## v1.1.0
 
 - **Settings reorganization** — Reorganized Settings modal from 11 tabs to 7: General, Projects, Appearance (Theme + Priority Display subtabs), Labels, Timer, About (Updates + What's New + Integrations + Help subtabs). Added section labels throughout. No settings removed or renamed.

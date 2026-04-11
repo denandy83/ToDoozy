@@ -4,6 +4,22 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.1.6
+
+- **My Day auto-add based on due date** — Tasks due today are now automatically included in your My Day view, so you never miss a deadline
+- **Per-integration default projects** — Telegram Bot and iOS Shortcut each get their own default project setting, so tasks land in the right place regardless of how you create them
+- **AND/OR label filter toggle** — The label filter bar now has a three-way toggle to switch between AND (all labels must match) and OR (any label matches) logic
+- **Per-project auto-archive** — Projects can automatically archive completed tasks after a configurable number of days. My Day also shows a "Done today" section for tasks completed during the current day
+- **Update available modal** — When an app update is available, a modal now shows formatted release notes so you can see what's new before installing
+- **Fix: updater restart on macOS** — Installing an update now properly restarts the app instead of just hiding the window
+- **Fix: bidirectional sync** — Tasks and statuses that are newer locally now push to Supabase during sync, keeping both sides in sync
+- **Fix: deleted tasks reappearing** — Fixed an issue where deleted tasks could reappear after a sync cycle
+- **Fix: release notes loading** — Release notes now load correctly from Supabase in the What's New tab
+- **Fix: sync foreign key failures** — Resolved foreign key constraint errors during background sync
+- **Fix: iOS Shortcut setup** — Updated setup instructions to include the project name in notifications
+- **Fix: various UX improvements** — Cleaned up redundant section titles in Settings, fixed notification bell display, and improved calendar and verification flows
+- **Notarization re-enabled** — macOS builds are now notarized via Apple's built-in notarization service
+
 ## v1.1.0
 
 - **Settings reorganization** — The Settings modal is now cleaner with 7 tabs instead of 11. Themes and Priority Display are grouped under Appearance. Updates, What's New, Integrations, and Help are grouped under About. Section labels make each tab easier to scan.

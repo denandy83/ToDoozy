@@ -1,49 +1,31 @@
 # Ralph Progress Log
-Started: Wed Apr  8 15:11:28 CEST 2026
+Started: Sat Apr 11 22:32:43 CEST 2026
 ---
 
-## Story #55 — My Day Auto-Add (2026-04-08)
-- Added migration_16 for my_day_dismissed_date column (SQLite + Supabase)
-- Implemented autoAddMyDayTasks() with full exclusion logic (subtasks, done, archived, dismissed today, permanent dismiss)
-- Simplified findMyDay() in both SQLite and Supabase repos — removed dual filter, now only checks is_in_my_day = 1
-- Auto-add is called from hydrateMyDay() in taskStore before fetching My Day tasks
-- ContextMenu simplified from 3 branches to 2 (removed "move due date to tomorrow" hack)
-- BulkContextMenu and TaskRow.tsx MyDayIndicator now set dismissed dates on removal
-- Settings UI: added auto-add dropdown + re-add dismissed toggle in MyDaySection
-- Telegram bot: getMyDayTasks() now fetches pinned + due/overdue tasks, sorted by due_date
-- 14 new tests covering autoAddMyDayTasks edge cases + findMyDay simplification
-- All tests pass (477/477), typecheck clean
-
-## Story #56 — Per-Integration Default Project (2026-04-08)
-- Removed shared Default Project dropdown from top of Integrations settings
-- Added per-integration default project dropdowns: Telegram in its sub-tab, iOS Shortcut in its sub-tab
-- iOS Shortcut has "Follow Telegram default" option (shows Telegram default name in parentheses)
-- Updated Telegram bot /default command: shows both Telegram and iOS defaults with change buttons
-- Added defpick:/defset: callback handlers for per-integration project selection
-- iOS can choose "Follow Telegram" which deletes the ios_shortcut_default_project setting
-- Updated quick_add_task Supabase RPC: checks ios_shortcut_default_project first, falls back to telegram_default_project, then first owned project
-- Added 'default', 'list', 'recent' to parser.ts reserved commands list
-- Typecheck clean, all tests pass
-
-## Story #58 — Per-Project Auto-Archive (2026-04-08)
-- Added migration_17: auto_archive_enabled/value/unit columns on projects table
-- Migration migrates global auto_archive_* settings to all personal projects, then deletes global keys
-- Updated Project type and UpdateProjectInput with new fields
-- Updated ProjectRepository.update() with new field handlers
-- Refactored checkAutoArchive() in App.tsx to per-project logic (no global settings)
-- Removed global auto-archive UI from GeneralSettingsContent SystemSection
-- Added per-project auto-archive UI in ProjectsSettingsContent (with shared project "manual only" message)
-- Updated PersonalSyncService pushProject to sync auto_archive fields, pull mapping to set them on creation
-- My Day Done bucket now only shows tasks completed today — previous days' done tasks are hidden, not archived
-- Typecheck clean, all tests pass
-
-## Story #57 — AND/OR Label Filter Logic (2026-04-08)
-- Added labelFilterLogic ('any' | 'all') to labelStore with selector and setter
-- Created LabelOperatorToggle component (3-way: is any of / is all of / is not)
-- Updated LabelFilterPicker to use LabelOperatorToggle instead of OperatorToggle
-- Updated label filter chips to show "Label is any of" / "Label is all of" prefix when 2+ labels selected
-- Updated client-side filtering in SavedViewListView, MyDayView, TaskListView, CalendarView — .every() for AND, .some() for OR
-- Updated TaskRepository.search() SQL — AND uses subquery with HAVING COUNT(DISTINCT)
-- Updated MCP search_tasks tool with label_logic parameter
-- Added labelLogic to saved view FilterConfig serialization/deserialization
-- Typecheck clean, all tests pass
+## Story #59: Remote MCP Server via Supabase Edge Function
+- Created `api_keys` table migration (003) with RLS and migration from user_settings
+- Created Supabase Edge Function at `supabase/functions/mcp/index.ts` with Streamable HTTP transport
+  - All 45 tool handlers ported from local mcp-server.ts
+  - API key authentication via `api_keys` table with request_count tracking
+  - CORS headers, session management, proper error responses (401/400)
+  - Repos inlined for Deno compatibility (npm: specifiers for @supabase/supabase-js and @modelcontextprotocol/sdk)
+  - Recurrence utils inlined to avoid cross-module Deno import issues
+- Removed local stdio MCP server entirely:
+  - Deleted `src/main/mcp-server.ts`
+  - Removed `mcp-server` from rollupOptions in electron.vite.config.ts
+  - Removed `writeMcpSession`, `deleteMcpSession`, `getMcpSessionPath` from ipc-handlers.ts
+  - Removed `mcp:getInfo` and `mcp:isRunning` IPC handlers
+  - Removed `McpAPI` interface and `mcp` property from preload bridge
+  - Removed `McpIndicator` component from sidebar
+  - Removed `execSync` import (no longer needed)
+- Restructured Settings > Integrations UI:
+  - API key section moved above sub-tabs (shared across all integrations)
+  - API key handlers updated to write to `api_keys` table instead of `user_settings`
+  - MCP tab rewritten with setup instructions for Claude Code, Gemini CLI, Codex CLI, and JSON config
+  - All setup commands auto-fill user's API key
+  - MCP on/off toggle removed, no ELECTRON_RUN_AS_NODE references
+  - iOS Shortcut tab references shared API key above
+- Updated `.mcp.json` with ToDoozy remote entry (manual update needed — file is sensitive)
+- Created migration 004 updating `quick_add_task` function to use `api_keys` table with backward compatibility
+- Decision: deploy_project_template handler throws "not available via remote" since ProjectTemplateRepository is local-only
+- Note: `.mcp.json` update was denied by permission system — user needs to add ToDoozy entry manually

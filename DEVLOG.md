@@ -4,6 +4,34 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## v1.1.6 — Stories #55-58, Update Modal, Sync and UX Fixes (2026-04-08 to 2026-04-11)
+
+**Session type:** Feature implementation + bug fixes + releases
+
+**What was built:**
+
+- **My Day auto-add by due date (#55)** — Tasks due today automatically appear in My Day. 21 files changed.
+- **Per-integration default project (#56)** — Telegram Bot and iOS Shortcut each have their own default project setting. 5 files changed.
+- **AND/OR label filter logic (#57)** — Three-way operator toggle for label filters (AND/OR mode). 11 files changed.
+- **Per-project auto-archive + My Day done-today filter (#58)** — Projects can auto-archive done tasks; My Day shows tasks completed today. 10 files changed.
+- **Update available modal** — Auto-updater shows formatted release notes in a modal before install.
+- **Notarization re-enabled** — Built-in notarization enabled in electron-builder config.
+
+**Fixes (v1.1.1 through v1.1.6):**
+
+- Updater restart properly quits/relaunches on macOS (was just hiding the window)
+- UUID DB files cleaned up after migration to email-named DB
+- Bidirectional sync: locally-newer tasks/statuses now push to Supabase
+- Sync FK constraint failures, stale sync detection improvements
+- Release notes loading from Supabase; deleted task resurrection on sync
+- Inline updater display, notification bell, redundant section titles in Settings
+- iOS Shortcut instructions updated with project name in notification
+- Calendar, verification flow, and miscellaneous UX fixes
+
+**Key commits:** 7a2bbdf, cf125a9, afea9bd, c93d169, 2a9da1b, cc8df26, bb02ffa, e7f3b49, 2447500, dc72ae7, 5c289c5
+
+---
+
 ## 2026-04-08 — Telegram Bot Polish, iOS Shortcut, Sync Improvements, DB Naming (v1.1.0)
 
 **Session type:** Feature polish + bug fixes

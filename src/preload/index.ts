@@ -164,11 +164,6 @@ const api: TodoozyAPI = {
     updateShortcut: (accelerator) => ipcRenderer.invoke('app-toggle:updateShortcut', accelerator)
   },
 
-  mcp: {
-    getInfo: () => ipcRenderer.invoke('mcp:getInfo'),
-    isRunning: () => ipcRenderer.invoke('mcp:isRunning')
-  },
-
   timer: {
     updateTimer: (state) => ipcRenderer.invoke('timer:updateTimer', state),
     clearTimer: () => ipcRenderer.invoke('timer:clearTimer'),

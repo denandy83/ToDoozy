@@ -199,11 +199,6 @@ export interface AppToggleAPI {
   updateShortcut(accelerator: string): Promise<ShortcutUpdateResult>
 }
 
-export interface McpAPI {
-  getInfo(): Promise<{ serverPath: string; configJson: string }>
-  isRunning(): Promise<{ running: boolean; instanceCount: number }>
-}
-
 export interface TimerTrayState {
   remainingSeconds: number
   isPaused: boolean
@@ -326,7 +321,6 @@ export interface TodoozyAPI {
   quickadd: QuickAddAPI
   appToggle: AppToggleAPI
   tray: TrayAPI
-  mcp: McpAPI
   timer: TimerAPI
   notifications: NotificationsAPI
   sync: SyncAPI
