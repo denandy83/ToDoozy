@@ -235,7 +235,8 @@ const api: TodoozyAPI = {
   app: {
     getLoginItemSettings: () => ipcRenderer.invoke('app:getLoginItemSettings'),
     setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin),
-    getChangelog: () => ipcRenderer.invoke('app:getChangelog')
+    getChangelog: () => ipcRenderer.invoke('app:getChangelog'),
+    getDatabasePath: () => ipcRenderer.invoke('app:getDatabasePath') as Promise<string>
   },
 
   projectAreas: {
@@ -264,7 +265,9 @@ const api: TodoozyAPI = {
     projectBreakdown: (userId) =>
       ipcRenderer.invoke('stats:projectBreakdown', userId),
     taskList: (userId, filter, projectIds, startDate, endDate) =>
-      ipcRenderer.invoke('stats:taskList', userId, filter, projectIds, startDate, endDate)
+      ipcRenderer.invoke('stats:taskList', userId, filter, projectIds, startDate, endDate),
+    focusTaskList: (userId, startDate, endDate, projectIds) =>
+      ipcRenderer.invoke('stats:focusTaskList', userId, startDate, endDate, projectIds)
   },
 
   savedViews: {

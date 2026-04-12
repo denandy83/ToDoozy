@@ -6,16 +6,19 @@ import {
 import { Flame, Trophy, AlertTriangle, CheckCircle2, Clock, ListTodo, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
+import { useViewStore } from '../../shared/stores/viewStore'
+import { useTaskStore } from '../../shared/stores/taskStore'
+import { useSetting } from '../../shared/stores/settingsStore'
 import { Modal } from '../../shared/components/Modal'
 
-type StatsFilter = 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue'
-interface StatsTask { id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }
+type StatsFilter = 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue' | 'focus_today' | 'focus_week'
+interface StatsTask { id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number; focusMinutes?: number }
 
 type TimeRange = 7 | 30 | 90
 
 interface CompletionData { date: string; count: number }
 interface FocusData { date: string; minutes: number }
-interface HeatmapData { date: string; count: number }
+interface HeatmapData { date: string; count: number; created: number; completed: number; updated: number }
 interface SummaryData { total: number; open: number; overdue: number; completed: number; avgCompletionDays: number }
 interface PriorityData { priority: number; count: number }
 interface DayOfWeekData { dayOfWeek: number; count: number }
@@ -34,6 +37,8 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export function StatsView(): React.JSX.Element {
   const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const allProjects = useProjectStore(selectAllProjects)
+  const weekStartSetting = useSetting('week_start') ?? 'monday'
+  const weekStartDay = weekStartSetting === 'sunday' ? 0 : 1
   const [timeRange, setTimeRange] = useState<TimeRange>(30)
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const [completions, setCompletions] = useState<CompletionData[]>([])
@@ -49,7 +54,7 @@ export function StatsView(): React.JSX.Element {
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
 
-  const projectIds = useMemo(() => projectFilter ? [projectFilter] : null, [projectFilter])
+  const projectIds = projectFilter ? [projectFilter] : null
 
   const { startDate, endDate } = useMemo(() => {
     const end = new Date()
@@ -63,8 +68,7 @@ export function StatsView(): React.JSX.Element {
 
   const heatmapRange = useMemo(() => {
     const end = new Date()
-    const start = new Date()
-    start.setDate(start.getDate() - 90)
+    const start = new Date(end.getFullYear(), end.getMonth() - 2, 1) // 1st of 3 months ago
     return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) + 'T23:59:59' }
   }, [])
 
@@ -91,7 +95,7 @@ export function StatsView(): React.JSX.Element {
       setProjectData(proj)
     }
     load()
-  }, [userId, projectIds, startDate, endDate, heatmapRange])
+  }, [userId, projectFilter, startDate, endDate, heatmapRange])
 
   // Compute overview numbers from completions
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
@@ -107,32 +111,34 @@ export function StatsView(): React.JSX.Element {
   const todayFocus = focusData.filter((f) => f.date === todayStr).reduce((s, f) => s + f.minutes, 0)
   const weekFocus = focusData.filter((f) => f.date >= weekStart).reduce((s, f) => s + f.minutes, 0)
 
-  // Fill chart data
+  // Fill chart data — use local dates to avoid UTC offset issues
   const completionChart = useMemo(() => {
     const map = new Map(completions.map((c) => [c.date, c.count]))
     const result: Array<{ date: string; count: number }> = []
-    const d = new Date(startDate)
-    const end = new Date(endDate)
-    while (d <= end) {
-      const key = d.toISOString().slice(0, 10)
+    const d = new Date(startDate + 'T12:00:00')
+    const endDay = todayStr
+    while (true) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       result.push({ date: key, count: map.get(key) ?? 0 })
+      if (key >= endDay) break
       d.setDate(d.getDate() + 1)
     }
     return result
-  }, [completions, startDate, endDate])
+  }, [completions, startDate, todayStr])
 
   const focusChart = useMemo(() => {
     const map = new Map(focusData.map((f) => [f.date, f.minutes]))
     const result: Array<{ date: string; minutes: number }> = []
-    const d = new Date(startDate)
-    const end = new Date(endDate)
-    while (d <= end) {
-      const key = d.toISOString().slice(0, 10)
+    const d = new Date(startDate + 'T12:00:00')
+    const endDay = todayStr
+    while (true) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       result.push({ date: key, minutes: map.get(key) ?? 0 })
+      if (key >= endDay) break
       d.setDate(d.getDate() + 1)
     }
     return result
-  }, [focusData, startDate, endDate])
+  }, [focusData, startDate, todayStr])
 
   // Day of week chart — fill all 7 days
   const dayOfWeekChart = useMemo(() => {
@@ -154,16 +160,23 @@ export function StatsView(): React.JSX.Element {
     setDrillDown({ filter, label })
     setDrillLoading(true)
     try {
-      const tasks = await window.api.stats.taskList(
-        userId, filter, projectIds,
-        filter === 'completed_range' ? startDate : undefined,
-        filter === 'completed_range' ? endDate : undefined
-      )
-      setDrillTasks(tasks)
+      if (filter === 'focus_today' || filter === 'focus_week') {
+        const focusStart = filter === 'focus_today' ? todayStr : weekStart
+        const focusEnd = todayStr + 'T23:59:59'
+        const tasks = await window.api.stats.focusTaskList(userId, focusStart, focusEnd, projectIds)
+        setDrillTasks(tasks)
+      } else {
+        const tasks = await window.api.stats.taskList(
+          userId, filter, projectIds,
+          filter === 'completed_range' ? startDate : undefined,
+          filter === 'completed_range' ? endDate : undefined
+        )
+        setDrillTasks(tasks)
+      }
     } finally {
       setDrillLoading(false)
     }
-  }, [userId, projectIds, startDate, endDate])
+  }, [userId, projectFilter, startDate, endDate, todayStr, weekStart])
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -185,25 +198,30 @@ export function StatsView(): React.JSX.Element {
       </div>
 
       <div className="space-y-6 px-6 py-4">
-        {/* Streaks — top of page */}
-        <div className="flex items-center gap-4">
-          <div className={`flex items-center gap-3 rounded-lg border px-5 py-3 ${streaks.current > 0 ? 'border-orange-400/30 bg-orange-400/5' : 'border-border bg-background'}`}>
-            <Flame size={24} className={streaks.current > 0 ? 'text-orange-400 motion-safe:animate-pulse' : 'text-muted'} />
-            <div>
-              <div className="text-3xl font-light text-foreground">{streaks.current}</div>
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted">Day Streak</div>
+        {/* Streaks + Activity Heatmap — same 6-col grid as summary cards */}
+        <div className="grid grid-cols-6 gap-3">
+          <div className="col-span-1 flex flex-col gap-3 pt-[22px]">
+            <div className={`rounded-lg border px-4 py-3 ${streaks.current > 0 ? 'border-orange-400/30 bg-orange-400/5' : 'border-border bg-background'}`}>
+              <div className="flex items-center gap-2">
+                <Flame size={14} className={streaks.current > 0 ? 'text-orange-400 motion-safe:animate-pulse' : 'text-muted'} />
+                <span className="text-2xl font-light text-foreground">{streaks.current}</span>
+              </div>
+              <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">Day Streak</div>
+            </div>
+            <div className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-background px-4 py-3">
+              <Trophy size={14} className="text-amber-400" />
+              <div>
+                <div className="text-2xl font-light text-foreground">{streaks.best}</div>
+                <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">Best Streak</div>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-5 py-3">
-            <Trophy size={24} className="text-amber-400" />
-            <div>
-              <div className="text-3xl font-light text-foreground">{streaks.best}</div>
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted">Best Streak</div>
+          <div className="col-span-5 flex flex-col">
+            <h2 className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Activity (3 months)</h2>
+            <div className="w-fit flex-1 rounded-lg border border-border bg-background p-4">
+              <ActivityHeatmap data={heatmapData} weekStartDay={weekStartDay} />
             </div>
           </div>
-          {streaks.current > 0 && streaks.current >= streaks.best && (
-            <span className="text-[11px] font-bold uppercase tracking-widest text-orange-400">New Record!</span>
-          )}
         </div>
 
         {/* Summary Cards */}
@@ -218,8 +236,8 @@ export function StatsView(): React.JSX.Element {
 
         {/* Focus row */}
         <div className="grid grid-cols-3 gap-3">
-          <OverviewCard label="Focus Today" value={todayFocus > 0 ? `${todayFocus}m` : '—'} />
-          <OverviewCard label="Focus This Week" value={weekFocus > 0 ? `${weekFocus}m` : '—'} />
+          <OverviewCard label="Focus Today" value={todayFocus > 0 ? `${todayFocus}m` : '—'} icon={<Clock size={14} className="text-accent" />} onClick={todayFocus > 0 ? () => openDrillDown('focus_today', 'Focus Today') : undefined} />
+          <OverviewCard label="Focus This Week" value={weekFocus > 0 ? `${weekFocus}m` : '—'} icon={<Clock size={14} className="text-accent" />} onClick={weekFocus > 0 ? () => openDrillDown('focus_week', 'Focus This Week') : undefined} />
           <OverviewCard label="Completion Rate" value={`${completionRate}%`} />
         </div>
 
@@ -282,16 +300,8 @@ export function StatsView(): React.JSX.Element {
           <PriorityChart data={priorityData} />
         </div>
 
-        {/* Row 3: Activity Heatmap + Project Breakdown */}
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Activity (90 days)</h2>
-            <div className="rounded-lg border border-border bg-background p-4">
-              <ActivityHeatmap data={heatmapData} />
-            </div>
-          </div>
-          <ProjectBreakdown data={projectData} />
-        </div>
+        {/* Row 3: Project Breakdown */}
+        <ProjectBreakdown data={projectData} />
       </div>
 
       {/* Drill-down modal */}
@@ -304,7 +314,19 @@ export function StatsView(): React.JSX.Element {
           <div className="max-h-[60vh] overflow-y-auto">
             <div className="space-y-0.5">
               {drillTasks.map((task) => (
-                <StatsTaskRow key={task.id} task={task} />
+                <StatsTaskRow key={task.id} task={task} onNavigate={(taskId, projectId) => {
+                  setDrillDown(null)
+                  useViewStore.getState().setSelectedProject(projectId)
+                  // Wait for project hydration, then select task
+                  setTimeout(() => {
+                    useTaskStore.getState().selectTask(taskId, { openPanel: true })
+                    setTimeout(() => {
+                      // Re-select after any hydration-triggered clearSelection
+                      useTaskStore.getState().selectTask(taskId, { openPanel: true })
+                      document.querySelector(`[data-task-id="${taskId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }, 200)
+                  }, 500)
+                }} />
               ))}
             </div>
             {drillTasks.length >= 200 && (
@@ -473,23 +495,26 @@ function ProjectBreakdown({ data }: { data: ProjectData[] }): React.JSX.Element 
 }
 
 interface ActivityHeatmapProps {
-  data: Array<{ date: string; count: number }>
+  data: Array<{ date: string; count: number; created: number; completed: number; updated: number }>
+  weekStartDay?: number // 0=Sun, 1=Mon
 }
 
-function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
+function ActivityHeatmap({ data, weekStartDay = 1 }: ActivityHeatmapProps): React.JSX.Element {
+  const [tooltip, setTooltip] = useState<{ date: string; created: number; completed: number; updated: number; x: number; y: number } | null>(null)
+
   const dataMap = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const d of data) map.set(d.date, d.count)
+    const map = new Map<string, { count: number; created: number; completed: number; updated: number }>()
+    for (const d of data) map.set(d.date, { count: d.count, created: d.created, completed: d.completed, updated: d.updated })
     return map
   }, [data])
 
-  const { grid, weekCount, monthLabels } = useMemo(() => {
-    const cells: Array<{ date: string; count: number; dayOfWeek: number; weekIndex: number }> = []
+  const { grid, weekCount, monthLabels, dayLabels: computedDayLabels } = useMemo(() => {
+    const cells: Array<{ date: string; count: number; created: number; completed: number; updated: number; dayOfWeek: number; weekIndex: number }> = []
     const today = new Date()
-    const start = new Date(today)
-    start.setDate(today.getDate() - 90)
-    // Align to Monday
-    start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+    const start = new Date(today.getFullYear(), today.getMonth() - 2, 1)
+    // Align to week start day
+    const offset = (start.getDay() - weekStartDay + 7) % 7
+    start.setDate(start.getDate() - offset)
 
     const d = new Date(start)
     let weekIndex = 0
@@ -497,21 +522,30 @@ function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
     let lastMonth = -1
 
     while (d <= today) {
-      const dayOfWeek = (d.getDay() + 6) % 7 // Mon=0, Sun=6
+      const dayOfWeek = (d.getDay() - weekStartDay + 7) % 7 // 0 = first day of week
       const dateStr = d.toISOString().slice(0, 10)
 
-      // Track month boundaries
-      if (d.getMonth() !== lastMonth && dayOfWeek === 0) {
+      // Track month boundaries — trigger on first day of a new month
+      if (d.getMonth() !== lastMonth) {
         months.push({ label: d.toLocaleString('default', { month: 'short' }), weekIndex })
         lastMonth = d.getMonth()
       }
 
-      cells.push({ date: dateStr, count: dataMap.get(dateStr) ?? 0, dayOfWeek, weekIndex })
+      const entry = dataMap.get(dateStr)
+      cells.push({ date: dateStr, count: entry?.count ?? 0, created: entry?.created ?? 0, completed: entry?.completed ?? 0, updated: entry?.updated ?? 0, dayOfWeek, weekIndex })
       if (dayOfWeek === 6) weekIndex++
       d.setDate(d.getDate() + 1)
     }
-    return { grid: cells, weekCount: weekIndex + 1, monthLabels: months }
-  }, [dataMap])
+
+    // Build day labels based on week start
+    const allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const labels = Array.from({ length: 7 }, (_, i) => {
+      const dayIdx = (weekStartDay + i) % 7
+      return i % 2 === 0 ? allDays[dayIdx] : ''
+    })
+
+    return { grid: cells, weekCount: weekIndex + 1, monthLabels: months, dayLabels: labels }
+  }, [dataMap, weekStartDay])
 
   const getColor = useCallback((count: number): string => {
     if (count === 0) return 'var(--color-border)'
@@ -520,21 +554,17 @@ function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
     return 'var(--color-accent, #6366f1)'
   }, [])
 
-  const dayLabels = ['Mon', '', 'Wed', '', 'Fri', '', '']
+  const dayLabels = computedDayLabels
 
   return (
     <div>
       {/* Month labels */}
-      <div className="mb-1 flex" style={{ paddingLeft: 28 }}>
+      <div className="relative mb-1" style={{ paddingLeft: 28, height: 14 }}>
         {monthLabels.map((m, i) => (
           <span
             key={i}
-            className="text-[9px] text-muted"
-            style={{
-              position: 'relative',
-              left: m.weekIndex * 12,
-              marginRight: i < monthLabels.length - 1 ? 0 : undefined
-            }}
+            className="absolute text-[9px] text-muted"
+            style={{ left: 28 + m.weekIndex * 12 }}
           >
             {m.label}
           </span>
@@ -558,9 +588,15 @@ function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
                 return (
                   <div
                     key={dayIdx}
-                    className="h-[10px] w-[10px] rounded-[2px] transition-colors"
+                    className="h-[10px] w-[10px] rounded-[2px]"
                     style={{ backgroundColor: cell ? getColor(cell.count) : 'transparent' }}
-                    title={cell ? `${cell.date}: ${cell.count} activities` : ''}
+                    onMouseEnter={(e) => {
+                      if (cell) {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setTooltip({ date: cell.date, created: cell.created, completed: cell.completed, updated: cell.updated, x: rect.left + 5, y: rect.top - 36 })
+                      }
+                    }}
+                    onMouseLeave={() => setTooltip(null)}
                   />
                 )
               })}
@@ -568,21 +604,39 @@ function ActivityHeatmap({ data }: ActivityHeatmapProps): React.JSX.Element {
           ))}
         </div>
       </div>
-      {/* Legend */}
-      <div className="mt-2 flex items-center justify-end gap-1">
+      {/* Legend — directly under the grid */}
+      <div className="mt-2 flex items-center gap-1" style={{ paddingLeft: 28 }}>
         <span className="mr-1 text-[8px] text-muted">Less</span>
         {[0, 1, 3, 5].map((v) => (
           <div key={v} className="h-[8px] w-[8px] rounded-[1px]" style={{ backgroundColor: getColor(v) }} />
         ))}
         <span className="ml-1 text-[8px] text-muted">More</span>
       </div>
+      {/* Instant tooltip */}
+      {tooltip && (
+        <div
+          className="pointer-events-none fixed z-[9999] flex flex-col gap-0.5 rounded border border-border bg-surface px-2 py-1.5 shadow-lg"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          <span className="text-[9px] text-muted">
+            {new Date(tooltip.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
+          <span className="text-[9px] text-foreground">
+            {[
+              tooltip.created > 0 ? `${tooltip.created} created` : null,
+              tooltip.completed > 0 ? `${tooltip.completed} completed` : null,
+              tooltip.updated > 0 ? `${tooltip.updated} updated` : null
+            ].filter(Boolean).join(' · ') || 'No activity'}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
 
 const PRIORITY_DOTS: Record<number, string> = { 0: '', 1: 'text-blue-400', 2: 'text-violet-400', 3: 'text-orange-400', 4: 'text-red-400' }
 
-function StatsTaskRow({ task }: { task: StatsTask }): React.JSX.Element {
+function StatsTaskRow({ task, onNavigate }: { task: StatsTask; onNavigate: (taskId: string, projectId: string) => void }): React.JSX.Element {
   const dateStr = task.completedDate
     ? new Date(task.completedDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     : task.dueDate
@@ -592,12 +646,23 @@ function StatsTaskRow({ task }: { task: StatsTask }): React.JSX.Element {
   const isOverdue = task.dueDate && !task.completedDate && new Date(task.dueDate) < new Date()
 
   return (
-    <div className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/6">
+    <div
+      className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-foreground/6"
+      onClick={() => onNavigate(task.id, task.projectId)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onNavigate(task.id, task.projectId) }}
+    >
       {task.priority > 0 && (
         <div className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOTS[task.priority] ?? ''}`} style={{ backgroundColor: PRIORITY_COLORS[task.priority] }} />
       )}
       <span className="min-w-0 flex-1 truncate text-[13px] font-light text-foreground">{task.title}</span>
       <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-muted">{task.projectName}</span>
+      {task.focusMinutes !== undefined && task.focusMinutes > 0 && (
+        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-accent">
+          {task.focusMinutes}m
+        </span>
+      )}
       {dateStr && (
         <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wider ${isOverdue ? 'text-red-400' : 'text-muted'}`}>
           {dateStr}

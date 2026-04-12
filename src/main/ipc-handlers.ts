@@ -2,7 +2,7 @@ import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
-import { getDatabase, switchDatabase } from './database'
+import { getDatabase, switchDatabase, getDatabasePath } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
@@ -695,6 +695,10 @@ export function registerIpcHandlers(): void {
     app.setLoginItemSettings({ openAtLogin })
   })
 
+  ipcMain.handle('app:getDatabasePath', () => {
+    return getDatabasePath()
+  })
+
   ipcMain.handle('app:getChangelog', async () => {
     // Always sync from Supabase first to get the latest release notes
     try {
@@ -798,11 +802,15 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('stats:focus', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
-    return getRepos().activityLog.getFocusStats(userId, projectIds as unknown as string | null, startDate, endDate)
+    return getRepos().activityLog.getFocusStats(userId, projectIds?.[0] ?? null, startDate, endDate)
   })
 
   ipcMain.handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {
     return getRepos().activityLog.getActivityHeatmap(userId, startDate, endDate)
+  })
+
+  ipcMain.handle('stats:focusTaskList', (_e, userId: string, startDate: string, endDate: string, projectIds: string[] | null) => {
+    return getRepos().activityLog.getFocusTaskList(userId, startDate, endDate, projectIds)
   })
 
   ipcMain.handle('stats:taskList', (_e, userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string) => {

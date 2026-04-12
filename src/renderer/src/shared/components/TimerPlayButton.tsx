@@ -67,26 +67,28 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
       e.stopPropagation()
       if (isTimerRunning) return
 
+      // Perpetual: direct start, no popup needed
+      if (settings.perpetualMode) {
+        handleStartTimer(settings.defaultPreset.minutes, 1, true, false)
+        return
+      }
+
       // Direct start only if neither repetition nor flowtime is enabled
       if (!settings.repetitionEnabled && !settings.flowtimeEnabled) {
         handleStartTimer(settings.defaultPreset.minutes, 1, false, false)
         return
       }
 
-      // Show popup
+      // Show popup — position will be adjusted after render
       const btn = btnRef.current
       if (btn) {
         const rect = btn.getBoundingClientRect()
         const popupW = 200
-        const popupH = 160
-        let top = rect.bottom + 4
         let left = rect.left - popupW / 2 + rect.width / 2
-
         if (left + popupW > window.innerWidth - 8) left = window.innerWidth - popupW - 8
         if (left < 8) left = 8
-        if (top + popupH > window.innerHeight - 8) top = rect.top - popupH - 4
-
-        setPopupPos({ top, left })
+        // Default below the button; will be corrected in useEffect if it overflows
+        setPopupPos({ top: rect.bottom + 4, left })
       }
       setPopupOpen(true)
     },
@@ -154,22 +156,31 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
   { position, settings, onStart, onClose },
   ref
 ) {
+  const [minutes, setMinutes] = useState(settings.defaultPreset.minutes)
   const [reps, setReps] = useState(settings.defaultReps)
-  const [isFlowtime, setIsFlowtime] = useState(false)
+  const [isFlowtime, setIsFlowtime] = useState(settings.flowtimeEnabled)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     inputRef.current?.select()
+    // Reposition if popup overflows viewport
+    const el = (ref as React.RefObject<HTMLDivElement>)?.current
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      if (rect.bottom > window.innerHeight - 8) {
+        el.style.top = `${position.top - rect.height - 8}px`
+      }
+    }
   }, [])
 
   const handleConfirm = useCallback(() => {
     onStart(
-      settings.defaultPreset.minutes,
+      minutes,
       isFlowtime ? 0 : (settings.perpetualMode ? 0 : reps),
       isFlowtime ? false : settings.perpetualMode,
       isFlowtime
     )
-  }, [settings, reps, isFlowtime, onStart])
+  }, [settings, minutes, reps, isFlowtime, onStart])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -212,9 +223,18 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
       {/* Preset info and reps — hidden when flowtime is on */}
       {!isFlowtime && (
         <>
-          <p className="mb-3 text-sm font-light text-foreground">
-            {settings.defaultPreset.name} ({settings.defaultPreset.minutes}m)
-          </p>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Focus</span>
+            <select
+              value={minutes}
+              onChange={(e) => setMinutes(parseInt(e.target.value, 10))}
+              className="rounded-lg border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+            >
+              {settings.presets.map((p) => (
+                <option key={p.id} value={p.minutes}>{p.name}</option>
+              ))}
+            </select>
+          </div>
 
           {settings.perpetualMode ? (
             <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">

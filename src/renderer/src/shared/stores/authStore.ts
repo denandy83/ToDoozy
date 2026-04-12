@@ -268,7 +268,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           return
         }
         await persistSession(sessionData.session)
-        await window.api.auth.switchDatabase(sessionData.user.id)
+        await window.api.auth.switchDatabase(sessionData.user.id, sessionData.user.email ?? undefined)
         const localUser = await ensureLocalUser(
           sessionData.user.id,
           sessionData.user.email ?? '',
@@ -291,7 +291,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           return
         }
         await persistSession(sessionData.session)
-        await window.api.auth.switchDatabase(sessionData.user.id)
+        await window.api.auth.switchDatabase(sessionData.user.id, sessionData.user.email ?? undefined)
         const localUser = await ensureLocalUser(
           sessionData.user.id,
           sessionData.user.email ?? '',
@@ -372,17 +372,24 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   },
 
   async ensureDefaultProject(userId: string): Promise<void> {
-    const existing = await window.api.projects.findDefault(userId)
-    if (existing) {
-      // Ensure membership exists (fixes projects created before membership was added)
-      const members = await window.api.projects.getMembers(existing.id)
+    // Check if user has ANY local projects (not just is_default=1)
+    const allProjects = await window.api.projects.getProjectsForUser(userId)
+    if (allProjects.length > 0) {
+      // User has projects — ensure at least one is marked default
+      const defaultProject = allProjects.find((p) => p.is_default === 1)
+      if (!defaultProject) {
+        await window.api.projects.update(allProjects[0].id, { is_default: 1 })
+      }
+      // Ensure membership exists on default
+      const target = defaultProject ?? allProjects[0]
+      const members = await window.api.projects.getMembers(target.id)
       if (!members.some((m) => m.user_id === userId)) {
-        await window.api.projects.addMember(existing.id, userId, 'owner', userId)
+        await window.api.projects.addMember(target.id, userId, 'owner', userId)
       }
       return
     }
 
-    // Check Supabase before creating — the project may exist remotely but not locally yet
+    // No local projects — check Supabase before creating
     try {
       const supabase = await getSupabase()
       const { data: memberships } = await supabase
@@ -399,39 +406,33 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           .single()
 
         if (project) {
-          const localProject = await window.api.projects.findById(project.id)
-          if (!localProject) {
-            await window.api.projects.create({
-              id: project.id,
-              name: project.name,
-              description: project.description,
-              color: project.color ?? '#6366f1',
-              icon: project.icon ?? 'folder',
-              owner_id: project.owner_id,
-              is_default: 1
-            })
-            await window.api.projects.addMember(project.id, userId, 'owner', userId)
+          await window.api.projects.create({
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            color: project.color ?? '#6366f1',
+            icon: project.icon ?? 'folder',
+            owner_id: project.owner_id,
+            is_default: 1
+          })
+          await window.api.projects.addMember(project.id, userId, 'owner', userId)
 
-            // Pull statuses for this project
-            const { data: statuses } = await supabase
-              .from('statuses')
-              .select('*')
-              .eq('project_id', project.id)
+          // Pull statuses for this project
+          const { data: statuses } = await supabase
+            .from('statuses')
+            .select('*')
+            .eq('project_id', project.id)
 
-            if (statuses) {
-              for (const s of statuses) {
-                const existingStatus = await window.api.statuses.findById(s.id)
-                if (!existingStatus) {
-                  await window.api.statuses.create({
-                    id: s.id, project_id: s.project_id, name: s.name, color: s.color,
-                    icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default
-                  })
-                }
+          if (statuses) {
+            for (const s of statuses) {
+              const existingStatus = await window.api.statuses.findById(s.id)
+              if (!existingStatus) {
+                await window.api.statuses.create({
+                  id: s.id, project_id: s.project_id, name: s.name, color: s.color,
+                  icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default
+                })
               }
             }
-          } else {
-            // Exists locally but is_default wasn't set — fix it
-            await window.api.projects.update(project.id, { is_default: 1 })
           }
           return
         }
@@ -439,6 +440,10 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     } catch (err) {
       console.warn('[Auth] Supabase check failed during ensureDefaultProject, creating locally:', err)
     }
+
+    // Double-check: re-read local projects in case sync populated them while we waited
+    const recheck = await window.api.projects.getProjectsForUser(userId)
+    if (recheck.length > 0) return
 
     // No project found locally or remotely — create fresh
     const crypto = globalThis.crypto

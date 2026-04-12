@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, copyFileSync, unlinkSync } from 'fs'
+import { existsSync, copyFileSync, unlinkSync, readdirSync } from 'fs'
 import { migrations } from './migrations'
 import { withTransaction } from './transaction'
 
@@ -83,24 +83,42 @@ export function switchDatabase(userId: string, email?: string): DatabaseSync {
     }
   }
 
-  if (emailDbPath && existsSync(emailDbPath)) {
-    userDbPath = emailDbPath
+  // Safety net: if no email was passed, scan for an existing email-named DB
+  // to prevent creating a new UUID DB when one already exists under the email name.
+  // This handles edge cases where Supabase returns null email on token refresh.
+  let resolvedEmailDbPath = emailDbPath
+  if (!resolvedEmailDbPath) {
+    try {
+      const userDataDir = app.getPath('userData')
+      const files = readdirSync(userDataDir)
+      const emailDb = files.find(
+        (f) => f.startsWith('todoozy-') && f.endsWith('.db') && f !== `todoozy-${userId}.db` && f !== 'todoozy.db'
+      )
+      if (emailDb) {
+        resolvedEmailDbPath = join(userDataDir, emailDb)
+        console.log(`[Database] No email provided, found existing email DB: ${emailDb}`)
+      }
+    } catch { /* ignore scan errors */ }
+  }
+
+  if (resolvedEmailDbPath && existsSync(resolvedEmailDbPath)) {
+    userDbPath = resolvedEmailDbPath
     // Clean up leftover UUID DB if it still exists
     if (existsSync(uuidDbPath)) removeUuidDb()
   } else if (existsSync(uuidDbPath)) {
-    if (emailDbPath) {
+    if (resolvedEmailDbPath) {
       // Migrate UUID DB to email-named
-      console.log(`[Database] Migrating UUID DB to email-named: ${emailDbPath}`)
-      copyFileSync(uuidDbPath, emailDbPath)
-      if (existsSync(uuidDbPath + '-wal')) copyFileSync(uuidDbPath + '-wal', emailDbPath + '-wal')
-      if (existsSync(uuidDbPath + '-shm')) copyFileSync(uuidDbPath + '-shm', emailDbPath + '-shm')
+      console.log(`[Database] Migrating UUID DB to email-named: ${resolvedEmailDbPath}`)
+      copyFileSync(uuidDbPath, resolvedEmailDbPath)
+      if (existsSync(uuidDbPath + '-wal')) copyFileSync(uuidDbPath + '-wal', resolvedEmailDbPath + '-wal')
+      if (existsSync(uuidDbPath + '-shm')) copyFileSync(uuidDbPath + '-shm', resolvedEmailDbPath + '-shm')
       removeUuidDb()
-      userDbPath = emailDbPath
+      userDbPath = resolvedEmailDbPath
     } else {
       userDbPath = uuidDbPath
     }
-  } else if (emailDbPath) {
-    userDbPath = emailDbPath
+  } else if (resolvedEmailDbPath) {
+    userDbPath = resolvedEmailDbPath
   } else {
     userDbPath = uuidDbPath
   }

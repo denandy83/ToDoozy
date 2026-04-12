@@ -49,7 +49,7 @@ export function resetRefreshGate(): void {
 
 function handleSyncError(context: string, error: { message?: string; code?: string; status?: number } | unknown): void {
   const err = error as { message?: string; code?: string; status?: number }
-  const isAuth = err?.status === 401 || err?.code === 'PGRST301' || err?.code === '42501'
+  const isAuth = err?.status === 401 || err?.status === 403 || err?.code === 'PGRST301' || err?.code === '42501'
     || err?.message?.includes('JWT') || err?.message?.includes('expired')
     || err?.message?.includes('unauthorized') || err?.message?.includes('row-level security')
   if (isAuth) {
@@ -83,6 +83,16 @@ const confirmedProjects = new Set<string>()
 
 /** Recently deleted task IDs — prevents pull from resurrecting tasks before Supabase delete completes */
 const recentlyDeletedIds = new Set<string>()
+
+/** Per-project timestamp of last successful pull — only fetch rows modified after this */
+const lastPullAt = new Map<string, string>()
+
+/** Cache of project ID → name for readable logs */
+const projectNameCache = new Map<string, string>()
+
+export function cacheProjectNames(projects: Array<{ id: string; name: string }>): void {
+  for (const p of projects) projectNameCache.set(p.id, p.name)
+}
 
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
 async function ensureProjectInSupabase(projectId: string): Promise<void> {
@@ -752,6 +762,18 @@ export async function fullPull(userId: string): Promise<void> {
               }
             }
 
+            // Sync task_labels (junction table)
+            const { data: remoteTaskLabels } = await supabase
+              .from('task_labels')
+              .select('task_id, label_id')
+              .in('task_id', (tasks ?? []).map((t) => t.id))
+
+            if (remoteTaskLabels) {
+              for (const tl of remoteTaskLabels) {
+                await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+              }
+            }
+
             // Sync labels for project
             if (project.label_data) {
               const labels: Array<{ name: string; color: string }> = JSON.parse(project.label_data)
@@ -854,7 +876,7 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
       .from('projects')
       .select('name, color, icon, description, updated_at')
       .eq('id', projectId)
-      .single()
+      .maybeSingle()
 
     if (error) {
       handleSyncError('pullProjectMetadata', error)
@@ -893,12 +915,14 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
 export async function pullStatuses(projectId: string): Promise<number> {
   try {
     const supabase = await getSupabase()
-    const { data: remoteStatuses, error } = await supabase
-      .from('statuses')
-      .select('*')
-      .eq('project_id', projectId)
+    const since = lastPullAt.get(`statuses:${projectId}`)
+    let query = supabase.from('statuses').select('*').eq('project_id', projectId)
+    if (since) query = query.gt('updated_at', since)
+
+    const { data: remoteStatuses, error } = await query
 
     if (error || !remoteStatuses) return 0
+    if (remoteStatuses.length === 0) return 0
 
     let changed = 0
     for (const rs of remoteStatuses) {
@@ -931,7 +955,9 @@ export async function pullStatuses(projectId: string): Promise<number> {
         changed++
       }
     }
-    if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for project ${projectId}`)
+    const pName = projectNameCache.get(projectId) ?? projectId
+    if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for "${pName}"`)
+    lastPullAt.set(`statuses:${projectId}`, new Date().toISOString())
     return changed
   } catch (err) {
     handleSyncError('pullStatuses', err)
@@ -945,10 +971,11 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     await pullStatuses(projectId)
 
     const supabase = await getSupabase()
-    const { data: remoteTasks, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('project_id', projectId)
+    const since = lastPullAt.get(`tasks:${projectId}`)
+    let query = supabase.from('tasks').select('*').eq('project_id', projectId)
+    if (since) query = query.gt('updated_at', since)
+
+    const { data: remoteTasks, error } = await query
 
     if (error) {
       handleSyncError('pullNewTasks', error)
@@ -956,7 +983,10 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     }
     if (!remoteTasks) return 0
 
-    let changed = 0
+    let pulled = 0
+    let pushed = 0
+    const touchedTaskIds: string[] = []
+
     for (const rt of remoteTasks) {
       if (recentlyDeletedIds.has(rt.id)) continue
       const existing = await window.api.tasks.findById(rt.id)
@@ -988,7 +1018,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             reference_url: rt.reference_url,
             my_day_dismissed_date: rt.my_day_dismissed_date ?? null
           })
-          changed++
+          touchedTaskIds.push(rt.id)
+          pulled++
         } catch (e) {
           console.error(`[PersonalSync] Failed to create task "${rt.title}" (${rt.id}):`, e)
         }
@@ -1011,7 +1042,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             reference_url: rt.reference_url,
             my_day_dismissed_date: rt.my_day_dismissed_date ?? null
           })
-          changed++
+          touchedTaskIds.push(rt.id)
+          pulled++
         } catch (e) {
           console.error(`[PersonalSync] Failed to update task "${rt.title}" (${rt.id}):`, e)
         }
@@ -1019,16 +1051,62 @@ export async function pullNewTasks(projectId: string): Promise<number> {
         // Local is newer — push to Supabase
         try {
           await pushTask(existing)
-          changed++
+          pushed++
         } catch (e) {
           console.error(`[PersonalSync] Failed to push task "${existing.title}" (${existing.id}):`, e)
         }
       }
     }
-    if (changed > 0) console.log(`[PersonalSync] Synced ${changed} tasks for project ${projectId}`)
+
+    // Sync task_labels only for tasks that were actually created or updated
+    if (touchedTaskIds.length > 0) {
+      try {
+        const { data: remoteTaskLabels } = await supabase
+          .from('task_labels')
+          .select('task_id, label_id')
+          .in('task_id', touchedTaskIds)
+
+        if (remoteTaskLabels && remoteTaskLabels.length > 0) {
+          // Ensure all referenced labels exist locally before assigning
+          const labelIds = [...new Set(remoteTaskLabels.map((tl) => tl.label_id))]
+          for (const labelId of labelIds) {
+            const localLabel = await window.api.labels.findById(labelId)
+            if (!localLabel) {
+              // Pull from Supabase
+              const { data: remoteLabel } = await supabase
+                .from('user_labels')
+                .select('*')
+                .eq('id', labelId)
+                .single()
+              if (remoteLabel) {
+                await window.api.labels.create({
+                  id: remoteLabel.id,
+                  name: remoteLabel.name,
+                  color: remoteLabel.color
+                }).catch(() => {})
+              }
+            }
+          }
+          for (const tl of remoteTaskLabels) {
+            await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+          }
+        }
+      } catch (e) {
+        console.error('[PersonalSync] Failed to sync task_labels:', e)
+      }
+    }
+
+    const pName = projectNameCache.get(projectId) ?? projectId
+    if (pulled > 0 || pushed > 0) {
+      const parts: string[] = []
+      if (pulled > 0) parts.push(`${pulled} pulled`)
+      if (pushed > 0) parts.push(`${pushed} pushed`)
+      console.log(`[PersonalSync] "${pName}": ${parts.join(', ')}`)
+    }
+    lastPullAt.set(`tasks:${projectId}`, new Date().toISOString())
     // Supabase responded successfully — clear any auth failure state
     clearAuthFailures()
-    return changed
+    return pulled + pushed
   } catch (err) {
     handleSyncError('pullNewTasks', err)
     return 0
@@ -1061,6 +1139,31 @@ export async function initSync(userId: string): Promise<void> {
   }
 }
 
+/**
+ * Sync a single task_label from Supabase — ensures the label exists locally first.
+ * Used by Realtime handler when a task_label INSERT is detected.
+ */
+export async function syncTaskLabel(taskId: string, labelId: string): Promise<void> {
+  const supabase = await getSupabase()
+  // Ensure label exists locally
+  const localLabel = await window.api.labels.findById(labelId)
+  if (!localLabel) {
+    const { data: remoteLabel } = await supabase
+      .from('user_labels')
+      .select('*')
+      .eq('id', labelId)
+      .single()
+    if (remoteLabel) {
+      await window.api.labels.create({
+        id: remoteLabel.id,
+        name: remoteLabel.name,
+        color: remoteLabel.color
+      }).catch(() => {})
+    }
+  }
+  await window.api.tasks.addLabel(taskId, labelId).catch(() => {})
+}
+
 // ── Realtime Subscriptions for All Projects ──────────────────────────
 
 /**
@@ -1069,7 +1172,7 @@ export async function initSync(userId: string): Promise<void> {
  */
 export async function subscribeToPersonalProject(
   projectId: string,
-  onTaskChange: (event: string, data: Record<string, unknown>) => void
+  onChange: (event: string, data: Record<string, unknown>) => void
 ): Promise<() => void> {
   const supabase = await getSupabase()
   const channel = supabase
@@ -1081,10 +1184,20 @@ export async function subscribeToPersonalProject(
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
-        onTaskChange(payload.eventType, data)
+        onChange(payload.eventType, data)
       }
     )
-    .subscribe()
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'task_labels' },
+      (payload) => {
+        onChange('TASK_LABEL_INSERT', payload.new as Record<string, unknown>)
+      }
+    )
+    .subscribe((status) => {
+      const pName = projectNameCache.get(projectId) ?? projectId
+      console.log(`[Realtime] ${pName}: ${status}`)
+    })
 
   return () => {
     supabase.removeChannel(channel)

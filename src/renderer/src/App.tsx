@@ -111,21 +111,103 @@ function App(): React.JSX.Element {
     hydrateLabels(currentProjectId)
     hydrateAllForProject(currentProjectId, currentUser.id)
 
-    // Pull any new tasks from Supabase that aren't in local SQLite
-    // (e.g. created by Telegram bot or another device)
+    // Pull new tasks from Supabase for ALL projects (not just the active one)
+    // so tasks created via Telegram, iOS Shortcut, or another device appear everywhere
     const doPull = async (): Promise<void> => {
       if (!navigator.onLine) return
-      const { pullNewTasks, pullProjectMetadata, resetRefreshGate } = await import('./services/PersonalSyncService')
+      const { pullNewTasks, pullProjectMetadata, resetRefreshGate, cacheProjectNames } = await import('./services/PersonalSyncService')
       resetRefreshGate()
-      const metaChanged = await pullProjectMetadata(currentProjectId).catch(() => false)
-      if (metaChanged) hydrateProjects(currentUser.id)
-      const pulled = await pullNewTasks(currentProjectId).catch(() => 0)
-      if (pulled > 0) hydrateAllForProject(currentProjectId, currentUser.id)
+
+      // Pull all user projects
+      const allProjects = await window.api.projects.getProjectsForUser(currentUser.id)
+      cacheProjectNames(allProjects)
+      let anyChanged = false
+      for (const project of allProjects) {
+        const metaChanged = await pullProjectMetadata(project.id).catch(() => false)
+        if (metaChanged) anyChanged = true
+        const pulled = await pullNewTasks(project.id).catch(() => 0)
+        if (pulled > 0) anyChanged = true
+      }
+      if (anyChanged) {
+        hydrateProjects(currentUser.id)
+        hydrateAllForProject(currentProjectId, currentUser.id)
+      }
     }
     doPull()
-    const pollInterval = setInterval(doPull, 10_000)
-    return () => clearInterval(pollInterval)
-  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
+    // Poll every 30s as fallback — Realtime accelerates when connected
+    const pollInterval = setInterval(doPull, 30_000)
+
+    // Subscribe to Supabase Realtime for instant task sync
+    // Debounce: collect all events in a window, then do one pull
+    const realtimeUnsubs: Array<() => void> = []
+    const pendingLabelSyncs: Array<{ taskId: string; labelId: string }> = []
+    const pendingProjectIds = new Set<string>()
+    let realtimeTimer: ReturnType<typeof setTimeout> | null = null
+    let realtimePullInProgress = false
+
+    const flushRealtime = async (): Promise<void> => {
+      if (realtimePullInProgress) return
+      realtimePullInProgress = true
+      try {
+        const { pullNewTasks: pullTasks, syncTaskLabel } = await import('./services/PersonalSyncService')
+
+        // Sync any pending task_labels first
+        const labels = [...pendingLabelSyncs]
+        pendingLabelSyncs.length = 0
+        for (const { taskId, labelId } of labels) {
+          await syncTaskLabel(taskId, labelId).catch(() => {})
+        }
+
+        // Pull changed tasks for affected projects
+        const projects = [...pendingProjectIds]
+        pendingProjectIds.clear()
+        let anyChanged = labels.length > 0
+        for (const pid of projects) {
+          const pulled = await pullTasks(pid).catch(() => 0)
+          if (pulled > 0) anyChanged = true
+        }
+
+        if (anyChanged) {
+          hydrateProjects(currentUser.id)
+          hydrateLabels(currentProjectId)
+          hydrateAllForProject(currentProjectId, currentUser.id)
+          useTaskStore.getState().hydrateAllTaskLabels(currentProjectId)
+        }
+      } finally {
+        realtimePullInProgress = false
+      }
+    }
+
+    const scheduleFlush = (): void => {
+      if (realtimeTimer) clearTimeout(realtimeTimer)
+      realtimeTimer = setTimeout(flushRealtime, 500)
+    }
+
+    const setupRealtime = async (): Promise<void> => {
+      if (!navigator.onLine) return
+      const { subscribeToPersonalProject, cacheProjectNames: cachePNames } = await import('./services/PersonalSyncService')
+      const allProjects = await window.api.projects.getProjectsForUser(currentUser.id)
+      cachePNames(allProjects)
+      for (const project of allProjects) {
+        const unsub = await subscribeToPersonalProject(project.id, (_event, data) => {
+          if (_event === 'TASK_LABEL_INSERT' && data.task_id && data.label_id) {
+            pendingLabelSyncs.push({ taskId: data.task_id as string, labelId: data.label_id as string })
+          } else {
+            pendingProjectIds.add(project.id)
+          }
+          scheduleFlush()
+        })
+        realtimeUnsubs.push(unsub)
+      }
+    }
+    setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
+
+    return () => {
+      clearInterval(pollInterval)
+      if (realtimeTimer) clearTimeout(realtimeTimer)
+      for (const unsub of realtimeUnsubs) unsub()
+    }
+  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateProjects])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)

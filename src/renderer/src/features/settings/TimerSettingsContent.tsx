@@ -53,6 +53,12 @@ export function TimerSettingsContent(): React.JSX.Element {
   const defaultPresetId = useSetting('timer_default_preset') ?? presets[1]?.id ?? presets[0]?.id ?? ''
   const breakMinutes = useSetting('timer_break_minutes') ?? '5'
   const defaultReps = useSetting('timer_default_reps') ?? '1'
+  const autoBreak = useSetting('timer_auto_break') ?? 'true'
+  const longBreakEnabled = useSetting('timer_long_break_enabled') ?? 'false'
+  const longBreakMinutes = useSetting('timer_long_break_minutes') ?? '15'
+  const longBreakInterval = useSetting('timer_long_break_interval') ?? '4'
+  const repetitionEnabled = useSetting('timer_repetition_enabled') ?? 'false'
+  const perpetualMode = useSetting('timer_perpetual') ?? 'false'
 
   // Add preset form
   const [adding, setAdding] = useState(false)
@@ -182,7 +188,7 @@ export function TimerSettingsContent(): React.JSX.Element {
           className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
         >
           {presets.map((p) => (
-            <option key={p.id} value={p.id}>{p.name} ({p.minutes}m)</option>
+            <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
       </div>
@@ -217,36 +223,17 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_auto_break" defaultValue="true" />
       </div>
 
-      {/* Long Break — only visible when auto-break is on */}
-      {(useSetting('timer_auto_break') ?? 'true') !== 'false' && (
-        <>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-light text-foreground">Long break</p>
-              <p className="text-[10px] text-muted">Longer rest after several work sessions</p>
-            </div>
-            <ToggleButton settingKey="timer_long_break_enabled" defaultValue="false" />
-          </div>
+      {/* Long Break */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Long break</p>
+          <p className="text-[10px] text-muted">Longer rest after several work sessions</p>
+        </div>
+        <ToggleButton settingKey="timer_long_break_enabled" defaultValue="false" />
+      </div>
 
-          {(useSetting('timer_long_break_enabled') ?? 'false') === 'true' && (
+          {longBreakEnabled === 'true' && (
             <>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-light text-foreground">Long break duration</p>
-                  <p className="text-[10px] text-muted">Duration of the long break</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={useSetting('timer_long_break_minutes') ?? '15'}
-                    onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
-                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
-                </div>
-              </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-light text-foreground">Long break every</p>
@@ -257,48 +244,36 @@ export function TimerSettingsContent(): React.JSX.Element {
                     type="number"
                     min={2}
                     max={10}
-                    value={useSetting('timer_long_break_interval') ?? '4'}
+                    value={longBreakInterval}
                     onChange={(e) => setSetting('timer_long_break_interval', e.target.value)}
                     className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted">sessions</span>
                 </div>
               </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-light text-foreground">Long break duration</p>
+                  <p className="text-[10px] text-muted">Duration of the long break</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={longBreakMinutes}
+                    onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
+                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
+                </div>
+              </div>
             </>
           )}
-        </>
-      )}
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Repetition</p>
 
-      {/* Repetition mode */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Repetition mode</p>
-          <p className="text-[10px] text-muted">Cycle work-break for multiple repetitions</p>
-        </div>
-        <ToggleButton settingKey="timer_repetition_enabled" defaultValue="false" />
-      </div>
-
-      {/* Default reps — only visible when repetition mode is on */}
-      {(useSetting('timer_repetition_enabled') ?? 'false') === 'true' && (
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-light text-foreground">Default repetitions</p>
-            <p className="text-[10px] text-muted">Number of work-break cycles</p>
-          </div>
-          <input
-            type="number"
-            min={1}
-            max={99}
-            value={defaultReps}
-            onChange={(e) => setSetting('timer_default_reps', e.target.value)}
-            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-        </div>
-      )}
-
-      {/* Perpetual mode */}
+      {/* Perpetual mode — shown first since it trumps repetition */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Perpetual mode</p>
@@ -306,6 +281,36 @@ export function TimerSettingsContent(): React.JSX.Element {
         </div>
         <ToggleButton settingKey="timer_perpetual" defaultValue="false" />
       </div>
+
+      {/* Repetition mode — hidden when perpetual is on */}
+      {perpetualMode !== 'true' && (
+        <>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-light text-foreground">Repetition mode</p>
+              <p className="text-[10px] text-muted">Cycle work-break for multiple repetitions</p>
+            </div>
+            <ToggleButton settingKey="timer_repetition_enabled" defaultValue="false" />
+          </div>
+
+          {repetitionEnabled === 'true' && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-light text-foreground">Default repetitions</p>
+                <p className="text-[10px] text-muted">Number of work-break cycles</p>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={defaultReps}
+                onChange={(e) => setSetting('timer_default_reps', e.target.value)}
+                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+          )}
+        </>
+      )}
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Flowtime</p>
 

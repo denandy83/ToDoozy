@@ -686,7 +686,7 @@ export class TaskRepository {
     projectIds: string[] | null,
     startDate?: string,
     endDate?: string
-  ): Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }> {
+  ): Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }> {
     const today = new Date().toISOString().slice(0, 10)
     const weekStartDate = new Date()
     weekStartDate.setDate(weekStartDate.getDate() - weekStartDate.getDay())
@@ -712,7 +712,7 @@ export class TaskRepository {
     }
 
     let sql = `
-      SELECT t.id, t.title, p.name as projectName, t.completed_date as completedDate, t.due_date as dueDate, t.priority
+      SELECT t.id, t.project_id as projectId, t.title, p.name as projectName, t.completed_date as completedDate, t.due_date as dueDate, t.priority
       FROM tasks t
       INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
       INNER JOIN statuses s ON s.id = t.status_id

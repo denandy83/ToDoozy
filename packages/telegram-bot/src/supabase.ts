@@ -261,11 +261,11 @@ export async function createTask(params: {
 
   // Assign labels
   for (const labelId of labelIds) {
-    await supabase.from('task_labels').insert({
-      id: uuidv4(),
+    const { error: labelError } = await supabase.from('task_labels').insert({
       task_id: id,
       label_id: labelId
     })
+    if (labelError) console.error(`[Bot] Failed to assign label ${labelId}:`, labelError.message)
   }
 
   return data

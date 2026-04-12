@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import { RefreshCw, CheckCircle, Download, AlertCircle } from 'lucide-react'
 import { useUpdateStore, type UpdateStatus } from '../../shared/stores/updateStore'
 
@@ -28,6 +28,11 @@ export function UpdateSettingsContent(): React.JSX.Element {
     }
   }, [status, dismissUpdate])
 
+  const [dbPath, setDbPath] = useState<string>('')
+  useEffect(() => {
+    window.api.app.getDatabasePath().then(setDbPath).catch(() => {})
+  }, [])
+
   return (
     <div className="flex flex-col gap-6">
       {/* Current version */}
@@ -37,6 +42,14 @@ export function UpdateSettingsContent(): React.JSX.Element {
           <p className="text-[10px] text-muted">ToDoozy v{appVersion}</p>
         </div>
       </div>
+
+      {/* Database location */}
+      {dbPath && (
+        <div>
+          <p className="text-sm font-light text-foreground">Database</p>
+          <p className="text-[10px] text-muted break-all">{dbPath}</p>
+        </div>
+      )}
 
       {/* Check for updates */}
       <div className="flex items-center justify-between">

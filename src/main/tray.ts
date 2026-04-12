@@ -239,8 +239,12 @@ export function updateTrayBadge(): void {
         : ''
     tray.setTitle(`${phaseIcon} ${timeStr}${repStr}`)
   } else {
-    const { totalNonDone } = getMyDayTrayData()
-    tray.setTitle(totalNonDone > 0 ? `[${totalNonDone}]` : '')
+    try {
+      const { totalNonDone } = getMyDayTrayData()
+      tray.setTitle(totalNonDone > 0 ? `[${totalNonDone}]` : '')
+    } catch {
+      // DB may be locked during startup — skip this refresh
+    }
   }
 }
 

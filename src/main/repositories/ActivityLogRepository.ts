@@ -91,14 +91,48 @@ export class ActivityLogRepository {
     return Object.entries(byDate).map(([date, minutes]) => ({ date, minutes }))
   }
 
+  getFocusTaskList(
+    userId: string,
+    startDate: string,
+    endDate: string,
+    projectIds: string[] | null
+  ): Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number; focusMinutes: number }> {
+    let sql = `
+      SELECT t.id, t.project_id as projectId, t.title, p.name as projectName,
+             t.completed_date as completedDate, t.due_date as dueDate, t.priority,
+             SUM(CAST(SUBSTR(al.action, 11, INSTR(SUBSTR(al.action, 11), ' ') - 1) AS INTEGER)) as focusMinutes
+      FROM activity_log al
+      INNER JOIN tasks t ON t.id = al.task_id
+      INNER JOIN projects p ON p.id = t.project_id
+      INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
+      WHERE al.action LIKE 'Completed % min focus session'
+        AND al.created_at >= ? AND al.created_at <= ?
+    `
+    const params: string[] = [userId, startDate, endDate]
+    if (projectIds && projectIds.length > 0) {
+      sql += ` AND t.project_id IN (${projectIds.map(() => '?').join(',')})`
+      params.push(...projectIds)
+    }
+    sql += ' GROUP BY t.id ORDER BY focusMinutes DESC LIMIT 200'
+    return this.db.prepare(sql).all(...params) as unknown as Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number; focusMinutes: number }>
+  }
+
   getActivityHeatmap(
     userId: string,
     startDate: string,
     endDate: string
-  ): Array<{ date: string; count: number }> {
+  ): Array<{ date: string; count: number; created: number; completed: number; updated: number }> {
     return this.db
       .prepare(
-        `SELECT date(al.created_at) as date, COUNT(*) as count
+        `SELECT date(al.created_at) as date,
+                COUNT(*) as count,
+                SUM(CASE WHEN al.action = 'created' THEN 1 ELSE 0 END) as created,
+                SUM(CASE WHEN al.action = 'status_changed' AND al.new_value IN (
+                  SELECT s.name FROM statuses s WHERE s.is_done = 1
+                ) THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN al.action != 'created' AND NOT (al.action = 'status_changed' AND al.new_value IN (
+                  SELECT s.name FROM statuses s WHERE s.is_done = 1
+                )) THEN 1 ELSE 0 END) as updated
          FROM activity_log al
          INNER JOIN tasks t ON t.id = al.task_id
          INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
@@ -106,6 +140,6 @@ export class ActivityLogRepository {
          GROUP BY date(al.created_at)
          ORDER BY date ASC`
       )
-      .all(userId, startDate, endDate) as unknown as Array<{ date: string; count: number }>
+      .all(userId, startDate, endDate) as unknown as Array<{ date: string; count: number; created: number; completed: number; updated: number }>
   }
 }

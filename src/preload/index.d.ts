@@ -258,6 +258,7 @@ export interface AppAPI {
   getLoginItemSettings(): Promise<{ openAtLogin: boolean }>
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
   getChangelog(): Promise<string>
+  getDatabasePath(): Promise<string>
 }
 
 export interface ReleaseNotesAPI {
@@ -297,12 +298,13 @@ export interface StatsAPI {
   completions(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
   streaks(userId: string): Promise<{ current: number; best: number }>
   focus(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ date: string; minutes: number }>>
-  heatmap(userId: string, startDate: string, endDate: string): Promise<Array<{ date: string; count: number }>>
+  heatmap(userId: string, startDate: string, endDate: string): Promise<Array<{ date: string; count: number; created: number; completed: number; updated: number }>>
   summary(userId: string, projectIds: string[] | null): Promise<{ total: number; open: number; overdue: number; completed: number; avgCompletionDays: number }>
   priorityBreakdown(userId: string, projectIds: string[] | null): Promise<Array<{ priority: number; count: number }>>
   completionsByDayOfWeek(userId: string, projectIds: string[] | null, startDate: string, endDate: string): Promise<Array<{ dayOfWeek: number; count: number }>>
   projectBreakdown(userId: string): Promise<Array<{ projectId: string; projectName: string; open: number; completed: number }>>
-  taskList(userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string): Promise<Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>>
+  taskList(userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string): Promise<Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>>
+  focusTaskList(userId: string, startDate: string, endDate: string, projectIds: string[] | null): Promise<Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number; focusMinutes: number }>>
 }
 
 export interface SavedViewsAPI {

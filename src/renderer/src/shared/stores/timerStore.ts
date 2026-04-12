@@ -59,6 +59,8 @@ interface TimerActions {
   pause(): void
   resume(): void
   stop(): void
+  skipBreak(): void
+  startFlowtimeBreak(): void
   tick(): void
 }
 
@@ -184,6 +186,34 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     syncTrayTimer(get())
   },
 
+  skipBreak(): void {
+    const state = get()
+    if (!state.isRunning || state.phase !== 'break') return
+
+    clearTickInterval()
+    if (state.isFlowtime) {
+      // Flowtime: resume counting up from 0
+      set({
+        phase: 'work',
+        remainingSeconds: state.workSeconds,
+        elapsedSeconds: 0,
+        isLongBreak: false,
+        currentRep: state.currentRep + 1
+      })
+    } else {
+      // Normal: start next work rep
+      set({
+        phase: 'work',
+        remainingSeconds: state.workSeconds,
+        elapsedSeconds: 0,
+        isLongBreak: false,
+        currentRep: state.currentRep + 1
+      })
+    }
+    startTickInterval()
+    syncTrayTimer(get())
+  },
+
   stop(): void {
     clearTickInterval()
     const state = get()
@@ -216,26 +246,49 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     syncTrayTimer(initialState)
   },
 
+  startFlowtimeBreak(): void {
+    const state = get()
+    if (!state.isRunning || !state.isFlowtime || state.phase !== 'work') return
+
+    const breakSeconds = Math.round(state.elapsedSeconds / 5)
+
+    // Log the flowtime work session
+    if (state.elapsedSeconds > 60 && state.taskId && cachedUserId) {
+      const minutes = Math.round(state.elapsedSeconds / 60)
+      if (minutes > 0) logFocusSession(state.taskId, cachedUserId, minutes)
+    }
+    if (state.notificationEnabled && state.taskId) {
+      showTimerNotification(state.taskId, state.taskTitle ?? 'Task', state.currentRep, state.totalReps, state.isPerpetual)
+    }
+
+    set((s) => ({
+      sessionsCompleted: s.sessionsCompleted + 1,
+      totalFocusSecondsToday: s.totalFocusSecondsToday + state.elapsedSeconds,
+      phase: 'break' as const,
+      remainingSeconds: breakSeconds,
+      isLongBreak: false,
+      elapsedSeconds: 0
+    }))
+    syncTrayTimer(get())
+  },
+
   tick(): void {
     const state = get()
     if (!state.isRunning || state.isPaused) return
 
     if (state.isFlowtime && state.phase === 'work') {
       // Flowtime: count UP
-      const next = state.elapsedSeconds + 1
-      set({ elapsedSeconds: next })
-      // Sync tray every 5 seconds to avoid excessive IPC
-      if (next % 5 === 0) syncTrayTimer({ ...state, elapsedSeconds: next })
+      set({ elapsedSeconds: state.elapsedSeconds + 1 })
     } else {
       // Normal: count DOWN
       const next = state.remainingSeconds - 1
       if (next <= 0) {
         completePhase(get, set)
-      } else {
-        set({ remainingSeconds: next })
-        syncTrayTimer({ ...state, remainingSeconds: next })
+        return
       }
+      set({ remainingSeconds: next })
     }
+    syncTrayTimer(get())
   }
 }), shallow)
 
@@ -269,9 +322,10 @@ function completePhase(
     // Start break if auto-break enabled
     if (state.autoBreak) {
       const updatedState = get()
+      // Use currentRep (per-timer) not sessionsCompleted (cumulative daily)
       const isLongBreak = state.longBreakInterval > 0
-        && updatedState.sessionsCompleted > 0
-        && updatedState.sessionsCompleted % state.longBreakInterval === 0
+        && state.currentRep > 0
+        && state.currentRep % state.longBreakInterval === 0
 
       const breakDuration = isLongBreak ? state.longBreakSeconds : state.breakSeconds
 
