@@ -295,6 +295,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         ? statusTasks.reduce((max, t) => Math.max(max, t.order_index), -1) + 1
         : statusTasks.reduce((min, t) => Math.min(min, t.order_index), 0) - 1
       const taskId = crypto.randomUUID()
+      console.log('[TaskListView] creating task:', { title: data.title, dueDate: data.dueDate, recurrenceRule: data.recurrenceRule })
       await createTask({
         id: taskId,
         project_id: projectId,

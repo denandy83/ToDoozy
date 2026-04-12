@@ -1,14 +1,10 @@
 // ToDoozy MCP Server — Supabase Edge Function
-// Streamable HTTP transport with API key authentication
+// Streamable HTTP transport with API key authentication via mcp-lite
 
+import { McpServer, StreamableHttpTransport } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
-import { RRule } from 'npm:rrule@2'
-import { Server } from 'npm:@modelcontextprotocol/sdk@1/server/index.js'
-import { StreamableHTTPServerTransport } from 'npm:@modelcontextprotocol/sdk@1/server/streamableHttp.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema
-} from 'npm:@modelcontextprotocol/sdk@1/types.js'
+import rruleLib from 'npm:rrule@2'
+const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
 
@@ -393,9 +389,12 @@ class TaskRepo {
 }
 
 class ProjectRepo {
-  constructor(private client: SupabaseClient, private _userId: string) {}
+  constructor(private client: SupabaseClient, private userId: string) {}
   async list() {
-    const { data } = await this.client.from('projects').select('*').order('sidebar_order')
+    const { data: memberships } = await this.client.from('project_members').select('project_id').eq('user_id', this.userId)
+    if (!memberships || memberships.length === 0) return []
+    const ids = memberships.map(m => m.project_id)
+    const { data } = await this.client.from('projects').select('*').in('id', ids).order('created_at')
     return data ?? []
   }
   async findById(id: string) {
@@ -1126,18 +1125,49 @@ function createHandlers(repos: Repos, userId: string) {
   return handlers
 }
 
+// ── Auth Context (set per-request before tool handlers run) ────────────
+
+let _authUserId: string | null = null
+let _authClient: SupabaseClient | null = null
+let _authRepos: Repos | null = null
+let _authHandlers: ReturnType<typeof createHandlers> | null = null
+
+// ── MCP Server Setup via mcp-lite ─────────────────────────────────────
+
+const mcp = new McpServer({ name: 'ToDoozy', version: '1.0.0' })
+
+// Register all tools
+for (const tool of tools) {
+  mcp.tool(tool.name, {
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    handler: async (args: Record<string, unknown>) => {
+      if (!_authHandlers) return { content: [{ type: 'text' as const, text: 'Not authenticated' }], isError: true }
+      const handler = _authHandlers[tool.name]
+      if (!handler) return { content: [{ type: 'text' as const, text: `Unknown tool: ${tool.name}` }], isError: true }
+      try {
+        const result = await handler(args)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }], isError: true }
+      }
+    }
+  })
+}
+
+const transport = new StreamableHttpTransport()
+const httpHandler = transport.bind(mcp)
+
 // ── CORS Headers ───────────────────────────────────────────────────────
 
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, Mcp-Session-Id',
   'Access-Control-Expose-Headers': 'Mcp-Session-Id',
 }
 
-// ── Session Management ─────────────────────────────────────────────────
-
-const sessions = new Map<string, { server: Server; transport: StreamableHTTPServerTransport }>()
+// ── Auth ───────────────────────────────────────────────────────────────
 
 async function authenticateRequest(req: Request): Promise<{ userId: string; client: SupabaseClient } | null> {
   const authHeader = req.headers.get('Authorization')
@@ -1148,68 +1178,30 @@ async function authenticateRequest(req: Request): Promise<{ userId: string; clie
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
-  const { data, error } = await adminClient
+  const { data: keyData } = await adminClient
     .from('api_keys')
-    .update({ request_count: adminClient.rpc('increment_counter', {}), last_used_at: new Date().toISOString() })
-    .eq('key', apiKey)
     .select('user_id')
+    .eq('key', apiKey)
     .single()
 
-  // Fallback: simple select + separate update if rpc doesn't exist
-  if (error || !data) {
-    const { data: keyData } = await adminClient
-      .from('api_keys')
-      .select('user_id')
-      .eq('key', apiKey)
-      .single()
-    if (!keyData) return null
+  if (!keyData) return null
 
-    // Increment request count
-    await adminClient.rpc('sql', {
-      query: `UPDATE api_keys SET request_count = request_count + 1, last_used_at = now() WHERE key = $1`,
-      params: [apiKey]
-    }).catch(() => {
-      // Fallback: just update last_used_at if raw SQL RPC is not available
-      adminClient
-        .from('api_keys')
-        .update({ last_used_at: new Date().toISOString() })
-        .eq('key', apiKey)
-        .then(() => {})
-    })
+  // Track usage (fire and forget)
+  adminClient
+    .from('api_keys')
+    .update({ last_used_at: new Date().toISOString() })
+    .eq('key', apiKey)
+    .then(() => {})
 
-    // Create a client scoped to this user using the service role
-    return { userId: keyData.user_id, client: adminClient }
-  }
-
-  return { userId: data.user_id, client: adminClient }
+  return { userId: keyData.user_id, client: adminClient }
 }
 
 // ── Request Handler ────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
+  // CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS })
-  }
-
-  // Handle DELETE (session cleanup)
-  if (req.method === 'DELETE') {
-    const sessionId = req.headers.get('mcp-session-id')
-    if (sessionId && sessions.has(sessionId)) {
-      const session = sessions.get(sessionId)!
-      await session.transport.close()
-      await session.server.close()
-      sessions.delete(sessionId)
-    }
-    return new Response(null, { status: 200, headers: CORS_HEADERS })
-  }
-
-  // Only POST and GET allowed
-  if (req.method !== 'POST' && req.method !== 'GET') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-    })
   }
 
   // Authenticate
@@ -1221,73 +1213,16 @@ Deno.serve(async (req: Request) => {
     })
   }
 
-  const { userId, client } = auth
-  const repos = createRepos(client, userId)
-  const handlers = createHandlers(repos, userId)
+  // Set auth context for tool handlers
+  _authUserId = auth.userId
+  _authClient = auth.client
+  _authRepos = createRepos(auth.client, auth.userId)
+  _authHandlers = createHandlers(_authRepos, auth.userId)
 
-  // Check for existing session
-  const sessionId = req.headers.get('mcp-session-id')
+  // Delegate to mcp-lite handler
+  const response = await httpHandler(req)
 
-  if (req.method === 'GET') {
-    // SSE connection for existing session
-    if (!sessionId || !sessions.has(sessionId)) {
-      return new Response(JSON.stringify({ error: 'No session found. Send an initialize request first.' }), {
-        status: 400,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-      })
-    }
-    const session = sessions.get(sessionId)!
-    const response = await session.transport.handleRequest(req)
-    // Add CORS headers
-    const headers = new Headers(response.headers)
-    for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-    return new Response(response.body, { status: response.status, headers })
-  }
-
-  // POST request
-  if (sessionId && sessions.has(sessionId)) {
-    // Existing session
-    const session = sessions.get(sessionId)!
-    const response = await session.transport.handleRequest(req)
-    const headers = new Headers(response.headers)
-    for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
-    return new Response(response.body, { status: response.status, headers })
-  }
-
-  // New session — create server + transport
-  const server = new Server(
-    { name: 'todoozy', version: '1.0.0' },
-    { capabilities: { tools: {} } }
-  )
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }))
-  server.setRequestHandler(CallToolRequestSchema, async (request: { params: { name: string; arguments?: Record<string, unknown> } }) => {
-    const { name, arguments: args } = request.params
-    const handler = handlers[name]
-    if (!handler) return fail(`Unknown tool: ${name}`)
-    try {
-      const result = await handler(args ?? {})
-      return ok(result)
-    } catch (e) {
-      return fail(e instanceof Error ? e.message : String(e))
-    }
-  })
-
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID(),
-    onsessioninitialized: (sid: string) => {
-      sessions.set(sid, { server, transport })
-    }
-  })
-
-  // Clean up on close
-  transport.onclose = () => {
-    const sid = transport.sessionId
-    if (sid) sessions.delete(sid)
-  }
-
-  await server.connect(transport)
-  const response = await transport.handleRequest(req)
+  // Add CORS headers to response
   const headers = new Headers(response.headers)
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
   return new Response(response.body, { status: response.status, headers })

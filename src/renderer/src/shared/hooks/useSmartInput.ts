@@ -284,17 +284,22 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
     }
 
     // Apply NLP date stripping if NLP detected and no explicit date
+    // Re-parse at submit time to get the most accurate result (state may lag behind typing)
     let nlpDate: string | null = null
     let nlpRecurrenceRule: string | null = null
-    if (nlpDateResult && !selectedDate) {
-      title = stripDateFromTitle(title, nlpDateResult)
-      nlpDate = formatNlpDate(nlpDateResult)
-      nlpRecurrenceRule = nlpDateResult.recurrenceRule
+    const freshNlp = (!selectedDate && !title.includes('d:')) ? parseNlpDate(title) : null
+    const effectiveNlp = freshNlp ?? nlpDateResult
+    console.log('[SmartInput] getSubmitData:', { title, selectedDate, freshNlpText: freshNlp?.text, freshNlpRule: freshNlp?.recurrenceRule, stateNlpText: nlpDateResult?.text, effectiveText: effectiveNlp?.text, effectiveRule: effectiveNlp?.recurrenceRule })
+    if (effectiveNlp && !selectedDate) {
+      title = stripDateFromTitle(title, effectiveNlp)
+      nlpDate = formatNlpDate(effectiveNlp)
+      nlpRecurrenceRule = effectiveNlp.recurrenceRule
 
       // Empty title after stripping = use "Untitled"
       if (!title) title = 'Untitled'
     }
 
+    console.log('[SmartInput] submit result:', { title, nlpDate, nlpRecurrenceRule })
     return { title, extractedReferenceUrl, nlpDate, nlpRecurrenceRule }
   }, [nlpDateResult, selectedDate])
 

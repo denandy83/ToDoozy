@@ -42,3 +42,19 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
+
+## 2026-04-11 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 4aa78d1 feat: enhanced timer with long break, flowtime mode, session stats (#61) (2026-04-11) — files: 10
+
+## 2026-04-11 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- b97f906 fix: detect RLS violations as auth errors, auto-refresh expired sessions (2026-04-11) — files: 2
+- d175681 feat(stats): clickable KPI cards drill down into task lists (2026-04-11) — files: 5
+- bbe0d92 feat(stats): enhanced dashboard with streaks at top, priority/project breakdown, day-of-week chart (2026-04-11) — files: 4
+
+## 2026-04-11 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- b97f906 fix: detect RLS violations as auth errors, auto-refresh expired sessions (2026-04-11) — files: 2
+- d175681 feat(stats): clickable KPI cards drill down into task lists (2026-04-11) — files: 5
+- bbe0d92 feat(stats): enhanced dashboard with streaks at top, priority/project breakdown, day-of-week chart (2026-04-11) — files: 4

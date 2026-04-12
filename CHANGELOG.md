@@ -10,6 +10,8 @@ All bug fixes and changes to ToDoozy. Most recent first.
 - **Per-integration default project for Telegram and iOS Shortcut** — Each integration (Telegram Bot, iOS Shortcut) can now have its own default project for task creation (#56)
 - **AND/OR label filter logic** — Label filters now support AND/OR operator toggle, letting you require all selected labels or match any of them (#57)
 - **Per-project auto-archive and My Day done-today filter** — Projects can auto-archive completed tasks after a configurable period; My Day shows tasks completed today in a separate section (#58)
+- **Remote MCP server via Supabase Edge Function** — ToDoozy's MCP tools can now be accessed remotely through a Supabase edge function, enabling AI integrations from anywhere (#59)
+- **Natural language date & recurrence parsing** — Users can type dates naturally (e.g., "tomorrow", "next Monday", "every 2 weeks") and they are parsed automatically into structured dates and recurrence rules (#60)
 - **Update available modal with release notes** — The auto-updater now shows a modal with formatted release notes when an update is available
 - **Fix: updater restart** — Updater restart now properly quits and relaunches the app on macOS instead of just hiding the window
 - **Fix: UUID DB cleanup** — Stale UUID-named database files are deleted after migrating to the email-named database

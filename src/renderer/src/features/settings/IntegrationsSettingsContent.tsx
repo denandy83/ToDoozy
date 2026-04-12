@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Check, ExternalLink, X, Copy, RefreshCw } from 'lucide-react'
+import { Check, ExternalLink, X, Copy, Trash2 } from 'lucide-react'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
@@ -117,30 +117,44 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     })
   }, [doRemoveTelegramId, telegramId, addToast, setSetting, userId])
 
-  // ── API Key handlers (writes to api_keys table) ──
+  // ── API Key handlers ──
   const handleGenerateApiKey = useCallback(async () => {
     const key = crypto.randomUUID()
     setSetting('api_key', key)
     try {
       const supabase = await getSupabase()
       if (userId) {
-        await supabase.from('api_keys').insert({
-          user_id: userId, key, name: 'Default'
-        })
+        const { error } = await supabase.from('api_keys').upsert({ user_id: userId, key, name: 'Default' })
+        if (error) console.error('[Integrations] api_keys upsert failed:', error.message, error.code, error.details)
       }
-    } catch { /* offline */ }
-  }, [setSetting, userId])
+    } catch (err) { console.error('[Integrations] Generate API key failed:', err) }
+    addToast({
+      message: 'New API key generated — update it in your iOS Shortcut and MCP clients'
+    })
+  }, [setSetting, userId, addToast])
 
-  const handleRevokeApiKey = useCallback(async () => {
-    const currentKey = apiKey
+  const doRevokeApiKey = useCallback(async () => {
     setSetting('api_key', null)
     try {
       const supabase = await getSupabase()
-      if (userId && currentKey) {
-        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key', currentKey)
+      if (userId && apiKey) {
+        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key', apiKey)
       }
     } catch { /* offline */ }
   }, [setSetting, userId, apiKey])
+
+  const handleRevokeApiKey = useCallback((e: React.MouseEvent) => {
+    if (!apiKey) return
+    if (shouldForceDelete(e)) { doRevokeApiKey(); return }
+    addToast({
+      message: 'Revoke API key? All integrations (iOS Shortcut, MCP) will stop working.',
+      persistent: true,
+      actions: [
+        { label: 'Revoke', onClick: () => doRevokeApiKey(), variant: 'danger' },
+        { label: 'Cancel', onClick: () => {}, variant: 'muted' }
+      ]
+    })
+  }, [doRevokeApiKey, apiKey, addToast])
 
   const iosDefaultProject = useSetting('ios_shortcut_default_project')
   const [subTab, setSubTab] = useState<'telegram' | 'shortcut' | 'mcp'>('telegram')
@@ -164,8 +178,8 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
             <button onClick={() => handleCopy(apiKey, 'apikey')} className="rounded p-1.5 text-muted hover:bg-foreground/6 transition-colors" title="Copy">
               {copied === 'apikey' ? <Check size={14} className="text-success" /> : <Copy size={14} />}
             </button>
-            <button onClick={handleRevokeApiKey} className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger transition-colors" title="Revoke">
-              <RefreshCw size={14} />
+            <button onClick={handleRevokeApiKey} className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger transition-colors" title="Revoke API key">
+              <Trash2 size={14} />
             </button>
           </div>
         )}

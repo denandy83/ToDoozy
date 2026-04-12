@@ -3,6 +3,13 @@
     "supabase": {
       "type": "http",
       "url": "https://mcp.supabase.com/mcp?project_ref=znmgsyjkaftbnhtlcxrm"
+    },
+    "ToDoozy": {
+      "type": "http",
+      "url": "https://znmgsyjkaftbnhtlcxrm.supabase.co/functions/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TODOOZY_API_KEY}"
+      }
     }
   }
 }

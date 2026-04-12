@@ -10,6 +10,8 @@ User-facing changes by date. Most recent first.
 - **Per-integration default projects** — Telegram Bot and iOS Shortcut each get their own default project setting, so tasks land in the right place regardless of how you create them
 - **AND/OR label filter toggle** — The label filter bar now has a three-way toggle to switch between AND (all labels must match) and OR (any label matches) logic
 - **Per-project auto-archive** — Projects can automatically archive completed tasks after a configurable number of days. My Day also shows a "Done today" section for tasks completed during the current day
+- **Remote MCP server** — Connect AI assistants to your ToDoozy tasks from anywhere, not just your local machine. A Supabase Edge Function proxies MCP tool calls so Claude and other AI clients can manage your tasks remotely
+- **Natural language dates** — Type dates the way you think: "tomorrow", "next Monday", "in 3 days", "every 2 weeks". ToDoozy parses natural language into structured dates and recurrence rules automatically — no more fiddling with date pickers for simple dates
 - **Update available modal** — When an app update is available, a modal now shows formatted release notes so you can see what's new before installing
 - **Fix: updater restart on macOS** — Installing an update now properly restarts the app instead of just hiding the window
 - **Fix: bidirectional sync** — Tasks and statuses that are newer locally now push to Supabase during sync, keeping both sides in sync

@@ -219,7 +219,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - `r:url` — attach a reference URL (e.g., `r:https://github.com/...`)
 - Popup suggestions for labels and priorities as user types
 - Autocomplete ranks exact and prefix matches above substring matches
-- **Status:** Complete
+- **Natural language date & recurrence parsing:** Users can type dates naturally (e.g., "tomorrow", "next Monday", "in 3 days", "every 2 weeks") and they are automatically parsed into structured dates and recurrence rules. Works in all task input contexts.
+- **Status:** Complete (updated 2026-04-11, Story #60)
 
 ### Command Palette
 - Cmd+K modal; substring match by default
@@ -425,7 +426,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Tools: create/update/delete/list tasks and subtasks, manage projects/labels/statuses, search, My Day management, templates, reorder tasks
 - Enable/disable in Settings > MCP; copy config to clipboard
 - **Activity logging:** All 22 mutating MCP tools (create/update/delete for tasks, subtasks, projects, labels, statuses, etc.) create activity log entries so AI-made changes appear in the activity timeline alongside user actions
-- **Status:** Complete
+- **Remote MCP server:** A Supabase Edge Function proxies MCP tool calls, enabling AI clients to manage tasks remotely without needing local access to the Electron app. Connects to the same Supabase backend for full read/write capability.
+- **Status:** Complete (updated 2026-04-11, Story #59)
 
 ---
 

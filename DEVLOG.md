@@ -4,7 +4,7 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
-## v1.1.6 — Stories #55-58, Update Modal, Sync and UX Fixes (2026-04-08 to 2026-04-11)
+## v1.1.6 — Stories #55-61, Update Modal, Sync and UX Fixes (2026-04-08 to 2026-04-11)
 
 **Session type:** Feature implementation + bug fixes + releases
 
@@ -14,6 +14,8 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 - **Per-integration default project (#56)** — Telegram Bot and iOS Shortcut each have their own default project setting. 5 files changed.
 - **AND/OR label filter logic (#57)** — Three-way operator toggle for label filters (AND/OR mode). 11 files changed.
 - **Per-project auto-archive + My Day done-today filter (#58)** — Projects can auto-archive done tasks; My Day shows tasks completed today. 10 files changed.
+- **Remote MCP server via Supabase Edge Function (#59)** — MCP tools accessible remotely through a Supabase edge function for AI integrations from anywhere. 20 files changed.
+- **Natural language date & recurrence parsing (#60)** — Users can type dates naturally ("tomorrow", "next Monday", "every 2 weeks") with automatic parsing. 18 files changed.
 - **Update available modal** — Auto-updater shows formatted release notes in a modal before install.
 - **Notarization re-enabled** — Built-in notarization enabled in electron-builder config.
 

@@ -118,3 +118,5 @@ npm run build
 | **AND/OR label filters** | Toggle between AND (all match) and OR (any match) logic for label filters |
 | **Per-project auto-archive** | Automatically archive completed tasks after a configurable number of days |
 | **Per-integration defaults** | Telegram Bot and iOS Shortcut each have their own default project |
+| **Remote MCP server** | Access ToDoozy's MCP tools remotely via Supabase Edge Function |
+| **Natural language dates** | Type "tomorrow", "next Monday", "every 2 weeks" — parsed automatically |

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Calendar, X, AlignLeft, Link } from 'lucide-react'
+import { Calendar, X, AlignLeft, Link, RefreshCw } from 'lucide-react'
 import type { Project, Label, ThemeConfig } from '../../shared/types'
 import { applyThemeConfig } from './shared/hooks/useThemeApplicator'
 import { useSmartInput } from './shared/hooks/useSmartInput'
@@ -106,7 +106,7 @@ export default function QuickAddApp(): React.JSX.Element {
 
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    const { title: trimmed, extractedReferenceUrl } = smart.getSubmitData()
+    const { title: trimmed, extractedReferenceUrl, nlpDate, nlpRecurrenceRule } = smart.getSubmitData()
     if (!trimmed || !userId || !selectedProjectId) return
 
     try {
@@ -131,7 +131,8 @@ export default function QuickAddApp(): React.JSX.Element {
         order_index: orderIndex,
         is_in_my_day: addToMyDay ? 1 : 0,
         priority: smart.selectedPriority ?? 0,
-        due_date: smart.selectedDate,
+        due_date: smart.selectedDate ?? nlpDate,
+        recurrence_rule: nlpRecurrenceRule ?? undefined,
         reference_url: extractedReferenceUrl || smart.referenceUrl
       })
 
@@ -284,7 +285,7 @@ export default function QuickAddApp(): React.JSX.Element {
     return []
   }, [smart.popupState, projectLabels, projects])
 
-  const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.referenceUrl !== null
+  const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.referenceUrl !== null || (smart.nlpDateResult !== null && !smart.selectedDate)
 
   if (!ready) {
     return <div className="w-screen bg-transparent" />
@@ -358,6 +359,17 @@ export default function QuickAddApp(): React.JSX.Element {
                     <X size={10} />
                   </button>
                 </span>
+              )}
+              {smart.nlpDateResult && !smart.selectedDate && (
+                <button
+                  onClick={smart.dismissNlpDate}
+                  className="inline-flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[10px] font-bold text-accent"
+                  title="Click to remove detected date"
+                >
+                  {smart.nlpDateResult.recurrenceRule ? <RefreshCw size={10} /> : <Calendar size={10} />}
+                  {smart.nlpDateResult.text}
+                  <X size={10} />
+                </button>
               )}
               {smart.referenceUrl && (
                 <span className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
