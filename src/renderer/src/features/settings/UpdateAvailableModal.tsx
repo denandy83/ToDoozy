@@ -70,34 +70,45 @@ export function UpdateAvailableModal(): React.JSX.Element | null {
   )
 }
 
+type NoteEntry = { type: 'section'; title: string } | { type: 'item'; title: string; desc: string }
+
 function ReleaseNotes({ notes }: { notes: string }): React.JSX.Element | null {
   const parsed = useMemo(() => {
     if (!notes) return []
-    return notes
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('- '))
-      .map((line) => {
+    const entries: NoteEntry[] = []
+    for (const raw of notes.split('\n')) {
+      const line = raw.trim()
+      if (line.startsWith('### ')) {
+        entries.push({ type: 'section', title: line.slice(4) })
+      } else if (line.startsWith('- ')) {
         const content = line.slice(2)
         const boldMatch = content.match(/^\*\*(.+?)\*\*\s*[—–-]\s*(.+)$/)
-        if (boldMatch) return { title: boldMatch[1], desc: boldMatch[2] }
-        return { title: content.replace(/\*\*/g, ''), desc: '' }
-      })
+        if (boldMatch) {
+          entries.push({ type: 'item', title: boldMatch[1], desc: boldMatch[2] })
+        } else {
+          entries.push({ type: 'item', title: content.replace(/\*\*/g, ''), desc: '' })
+        }
+      }
+    }
+    return entries
   }, [notes])
 
   if (parsed.length === 0) return null
 
   return (
     <div className="max-h-60 overflow-y-auto rounded-lg border border-border bg-background p-3">
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
-        {"What's New"}
-      </p>
-      {parsed.map((note, i) => (
-        <div key={i} className="py-1.5 border-b border-border/30 last:border-0">
-          <p className="text-[13px] font-medium text-foreground">{note.title}</p>
-          {note.desc && <p className="text-[12px] font-light text-muted mt-0.5">{note.desc}</p>}
-        </div>
-      ))}
+      {parsed.map((entry, i) =>
+        entry.type === 'section' ? (
+          <p key={i} className={`text-[10px] font-bold uppercase tracking-[0.3em] text-muted ${i > 0 ? 'mt-3' : ''} mb-1`}>
+            {entry.title}
+          </p>
+        ) : (
+          <div key={i} className="py-1.5 border-b border-border/30 last:border-0">
+            <p className="text-[13px] font-medium text-foreground">{entry.title}</p>
+            {entry.desc && <p className="text-[12px] font-light text-muted mt-0.5">{entry.desc}</p>}
+          </div>
+        )
+      )}
     </div>
   )
 }
