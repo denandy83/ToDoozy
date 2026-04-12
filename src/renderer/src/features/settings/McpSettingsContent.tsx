@@ -34,6 +34,17 @@ export function McpSettingsContent({ apiKey }: McpSettingsContentProps): React.J
     url: MCP_URL,
     headers: { Authorization: `Bearer ${apiKey}` }
   }, null, 2)
+  const claudeDesktopConfig = JSON.stringify({
+    ToDoozy: {
+      command: 'npx',
+      args: [
+        '-y', 'mcp-remote',
+        MCP_URL,
+        '--header',
+        `Authorization: Bearer ${apiKey}`
+      ]
+    }
+  }, null, 2)
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,8 +71,27 @@ export function McpSettingsContent({ apiKey }: McpSettingsContentProps): React.J
         </p>
       </SetupSection>
 
-      {/* JSON Config */}
-      <SetupSection title="JSON Config (Claude Desktop, ChatGPT, etc.)" label="json-config" copied={copied} onCopy={handleCopy}>
+      {/* Claude Desktop */}
+      <SetupSection title="Claude Desktop" label="claude-desktop" copied={copied} onCopy={handleCopy}>
+        <div className="flex items-start gap-2">
+          <pre className="flex-1 select-all overflow-x-auto whitespace-pre rounded bg-surface px-2 py-1.5 font-mono text-[11px] text-fg-secondary">
+            {claudeDesktopConfig}
+          </pre>
+          <button
+            onClick={() => handleCopy(claudeDesktopConfig, 'claude-desktop')}
+            className="flex-shrink-0 rounded p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground mt-0.5"
+            title="Copy config"
+          >
+            {copied === 'claude-desktop' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+          </button>
+        </div>
+        <p className="text-[10px] text-muted mt-1">
+          Add under {'"mcpServers"'} in Claude Desktop{'\''}s config file. Requires npx.
+        </p>
+      </SetupSection>
+
+      {/* Streamable HTTP JSON Config */}
+      <SetupSection title="Streamable HTTP (ChatGPT, etc.)" label="json-config" copied={copied} onCopy={handleCopy}>
         <div className="flex items-start gap-2">
           <pre className="flex-1 select-all overflow-x-auto whitespace-pre rounded bg-surface px-2 py-1.5 font-mono text-[11px] text-fg-secondary">
             {jsonConfig}
@@ -75,7 +105,7 @@ export function McpSettingsContent({ apiKey }: McpSettingsContentProps): React.J
           </button>
         </div>
         <p className="text-[10px] text-muted mt-1">
-          Paste into Claude Desktop, ChatGPT, or any MCP client that supports Streamable HTTP.
+          For any MCP client that supports Streamable HTTP natively.
         </p>
       </SetupSection>
     </div>
