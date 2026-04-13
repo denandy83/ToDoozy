@@ -594,13 +594,13 @@ function logFocusSession(taskId: string, userId: string, minutes: number): void 
 }
 
 function logCookieBreak(taskId: string, userId: string, earnedSeconds: number, spentSeconds: number): void {
-  const earnedMin = Math.round(earnedSeconds / 60)
-  const spentMin = Math.round(spentSeconds / 60)
+  const earned = Math.round(earnedSeconds)
+  const spent = Math.round(spentSeconds)
   window.api.activityLog.create({
     id: crypto.randomUUID(),
     task_id: taskId,
     user_id: userId,
-    action: `Cookie break: earned ${earnedMin}m, spent ${spentMin}m`
+    action: `Cookie break: earned ${earned}s, spent ${spent}s`
   }).catch((err: unknown) => {
     console.error('Failed to log cookie break:', err)
   })

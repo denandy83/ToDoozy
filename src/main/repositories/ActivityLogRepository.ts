@@ -121,7 +121,7 @@ export class ActivityLogRepository {
     userId: string,
     startDate: string,
     endDate: string
-  ): { earned: number; spent: number } {
+  ): { earnedSeconds: number; spentSeconds: number } {
     const sql = `
       SELECT al.action
       FROM activity_log al
@@ -131,16 +131,16 @@ export class ActivityLogRepository {
         AND al.created_at >= ? AND al.created_at <= ?
     `
     const rows = this.db.prepare(sql).all(userId, startDate, endDate) as unknown as Array<{ action: string }>
-    let earned = 0
-    let spent = 0
+    let earnedSeconds = 0
+    let spentSeconds = 0
     for (const row of rows) {
-      const match = row.action.match(/^Cookie break: earned (\d+)m, spent (\d+)m$/)
+      const match = row.action.match(/^Cookie break: earned (\d+)s, spent (\d+)s$/)
       if (match) {
-        earned += Number(match[1])
-        spent += Number(match[2])
+        earnedSeconds += Number(match[1])
+        spentSeconds += Number(match[2])
       }
     }
-    return { earned, spent }
+    return { earnedSeconds, spentSeconds }
   }
 
   getActivityHeatmap(

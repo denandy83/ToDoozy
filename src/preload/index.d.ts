@@ -307,7 +307,7 @@ export interface StatsAPI {
   projectBreakdown(userId: string): Promise<Array<{ projectId: string; projectName: string; open: number; completed: number }>>
   taskList(userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string): Promise<Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>>
   focusTaskList(userId: string, startDate: string, endDate: string, projectIds: string[] | null): Promise<Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number; focusMinutes: number }>>
-  cookieBalance(userId: string, startDate: string, endDate: string): Promise<{ earned: number; spent: number }>
+  cookieBalance(userId: string, startDate: string, endDate: string): Promise<{ earnedSeconds: number; spentSeconds: number }>
 }
 
 export interface SavedViewsAPI {

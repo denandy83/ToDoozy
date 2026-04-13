@@ -49,9 +49,9 @@ export function StatsView(): React.JSX.Element {
   const [priorityData, setPriorityData] = useState<PriorityData[]>([])
   const [dayOfWeekData, setDayOfWeekData] = useState<DayOfWeekData[]>([])
   const [projectData, setProjectData] = useState<ProjectData[]>([])
-  const [cookieToday, setCookieToday] = useState({ earned: 0, spent: 0 })
-  const [cookieWeek, setCookieWeek] = useState({ earned: 0, spent: 0 })
-  const [cookieMonth, setCookieMonth] = useState({ earned: 0, spent: 0 })
+  const [cookieToday, setCookieToday] = useState({ earnedSeconds: 0, spentSeconds: 0 })
+  const [cookieWeek, setCookieWeek] = useState({ earnedSeconds: 0, spentSeconds: 0 })
+  const [cookieMonth, setCookieMonth] = useState({ earnedSeconds: 0, spentSeconds: 0 })
 
   const [drillDown, setDrillDown] = useState<{ filter: StatsFilter; label: string } | null>(null)
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
@@ -142,10 +142,10 @@ export function StatsView(): React.JSX.Element {
   const weekFocus = focusData.filter((f) => f.date >= weekStart).reduce((s, f) => s + f.minutes, 0)
   const monthFocus = focusData.filter((f) => f.date >= monthStart).reduce((s, f) => s + f.minutes, 0)
 
-  const cookieTodayBalance = cookieToday.earned - cookieToday.spent
-  const cookieWeekBalance = cookieWeek.earned - cookieWeek.spent
-  const cookieMonthBalance = cookieMonth.earned - cookieMonth.spent
-  const hasCookieData = cookieToday.earned > 0 || cookieToday.spent > 0 || cookieWeek.earned > 0 || cookieMonth.earned > 0
+  const cookieTodayBalance = cookieToday.earnedSeconds - cookieToday.spentSeconds
+  const cookieWeekBalance = cookieWeek.earnedSeconds - cookieWeek.spentSeconds
+  const cookieMonthBalance = cookieMonth.earnedSeconds - cookieMonth.spentSeconds
+  const hasCookieData = cookieToday.earnedSeconds > 0 || cookieToday.spentSeconds > 0 || cookieWeek.earnedSeconds > 0 || cookieMonth.earnedSeconds > 0
 
   // Fill chart data — use local dates to avoid UTC offset issues
   const completionChart = useMemo(() => {
@@ -281,9 +281,9 @@ export function StatsView(): React.JSX.Element {
         {/* Cookie Balance row — only shown when there's cookie data */}
         {hasCookieData && (
           <div className="grid grid-cols-3 gap-3">
-            <CookieBalanceCard label="Cookie Today" balance={cookieTodayBalance} earned={cookieToday.earned} spent={cookieToday.spent} />
-            <CookieBalanceCard label="Cookie This Week" balance={cookieWeekBalance} earned={cookieWeek.earned} spent={cookieWeek.spent} />
-            <CookieBalanceCard label="Cookie This Month" balance={cookieMonthBalance} earned={cookieMonth.earned} spent={cookieMonth.spent} />
+            <CookieBalanceCard label="Cookie Today" balanceSeconds={cookieTodayBalance} earnedSeconds={cookieToday.earnedSeconds} spentSeconds={cookieToday.spentSeconds} />
+            <CookieBalanceCard label="Cookie This Week" balanceSeconds={cookieWeekBalance} earnedSeconds={cookieWeek.earnedSeconds} spentSeconds={cookieWeek.spentSeconds} />
+            <CookieBalanceCard label="Cookie This Month" balanceSeconds={cookieMonthBalance} earnedSeconds={cookieMonth.earnedSeconds} spentSeconds={cookieMonth.spentSeconds} />
           </div>
         )}
 
@@ -387,9 +387,24 @@ export function StatsView(): React.JSX.Element {
 
 /* ── Sub-components ─────────────────────────────────────────────── */
 
-function CookieBalanceCard({ label, balance, earned, spent }: { label: string; balance: number; earned: number; spent: number }): React.JSX.Element {
-  const isPositive = balance >= 0
-  const balanceStr = `${isPositive ? '+' : ''}${balance}m`
+function formatCookieTime(seconds: number): string {
+  const abs = Math.abs(Math.round(seconds))
+  const m = Math.floor(abs / 60)
+  const s = abs % 60
+  const prefix = seconds < 0 ? '-' : '+'
+  return `${prefix}${m}:${s.toString().padStart(2, '0')}`
+}
+
+function formatCookieDuration(seconds: number): string {
+  const abs = Math.round(seconds)
+  const m = Math.floor(abs / 60)
+  const s = abs % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
+function CookieBalanceCard({ label, balanceSeconds, earnedSeconds, spentSeconds }: { label: string; balanceSeconds: number; earnedSeconds: number; spentSeconds: number }): React.JSX.Element {
+  const isPositive = balanceSeconds >= 0
+  const balanceStr = formatCookieTime(balanceSeconds)
   return (
     <div className={`rounded-lg border px-4 py-3 ${isPositive ? 'border-emerald-400/30 bg-emerald-400/5' : 'border-red-400/30 bg-red-400/5'}`}>
       <div className="flex items-center gap-2">
@@ -397,7 +412,7 @@ function CookieBalanceCard({ label, balance, earned, spent }: { label: string; b
         <span className={`text-2xl font-light ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>{balanceStr}</span>
       </div>
       <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">{label}</div>
-      <div className="mt-1 text-[9px] text-muted">Earned {earned}m · Spent {spent}m</div>
+      <div className="mt-1 text-[9px] text-muted">Earned {formatCookieDuration(earnedSeconds)} · Spent {formatCookieDuration(spentSeconds)}</div>
     </div>
   )
 }
