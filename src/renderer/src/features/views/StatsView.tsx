@@ -281,9 +281,9 @@ export function StatsView(): React.JSX.Element {
         {/* Cookie Balance row — only shown when there's cookie data */}
         {hasCookieData && (
           <div className="grid grid-cols-3 gap-3">
-            <CookieBalanceCard label="Cookie Today" balanceSeconds={cookieTodayBalance} earnedSeconds={cookieToday.earnedSeconds} spentSeconds={cookieToday.spentSeconds} />
-            <CookieBalanceCard label="Cookie This Week" balanceSeconds={cookieWeekBalance} earnedSeconds={cookieWeek.earnedSeconds} spentSeconds={cookieWeek.spentSeconds} />
-            <CookieBalanceCard label="Cookie This Month" balanceSeconds={cookieMonthBalance} earnedSeconds={cookieMonth.earnedSeconds} spentSeconds={cookieMonth.spentSeconds} />
+            <CookieBalanceCard label="Cookies Today" balanceSeconds={cookieTodayBalance} earnedSeconds={cookieToday.earnedSeconds} spentSeconds={cookieToday.spentSeconds} />
+            <CookieBalanceCard label="Cookies This Week" balanceSeconds={cookieWeekBalance} earnedSeconds={cookieWeek.earnedSeconds} spentSeconds={cookieWeek.spentSeconds} />
+            <CookieBalanceCard label="Cookies This Month" balanceSeconds={cookieMonthBalance} earnedSeconds={cookieMonth.earnedSeconds} spentSeconds={cookieMonth.spentSeconds} />
           </div>
         )}
 
