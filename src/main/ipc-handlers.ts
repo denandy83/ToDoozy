@@ -833,6 +833,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.getProjectBreakdown(userId)
   })
 
+  ipcMain.handle('stats:cookieBalance', (_e, userId: string, startDate: string, endDate: string) => {
+    return getRepos().activityLog.getCookieStats(userId, startDate, endDate)
+  })
+
   // ── Saved Views ──────────────────────────────────────────────────
   ipcMain.handle('savedViews:findById', (_e, id: string) => {
     return getRepos().savedViews.findById(id) ?? null

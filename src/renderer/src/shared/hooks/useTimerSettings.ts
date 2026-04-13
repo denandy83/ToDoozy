@@ -16,6 +16,8 @@ export interface TimerSettings {
   longBreakEnabled: boolean
   longBreakMinutes: number
   longBreakInterval: number
+  cookieMinutesPerHour: number
+  cookieTransfer: boolean
 }
 
 export function useTimerSettings(): TimerSettings {
@@ -32,6 +34,8 @@ export function useTimerSettings(): TimerSettings {
   const longBreakEnabled = useSetting('timer_long_break_enabled')
   const longBreakMinutesRaw = useSetting('timer_long_break_minutes')
   const longBreakIntervalRaw = useSetting('timer_long_break_interval')
+  const cookieMinutesPerHourRaw = useSetting('timer_cookie_minutes_per_hour')
+  const cookieTransfer = useSetting('timer_cookie_transfer')
 
   return useMemo(() => {
     let presets: TimerPreset[]
@@ -57,7 +61,9 @@ export function useTimerSettings(): TimerSettings {
       flowtimeEnabled: flowtimeEnabled === 'true',
       longBreakEnabled: longBreakEnabled === 'true',
       longBreakMinutes: parseInt(longBreakMinutesRaw ?? '15', 10) || 15,
-      longBreakInterval: parseInt(longBreakIntervalRaw ?? '4', 10) || 4
+      longBreakInterval: parseInt(longBreakIntervalRaw ?? '4', 10) || 4,
+      cookieMinutesPerHour: parseInt(cookieMinutesPerHourRaw ?? '10', 10) || 10,
+      cookieTransfer: cookieTransfer === 'true'
     }
-  }, [presetsRaw, defaultPresetId, breakMinutesRaw, repetitionEnabled, defaultRepsRaw, perpetualMode, soundEnabled, notificationEnabled, autoBreak, flowtimeEnabled, longBreakEnabled, longBreakMinutesRaw, longBreakIntervalRaw])
+  }, [presetsRaw, defaultPresetId, breakMinutesRaw, repetitionEnabled, defaultRepsRaw, perpetualMode, soundEnabled, notificationEnabled, autoBreak, flowtimeEnabled, longBreakEnabled, longBreakMinutesRaw, longBreakIntervalRaw, cookieMinutesPerHourRaw, cookieTransfer])
 }

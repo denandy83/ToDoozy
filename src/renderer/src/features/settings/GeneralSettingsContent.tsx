@@ -282,12 +282,19 @@ const COMMON_TIMEZONES = [
   { value: 'Pacific/Auckland', label: 'New Zealand (NZST)' }
 ]
 
+const DAY_RESET_HOURS = Array.from({ length: 24 }, (_, i) => {
+  const hour12 = i === 0 ? 12 : i > 12 ? i - 12 : i
+  const ampm = i < 12 ? 'AM' : 'PM'
+  return { value: String(i), label: i === 0 ? 'Midnight' : `${hour12}:00 ${ampm}` }
+})
+
 function SystemSection(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const dateFormat = useSetting('date_format') ?? 'dd/mm/yyyy'
   const weekStart = useSetting('week_start') ?? 'monday'
   const timezone = useSetting('timezone') ?? 'auto'
+  const dayResetHour = useSetting('system_day_reset_hour') ?? '0'
 
   useEffect(() => {
     window.api.app.getLoginItemSettings().then((settings) => {
@@ -344,6 +351,21 @@ function SystemSection(): React.JSX.Element {
         >
           <option value="monday">Monday</option>
           <option value="sunday">Sunday</option>
+        </select>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Day reset time</p>
+          <p className="text-[10px] text-muted">When &quot;today&quot; rolls over for stats, streaks, and cookie balance</p>
+        </div>
+        <select
+          value={dayResetHour}
+          onChange={(e) => setSetting('system_day_reset_hour', e.target.value)}
+          className="rounded-lg border border-border bg-transparent px-2 py-1.5 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+        >
+          {DAY_RESET_HOURS.map((h) => (
+            <option key={h.value} value={h.value}>{h.label}</option>
+          ))}
         </select>
       </div>
       <ToggleSetting

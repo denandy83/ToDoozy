@@ -55,7 +55,8 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         userId: currentUser.id,
         isFlowtime,
         longBreakMinutes: settings.longBreakEnabled ? settings.longBreakMinutes : 0,
-        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0
+        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0,
+        cookieMinutesPerHour: isFlowtime ? settings.cookieMinutesPerHour : 0
       })
       setPopupOpen(false)
     },

@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import MarkdownIt from 'markdown-it'
-import { useTimerStore } from '../stores/timerStore'
+import { useTimerStore, formatTimeRemaining } from '../stores/timerStore'
 import { useTaskStore } from '../stores/taskStore'
 import { Pause, Play, Square, Minimize2, Maximize2 } from 'lucide-react'
 
@@ -21,11 +21,16 @@ export function TimerOverlay(): React.JSX.Element | null {
   const isLongBreak = useTimerStore((s) => s.isLongBreak)
   const sessionsCompleted = useTimerStore((s) => s.sessionsCompleted)
   const totalFocusSecondsToday = useTimerStore((s) => s.totalFocusSecondsToday)
+  const isCookieBreak = useTimerStore((s) => s.isCookieBreak)
+  const isCookieBreakPhase = useTimerStore((s) => s.isCookieBreakPhase)
+  const cookiePoolSeconds = useTimerStore((s) => s.cookiePoolSeconds)
   const pause = useTimerStore((s) => s.pause)
   const resume = useTimerStore((s) => s.resume)
   const stop = useTimerStore((s) => s.stop)
   const skipBreak = useTimerStore((s) => s.skipBreak)
   const startFlowtimeBreak = useTimerStore((s) => s.startFlowtimeBreak)
+  const startCookieBreak = useTimerStore((s) => s.startCookieBreak)
+  const backToWork = useTimerStore((s) => s.backToWork)
   const task = useTaskStore((s) => taskId ? s.tasks[taskId] : null)
   const descriptionHtml = useMemo(() => {
     if (!task?.description?.trim()) return null
@@ -34,27 +39,73 @@ export function TimerOverlay(): React.JSX.Element | null {
 
   const [minimized, setMinimized] = useState(false)
 
+  // Keyboard shortcut: B toggles cookie break
+  useEffect(() => {
+    if (!isRunning || !isCookieBreak) return
+    const handler = (e: KeyboardEvent): void => {
+      if (e.key === 'b' || e.key === 'B') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+        e.preventDefault()
+        if (isCookieBreakPhase) {
+          backToWork()
+        } else if (phase === 'work') {
+          startCookieBreak()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isRunning, isCookieBreak, isCookieBreakPhase, phase, startCookieBreak, backToWork])
+
   if (!isRunning) return null
 
-  const displaySeconds = (isFlowtime && phase === 'work') ? elapsedSeconds : remainingSeconds
-  const minutes = Math.floor(displaySeconds / 60)
-  const seconds = displaySeconds % 60
-  const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+  // Determine display time
+  let displaySeconds: number
+  if (isCookieBreakPhase) {
+    displaySeconds = cookiePoolSeconds
+  } else if (isFlowtime && phase === 'work') {
+    displaySeconds = elapsedSeconds
+  } else {
+    displaySeconds = remainingSeconds
+  }
+
+  const timeStr = isCookieBreakPhase
+    ? formatTimeRemaining(cookiePoolSeconds)
+    : formatTimeRemaining(displaySeconds)
 
   const isBreak = phase === 'break'
   const showReps = isPerpetual || totalReps > 1
 
-  const phaseLabel = phase === 'work'
-    ? (isFlowtime ? 'Flowtime' : 'Focus')
-    : isLongBreak
-      ? 'Long Break'
-      : 'Break'
+  // No pause during flowtime at all (work or cookie break). Pause only for non-flowtime.
+  const canPause = !isFlowtime
 
-  const phaseColor = phase === 'work'
-    ? 'text-accent'
-    : isLongBreak
-      ? 'text-amber-400'
-      : 'text-emerald-400'
+  const phaseLabel = isCookieBreakPhase
+    ? 'Cookie Break 🍪'
+    : phase === 'work'
+      ? (isFlowtime ? 'Flowtime' : 'Focus')
+      : isLongBreak
+        ? 'Long Break'
+        : 'Break'
+
+  const phaseColor = isCookieBreakPhase
+    ? (cookiePoolSeconds >= 0 ? 'text-emerald-400' : 'text-red-400')
+    : phase === 'work'
+      ? 'text-accent'
+      : isLongBreak
+        ? 'text-amber-400'
+        : 'text-emerald-400'
+
+  const timeColor = isCookieBreakPhase
+    ? (cookiePoolSeconds >= 0 ? 'text-emerald-400' : 'text-red-400')
+    : isBreak
+      ? (isLongBreak ? 'text-amber-400' : 'text-emerald-400')
+      : 'text-foreground'
+
+  // Cookie pool display for the button during work phase
+  const cookiePoolStr = formatTimeRemaining(cookiePoolSeconds)
+  const cookieButtonColor = cookiePoolSeconds >= 0
+    ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-400 hover:bg-emerald-400/15'
+    : 'border-red-400/30 bg-red-400/5 text-red-400 hover:bg-red-400/15'
 
   // Minimized: compact bar at bottom
   if (minimized) {
@@ -63,7 +114,7 @@ export function TimerOverlay(): React.JSX.Element | null {
         <p className={`text-[10px] font-bold uppercase tracking-widest ${phaseColor}`}>
           {phaseLabel}
         </p>
-        <p className={`text-lg font-light tabular-nums ${isBreak ? (isLongBreak ? 'text-amber-400' : 'text-emerald-400') : 'text-foreground'}`}>
+        <p className={`text-lg font-light tabular-nums ${timeColor}`}>
           {timeStr}
         </p>
         {showReps && (
@@ -72,14 +123,34 @@ export function TimerOverlay(): React.JSX.Element | null {
           </p>
         )}
         <div className="flex items-center gap-1.5 ml-1">
-          <button
-            onClick={isPaused ? resume : pause}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-border text-foreground transition-colors hover:bg-foreground/10"
-            title={isPaused ? 'Resume' : 'Pause'}
-          >
-            {isPaused ? <Play size={12} /> : <Pause size={12} />}
-          </button>
-          {isBreak && (
+          {canPause && (
+            <button
+              onClick={isPaused ? resume : pause}
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border text-foreground transition-colors hover:bg-foreground/10"
+              title={isPaused ? 'Resume' : 'Pause'}
+            >
+              {isPaused ? <Play size={12} /> : <Pause size={12} />}
+            </button>
+          )}
+          {isCookieBreakPhase && (
+            <button
+              onClick={backToWork}
+              className="rounded-full border border-border px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/10"
+              title="Back to work (B)"
+            >
+              Back to work!
+            </button>
+          )}
+          {isCookieBreak && phase === 'work' && (
+            <button
+              onClick={startCookieBreak}
+              className={`rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-widest transition-colors ${cookieButtonColor}`}
+              title="Time for a cookie! (B)"
+            >
+              🍪 {cookiePoolStr}
+            </button>
+          )}
+          {isBreak && !isCookieBreakPhase && (
             <button
               onClick={skipBreak}
               className="rounded-full border border-border px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/10"
@@ -126,9 +197,9 @@ export function TimerOverlay(): React.JSX.Element | null {
           {phaseLabel}
         </p>
 
-        {/* Countdown */}
+        {/* Countdown / elapsed */}
         <p
-          className={`font-light tabular-nums ${isBreak ? (isLongBreak ? 'text-amber-400' : 'text-emerald-400') : 'text-foreground'}`}
+          className={`font-light tabular-nums ${timeColor}`}
           style={{ fontSize: '8rem', lineHeight: 1 }}
         >
           {timeStr}
@@ -148,8 +219,19 @@ export function TimerOverlay(): React.JSX.Element | null {
           </p>
         )}
 
-        {/* Earned break — flowtime work phase only, shows after 1 min */}
-        {isFlowtime && phase === 'work' && elapsedSeconds >= 60 && (
+        {/* Cookie break button — flowtime work phase with cookie enabled */}
+        {isCookieBreak && phase === 'work' && (
+          <button
+            onClick={startCookieBreak}
+            className={`mt-6 rounded-full border px-4 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${cookieButtonColor}`}
+            title="Time for a cookie! (B)"
+          >
+            Time for a cookie! 🍪 · {cookiePoolStr}
+          </button>
+        )}
+
+        {/* Earned break — flowtime work phase only, without cookie break, shows after 1 min */}
+        {isFlowtime && !isCookieBreak && phase === 'work' && elapsedSeconds >= 60 && (
           <button
             onClick={startFlowtimeBreak}
             className="mt-6 rounded-full border border-emerald-400/30 bg-emerald-400/5 px-4 py-1.5 text-[11px] font-bold uppercase tracking-widest text-emerald-400 transition-colors hover:bg-emerald-400/15"
@@ -161,14 +243,25 @@ export function TimerOverlay(): React.JSX.Element | null {
 
         {/* Controls */}
         <div className="mt-10 flex items-center gap-4">
-          <button
-            onClick={isPaused ? resume : pause}
-            className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-foreground transition-colors hover:bg-foreground/10"
-            title={isPaused ? 'Resume' : 'Pause'}
-          >
-            {isPaused ? <Play size={20} /> : <Pause size={20} />}
-          </button>
-          {isBreak && (
+          {canPause && (
+            <button
+              onClick={isPaused ? resume : pause}
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-foreground transition-colors hover:bg-foreground/10"
+              title={isPaused ? 'Resume' : 'Pause'}
+            >
+              {isPaused ? <Play size={20} /> : <Pause size={20} />}
+            </button>
+          )}
+          {isCookieBreakPhase && (
+            <button
+              onClick={backToWork}
+              className="rounded-full border border-border bg-surface px-4 py-3 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/10"
+              title="Back to work! (B)"
+            >
+              Back to work!
+            </button>
+          )}
+          {isBreak && !isCookieBreakPhase && (
             <button
               onClick={skipBreak}
               className="rounded-full border border-border bg-surface px-4 py-3 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/10"

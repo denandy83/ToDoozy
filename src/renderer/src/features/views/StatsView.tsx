@@ -49,6 +49,9 @@ export function StatsView(): React.JSX.Element {
   const [priorityData, setPriorityData] = useState<PriorityData[]>([])
   const [dayOfWeekData, setDayOfWeekData] = useState<DayOfWeekData[]>([])
   const [projectData, setProjectData] = useState<ProjectData[]>([])
+  const [cookieToday, setCookieToday] = useState({ earned: 0, spent: 0 })
+  const [cookieWeek, setCookieWeek] = useState({ earned: 0, spent: 0 })
+  const [cookieMonth, setCookieMonth] = useState({ earned: 0, spent: 0 })
 
   const [drillDown, setDrillDown] = useState<{ filter: StatsFilter; label: string } | null>(null)
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
@@ -70,6 +73,12 @@ export function StatsView(): React.JSX.Element {
     const end = new Date()
     const start = new Date(end.getFullYear(), end.getMonth() - 2, 1) // 1st of 3 months ago
     return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) + 'T23:59:59' }
+  }, [])
+
+  const { monthStart, monthEnd } = useMemo(() => {
+    const now = new Date()
+    const ms = new Date(now.getFullYear(), now.getMonth(), 1)
+    return { monthStart: ms.toISOString().slice(0, 10), monthEnd: now.toISOString().slice(0, 10) + 'T23:59:59' }
   }, [])
 
   useEffect(() => {
@@ -97,6 +106,27 @@ export function StatsView(): React.JSX.Element {
     load()
   }, [userId, projectFilter, startDate, endDate, heatmapRange])
 
+  // Cookie balance stats
+  useEffect(() => {
+    if (!userId) return
+    const loadCookie = async (): Promise<void> => {
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const todayEnd = todayStr + 'T23:59:59'
+      const d = new Date()
+      d.setDate(d.getDate() - d.getDay())
+      const ws = d.toISOString().slice(0, 10)
+      const [ct, cw, cm] = await Promise.all([
+        window.api.stats.cookieBalance(userId, todayStr, todayEnd),
+        window.api.stats.cookieBalance(userId, ws, todayEnd),
+        window.api.stats.cookieBalance(userId, monthStart, monthEnd)
+      ])
+      setCookieToday(ct)
+      setCookieWeek(cw)
+      setCookieMonth(cm)
+    }
+    loadCookie()
+  }, [userId, monthStart, monthEnd])
+
   // Compute overview numbers from completions
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const weekStart = useMemo(() => {
@@ -110,6 +140,12 @@ export function StatsView(): React.JSX.Element {
   const totalRange = completions.reduce((s, c) => s + c.count, 0)
   const todayFocus = focusData.filter((f) => f.date === todayStr).reduce((s, f) => s + f.minutes, 0)
   const weekFocus = focusData.filter((f) => f.date >= weekStart).reduce((s, f) => s + f.minutes, 0)
+  const monthFocus = focusData.filter((f) => f.date >= monthStart).reduce((s, f) => s + f.minutes, 0)
+
+  const cookieTodayBalance = cookieToday.earned - cookieToday.spent
+  const cookieWeekBalance = cookieWeek.earned - cookieWeek.spent
+  const cookieMonthBalance = cookieMonth.earned - cookieMonth.spent
+  const hasCookieData = cookieToday.earned > 0 || cookieToday.spent > 0 || cookieWeek.earned > 0 || cookieMonth.earned > 0
 
   // Fill chart data — use local dates to avoid UTC offset issues
   const completionChart = useMemo(() => {
@@ -235,11 +271,21 @@ export function StatsView(): React.JSX.Element {
         </div>
 
         {/* Focus row */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           <OverviewCard label="Focus Today" value={todayFocus > 0 ? `${todayFocus}m` : '—'} icon={<Clock size={14} className="text-accent" />} onClick={todayFocus > 0 ? () => openDrillDown('focus_today', 'Focus Today') : undefined} />
           <OverviewCard label="Focus This Week" value={weekFocus > 0 ? `${weekFocus}m` : '—'} icon={<Clock size={14} className="text-accent" />} onClick={weekFocus > 0 ? () => openDrillDown('focus_week', 'Focus This Week') : undefined} />
+          <OverviewCard label="Focus This Month" value={monthFocus > 0 ? `${monthFocus}m` : '—'} icon={<Clock size={14} className="text-accent" />} />
           <OverviewCard label="Completion Rate" value={`${completionRate}%`} />
         </div>
+
+        {/* Cookie Balance row — only shown when there's cookie data */}
+        {hasCookieData && (
+          <div className="grid grid-cols-3 gap-3">
+            <CookieBalanceCard label="Cookie Today" balance={cookieTodayBalance} earned={cookieToday.earned} spent={cookieToday.spent} />
+            <CookieBalanceCard label="Cookie This Week" balance={cookieWeekBalance} earned={cookieWeek.earned} spent={cookieWeek.spent} />
+            <CookieBalanceCard label="Cookie This Month" balance={cookieMonthBalance} earned={cookieMonth.earned} spent={cookieMonth.spent} />
+          </div>
+        )}
 
         {/* Charts row 1: Completions + Day of Week */}
         <div className="grid grid-cols-3 gap-6">
@@ -340,6 +386,21 @@ export function StatsView(): React.JSX.Element {
 }
 
 /* ── Sub-components ─────────────────────────────────────────────── */
+
+function CookieBalanceCard({ label, balance, earned, spent }: { label: string; balance: number; earned: number; spent: number }): React.JSX.Element {
+  const isPositive = balance >= 0
+  const balanceStr = `${isPositive ? '+' : ''}${balance}m`
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${isPositive ? 'border-emerald-400/30 bg-emerald-400/5' : 'border-red-400/30 bg-red-400/5'}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-lg">🍪</span>
+        <span className={`text-2xl font-light ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>{balanceStr}</span>
+      </div>
+      <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">{label}</div>
+      <div className="mt-1 text-[9px] text-muted">Earned {earned}m · Spent {spent}m</div>
+    </div>
+  )
+}
 
 interface OverviewCardProps {
   label: string

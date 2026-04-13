@@ -728,7 +728,7 @@ export class TaskRepository {
       params.push(...projectIds)
     }
     sql += ' ORDER BY t.updated_at DESC LIMIT 200'
-    return this.db.prepare(sql).all(...params) as Array<{ id: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>
+    return this.db.prepare(sql).all(...params) as Array<{ id: string; projectId: string; title: string; projectName: string; completedDate: string | null; dueDate: string | null; priority: number }>
   }
 
   getTaskSummaryStats(

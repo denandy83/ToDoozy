@@ -267,7 +267,9 @@ const api: TodoozyAPI = {
     taskList: (userId, filter, projectIds, startDate, endDate) =>
       ipcRenderer.invoke('stats:taskList', userId, filter, projectIds, startDate, endDate),
     focusTaskList: (userId, startDate, endDate, projectIds) =>
-      ipcRenderer.invoke('stats:focusTaskList', userId, startDate, endDate, projectIds)
+      ipcRenderer.invoke('stats:focusTaskList', userId, startDate, endDate, projectIds),
+    cookieBalance: (userId: string, startDate: string, endDate: string) =>
+      ipcRenderer.invoke('stats:cookieBalance', userId, startDate, endDate)
   },
 
   savedViews: {

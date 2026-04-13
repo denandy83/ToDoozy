@@ -38,7 +38,7 @@ interface TimerState {
   autoBreak: boolean
   /** Flowtime: counts up instead of down */
   isFlowtime: boolean
-  /** Flowtime: seconds elapsed in work phase */
+  /** Flowtime: seconds elapsed in work phase (cumulative across breaks) */
   elapsedSeconds: number
   /** Long break duration in seconds */
   longBreakSeconds: number
@@ -52,6 +52,20 @@ interface TimerState {
   totalFocusSecondsToday: number
   /** ISO date for daily reset */
   statsDate: string | null
+  /** Cookie break: whether cookie break mode is active for this session */
+  isCookieBreak: boolean
+  /** Cookie break: minutes earned per hour setting */
+  cookieMinutesPerHour: number
+  /** Cookie break: current pool in seconds (can be negative = debt) */
+  cookiePoolSeconds: number
+  /** Cookie break: total seconds earned this session */
+  cookieEarnedThisSession: number
+  /** Cookie break: total seconds spent on breaks this session */
+  cookieSpentThisSession: number
+  /** Cookie break: whether currently in a cookie break */
+  isCookieBreakPhase: boolean
+  /** Cookie break: seconds at which cookie break started (snapshot of pool) */
+  cookieBreakStartPool: number
 }
 
 interface TimerActions {
@@ -61,6 +75,8 @@ interface TimerActions {
   stop(): void
   skipBreak(): void
   startFlowtimeBreak(): void
+  startCookieBreak(): void
+  backToWork(): void
   tick(): void
 }
 
@@ -78,6 +94,7 @@ export interface StartTimerParams {
   isFlowtime?: boolean
   longBreakMinutes?: number
   longBreakInterval?: number
+  cookieMinutesPerHour?: number
 }
 
 export type TimerStore = TimerState & TimerActions
@@ -99,6 +116,20 @@ function startTickInterval(): void {
   tickInterval = setInterval(() => {
     useTimerStore.getState().tick()
   }, 1000)
+}
+
+// ── Day boundary helper ───────────────────────────────────────────────
+
+function getTodayKey(): string {
+  const settings = useSettingsStore.getState().settings
+  const resetHour = parseInt(settings['system_day_reset_hour'] ?? '0', 10) || 0
+  const now = new Date()
+  // If current hour < reset hour, "today" is actually yesterday
+  const adjusted = new Date(now)
+  if (now.getHours() < resetHour) {
+    adjusted.setDate(adjusted.getDate() - 1)
+  }
+  return adjusted.toISOString().slice(0, 10)
 }
 
 // ── Store ──────────────────────────────────────────────────────────────
@@ -125,7 +156,14 @@ const initialState: TimerState = {
   isLongBreak: false,
   sessionsCompleted: 0,
   totalFocusSecondsToday: 0,
-  statsDate: null
+  statsDate: null,
+  isCookieBreak: false,
+  cookieMinutesPerHour: 0,
+  cookiePoolSeconds: 0,
+  cookieEarnedThisSession: 0,
+  cookieSpentThisSession: 0,
+  isCookieBreakPhase: false,
+  cookieBreakStartPool: 0
 }
 
 export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
@@ -136,7 +174,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     cachedUserId = params.userId
 
     // Daily stats reset
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getTodayKey()
     const prevState = get()
     if (prevState.statsDate !== today) {
       set({ sessionsCompleted: 0, totalFocusSecondsToday: 0, statsDate: today })
@@ -144,6 +182,20 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
 
     const workSec = params.minutes * 60
     const breakSec = params.breakMinutes * 60
+    const cookieMph = params.cookieMinutesPerHour ?? 0
+    const isCookieMode = params.isFlowtime === true && cookieMph > 0
+
+    // Load persisted cookie pool if transfer is enabled
+    let startPool = 0
+    if (isCookieMode) {
+      const settings = useSettingsStore.getState().settings
+      const transfer = settings['timer_cookie_transfer'] === 'true'
+      const poolDate = settings['timer_cookie_pool_date'] ?? ''
+      if (transfer && poolDate === today) {
+        startPool = parseInt(settings['timer_cookie_pool_seconds'] ?? '0', 10) || 0
+      }
+    }
+
     set({
       isRunning: true,
       isPaused: false,
@@ -163,7 +215,14 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       elapsedSeconds: 0,
       longBreakSeconds: (params.longBreakMinutes ?? 0) * 60,
       longBreakInterval: params.longBreakInterval ?? 0,
-      isLongBreak: false
+      isLongBreak: false,
+      isCookieBreak: isCookieMode,
+      cookieMinutesPerHour: cookieMph,
+      cookiePoolSeconds: startPool,
+      cookieEarnedThisSession: 0,
+      cookieSpentThisSession: 0,
+      isCookieBreakPhase: false,
+      cookieBreakStartPool: 0
     })
 
     startTickInterval()
@@ -189,10 +248,12 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   skipBreak(): void {
     const state = get()
     if (!state.isRunning || state.phase !== 'break') return
+    // Cookie break uses backToWork() instead
+    if (state.isCookieBreakPhase) return
 
     clearTickInterval()
     if (state.isFlowtime) {
-      // Flowtime: resume counting up from 0
+      // Flowtime without cookie: resume counting up from 0
       set({
         phase: 'work',
         remainingSeconds: state.workSeconds,
@@ -239,6 +300,23 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       }
     }
 
+    // Log cookie break if stopping during one
+    if (state.isRunning && state.isCookieBreakPhase && state.taskId && cachedUserId) {
+      const breakDuration = Math.abs(state.cookieBreakStartPool - state.cookiePoolSeconds)
+      logCookieBreak(state.taskId, cachedUserId, state.cookieEarnedThisSession, state.cookieSpentThisSession + breakDuration)
+    } else if (state.isRunning && state.isCookieBreak && state.taskId && cachedUserId) {
+      // Log final cookie stats on stop
+      logCookieBreak(state.taskId, cachedUserId, state.cookieEarnedThisSession, state.cookieSpentThisSession)
+    }
+
+    // Persist cookie pool for transfer
+    if (state.isCookieBreak) {
+      const today = getTodayKey()
+      const { setSetting } = useSettingsStore.getState()
+      setSetting('timer_cookie_pool_seconds', String(Math.round(state.cookiePoolSeconds)))
+      setSetting('timer_cookie_pool_date', today)
+    }
+
     // Preserve session stats across stops
     const { sessionsCompleted, totalFocusSecondsToday, statsDate } = get()
     cachedUserId = null
@@ -249,6 +327,8 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   startFlowtimeBreak(): void {
     const state = get()
     if (!state.isRunning || !state.isFlowtime || state.phase !== 'work') return
+    // If cookie break is enabled, use startCookieBreak instead
+    if (state.isCookieBreak) return
 
     const breakSeconds = Math.round(state.elapsedSeconds / 5)
 
@@ -272,12 +352,65 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     syncTrayTimer(get())
   },
 
+  startCookieBreak(): void {
+    const state = get()
+    if (!state.isRunning || !state.isCookieBreak || state.phase !== 'work') return
+
+    set({
+      phase: 'break',
+      isCookieBreakPhase: true,
+      cookieBreakStartPool: state.cookiePoolSeconds,
+      isLongBreak: false
+      // elapsedSeconds is NOT reset — cumulative across breaks
+    })
+    syncTrayTimer(get())
+  },
+
+  backToWork(): void {
+    const state = get()
+    if (!state.isRunning || !state.isCookieBreakPhase || state.phase !== 'break') return
+
+    // Calculate how much break time was consumed
+    const breakConsumed = state.cookieBreakStartPool - state.cookiePoolSeconds
+    // Pool has already been decremented by tick(), just record the spend
+    set({
+      phase: 'work',
+      isCookieBreakPhase: false,
+      cookieSpentThisSession: state.cookieSpentThisSession + breakConsumed,
+      isLongBreak: false
+      // elapsedSeconds stays — cumulative
+    })
+    syncTrayTimer(get())
+  },
+
   tick(): void {
     const state = get()
     if (!state.isRunning || state.isPaused) return
 
-    if (state.isFlowtime && state.phase === 'work') {
-      // Flowtime: count UP
+    if (state.isCookieBreak && state.phase === 'work') {
+      // Cookie flowtime: count UP elapsed, accumulate cookie pool
+      const earnRate = state.cookieMinutesPerHour / 60 // seconds earned per second worked
+      const newElapsed = state.elapsedSeconds + 1
+      const newEarned = state.cookieEarnedThisSession + earnRate
+      const newPool = state.cookiePoolSeconds + earnRate
+      set({
+        elapsedSeconds: newElapsed,
+        cookieEarnedThisSession: newEarned,
+        cookiePoolSeconds: newPool
+      })
+    } else if (state.isCookieBreakPhase && state.phase === 'break') {
+      // Cookie break: decrement pool (can go negative)
+      const newPool = state.cookiePoolSeconds - 1
+      set({ cookiePoolSeconds: newPool })
+      // Play sound + notification when crossing zero
+      if (state.cookiePoolSeconds > 0 && newPool <= 0) {
+        if (state.soundEnabled) playTimerSound()
+        if (state.notificationEnabled) {
+          showCookieNotification()
+        }
+      }
+    } else if (state.isFlowtime && state.phase === 'work') {
+      // Flowtime without cookie: count UP
       set({ elapsedSeconds: state.elapsedSeconds + 1 })
     } else {
       // Normal: count DOWN
@@ -321,7 +454,6 @@ function completePhase(
 
     // Start break if auto-break enabled
     if (state.autoBreak) {
-      const updatedState = get()
       // Use currentRep (per-timer) not sessionsCompleted (cumulative daily)
       const isLongBreak = state.longBreakInterval > 0
         && state.currentRep > 0
@@ -384,6 +516,8 @@ export interface TrayTimerState {
   isLongBreak: boolean
   sessionsCompleted: number
   totalFocusSecondsToday: number
+  isCookieBreakPhase: boolean
+  cookiePoolSeconds: number
 }
 
 function syncTrayTimer(state: TimerState): void {
@@ -404,7 +538,9 @@ function syncTrayTimer(state: TimerState): void {
       elapsedSeconds: state.elapsedSeconds,
       isLongBreak: state.isLongBreak,
       sessionsCompleted: state.sessionsCompleted,
-      totalFocusSecondsToday: state.totalFocusSecondsToday
+      totalFocusSecondsToday: state.totalFocusSecondsToday,
+      isCookieBreakPhase: state.isCookieBreakPhase,
+      cookiePoolSeconds: state.cookiePoolSeconds
     })
   }
 }
@@ -440,6 +576,10 @@ function showTimerNotification(taskId: string, taskTitle: string, currentRep: nu
   }
 }
 
+function showCookieNotification(): void {
+  new Notification('Cookie time\'s up! 🍪', { body: 'Your earned break time is spent. Back to work?' })
+}
+
 // ── Activity log ───────────────────────────────────────────────────────
 
 function logFocusSession(taskId: string, userId: string, minutes: number): void {
@@ -453,10 +593,25 @@ function logFocusSession(taskId: string, userId: string, minutes: number): void 
   })
 }
 
+function logCookieBreak(taskId: string, userId: string, earnedSeconds: number, spentSeconds: number): void {
+  const earnedMin = Math.round(earnedSeconds / 60)
+  const spentMin = Math.round(spentSeconds / 60)
+  window.api.activityLog.create({
+    id: crypto.randomUUID(),
+    task_id: taskId,
+    user_id: userId,
+    action: `Cookie break: earned ${earnedMin}m, spent ${spentMin}m`
+  }).catch((err: unknown) => {
+    console.error('Failed to log cookie break:', err)
+  })
+}
+
 // ── Selectors ──────────────────────────────────────────────────────────
 
 export function formatTimeRemaining(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const abs = Math.abs(Math.floor(seconds))
+  const m = Math.floor(abs / 60)
+  const s = abs % 60
+  const prefix = seconds < 0 ? '-' : ''
+  return `${prefix}${m}:${s.toString().padStart(2, '0')}`
 }

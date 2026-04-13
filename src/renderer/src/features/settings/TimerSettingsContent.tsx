@@ -53,12 +53,13 @@ export function TimerSettingsContent(): React.JSX.Element {
   const defaultPresetId = useSetting('timer_default_preset') ?? presets[1]?.id ?? presets[0]?.id ?? ''
   const breakMinutes = useSetting('timer_break_minutes') ?? '5'
   const defaultReps = useSetting('timer_default_reps') ?? '1'
-  const autoBreak = useSetting('timer_auto_break') ?? 'true'
   const longBreakEnabled = useSetting('timer_long_break_enabled') ?? 'false'
   const longBreakMinutes = useSetting('timer_long_break_minutes') ?? '15'
   const longBreakInterval = useSetting('timer_long_break_interval') ?? '4'
   const repetitionEnabled = useSetting('timer_repetition_enabled') ?? 'false'
   const perpetualMode = useSetting('timer_perpetual') ?? 'false'
+  const flowtimeEnabled = useSetting('timer_flowtime_enabled') ?? 'false'
+  const cookieMinutesPerHour = useSetting('timer_cookie_minutes_per_hour') ?? '10'
 
   // Add preset form
   const [adding, setAdding] = useState(false)
@@ -322,6 +323,33 @@ export function TimerSettingsContent(): React.JSX.Element {
         </div>
         <ToggleButton settingKey="timer_flowtime_enabled" defaultValue="false" />
       </div>
+
+      {flowtimeEnabled === 'true' && (
+        <>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-light text-foreground">Cookie break minutes per hour</p>
+              <p className="text-[10px] text-muted">Break time earned for every hour of focused work</p>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={cookieMinutesPerHour}
+                onChange={(e) => setSetting('timer_cookie_minutes_per_hour', e.target.value)}
+                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min/hr</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-light text-foreground">Cookie time transfers across sessions</p>
+              <p className="text-[10px] text-muted">Unused cookie time carries over to the next session within the same day</p>
+            </div>
+            <ToggleButton settingKey="timer_cookie_transfer" defaultValue="false" />
+          </div>
+        </>
+      )}
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Behavior</p>
 

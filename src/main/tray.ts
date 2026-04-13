@@ -58,6 +58,14 @@ function formatTimerDisplay(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+function formatCookieDisplay(seconds: number): string {
+  const abs = Math.abs(Math.floor(seconds))
+  const m = Math.floor(abs / 60)
+  const s = abs % 60
+  const prefix = seconds < 0 ? '-' : ''
+  return `${prefix}${m}:${s.toString().padStart(2, '0')}`
+}
+
 function sendToRenderer(channel: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -225,13 +233,25 @@ export function updateTrayBadge(): void {
 
   if (timerState) {
     // Show countdown in menu bar with phase indicator
-    const displaySeconds = (timerState.isFlowtime && timerState.phase === 'work')
-      ? timerState.elapsedSeconds
-      : timerState.remainingSeconds
-    const timeStr = formatTimerDisplay(displaySeconds)
-    const phaseIcon = timerState.phase === 'break'
-      ? (timerState.isLongBreak ? '\ud83e\uddd8' : '\u2615')
-      : (timerState.isFlowtime ? '\ud83c\udf0a' : '\u23f1')
+    let displaySeconds: number
+    let phaseIcon: string
+    if (timerState.isCookieBreakPhase) {
+      // Cookie break: show pool countdown (can be negative)
+      displaySeconds = timerState.cookiePoolSeconds
+      phaseIcon = '\ud83c\udf6a' // 🍪
+    } else if (timerState.isFlowtime && timerState.phase === 'work') {
+      displaySeconds = timerState.elapsedSeconds
+      phaseIcon = '\ud83c\udf0a' // 🌊
+    } else if (timerState.phase === 'break') {
+      displaySeconds = timerState.remainingSeconds
+      phaseIcon = timerState.isLongBreak ? '\ud83e\uddd8' : '\u2615'
+    } else {
+      displaySeconds = timerState.remainingSeconds
+      phaseIcon = '\u23f1' // ⏱
+    }
+    const timeStr = timerState.isCookieBreakPhase
+      ? formatCookieDisplay(displaySeconds)
+      : formatTimerDisplay(displaySeconds)
     const repStr = timerState.isPerpetual
       ? ` ${timerState.currentRep}`
       : timerState.totalReps > 1
