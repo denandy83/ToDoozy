@@ -13,6 +13,8 @@ interface SyncState {
   firstSyncProgress: number
   /** Error message for display */
   errorMessage: string | null
+  /** Whether Supabase Realtime is connected (used to toggle polling) */
+  realtimeConnected: boolean
 }
 
 interface SyncActions {
@@ -22,6 +24,7 @@ interface SyncActions {
   setFirstSync(active: boolean): void
   setFirstSyncProgress(progress: number): void
   setError(message: string | null): void
+  setRealtimeConnected(connected: boolean): void
   hydrate(): Promise<void>
 }
 
@@ -35,6 +38,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     isFirstSync: false,
     firstSyncProgress: 0,
     errorMessage: null,
+    realtimeConnected: false,
 
     setStatus: (status) => set({ status, errorMessage: status !== 'error' ? null : undefined }),
     setPendingCount: (count) => set({ pendingCount: count }),
@@ -42,6 +46,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     setFirstSync: (active) => set({ isFirstSync: active, firstSyncProgress: active ? 0 : 100 }),
     setFirstSyncProgress: (progress) => set({ firstSyncProgress: progress }),
     setError: (message) => set({ errorMessage: message, status: message ? 'error' : 'synced' }),
+    setRealtimeConnected: (connected) => set({ realtimeConnected: connected }),
 
     hydrate: async () => {
       try {
@@ -63,3 +68,4 @@ export const selectPendingCount = (state: SyncState): number => state.pendingCou
 export const selectLastSyncedAt = (state: SyncState): string | null => state.lastSyncedAt
 export const selectIsFirstSync = (state: SyncState): boolean => state.isFirstSync
 export const selectFirstSyncProgress = (state: SyncState): number => state.firstSyncProgress
+export const selectRealtimeConnected = (state: SyncState): boolean => state.realtimeConnected

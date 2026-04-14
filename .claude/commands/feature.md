@@ -7,9 +7,11 @@ description: Add a new feature to ToDoozy. Use when the user wants to add a new 
 
 You are adding a new feature to ToDoozy. This skill defines the story through a structured interview, writes it to prd.json, and launches ralph to implement it autonomously.
 
-## Phase 0: Check scope.md
+## Phase 0: Check scope.md and debug-learnings.md
 
-Before starting, read `scope.md` in the project root. If it exists and covers the feature area, use that context instead of re-exploring. If it doesn't exist or doesn't cover this area, you'll create/update it during investigation.
+Before starting, read:
+- `scope.md` in the project root — if it covers the feature area, start from there instead of re-exploring
+- `debug-learnings.md` in the project root — known code bug patterns and performance pitfalls (especially Supabase sync rules) to avoid in the implementation
 
 ---
 

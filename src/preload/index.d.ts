@@ -67,6 +67,7 @@ export interface TasksAPI {
 
 export interface LabelsAPI {
   findById(id: string): Promise<Label | null>
+  findByIds(ids: string[]): Promise<Label[]>
   findAll(userId: string): Promise<Label[]>
   findByProjectId(projectId: string): Promise<Label[]>
   findByName(userId: string, name: string): Promise<Label | null>
@@ -224,6 +225,8 @@ export interface TimerAPI {
   onPause(callback: () => void): () => void
   onResume(callback: () => void): () => void
   onStop(callback: () => void): () => void
+  onCookieBreak(callback: () => void): () => void
+  onBackToWork(callback: () => void): () => void
 }
 
 export interface TrayAPI {

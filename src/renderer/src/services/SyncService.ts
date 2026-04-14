@@ -283,21 +283,54 @@ export async function processSyncQueue(): Promise<number> {
   const supabase = await getSupabase()
   let processed = 0
 
+  // Group by table + operation for batch processing
+  const upsertsByTable = new Map<string, Array<{ entryId: string; payload: Record<string, unknown> }>>()
+  const deletes: typeof queue = []
+
   for (const entry of queue) {
+    if (entry.operation === 'DELETE') {
+      deletes.push(entry)
+    } else {
+      const existing = upsertsByTable.get(entry.table_name) ?? []
+      existing.push({ entryId: entry.id, payload: JSON.parse(entry.payload) })
+      upsertsByTable.set(entry.table_name, existing)
+    }
+  }
+
+  // Batch upserts by table
+  for (const [table, entries] of upsertsByTable) {
     try {
-      const payload = JSON.parse(entry.payload)
-
-      if (entry.operation === 'DELETE') {
-        await supabase.from(entry.table_name).delete().eq('id', entry.row_id)
-      } else {
-        await supabase.from(entry.table_name).upsert(payload)
+      const payloads = entries.map((e) => e.payload)
+      await supabase.from(table).upsert(payloads)
+      for (const e of entries) {
+        await window.api.sync.dequeue(e.entryId)
+        processed++
       }
+    } catch (err) {
+      console.error(`Failed to batch sync ${table}:`, err)
+      // Fallback: try one-by-one
+      for (const e of entries) {
+        try {
+          await supabase.from(table).upsert(e.payload)
+          await window.api.sync.dequeue(e.entryId)
+          processed++
+        } catch (innerErr) {
+          console.error(`Failed to sync queue entry ${e.entryId}:`, innerErr)
+          break
+        }
+      }
+    }
+  }
 
+  // Process deletes individually (can't batch different row IDs)
+  for (const entry of deletes) {
+    try {
+      await supabase.from(entry.table_name).delete().eq('id', entry.row_id)
       await window.api.sync.dequeue(entry.id)
       processed++
     } catch (err) {
-      console.error(`Failed to sync queue entry ${entry.id}:`, err)
-      break // Stop on first error to maintain order
+      console.error(`Failed to sync delete ${entry.id}:`, err)
+      break
     }
   }
 
@@ -891,6 +924,18 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
 
   if (error || !data) return []
 
+  // Batch-fetch all user profiles in one query instead of N+1
+  const userIds = data.map((m) => m.user_id)
+  const { data: profiles } = await supabase
+    .from('user_profiles')
+    .select('id, email, display_name')
+    .in('id', userIds)
+
+  const profileMap = new Map<string, { email: string; display_name: string | null }>()
+  if (profiles) {
+    for (const p of profiles) profileMap.set(p.id, p)
+  }
+
   const members: Array<{
     user_id: string
     role: string
@@ -902,12 +947,7 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   }> = []
 
   for (const member of data) {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('email, display_name')
-      .eq('id', member.user_id)
-      .single()
-
+    const profile = profileMap.get(member.user_id)
     if (profile) {
       members.push({
         user_id: member.user_id,

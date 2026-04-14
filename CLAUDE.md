@@ -70,6 +70,18 @@ This prevents expensive re-exploration across sessions and keeps investigation c
 - SQL injection prevention: column whitelist for update queries.
 - Foreign keys enabled (`PRAGMA foreign_keys = ON`).
 
+## Supabase Performance Rules
+- **Realtime-first, polling-fallback.** Never poll alongside an active Realtime subscription. Use `syncStore.realtimeConnected` to toggle.
+- **Filter every Realtime subscription.** Never subscribe to a table without a filter — unfiltered subs force WAL decoding for ALL rows across ALL users.
+- **No N+1 queries to Supabase.** Use `.in()` batch queries instead of per-item loops. This applies to label resolution, member loading, and any list-of-IDs lookup.
+- **No write-through on read paths.** Polling/pull functions must never call RPCs or upserts. Use SELECT to check for changes; only write when the user initiates a mutation.
+- **Compound indexes for incremental sync.** Any table queried with `WHERE project_id = ? AND updated_at > ?` must have a compound index on `(project_id, updated_at)`.
+- **Debounce high-frequency writes.** Settings, preferences, and non-critical metadata should be debounced (5s) before pushing to Supabase.
+- **Subscribe to active context only.** Personal projects: subscribe only to the active project's Realtime channel, not all projects. Shared projects: subscribe per-project as needed.
+- **Batch sync queue flushes.** Group queued changes by table and batch-upsert, don't process one-by-one.
+- **Index all foreign keys.** Every FK in Supabase must have a covering index (Supabase performance advisor flags these).
+- **No duplicate Realtime channels.** Track subscribed channels in a Set; check before subscribing.
+
 ## UX Consistency (see REBUILD_SPEC.md §35)
 - Use shared components everywhere: StatusButton, PriorityIndicator, LabelChip, LabelPicker, DatePicker, Toast, ContextMenu, Modal, Avatar, EmptyState
 - Selection: accent bg at 12% opacity + accent border at 15% opacity

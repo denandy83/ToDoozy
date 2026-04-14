@@ -8,6 +8,7 @@ import { useSettingsStore } from './shared/stores/settingsStore'
 import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
 import { useUpdateStore } from './shared/stores/updateStore'
+import { useSyncStore } from './shared/stores/syncStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
@@ -71,7 +72,14 @@ function App(): React.JSX.Element {
         }
 
         // Discover projects we're a member of in Supabase but don't have locally
-        const missingIds = await discoverRemoteMemberships(currentUser.id)
+        // Skip if last check was less than 5 minutes ago
+        const lastMemberCheck = await window.api.settings.get(currentUser.id, 'last_member_discovery')
+        const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString()
+        const shouldDiscover = !lastMemberCheck || lastMemberCheck < fiveMinAgo
+        const missingIds = shouldDiscover ? await discoverRemoteMemberships(currentUser.id) : []
+        if (shouldDiscover) {
+          await window.api.settings.set(currentUser.id, 'last_member_discovery', new Date().toISOString())
+        }
         if (missingIds.length > 0) {
           for (const pid of missingIds) {
             await syncDown(pid, currentUser.id).catch((err) =>
@@ -134,13 +142,39 @@ function App(): React.JSX.Element {
       }
     }
     doPull()
-    // Poll every 30s as fallback — Realtime accelerates when connected
-    const pollInterval = setInterval(doPull, 30_000)
+    // Adaptive polling: no polling when Realtime is connected, 120s fallback when disconnected
+    let pollInterval: ReturnType<typeof setInterval> | null = null
+    const startPolling = (): void => {
+      if (!pollInterval) {
+        pollInterval = setInterval(doPull, 120_000)
+      }
+    }
+    const stopPolling = (): void => {
+      if (pollInterval) {
+        clearInterval(pollInterval)
+        pollInterval = null
+      }
+    }
+    let prevRealtimeConnected = useSyncStore.getState().realtimeConnected
+    const unsubRealtimeState = useSyncStore.subscribe((state) => {
+      const connected = state.realtimeConnected
+      if (connected !== prevRealtimeConnected) {
+        prevRealtimeConnected = connected
+        if (connected) {
+          stopPolling()
+          // On reconnect, do one immediate pull to catch anything missed
+          doPull()
+        } else {
+          startPolling()
+        }
+      }
+    })
+    // Start polling initially (Realtime will stop it once connected)
+    startPolling()
 
     // Subscribe to Supabase Realtime for instant task sync
     // Debounce: collect all events in a window, then do one pull
     const realtimeUnsubs: Array<() => void> = []
-    const pendingLabelSyncs: Array<{ taskId: string; labelId: string }> = []
     const pendingProjectIds = new Set<string>()
     let realtimeTimer: ReturnType<typeof setTimeout> | null = null
     let realtimePullInProgress = false
@@ -149,19 +183,12 @@ function App(): React.JSX.Element {
       if (realtimePullInProgress) return
       realtimePullInProgress = true
       try {
-        const { pullNewTasks: pullTasks, syncTaskLabel } = await import('./services/PersonalSyncService')
-
-        // Sync any pending task_labels first
-        const labels = [...pendingLabelSyncs]
-        pendingLabelSyncs.length = 0
-        for (const { taskId, labelId } of labels) {
-          await syncTaskLabel(taskId, labelId).catch(() => {})
-        }
+        const { pullNewTasks: pullTasks } = await import('./services/PersonalSyncService')
 
         // Pull changed tasks for affected projects
         const projects = [...pendingProjectIds]
         pendingProjectIds.clear()
-        let anyChanged = labels.length > 0
+        let anyChanged = false
         for (const pid of projects) {
           const pulled = await pullTasks(pid).catch(() => 0)
           if (pulled > 0) anyChanged = true
@@ -189,12 +216,8 @@ function App(): React.JSX.Element {
       const allProjects = await window.api.projects.getProjectsForUser(currentUser.id)
       cachePNames(allProjects)
       for (const project of allProjects) {
-        const unsub = await subscribeToPersonalProject(project.id, (_event, data) => {
-          if (_event === 'TASK_LABEL_INSERT' && data.task_id && data.label_id) {
-            pendingLabelSyncs.push({ taskId: data.task_id as string, labelId: data.label_id as string })
-          } else {
-            pendingProjectIds.add(project.id)
-          }
+        const unsub = await subscribeToPersonalProject(project.id, (_event, _data) => {
+          pendingProjectIds.add(project.id)
           scheduleFlush()
         })
         realtimeUnsubs.push(unsub)
@@ -203,7 +226,8 @@ function App(): React.JSX.Element {
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
 
     return () => {
-      clearInterval(pollInterval)
+      stopPolling()
+      unsubRealtimeState()
       if (realtimeTimer) clearTimeout(realtimeTimer)
       for (const unsub of realtimeUnsubs) unsub()
     }
@@ -262,10 +286,18 @@ function App(): React.JSX.Element {
     const unsubStop = window.api.timer.onStop(() => {
       useTimerStore.getState().stop()
     })
+    const unsubCookieBreak = window.api.timer.onCookieBreak(() => {
+      useTimerStore.getState().startCookieBreak()
+    })
+    const unsubBackToWork = window.api.timer.onBackToWork(() => {
+      useTimerStore.getState().backToWork()
+    })
     return () => {
       unsubPause()
       unsubResume()
       unsubStop()
+      unsubCookieBreak()
+      unsubBackToWork()
     }
   }, [])
 

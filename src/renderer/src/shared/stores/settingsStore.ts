@@ -81,7 +81,7 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       if (value !== null) {
         const uid = userId
         import('../../services/PersonalSyncService').then(({ pushSetting }) => {
-          pushSetting(key, value, uid).catch(() => {})
+          pushSetting(key, value, uid)
         })
       }
     } catch (err) {
@@ -107,7 +107,7 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       import('../../services/PersonalSyncService').then(({ pushSetting }) => {
         for (const setting of settings) {
           if (setting.value !== null) {
-            pushSetting(setting.key, setting.value, uid).catch(() => {})
+            pushSetting(setting.key, setting.value, uid)
           }
         }
       })

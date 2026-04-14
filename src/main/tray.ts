@@ -86,21 +86,37 @@ function buildTimerMenu(): Menu {
 
   menuItems.push({ type: 'separator' })
 
-  if (timerState.isPaused) {
+  // Cookie time: show accumulated pool and toggle cookie break on click
+  if (timerState.isCookieBreakPhase) {
+    // Currently on cookie break — show pool (draining) and offer to go back to work
     menuItems.push({
-      label: 'Resume',
-      click: (): void => { sendToRenderer('timer:resume') }
+      label: `🍪 Cookie Time: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      click: (): void => { sendToRenderer('timer:backToWork') }
     })
-  } else {
+  } else if (timerState.isFlowtime && timerState.cookiePoolSeconds > 0) {
+    // Working with cookie pool available — offer to take a cookie break
     menuItems.push({
-      label: 'Pause',
-      click: (): void => { sendToRenderer('timer:pause') }
+      label: `🍪 Cookie Time: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      click: (): void => { sendToRenderer('timer:cookieBreak') }
+    })
+  } else if (timerState.isFlowtime) {
+    // Flowtime but no pool yet
+    menuItems.push({
+      label: `🍪 Cookies: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      enabled: false
     })
   }
 
   menuItems.push({
     label: 'Stop',
     click: (): void => { sendToRenderer('timer:stop') }
+  })
+
+  menuItems.push({ type: 'separator' })
+
+  menuItems.push({
+    label: 'Open ToDoozy',
+    click: (): void => showMainWindow()
   })
 
   return Menu.buildFromTemplate(menuItems)

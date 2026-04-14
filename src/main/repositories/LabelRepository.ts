@@ -9,6 +9,12 @@ export class LabelRepository {
     return this.db.prepare('SELECT * FROM labels WHERE id = ?').get(id) as unknown as Label | undefined
   }
 
+  findByIds(ids: string[]): Label[] {
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(',')
+    return this.db.prepare(`SELECT * FROM labels WHERE id IN (${placeholders})`).all(...ids) as unknown as Label[]
+  }
+
   /** Get all labels accessible to a user (linked to any of their projects) */
   findAllForUser(userId: string): Label[] {
     return this.db.prepare(

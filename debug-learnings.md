@@ -61,3 +61,17 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Root cause**: react-datepicker's `dateFormat` prop only controls display, not parsing. Without the correct locale registered, manual input in dd/MM/yyyy is parsed as MM/dd/yyyy (en-US default), creating Invalid Date objects that get stored as garbage.
 - **Fix**: Register the correct date-fns locale (`registerLocale('en-GB', enGB)`) and pass `locale="en-GB"` to ReactDatePicker. Add `isValidDate` guards on `toDate` and `formatIso` so invalid dates never crash or store garbage. Use `onChangeRaw` with `InputEvent` detection for input masking without interfering with calendar picks.
 - **Check first**: Is a locale registered for react-datepicker? Does the `dateFormat` match what the locale expects? Is `toDate` defensive against invalid stored values?
+
+---
+
+### Supabase Sync Performance (2026-04-14 audit)
+- **Symptoms**: Supabase free-tier Disk IO Budget depleted with only 1-2 users. App becomes slow/unresponsive.
+- **Root causes found**:
+  1. **Unfiltered Realtime subscriptions** — subscribing to `task_labels` without a filter caused WAL decoding for ALL users' label changes (2.1M calls)
+  2. **share_project RPC on read paths** — `pullProjectMetadata` called `pushProject` (which uses `share_project` RPC) on every 30s poll cycle when local timestamp was newer, even if metadata was identical. Generated 10K+ phantom writes.
+  3. **10-second member polling** — `setInterval(() => loadMembers(), 10_000)` caused 2M sequential scans on a 13-row table. Realtime already handled this.
+  4. **N+1 queries** — per-label `findById` loops in `pushTask`, per-member `user_profiles` queries in `getSharedProjectMembers`
+  5. **Missing compound indexes** — `tasks(project_id, updated_at)` and `statuses(project_id, updated_at)` missing
+  6. **No adaptive polling** — 30s poll ran alongside Realtime, doubling IO
+- **Fix**: See CLAUDE.md "Supabase Performance Rules". Key changes: adaptive polling via `syncStore.realtimeConnected`, removed unfiltered RT subs, batch `.in()` queries, debounced settings writes, compound indexes added.
+- **Check first**: When adding any Supabase query or subscription, verify: Is it filtered? Is it batched? Is it on a read path (no writes allowed)? Does the table have indexes for the query pattern?

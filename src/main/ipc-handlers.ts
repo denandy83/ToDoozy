@@ -234,6 +234,10 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.findById(id) ?? null
   })
 
+  ipcMain.handle('labels:findByIds', (_e, ids: string[]) => {
+    return getRepos().labels.findByIds(ids)
+  })
+
   ipcMain.handle('labels:findAll', (_e, userId: string) => {
     return getRepos().labels.findAllForUser(userId)
   })

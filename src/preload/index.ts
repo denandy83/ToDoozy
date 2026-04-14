@@ -28,6 +28,7 @@ const api: TodoozyAPI = {
 
   labels: {
     findById: (id) => ipcRenderer.invoke('labels:findById', id),
+    findByIds: (ids: string[]) => ipcRenderer.invoke('labels:findByIds', ids),
     findAll: (userId) => ipcRenderer.invoke('labels:findAll', userId),
     findByProjectId: (projectId) => ipcRenderer.invoke('labels:findByProjectId', projectId),
     findByName: (userId, name) => ipcRenderer.invoke('labels:findByName', userId, name),
@@ -180,6 +181,14 @@ const api: TodoozyAPI = {
     onStop: (callback) => {
       ipcRenderer.on('timer:stop', callback)
       return () => { ipcRenderer.removeListener('timer:stop', callback) }
+    },
+    onCookieBreak: (callback) => {
+      ipcRenderer.on('timer:cookieBreak', callback)
+      return () => { ipcRenderer.removeListener('timer:cookieBreak', callback) }
+    },
+    onBackToWork: (callback) => {
+      ipcRenderer.on('timer:backToWork', callback)
+      return () => { ipcRenderer.removeListener('timer:backToWork', callback) }
     }
   },
 

@@ -316,12 +316,7 @@ export function AppLayout(): React.JSX.Element {
       setProjectMembers([])
     }
 
-    // Poll members every 10s as fallback for missed Realtime events
-    let interval: ReturnType<typeof setInterval> | undefined
-    if (selectedProject?.is_shared === 1) {
-      interval = setInterval(() => loadMembers(selectedProject.id), 10_000)
-    }
-    return () => { if (interval) clearInterval(interval) }
+    return undefined
   }, [selectedProject?.id, selectedProject?.is_shared, loadMembers])
 
   // Show toast when a recurring task clone is created

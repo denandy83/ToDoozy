@@ -35,7 +35,7 @@ The app has three areas:
 
 ## My Day
 
-My Day shows all tasks you've flagged for today plus any tasks due today, grouped by project.
+My Day shows all tasks you've flagged for today plus any tasks due today (if auto-add is enabled), grouped by project.
 
 **To add a task to My Day:**
 - Right-click any task → Pin to My Day
@@ -43,6 +43,9 @@ My Day shows all tasks you've flagged for today plus any tasks due today, groupe
 
 **To remove from My Day:**
 - Right-click → Unpin from My Day
+
+### Auto-add tasks due today
+In **Settings → General**, enable **"Auto-add tasks due today to My Day"** to have tasks with today's due date appear in My Day automatically on launch. You can also control whether dismissed tasks re-appear the next day with the **"Re-add dismissed tasks"** setting.
 
 ---
 
@@ -178,17 +181,20 @@ Click any result to open the task in the detail panel.
 
 ## Views (Smart Lists)
 
-Save any filter combination as a reusable view. Views appear in the sidebar between Calendar and Projects with live task count badges.
+Save any filter combination as a reusable view. Views appear in the sidebar between Calendar and Projects with live task count badges and colored dots.
 
 ### Creating a view
 1. Set up filters in the filter bar (labels, priority, status, due date, keyword)
 2. Click **Save as View** in the filter bar
-3. Give it a name — it appears in the sidebar immediately
+3. Give it a name — it appears in the sidebar immediately with an auto-assigned color dot
 
 ### Using a view
 - Click a saved view in the sidebar to load its filters
 - Tweak filters as needed — changes are not auto-saved
 - Click **Update View** when filters differ from the stored config to save changes
+
+### Sorting
+Views (and project views) support multi-sort. Click the sort dropdown to add stackable sort rules — due date, priority, title, created date, etc. Choose "Custom" to enable drag-and-drop reordering. Sort preferences persist per view.
 
 ### Managing views
 - Right-click a view → Rename, Duplicate, or Delete
@@ -253,7 +259,7 @@ Each user's folder assignments are independent — they are not synced to other 
 A filter bar appears at the top of every task view. Filters combine with AND logic.
 
 ### Always visible
-- **Labels** — click to toggle label filters (OR logic between selected labels)
+- **Labels** — click to toggle label filters. Use the three-way toggle to switch between "is any of" (OR), "is all of" (AND), or "is not" (exclusion) mode
 - **Project scope** — narrow to a specific project or view all
 
 ### Additional filters (via + Filter button)
@@ -262,6 +268,9 @@ A filter bar appears at the top of every task view. Filters combine with AND log
 - **Status** — multi-select from the current project's statuses
 - **Assignee** — multi-select from project members
 - **Keyword** — text search matching task title and description
+
+### Exclusion filters ("is not")
+Every filter type supports exclusion mode. When set to "is not," tasks matching the filter are hidden instead of shown. Exclusion filters appear with muted-red styling to distinguish them from inclusion filters. If both "is" and "is not" are set for the same filter type, the last action wins.
 
 ### Managing filters
 - Each active filter shows as a removable chip
@@ -319,17 +328,28 @@ Go to **Settings → Appearance → Theme** to change the app's appearance.
 ### Task templates
 1. Right-click any task → Save as Template
 2. To use a template: right-click where you want to add a task → Use Template, or go to the Templates view
+3. Task templates are global — they can be used in any project
 
 ### Project templates
 1. Open project settings → Save as Template
 2. To deploy: Templates view → choose a project template → Deploy → follow the wizard
 
+### Relative due dates
+When saving a project template, you can choose to include due dates as relative offsets (e.g., "+3 days from deploy date"). When deploying:
+- A wizard step lets you pick a deploy date (defaults to today)
+- A preview shows the computed due dates for each task
+- Subtasks carry their offsets too
+- Tasks without due dates are skipped
+
 ---
 
 ## Archiving
 
-### Auto-archive
-Enable in **Settings → General**. Completed tasks are automatically archived after a configurable delay (e.g., 3 days). Auto-archive only applies to **local projects** — shared projects are excluded to avoid conflicts between users with different settings.
+### Auto-archive (global)
+Enable in **Settings → General**. Completed tasks are automatically archived after a configurable delay (e.g., 3 days). This global setting applies to all local projects unless overridden per-project.
+
+### Per-project auto-archive
+Override the global auto-archive setting for individual projects in **Settings → Projects**. Each project can have its own timeframe (e.g., 1 day, 7 days, 30 days) or disable auto-archive entirely. Shared projects always require manual archiving.
 
 ### Manual archive
 Right-click a task → **Archive**, or toggle archive in the detail panel. In shared projects, manually archiving a task moves it to the archive for **all members**. Archiving a parent task also archives its subtasks.
@@ -386,16 +406,20 @@ To start a timer on a task:
 1. Hover over any task row
 2. Click the play button (appears on hover)
 
-The timer counts down in the menu bar. You can pause, resume, or stop it at any time. When it finishes, a break timer starts automatically.
+The timer counts down in the menu bar. You can pause, resume, or stop it at any time. When a work session finishes, a break timer starts automatically.
 
-Configure timer duration in **Settings → Timer**.
+### Sessions and repetitions
+Configure repetition mode to automatically chain work + break cycles. After a set number of work sessions, a long break kicks in. Timer activity is logged and appears in the Productivity Stats dashboard.
+
+### Timer settings
+Go to **Settings → Timer** to configure work duration, short break, long break, sessions before long break, and auto-start behavior.
 
 ---
 
 ## File Attachments
 
 To attach files to a task:
-1. Go to **Settings → iCloud** and enable iCloud Drive sync
+1. Go to **Settings → About → Integrations** and enable iCloud Drive sync
 2. Open the task detail panel
 3. Click the paperclip icon in the editor toolbar
 4. Select one or more files (max 10 MB each, max 10 attachments per task)
@@ -453,6 +477,99 @@ Closing the main window does not quit the app — it stays in the menu bar.
 
 ---
 
+## Due Date Notifications
+
+When a task has a due date with a time component, ToDoozy sends native macOS notifications before the deadline.
+
+- **Lead time** — a notification fires at a configurable lead time before the due time (5, 10, 15, 30, or 60 minutes)
+- **1-minute warning** — a second notification fires 1 minute before the due time
+- **Click to navigate** — clicking a notification focuses the ToDoozy window and navigates directly to the task
+- **Smart filtering** — notifications are not sent for completed, archived, or template tasks; no duplicates
+
+### Settings
+Go to **Settings → General → Notifications** to toggle notifications on/off and choose the lead time from the dropdown.
+
+---
+
+## Context Menu
+
+Right-click any task to open the context menu. It provides quick access to all task actions without opening the detail panel.
+
+**Available actions:**
+- Status (with dynamic project statuses)
+- Priority submenu
+- Recurrence submenu
+- Labels flyout (with all project labels)
+- Snooze submenu (presets + custom)
+- Focus (start Pomodoro timer)
+- Pin/Unpin My Day
+- Add Subtask
+- Duplicate
+- Copy title
+- Save as Template
+- Archive
+- Delete (red, at bottom)
+
+Flyout submenus open on hover after a brief delay and automatically open left or right based on available screen space.
+
+---
+
+## Sidebar Customization
+
+### Show and hide items
+Go to **Settings → General → Sidebar Items**. Toggle visibility of Calendar, Stats, Views, Archive, and Templates. My Day is always visible and cannot be hidden.
+
+### Reorder items
+Drag sidebar items to reorder them. Keyboard shortcuts (Cmd+1, Cmd+2, etc.) update dynamically based on your ordering.
+
+### Dark/light mode toggle
+A sun/moon icon at the bottom of the sidebar lets you toggle between dark and light mode without opening Settings.
+
+---
+
+## Sync & Multi-Device
+
+All data syncs automatically to Supabase in the background. SQLite is the local source of truth.
+
+### How it works
+- Changes push to Supabase in the background after each edit
+- Real-time subscriptions pull changes from other devices and shared project members
+- A sync status icon in the sidebar shows connection state (green = synced, orange = syncing, red = offline)
+
+### New device setup
+Log in on a new device and all your data — tasks, projects, settings, themes, saved views, and areas — pulls down automatically. No manual import needed.
+
+### Offline support
+- **Personal projects** — fully usable offline. Create, edit, and complete tasks without internet. Changes sync when you reconnect.
+- **Shared projects** — become read-only when offline to prevent conflicts. Full functionality resumes when connected.
+
+---
+
+## Integrations
+
+### MCP — AI Integration
+The Model Context Protocol lets Claude (or any MCP-compatible AI) manage your tasks directly through natural language.
+
+**Setup:** Go to **Settings → About → Integrations**. Enable the MCP server and copy the config JSON — paste it into your AI client's MCP configuration.
+
+**Capabilities:** Full CRUD for tasks, subtasks, projects, labels, and statuses. Search with filters, manage My Day, deploy templates, reorder tasks, and create saved views. AI-made changes appear in the activity timeline alongside user actions.
+
+### Telegram Bot
+Add tasks from Telegram using smart input syntax:
+- Send a message to create a task (supports @label, p:priority, d:date syntax)
+- `/project` — list projects and complete tasks with inline buttons
+- `/myday` — see today's tasks
+- `/done` — complete a task by keyword
+- `/default` — set default project for new tasks
+
+### Default project per integration
+In **Settings → About → Integrations**, set a default project separately for Telegram and iOS Shortcuts. New tasks from each integration go to their respective default project. iOS Shortcuts can optionally follow the Telegram default.
+
+### iCloud Drive
+Link iCloud Drive in **Settings → About → Integrations** to enable file attachments on tasks. Files sync across your devices via iCloud.
+
+---
+
 ## Frequently Asked Questions
 
 **How do I make a task repeat?**
@@ -478,3 +595,12 @@ Go to Settings → General. Click the shortcut field and press your desired key 
 
 **What happens if I accidentally delete a task?**
 An undo toast appears for 5 seconds after deletion. Click Undo to restore the task.
+
+**How do I get notifications for due tasks?**
+Go to Settings → General → Notifications. Enable notifications and choose a lead time. Only tasks with a due date *and* a time component trigger notifications.
+
+**How do I customize what shows in the sidebar?**
+Go to Settings → General → Sidebar Items. Toggle visibility and drag to reorder. Keyboard shortcuts update dynamically.
+
+**How do I use ToDoozy on multiple devices?**
+Just log in on the new device — all your data syncs automatically. No export/import needed. Changes sync in real-time when online.

@@ -87,6 +87,19 @@ const recentlyDeletedIds = new Set<string>()
 /** Per-project timestamp of last successful pull — only fetch rows modified after this */
 const lastPullAt = new Map<string, string>()
 
+/** Debounce buffer for settings writes — collects changes over 5s then pushes once */
+const pendingSettings = new Map<string, { key: string; value: string; userId: string }>()
+let settingsFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushSettingsBuffer(): void {
+  const entries = [...pendingSettings.values()]
+  pendingSettings.clear()
+  settingsFlushTimer = null
+  for (const entry of entries) {
+    pushSettingImmediate(entry.key, entry.value, entry.userId)
+  }
+}
+
 /** Cache of project ID → name for readable logs */
 const projectNameCache = new Map<string, string>()
 
@@ -119,13 +132,11 @@ export async function pushTask(task: Task): Promise<void> {
     // Ensure the project exists in Supabase (RLS requires project_members entry)
     await ensureProjectInSupabase(task.project_id)
 
-    // Get label names for this task
+    // Get label names for this task (batch query instead of N+1)
     const taskLabels = await window.api.tasks.getLabels(task.id)
-    const labelData: Array<{ name: string; color: string }> = []
-    for (const tl of taskLabels) {
-      const label = await window.api.labels.findById(tl.label_id)
-      if (label) labelData.push({ name: label.name, color: label.color })
-    }
+    const labelIds = taskLabels.map((tl) => tl.label_id)
+    const allLabels = labelIds.length > 0 ? await window.api.labels.findByIds(labelIds) : []
+    const labelData = allLabels.map((l) => ({ name: l.name, color: l.color }))
 
     const { error } = await supabase.from('tasks').upsert({
       id: task.id,
@@ -237,9 +248,9 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
 }
 
 /**
- * Push a setting to user_settings in Supabase.
+ * Push a setting to user_settings in Supabase (immediate, no debounce).
  */
-export async function pushSetting(key: string, value: string, userId: string): Promise<void> {
+async function pushSettingImmediate(key: string, value: string, userId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_settings').upsert({
@@ -254,6 +265,15 @@ export async function pushSetting(key: string, value: string, userId: string): P
   } catch (err) {
     console.error('[PersonalSync] pushSetting failed:', err)
   }
+}
+
+/**
+ * Push a setting to Supabase with 5s debounce to batch rapid changes.
+ */
+export function pushSetting(key: string, value: string, userId: string): void {
+  pendingSettings.set(`${userId}:${key}`, { key, value, userId })
+  if (settingsFlushTimer) clearTimeout(settingsFlushTimer)
+  settingsFlushTimer = setTimeout(flushSettingsBuffer, 5_000)
 }
 
 /**
@@ -546,10 +566,10 @@ export async function fullUpload(userId: string): Promise<void> {
       }
     }
 
-    // 3. Push settings
+    // 3. Push settings (immediate, not debounced — this is initial full upload)
     for (const setting of allSettings) {
       if (setting.value !== null) {
-        await pushSetting(setting.key, setting.value, userId)
+        await pushSettingImmediate(setting.key, setting.value, userId)
       }
       updateProgress()
     }
@@ -897,9 +917,16 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
       return true
     }
 
-    // Local is newer — push local state to Supabase (covers failed prior pushes)
+    // Local is newer — only push if metadata actually differs (avoids phantom writes)
     if (local.updated_at && remote.updated_at && local.updated_at > remote.updated_at) {
-      await pushProject(local)
+      const metadataChanged =
+        local.name !== remote.name ||
+        local.color !== remote.color ||
+        local.icon !== remote.icon ||
+        (local.description ?? '') !== (remote.description ?? '')
+      if (metadataChanged) {
+        await pushProject(local)
+      }
     }
     return false
   } catch (err) {
@@ -1187,16 +1214,14 @@ export async function subscribeToPersonalProject(
         onChange(payload.eventType, data)
       }
     )
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'task_labels' },
-      (payload) => {
-        onChange('TASK_LABEL_INSERT', payload.new as Record<string, unknown>)
-      }
-    )
     .subscribe((status) => {
       const pName = projectNameCache.get(projectId) ?? projectId
       console.log(`[Realtime] ${pName}: ${status}`)
+      if (status === 'SUBSCRIBED') {
+        useSyncStore.getState().setRealtimeConnected(true)
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        useSyncStore.getState().setRealtimeConnected(false)
+      }
     })
 
   return () => {
