@@ -7,29 +7,47 @@ description: Check Supabase Disk IO stats and compare against the pre-optimizati
 
 Compare current Supabase stats against the pre-optimization baseline captured on 2026-04-14 to verify that IO optimizations are working.
 
-## Baseline (2026-04-14, pre-optimization)
+## Baseline — Average Hourly Rates (pre-optimization)
+
+Calculated from 1,449 hours of cumulative stats (2026-02-12 to 2026-04-14) with 1-2 active users.
 
 ```
-KEY METRICS:
-- realtime.list_changes() calls: 2,138,831
-- realtime.list_changes() total DB time: 12,116s
-- share_project RPC calls: 10,835
-- Realtime subscription INSERTs: 22,689
-- Index count: 29
+QUERY CALL RATES (avg/hour):
+- realtime.list_changes() v1:  1,198/hr
+- realtime.list_changes() v2:  278/hr
+- share_project RPC:           7.5/hr
+- set_config (PostgREST):      194/hr
+- Realtime subscription INSERTs: 15.7/hr
 
-TABLE IO (seq_scan / idx_scan / dead_tup):
-- project_members: 2,000,324 / 12,848 / 45
-- projects: 51,830 / 11,531 / 10
-- api_keys: 1,625 / 103 / 13
-- statuses: 945 / 48,449 / 25
-- tasks: 558 / 220,081 / 23
-- user_settings: 270 / 952 / 17
+TABLE SCAN RATES (avg/hour):
+- project_members seq_scans:   1,380/hr
+- projects seq_scans:          36/hr
+- statuses seq_scans:          0.65/hr
+- tasks seq_scans:             0.39/hr
 
-WRITE STATS:
-- projects updates: 20,519
-- tasks updates: 77,535
-- statuses updates: 7,746
+WRITE RATES (avg/hour):
+- projects updates:            14/hr
+- tasks updates:               54/hr
+- statuses updates:            5.3/hr
+- user_settings updates:       0.58/hr
+
+Index count: 29 (now 37 after optimization)
 ```
+
+## Post-Optimization Table Stats Snapshot (2026-04-14 10:48 UTC)
+
+Use this to calculate post-optimization deltas for table stats (subtract these from current values).
+
+```
+project_members: seq_scan=2,006,711 / idx_scan=37,396 / updates=11
+projects: seq_scan=53,824 / idx_scan=12,032 / updates=21,507
+tasks: seq_scan=576 / idx_scan=232,860 / updates=81,810
+statuses: seq_scan=954 / idx_scan=50,440 / updates=8,120
+user_settings: seq_scan=275 / idx_scan=964 / updates=851
+api_keys: seq_scan=1,737 / idx_scan=103 / updates=910
+```
+
+**pg_stat_statements was reset on 2026-04-14 08:48 UTC** — so query stats start fresh from that point. Table stats (pg_stat_user_tables) could NOT be reset (permission denied on free tier) and are cumulative since 2026-02-12.
 
 ## Steps
 
@@ -60,25 +78,36 @@ SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size, n_l
 FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(relid) DESC;
 ```
 
-2. Compare each metric against the baseline above.
-
-3. Calculate % change: `((current - baseline) / baseline * 100)`. Negative = improvement for scans/calls/dead_tup. Positive = improvement for index_count.
-
-4. Present results as a markdown table:
-
-```markdown
-| Metric | Baseline | Current | Change |
-|--------|----------|---------|--------|
-| RT list_changes calls | 2,138,831 | X | -Y% |
-| share_project RPC calls | 10,835 | X | -Y% |
-| project_members seq_scans | 2,000,324 | X | -Y% |
-| projects updates | 20,519 | X | -Y% |
-| Index count | 29 | X | +Y% |
-| Dead tuples (total) | ~200 | X | -Y% |
+2. Calculate hours since `pg_stat_statements` reset (2026-04-14 08:48 UTC):
+```sql
+SELECT EXTRACT(EPOCH FROM (NOW() - '2026-04-14 08:48:47.191683+00'::timestamptz)) / 3600 AS hours_since_reset;
 ```
 
-5. Flag any metric that got WORSE (increased calls/scans/dead_tup).
+3. Divide current totals by hours to get **current rate/hour**.
 
-6. Provide a summary: "IO reduction estimate: ~X% based on query call reduction."
+4. Present results comparing current rates against pre-optimization baseline rates:
 
-**Note:** `pg_stat_statements` and `pg_stat_user_tables` are cumulative since last stats reset. To get a clean comparison, you may need to reset stats first with `SELECT pg_stat_reset()` and check again after 24h. Warn the user if the stats haven't been reset since the optimization was deployed.
+```markdown
+| Metric | Pre-opt Rate/hr | Current Rate/hr | Change |
+|--------|----------------|-----------------|--------|
+| RT list_changes v1 | 1,198 | X | ? |
+| RT list_changes v2 | 278 | X | ? |
+| share_project RPC | 7.5 | X | ? |
+| project_members seq_scans | 1,380 | X | ? |
+| projects updates | 14 | X | ? |
+| tasks updates | 54 | X | ? |
+| Index count | 29 | 37 | +8 |
+```
+
+5. Flag any metric where the current rate **exceeds** the pre-optimization rate — that means something got worse.
+
+6. Flag any rate that seems unreasonably high for the number of active users (e.g., >100 seq_scans/hr for a 13-row table).
+
+7. Check dead tuples — report any table with dead_tup > live_tup (needs VACUUM).
+
+8. Summary: Report overall health as one of:
+   - **Healthy** — all rates below baseline, dead tuples low
+   - **Improved but watch** — most rates down, one or two elevated
+   - **Needs attention** — rates exceeding baseline or dead tuples accumulating
+
+**Note:** Table stats (pg_stat_user_tables) are cumulative since 2026-02-12 and could NOT be reset (free tier restriction). Only `pg_stat_statements` (query stats) was reset on 2026-04-14 08:48 UTC. For table scan/update rates, subtract the baseline snapshot totals and divide by hours since baseline to get the post-optimization rate.

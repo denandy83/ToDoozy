@@ -80,3 +80,16 @@ Working file — entries written here during a session are processed into perman
 <!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
 - fcdc3b3 chore: bump version to 1.3.0 (2026-04-13) — files: 2
 - 5ce883b fix: rename cookie stats labels to plural "Cookies" (2026-04-13) — files: 1
+
+## 2026-04-14 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- d669c62 chore: bump version to 1.3.1 (2026-04-14) — files: 2
+- 22da287 perf: optimize Supabase disk IO — adaptive polling, indexes, N+1 fixes (2026-04-14) — files: 23
+
+## 2026-04-16 — Feature: Update restart banner
+**What it does:** After an auto-update downloads, a persistent banner appears at the top of the main content area showing the version number and a Restart button.
+**Why it was built:** Previously, clicking "Install" on the update dialog made it disappear with no way to restart — the user had to manually navigate to Settings > About > Updates.
+**How to use it:** When the banner appears, click Restart to apply the update. The banner stays visible until you restart.
+**Technical summary:** New `UpdateReadyBanner` component renders when `updateStore.status.state === 'downloaded'`. Placed inside `<main>` in AppLayout, above the header. Calls the same `installUpdate()` → `autoUpdater.quitAndInstall()` path as Settings.
+**Affected views/components:** AppLayout, new UpdateReadyBanner component
+**Commit:** 72ddd4b

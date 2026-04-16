@@ -4,6 +4,10 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.3.1
+
+- **Update restart banner** — After an auto-update downloads, a persistent banner appears at the top of the app with the version number and a Restart button, so users always know a new version is ready
+
 ## v1.1.6
 
 - **My Day auto-add based on due date** — Tasks with a due date matching today are automatically added to the My Day view (#55)

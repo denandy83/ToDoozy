@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.3.1
+
+- **Update restart banner** — When a new version finishes downloading, a banner appears at the top of the app with a Restart button — no more hunting through Settings to apply updates
+
 ## v1.1.6
 
 - **My Day auto-add based on due date** — Tasks due today are now automatically included in your My Day view, so you never miss a deadline
