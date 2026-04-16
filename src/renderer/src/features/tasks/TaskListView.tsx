@@ -305,7 +305,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
         order_index: orderIndex,
         priority: data.priority,
         due_date: data.dueDate,
-        recurrence_rule: data.recurrenceRule ?? undefined
+        recurrence_rule: data.recurrenceRule ?? undefined,
+        reference_url: data.referenceUrl ?? undefined
       })
       // Assign labels
       for (const label of data.labels) {

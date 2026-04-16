@@ -21,6 +21,7 @@ export interface SmartTaskData {
   priority: number
   dueDate: string | null
   recurrenceRule: string | null
+  referenceUrl: string | null
 }
 
 interface AddTaskInputProps {
@@ -52,14 +53,15 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
 
     const handleSubmit = useCallback(() => {
       if (smart.popupState) return // Let popup handle Enter
-      const { title, nlpDate, nlpRecurrenceRule } = smart.getSubmitData()
+      const { title, nlpDate, nlpRecurrenceRule, extractedReferenceUrl } = smart.getSubmitData()
       if (!title) return
       onSubmit({
         title,
         labels: smart.attachedLabels,
         priority: smart.selectedPriority ?? 0,
         dueDate: smart.selectedDate ?? nlpDate,
-        recurrenceRule: nlpRecurrenceRule
+        recurrenceRule: nlpRecurrenceRule,
+        referenceUrl: extractedReferenceUrl || smart.referenceUrl
       })
       smart.reset()
     }, [smart, onSubmit])
