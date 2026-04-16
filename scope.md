@@ -208,8 +208,12 @@ VACUUM ANALYZE statuses;
 - **File**: `src/renderer/src/services/PersonalSyncService.ts:113-128`
 - Batch label resolution — fetch all labels for all tasks being pushed in one query.
 
-#### 2C. Deduplicate Realtime Subscriptions
-- Track subscribed channels in a Set. Before subscribing, check if channel exists.
+#### 2C. Deduplicate Realtime Subscriptions ✅ DONE (2026-04-16)
+- Added `personalChannels: Map<string, RealtimeChannel>` to PersonalSyncService with has-check before subscribing
+- Split App.tsx effect so RT subscriptions depend only on `currentUser` (not `currentProjectId`) — eliminates teardown/recreate on every project switch
+- Fixed invite channel name from `invites:${email}:${Date.now()}` to stable `invites:${email}`
+- Added `unsubscribeAllPersonal()` for clean teardown at logout
+- **Impact**: RT subscription INSERTs should drop from 464/hr back toward baseline (~16/hr); list_changes should drop proportionally
 
 #### 2D. Debounce Settings Writes
 - **File**: `src/renderer/src/services/PersonalSyncService.ts:245`

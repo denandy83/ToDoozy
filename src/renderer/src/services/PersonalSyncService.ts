@@ -5,6 +5,7 @@
  * SQLite is always the source of truth. Every local write pushes to Supabase
  * in the background. On new device, all data is pulled from Supabase.
  */
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import type { Task, Status, Label } from '../../../shared/types'
@@ -1193,14 +1194,19 @@ export async function syncTaskLabel(taskId: string, labelId: string): Promise<vo
 
 // ── Realtime Subscriptions for All Projects ──────────────────────────
 
+/** Track active personal-project Realtime channels to prevent duplicates. */
+const personalChannels: Map<string, RealtimeChannel> = new Map()
+
 /**
  * Subscribe to Realtime changes for a personal (non-shared) project.
- * Uses the same channel pattern as shared projects.
+ * No-ops if a subscription already exists for this project.
  */
 export async function subscribeToPersonalProject(
   projectId: string,
   onChange: (event: string, data: Record<string, unknown>) => void
-): Promise<() => void> {
+): Promise<void> {
+  if (personalChannels.has(projectId)) return
+
   const supabase = await getSupabase()
   const channel = supabase
     .channel(`personal:${projectId}`)
@@ -1224,9 +1230,18 @@ export async function subscribeToPersonalProject(
       }
     })
 
-  return () => {
-    supabase.removeChannel(channel)
+  personalChannels.set(projectId, channel)
+}
+
+/**
+ * Unsubscribe from all personal-project Realtime channels.
+ */
+export async function unsubscribeAllPersonal(): Promise<void> {
+  const supabase = await getSupabase()
+  for (const channel of personalChannels.values()) {
+    await supabase.removeChannel(channel)
   }
+  personalChannels.clear()
 }
 
 // ── Online/Offline Detection ─────────────────────────────────────────

@@ -118,6 +118,17 @@ function App(): React.JSX.Element {
     hydrateStatuses(currentProjectId)
     hydrateLabels(currentProjectId)
     hydrateAllForProject(currentProjectId, currentUser.id)
+  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
+
+  // Ref so the RT flush callback always reads the latest project without re-triggering the effect
+  const currentProjectRef = useRef(currentProjectId)
+  currentProjectRef.current = currentProjectId
+
+  // Supabase Realtime subscriptions + adaptive polling — runs once at login, not per project switch.
+  // Personal subscriptions are deduped by PersonalSyncService's Map, so re-running is safe but
+  // we avoid it to prevent unnecessary channel churn.
+  useEffect(() => {
+    if (!currentUser) return
 
     // Pull new tasks from Supabase for ALL projects (not just the active one)
     // so tasks created via Telegram, iOS Shortcut, or another device appear everywhere
@@ -126,7 +137,6 @@ function App(): React.JSX.Element {
       const { pullNewTasks, pullProjectMetadata, resetRefreshGate, cacheProjectNames } = await import('./services/PersonalSyncService')
       resetRefreshGate()
 
-      // Pull all user projects
       const allProjects = await window.api.projects.getProjectsForUser(currentUser.id)
       cacheProjectNames(allProjects)
       let anyChanged = false
@@ -137,11 +147,15 @@ function App(): React.JSX.Element {
         if (pulled > 0) anyChanged = true
       }
       if (anyChanged) {
+        const pid = currentProjectRef.current
         hydrateProjects(currentUser.id)
-        hydrateAllForProject(currentProjectId, currentUser.id)
+        if (pid) {
+          hydrateAllForProject(pid, currentUser.id)
+        }
       }
     }
     doPull()
+
     // Adaptive polling: no polling when Realtime is connected, 120s fallback when disconnected
     let pollInterval: ReturnType<typeof setInterval> | null = null
     const startPolling = (): void => {
@@ -162,19 +176,16 @@ function App(): React.JSX.Element {
         prevRealtimeConnected = connected
         if (connected) {
           stopPolling()
-          // On reconnect, do one immediate pull to catch anything missed
           doPull()
         } else {
           startPolling()
         }
       }
     })
-    // Start polling initially (Realtime will stop it once connected)
     startPolling()
 
     // Subscribe to Supabase Realtime for instant task sync
     // Debounce: collect all events in a window, then do one pull
-    const realtimeUnsubs: Array<() => void> = []
     const pendingProjectIds = new Set<string>()
     let realtimeTimer: ReturnType<typeof setTimeout> | null = null
     let realtimePullInProgress = false
@@ -185,7 +196,6 @@ function App(): React.JSX.Element {
       try {
         const { pullNewTasks: pullTasks } = await import('./services/PersonalSyncService')
 
-        // Pull changed tasks for affected projects
         const projects = [...pendingProjectIds]
         pendingProjectIds.clear()
         let anyChanged = false
@@ -195,10 +205,13 @@ function App(): React.JSX.Element {
         }
 
         if (anyChanged) {
+          const pid = currentProjectRef.current
           hydrateProjects(currentUser.id)
-          hydrateLabels(currentProjectId)
-          hydrateAllForProject(currentProjectId, currentUser.id)
-          useTaskStore.getState().hydrateAllTaskLabels(currentProjectId)
+          if (pid) {
+            hydrateLabels(pid)
+            hydrateAllForProject(pid, currentUser.id)
+            useTaskStore.getState().hydrateAllTaskLabels(pid)
+          }
         }
       } finally {
         realtimePullInProgress = false
@@ -216,11 +229,10 @@ function App(): React.JSX.Element {
       const allProjects = await window.api.projects.getProjectsForUser(currentUser.id)
       cachePNames(allProjects)
       for (const project of allProjects) {
-        const unsub = await subscribeToPersonalProject(project.id, (_event, _data) => {
+        await subscribeToPersonalProject(project.id, (_event, _data) => {
           pendingProjectIds.add(project.id)
           scheduleFlush()
         })
-        realtimeUnsubs.push(unsub)
       }
     }
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
@@ -229,9 +241,9 @@ function App(): React.JSX.Element {
       stopPolling()
       unsubRealtimeState()
       if (realtimeTimer) clearTimeout(realtimeTimer)
-      for (const unsub of realtimeUnsubs) unsub()
+      import('./services/PersonalSyncService').then(({ unsubscribeAllPersonal }) => unsubscribeAllPersonal())
     }
-  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateProjects])
+  }, [currentUser, hydrateLabels, hydrateAllForProject, hydrateProjects])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)

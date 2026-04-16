@@ -75,3 +75,12 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
   6. **No adaptive polling** — 30s poll ran alongside Realtime, doubling IO
 - **Fix**: See CLAUDE.md "Supabase Performance Rules". Key changes: adaptive polling via `syncStore.realtimeConnected`, removed unfiltered RT subs, batch `.in()` queries, debounced settings writes, compound indexes added.
 - **Check first**: When adding any Supabase query or subscription, verify: Is it filtered? Is it batched? Is it on a read path (no writes allowed)? Does the table have indexes for the query pattern?
+
+### Realtime subscription churn (2026-04-16 audit)
+- **Symptoms**: Post-optimization check shows RT `list_changes` at 7,068/hr (4.8x worse than pre-opt) and subscription INSERTs at 464/hr (30x worse). Write rates were down, but Realtime load spiked.
+- **Root causes found**:
+  1. **PersonalSyncService had no dedup Map** — `subscribeToPersonalProject()` created a new channel every call without checking if one already existed. SyncService had `channels.has(projectId)` guard; PersonalSyncService didn't.
+  2. **App.tsx effect re-ran on every project switch** — The useEffect that set up RT subscriptions depended on `currentProjectId`. Switching projects tore down ALL subscriptions then recreated them for ALL projects. 10 projects x 5 switches = 50 subscribe/unsubscribe cycles.
+  3. **Invite channel used `Date.now()` in name** — `subscribeToInvites()` created channels named `invites:email:${Date.now()}`, always unique, so Supabase never reused the channel.
+- **Fix**: Added `personalChannels: Map<string, RealtimeChannel>` with has-check in PersonalSyncService. Split App.tsx effect: hydration depends on `currentProjectId`, RT subscriptions depend only on `currentUser` (run once at login). Removed `Date.now()` from invite channel name.
+- **Check first**: When adding a Realtime subscription, verify: (1) Is there a Map/Set guarding against duplicates? (2) Is the useEffect dependency array minimal — does it include anything that changes frequently? (3) Is the channel name stable (no timestamps, no random suffixes)?

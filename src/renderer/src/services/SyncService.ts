@@ -413,7 +413,7 @@ export async function subscribeToInvites(
 
   const createChannel = (): RealtimeChannel => {
     return supabase
-      .channel(`invites:${email}:${Date.now()}`)
+      .channel(`invites:${email}`)
       .on(
         'postgres_changes',
         {
