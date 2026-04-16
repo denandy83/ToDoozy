@@ -738,6 +738,9 @@ export function AppLayout(): React.JSX.Element {
   const [editingProjectName, setEditingProjectName] = useState(false)
   const [projectNameValue, setProjectNameValue] = useState('')
   const projectNameRef = useRef<HTMLInputElement>(null)
+  const [editingViewName, setEditingViewName] = useState(false)
+  const [viewNameValue, setViewNameValue] = useState('')
+  const viewNameRef = useRef<HTMLInputElement>(null)
   const { updateProject, deleteProject } = useProjectStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 
@@ -756,6 +759,29 @@ export function AppLayout(): React.JSX.Element {
     }
     setEditingProjectName(false)
   }, [projectNameValue, selectedProject, updateProject])
+
+  const handleStartEditViewName = useCallback(() => {
+    if (currentView === 'saved-view' && currentSavedView) {
+      setViewNameValue(currentSavedView.name)
+      setEditingViewName(true)
+      setTimeout(() => viewNameRef.current?.select(), 0)
+    }
+  }, [currentView, currentSavedView])
+
+  const handleSaveViewName = useCallback(() => {
+    const trimmed = viewNameValue.trim()
+    if (trimmed && currentSavedView && trimmed !== currentSavedView.name) {
+      useSavedViewStore.getState().updateView(currentSavedView.id, { name: trimmed })
+    }
+    setEditingViewName(false)
+  }, [viewNameValue, currentSavedView])
+
+  // Auto-edit newly created saved views (name defaults to "New View")
+  useEffect(() => {
+    if (currentView === 'saved-view' && currentSavedView?.name === 'New View') {
+      handleStartEditViewName()
+    }
+  }, [currentSavedView?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle share project
   const handleShareProject = useCallback(async () => {
@@ -1032,10 +1058,23 @@ export function AppLayout(): React.JSX.Element {
                 }}
                 className="text-3xl font-light tracking-[0.15em] uppercase text-foreground bg-transparent focus:outline-none"
               />
+            ) : editingViewName && currentView === 'saved-view' ? (
+              <input
+                ref={viewNameRef}
+                type="text"
+                value={viewNameValue}
+                onChange={(e) => setViewNameValue(e.target.value)}
+                onBlur={handleSaveViewName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveViewName()
+                  if (e.key === 'Escape') { e.stopPropagation(); setEditingViewName(false) }
+                }}
+                className="text-3xl font-light tracking-[0.15em] uppercase text-foreground bg-transparent focus:outline-none"
+              />
             ) : (
               <h1
-                className={`text-3xl font-light tracking-[0.15em] uppercase text-foreground ${currentView === 'project' ? 'cursor-pointer' : ''}`}
-                onDoubleClick={handleStartEditProjectName}
+                className={`text-3xl font-light tracking-[0.15em] uppercase text-foreground ${currentView === 'project' || currentView === 'saved-view' ? 'cursor-pointer' : ''}`}
+                onDoubleClick={currentView === 'saved-view' ? handleStartEditViewName : handleStartEditProjectName}
               >
                 {viewTitle}
               </h1>
