@@ -32,7 +32,7 @@ import { useAuthStore } from '../../shared/stores/authStore'
 import { useSavedViewStore, selectSavedViews, selectViewCounts } from '../../shared/stores/savedViewStore'
 import { useProjectAreaStore, selectProjectAreas } from '../../shared/stores/projectAreaStore'
 import type { ThemeConfig } from '../../../../shared/types'
-import { useSyncStore, selectSyncStatus, selectLastSyncedAt, selectIsFirstSync, selectFirstSyncProgress } from '../../shared/stores/syncStore'
+import { useSyncStore, selectSyncStatus, selectLastSyncedAt, selectIsFirstSync, selectFirstSyncProgress, selectRealtimeConnected, selectPendingCount } from '../../shared/stores/syncStore'
 import type { SyncStatus } from '../../shared/stores/syncStore'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
@@ -602,17 +602,57 @@ export function Sidebar({
   )
 }
 
+const STUCK_QUEUE_MS = 60 * 1000
+const STALENESS_TICK_MS = 30 * 1000
+
+type StaleReason = 'offline' | 'realtime-down' | 'queue-stuck'
+
 function SyncStatusIcon(): React.JSX.Element {
   const syncStatus = useSyncStore(selectSyncStatus)
   const lastSyncedAt = useSyncStore(selectLastSyncedAt)
   const errorMessage = useSyncStore((s) => s.errorMessage)
   const isFirstSync = useSyncStore(selectIsFirstSync)
   const firstSyncProgress = useSyncStore(selectFirstSyncProgress)
+  const realtimeConnected = useSyncStore(selectRealtimeConnected)
+  const pendingCount = useSyncStore(selectPendingCount)
   const [showTooltip, setShowTooltip] = useState(false)
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true))
+  const [, setTick] = useState(0)
 
-  // Detect stale sync — if last sync was >5 minutes ago and status claims "synced", something is wrong
-  const isStale = syncStatus === 'synced' && lastSyncedAt && (Date.now() - new Date(lastSyncedAt).getTime() > 5 * 60 * 1000)
-  const effectiveStatus = isStale ? 'error' as SyncStatus : syncStatus
+  // Track browser online/offline events
+  useEffect(() => {
+    const goOnline = (): void => setIsOnline(true)
+    const goOffline = (): void => setIsOnline(false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
+  }, [])
+
+  // Re-evaluate staleness on a timer so the dot flips without needing an unrelated render
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), STALENESS_TICK_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // Sync is stale (red) when:
+  //  - the device is offline,
+  //  - the Supabase Realtime channel is down, or
+  //  - local writes are queued and the queue hasn't drained in the last minute.
+  // An idle session with Realtime up and no pending work is NOT stale regardless of elapsed time.
+  let staleReason: StaleReason | null = null
+  if (!isOnline) staleReason = 'offline'
+  else if (!realtimeConnected) staleReason = 'realtime-down'
+  else if (
+    pendingCount > 0
+    && lastSyncedAt
+    && Date.now() - new Date(lastSyncedAt).getTime() > STUCK_QUEUE_MS
+  ) staleReason = 'queue-stuck'
+
+  const isStale = staleReason !== null
+  const effectiveStatus: SyncStatus = isStale ? 'error' : syncStatus
 
   const formatTime = (iso: string | null): string => {
     if (!iso) return 'Never'
@@ -641,8 +681,19 @@ function SyncStatusIcon(): React.JSX.Element {
     error: 'Sync error'
   }
 
-  const effectiveLabel = isStale ? 'Sync stale' : statusLabel[syncStatus]
-  const effectiveMessage = errorMessage ?? (isStale ? 'Sync has not completed recently — check your connection or re-login' : null)
+  const staleLabel: Record<StaleReason, string> = {
+    'offline': 'Offline',
+    'realtime-down': 'Supabase unreachable',
+    'queue-stuck': 'Sync stuck'
+  }
+  const staleMessage: Record<StaleReason, string> = {
+    'offline': 'No internet connection — changes will sync when you reconnect',
+    'realtime-down': 'Lost connection to Supabase — check your network or re-login',
+    'queue-stuck': `${pendingCount} local change${pendingCount === 1 ? '' : 's'} haven't uploaded — check your connection`
+  }
+
+  const effectiveLabel = staleReason ? staleLabel[staleReason] : statusLabel[syncStatus]
+  const effectiveMessage = errorMessage ?? (staleReason ? staleMessage[staleReason] : null)
 
   return (
     <div className="relative">
