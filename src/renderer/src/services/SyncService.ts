@@ -740,6 +740,44 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   const remoteTaskIds = new Set<string>()
 
   if (remoteTasks) {
+    // Ensure every referenced user (owner_id + assigned_to) exists locally before
+    // inserting tasks — otherwise tasks.create trips the users FK. We fetch real
+    // profile data in one batched request and fall back to a 'shared-user'
+    // placeholder so the row at least satisfies the constraint.
+    const referencedUserIds = new Set<string>()
+    for (const task of remoteTasks) {
+      if (task.owner_id) referencedUserIds.add(task.owner_id as string)
+      if (task.assigned_to) referencedUserIds.add(task.assigned_to as string)
+    }
+    const missingUserIds: string[] = []
+    for (const uid of referencedUserIds) {
+      const local = await window.api.users.findById(uid)
+      if (!local) missingUserIds.push(uid)
+    }
+    if (missingUserIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email, display_name, avatar_url')
+        .in('id', missingUserIds)
+      const profilesById = new Map<string, { email: string | null; display_name: string | null; avatar_url: string | null }>()
+      for (const p of profiles ?? []) {
+        profilesById.set(p.id as string, {
+          email: (p.email as string | null) ?? null,
+          display_name: (p.display_name as string | null) ?? null,
+          avatar_url: (p.avatar_url as string | null) ?? null
+        })
+      }
+      for (const uid of missingUserIds) {
+        const profile = profilesById.get(uid)
+        await window.api.users.create({
+          id: uid,
+          email: profile?.email ?? 'shared-user',
+          display_name: profile?.display_name ?? null,
+          avatar_url: profile?.avatar_url ?? null
+        }).catch(() => { /* already exists */ })
+      }
+    }
+
     for (const task of remoteTasks) {
       remoteTaskIds.add(task.id)
       const existing = await window.api.tasks.findById(task.id)
@@ -762,12 +800,6 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
         // Update existing task with remote data
         await window.api.tasks.update(task.id, taskData)
       } else {
-        // Ensure owner user record exists for FK
-        const ownerId = task.owner_id as string
-        const localOwner = await window.api.users.findById(ownerId)
-        if (!localOwner) {
-          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
-        }
         await window.api.tasks.create({
           id: task.id,
           project_id: task.project_id,
