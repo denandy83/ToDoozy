@@ -197,11 +197,11 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const supabase = await getSupabase()
-      // Point email confirmation at our Supabase Edge Function so the user lands
-      // on a real "Email confirmed, open ToDoozy" page instead of the dashboard
-      // default (localhost, which refuses the connection).
-      const supabaseUrl = (await window.api.auth.getSupabaseConfig()).url
-      const emailRedirectTo = `${supabaseUrl}/functions/v1/email-confirmed`
+      // Point email confirmation at our public GitHub Pages confirmation page
+      // (supabase.co Edge Functions force text/plain + CSP sandbox, so we can't
+      // serve HTML there). This keeps the user off the dashboard default Site
+      // URL, which is localhost during development.
+      const emailRedirectTo = 'https://denandy83.github.io/ToDoozy/email-confirmed.html'
       const { data, error } = await supabase.auth.signUp({
         email,
         password,

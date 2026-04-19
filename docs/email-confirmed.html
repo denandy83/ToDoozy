@@ -1,14 +1,10 @@
-// Landing page for Supabase email confirmation redirects.
-// Supabase finishes verifying the signup token before hitting this URL, so the
-// only job here is to show the user a friendly "you can close this tab" page
-// instead of the dashboard's default localhost Site URL.
-
-const HTML = `<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Email confirmed — ToDoozy</title>
+    <meta name="robots" content="noindex" />
     <style>
       :root { color-scheme: light dark; }
       html, body { height: 100%; margin: 0; }
@@ -25,9 +21,9 @@ const HTML = `<!doctype html>
         padding: 40px 32px;
         border-radius: 16px;
         background: #16161a;
-        border: 1px solid rgba(255,255,255,0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         text-align: center;
-        box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
       }
       .mark {
         width: 56px;
@@ -52,14 +48,14 @@ const HTML = `<!doctype html>
       p {
         font-size: 14px;
         line-height: 1.55;
-        color: rgba(245,245,247,0.7);
+        color: rgba(245, 245, 247, 0.7);
         margin: 0 0 18px;
       }
       .hint {
         font-size: 11px;
         letter-spacing: 0.25em;
         text-transform: uppercase;
-        color: rgba(245,245,247,0.4);
+        color: rgba(245, 245, 247, 0.4);
       }
     </style>
   </head>
@@ -71,14 +67,4 @@ const HTML = `<!doctype html>
       <div class="hint">You can close this window</div>
     </div>
   </body>
-</html>`
-
-Deno.serve(() => {
-  return new Response(HTML, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600'
-    }
-  })
-})
+</html>
