@@ -18,7 +18,7 @@ import {
 
 export default function QuickAddApp(): React.JSX.Element {
   const [projects, setProjects] = useState<Project[]>([])
-  const [projectLabels, setProjectLabels] = useState<Label[]>([])
+  const [allLabels, setAllLabels] = useState<Label[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [addToMyDay, setAddToMyDay] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
@@ -41,11 +41,26 @@ export default function QuickAddApp(): React.JSX.Element {
 
   const targetProjectId = selectedProjectId
 
-  // Load labels when target project changes
+  // Load ALL labels across the user's projects — quick-add allows changing project
+  // later, so the picker must show every label, not just the default project's.
   useEffect(() => {
-    if (!targetProjectId) return
-    window.api.labels.findByProjectId(targetProjectId).then(setProjectLabels).catch(() => setProjectLabels([]))
-  }, [targetProjectId])
+    if (!userId) return
+    window.api.labels.findAll(userId).then(setAllLabels).catch(() => setAllLabels([]))
+  }, [userId])
+
+  // Dedupe labels by lowercase name so the same name linked to multiple projects
+  // only appears once in the picker.
+  const uniqueLabels = useMemo(() => {
+    const seen = new Set<string>()
+    const out: Label[] = []
+    for (const l of allLabels) {
+      const key = l.name.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(l)
+    }
+    return out
+  }, [allLabels])
 
   // Initialize: load user, projects, settings, theme
   useEffect(() => {
@@ -136,8 +151,10 @@ export default function QuickAddApp(): React.JSX.Element {
         reference_url: extractedReferenceUrl || smart.referenceUrl
       })
 
-      // Assign labels
+      // Assign labels — ensure each label is linked to the target project first,
+      // so cross-project labels picked from the popup get connected to this project.
       for (const label of smart.attachedLabels) {
+        await window.api.labels.addToProject(selectedProjectId, label.id).catch(() => {})
         await window.api.tasks.addLabel(taskId, label.id)
       }
 
@@ -203,7 +220,7 @@ export default function QuickAddApp(): React.JSX.Element {
             .create({ id: crypto.randomUUID(), project_id: targetProjectId, name: data.name, color: data.color })
             .then((created) => {
               smart.selectLabel(created)
-              setProjectLabels((prev) => [...prev, created])
+              setAllLabels((prev) => [...prev, created])
             })
             .catch((err: unknown) => console.error('Failed to create label:', err))
         }
@@ -231,7 +248,7 @@ export default function QuickAddApp(): React.JSX.Element {
     if (!smart.popupState) return []
 
     if (smart.popupState.type === '@') {
-      const filtered = filterLabels(projectLabels, smart.popupState.query)
+      const filtered = filterLabels(uniqueLabels, smart.popupState.query)
       const items: InputSuggestionPopupProps['items'] = filtered.map((l) => ({
         id: l.id,
         label: l.name,
@@ -239,7 +256,7 @@ export default function QuickAddApp(): React.JSX.Element {
         data: { type: 'label' as const, label: l }
       }))
       if (smart.popupState.query.trim()) {
-        const autoColor = getNextAutoColor(projectLabels)
+        const autoColor = getNextAutoColor(uniqueLabels)
         items.push({
           id: '__create__',
           label: `+ Create "${smart.popupState.query.trim()}"`,
@@ -283,7 +300,7 @@ export default function QuickAddApp(): React.JSX.Element {
     }
 
     return []
-  }, [smart.popupState, projectLabels, projects])
+  }, [smart.popupState, uniqueLabels, projects, dateFormat])
 
   const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.referenceUrl !== null || (smart.nlpDateResult !== null && !smart.selectedDate)
 
