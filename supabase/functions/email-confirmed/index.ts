@@ -1,0 +1,84 @@
+// Landing page for Supabase email confirmation redirects.
+// Supabase finishes verifying the signup token before hitting this URL, so the
+// only job here is to show the user a friendly "you can close this tab" page
+// instead of the dashboard's default localhost Site URL.
+
+const HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Email confirmed — ToDoozy</title>
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0b0b0c;
+        color: #f5f5f7;
+      }
+      .card {
+        max-width: 420px;
+        padding: 40px 32px;
+        border-radius: 16px;
+        background: #16161a;
+        border: 1px solid rgba(255,255,255,0.08);
+        text-align: center;
+        box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+      }
+      .mark {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        background: #22c55e;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        color: #0b0b0c;
+        font-weight: 700;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 300;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        margin: 0 0 12px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.55;
+        color: rgba(245,245,247,0.7);
+        margin: 0 0 18px;
+      }
+      .hint {
+        font-size: 11px;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        color: rgba(245,245,247,0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="mark">&#10003;</div>
+      <h1>Email confirmed</h1>
+      <p>Your ToDoozy account is ready. You can close this tab and open ToDoozy to sign in.</p>
+      <div class="hint">You can close this window</div>
+    </div>
+  </body>
+</html>`
+
+Deno.serve(() => {
+  return new Response(HTML, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600'
+    }
+  })
+})
