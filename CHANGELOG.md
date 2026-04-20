@@ -4,6 +4,10 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.3.3
+
+- **Fix: DatePicker only highlights the real due date** — Opening the calendar with no due date set used to show today filled across every month you navigated to, and with a date like April 18 set, navigating to May would also highlight May 18. Now only the actual selected date gets the accent fill, today shows a subtle accent-colored border when it isn't the selected date, and every other day renders neutrally
+
 ## v1.3.2
 
 - **Fix: Quick-add label picker shows all labels** — The `@` picker in the quick-add popup now lists every label the user has access to, not just labels linked to the default project, and picking a label from another project links it into the selected project on submit instead of creating a duplicate

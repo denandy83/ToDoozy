@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.3.3
+
+- **Fix: Due date calendar only highlights the real date** — The date picker no longer shows today (or the matching day-of-month) filled in every month you navigate to. Only the actual due date is filled; today shows a subtle border when it isn't the selected date
+
 ## v1.3.2
 
 - **Fix: Quick-add sees all your labels** — The quick-add popup's `@` picker now shows every label across your projects, and picking one that lives in a different project links it to the active project instead of creating a duplicate

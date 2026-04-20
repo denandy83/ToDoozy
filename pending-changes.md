@@ -86,3 +86,17 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Email/password signup flow
 **Files changed:** src/renderer/src/shared/stores/authStore.ts, docs/email-confirmed.html (new)
 **Commit:** c851ff7
+
+## 2026-04-20 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 26ee6bf chore: bump version to 1.3.3 (2026-04-20) — files: 2
+- 05118ed docs: changelog and release notes for v1.3.2 fixes (2026-04-20) — files: 6
+
+## 2026-04-20 — Fix: DatePicker keyboard-selected day highlighted across months
+**What was broken:** Opening the due date calendar with no date set highlighted today in every month as the user navigated; with a date like April 18 set, navigating to May also highlighted May 18 (and June 18, etc.) as if selected.
+**Root cause:** `src/renderer/src/assets/main.css` applied the same accent-fill style to both `.react-datepicker__day--selected` and `.react-datepicker__day--keyboard-selected`. react-datepicker applies `--keyboard-selected` to the keyboard-focus day, which mirrors the selected day-of-month across navigated months and falls back to today when no date is selected, so it always rendered as "selected."
+**What was fixed:** Split the rule so only `--selected` gets the accent fill. Added `:not(--selected)` overrides that neutralize `--keyboard-selected` to transparent and give `--today` a subtle accent-colored `box-shadow: inset` border (no layout shift) when it isn't the selected date.
+**User-facing impact:** The calendar now shows exactly one filled day (the real due date), today is bordered, every other day renders neutrally as the user expects.
+**Affected area:** DatePicker (shared component) — used everywhere due dates are edited (TaskRow inline, DetailPanel, quick-add, etc.)
+**Files changed:** `src/renderer/src/assets/main.css`
+**Commit:** 35d7869
