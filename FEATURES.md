@@ -94,7 +94,9 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Productivity stats view with visual analytics powered by Recharts
 - Completion trends, priority distributions, and productivity insights
 - Cross-project analytics for all tasks
-- **Status:** Complete (2026-04-03, Story #48)
+- **Clickable KPI cards:** Each KPI card drills down into a filtered task list when clicked
+- **Enhanced charts:** Streaks displayed at top, priority/project breakdown charts, day-of-week activity chart
+- **Status:** Complete (updated 2026-04-12, v1.2.0)
 
 ### Per-Project Views
 - Each project in the sidebar has its own task list
@@ -366,10 +368,14 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Tray countdown: active timer shown in menu bar
 - Pause/resume/stop controls in timer overlay
 - Break timer after session completion
+- **Long break support:** Configurable long break interval and duration
+- **Flowtime mode:** Open-ended focus sessions without a fixed timer — work until you want to stop
+- **Session stats summary:** Post-session summary showing focus time, breaks taken, and productivity metrics
 - Repetition/session mode (auto-repeat)
 - Activity log entry on session completion
 - Sound + system notifications
-- **Status:** Complete
+- **Cookie break gamification:** Flow timer rewards breaks with animated cookie treats. Cookie jar collection tracks treats earned, with streak tracking to encourage consistent healthy break habits
+- **Status:** Complete (updated 2026-04-13, v1.3.0)
 
 ---
 
@@ -538,6 +544,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Checks for updates on app launch (background, non-blocking) and every 4 hours
 - Manual check via Settings > Updates > "Check for Updates" button
 - **Update available modal:** Shows current version, new version, and formatted release notes with Install & Restart / Not Now buttons
+- **Update restart banner:** After an update finishes downloading, a persistent banner appears at the top of the main content area with the version and a Restart button — stays visible until the user restarts
 - Download progress bar with percentage during update download
 - Dismissed updates only re-prompt on next launch or manual check (not on periodic checks)
 - Settings displays current app version from `app.getVersion()`

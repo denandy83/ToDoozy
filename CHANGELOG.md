@@ -4,9 +4,38 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.3.2
+
+- **Fix: Quick-add label picker shows all labels** — The `@` picker in the quick-add popup now lists every label the user has access to, not just labels linked to the default project, and picking a label from another project links it into the selected project on submit instead of creating a duplicate
+- **Fix: Sync dot no longer goes red on idle** — The sidebar sync indicator used to turn red after 5 minutes of inactivity even when the app was genuinely up to date. It's now driven by real signals (internet connection, Supabase Realtime channel, unflushed local writes) and the tooltip names which one failed
+- **Fix: Accepting an invite no longer fails with a FOREIGN KEY error** — When a new user joined a shared project, the initial sync could fail with "FOREIGN KEY constraint failed" if any task was assigned to a user their device had never seen. The sync now pre-fetches every referenced user and ensures local user rows exist before inserting any tasks
+- **Fix: Email confirmation lands on a real page** — Clicking the email confirmation link after signing up used to send users to a localhost URL the browser refused to connect to. A new hosted confirmation page now shows a friendly "Email confirmed — open ToDoozy to sign in" message
+
 ## v1.3.1
 
 - **Update restart banner** — After an auto-update downloads, a persistent banner appears at the top of the app with the version number and a Restart button, so users always know a new version is ready
+- **Realtime subscription dedup** — Fixed subscription churn by deduplicating personal Realtime channels and stabilizing invite channel names
+- **Supabase disk IO optimization** — Adaptive polling intervals, compound indexes for incremental sync, batch N+1 queries for labels and members
+- **Reference URL fix** — Reference URLs entered in the main task input are now correctly passed through to the created task
+
+## v1.3.0
+
+- **Cookie break gamification** — Flow timer now rewards breaks with animated cookie treats, a cookie jar collection, and streak tracking to encourage healthy work patterns
+- **Fix: cookie stats precision** — Cookie stats now show seconds precision instead of rounding to minutes
+- **Fix: cookie label rename** — Cookie stats labels updated to plural "Cookies" for consistency
+
+## v1.2.1
+
+- **Claude Desktop config in MCP settings** — Settings > Integrations > MCP Server now shows a Claude Desktop JSON config snippet for easy copy-paste setup
+- **Fix: section headers in update modal** — Section headers now render correctly in the update available modal and release notes display
+
+## v1.2.0
+
+- **Enhanced timer with long break, flowtime mode, session stats (#61)** — Timer now supports long breaks, flowtime (open-ended focus) mode, and a session stats summary after each work cycle
+- **Stats: clickable KPI cards** — Dashboard KPI cards now drill down into filtered task lists when clicked
+- **Stats: enhanced dashboard** — Streaks displayed at top, plus new priority/project breakdown charts and day-of-week activity chart
+- **Fix: RLS auth detection** — RLS policy violations are now detected as auth errors and trigger automatic session refresh
+- **Fix: UUID database regression** — Fixed UUID database naming regression, sync overhaul, timer fixes, and stats enhancements
 
 ## v1.1.6
 

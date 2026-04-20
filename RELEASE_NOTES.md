@@ -4,9 +4,35 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.3.2
+
+- **Fix: Quick-add sees all your labels** — The quick-add popup's `@` picker now shows every label across your projects, and picking one that lives in a different project links it to the active project instead of creating a duplicate
+- **Fix: Sync status reflects reality** — The sync dot no longer turns red just because you haven't edited anything for a while. It only goes red when you're actually offline, Supabase is unreachable, or your local changes aren't uploading — and the tooltip tells you which
+- **Fix: Invited collaborators join cleanly** — Accepting an invite to a shared project no longer fails with a scary FOREIGN KEY error on the first try. New collaborators land in the project immediately, no log-out/log-in dance required
+- **Fix: Friendly email confirmation page** — After confirming your email on signup, you now land on a proper "Email confirmed — open ToDoozy to sign in" page instead of a localhost connection error
+
 ## v1.3.1
 
 - **Update restart banner** — When a new version finishes downloading, a banner appears at the top of the app with a Restart button — no more hunting through Settings to apply updates
+- **Supabase performance optimization** — Background sync is now lighter on disk and network: adaptive polling, smarter indexes, and batch queries reduce IO significantly
+- **Reference URL fix** — URLs entered alongside task titles in the main input now attach correctly to the new task
+
+## v1.3.0
+
+- **Cookie break gamification** — The flow timer now rewards you with animated cookie treats when you take breaks. Collect cookies in a jar, track your streak, and build healthy break habits while staying productive
+- **Fix: cookie stats precision** — Cookie stats now display with seconds precision instead of rounding
+- **Fix: cookie labels** — Stats labels corrected to plural "Cookies"
+
+## v1.2.1
+
+- **Claude Desktop MCP setup** — The MCP settings page now includes a ready-to-paste JSON config for Claude Desktop users
+- **Fix: update modal headers** — Section headers in the update available modal and release notes now render properly
+
+## v1.2.0
+
+- **Enhanced focus timer** — Long breaks, flowtime (open-ended focus) mode, and session stats summary after each work cycle
+- **Interactive stats dashboard** — Click any KPI card to drill down into the matching task list. New charts: priority breakdown, project breakdown, and day-of-week activity. Streaks displayed prominently at the top
+- **Fix: session refresh on auth errors** — RLS violations now trigger automatic session refresh instead of silent failures
 
 ## v1.1.6
 

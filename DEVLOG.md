@@ -4,6 +4,64 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## v1.3.1 — Performance, Update Banner, Reference URL Fix (2026-04-14)
+
+**Session type:** Performance optimization + feature + bug fix
+
+**What was built/fixed:**
+
+- **Supabase disk IO optimization** — Adaptive polling intervals replace fixed 10s polling, compound indexes added for incremental sync queries, N+1 label/member lookups replaced with batch `.in()` queries. 23 files changed.
+- **Realtime subscription dedup** — Personal Realtime channels deduplicated, invite channel names stabilized to prevent subscription churn.
+- **Update restart banner** — Persistent banner at top of main content area when an auto-update finishes downloading, with version number and Restart button.
+- **Reference URL fix** — URLs from the main task input now correctly propagate to `createTask`.
+
+**Key commits:** 22da287, a64908c, 72ddd4b, 347e9b9
+
+---
+
+## v1.3.0 — Cookie Break Gamification (2026-04-13)
+
+**Session type:** Feature implementation
+
+**What was built:**
+
+- **Cookie break gamification for flow timer** — Animated cookie rewards on break completion, cookie jar collection, streak tracking. 13 files changed.
+- **Fix: cookie stats precision** — Seconds precision instead of minute rounding. 4 files changed.
+- **Fix: cookie label rename** — Stats labels corrected to plural "Cookies".
+
+**Key commits:** 3dc6153, 21d7985, 5ce883b
+
+---
+
+## v1.2.1 — Claude Desktop Config, Section Header Fix (2026-04-12)
+
+**Session type:** Feature + bug fix
+
+**What was built/fixed:**
+
+- **Claude Desktop config section** — MCP settings page now shows a JSON config snippet for Claude Desktop.
+- **Fix: section headers** — Update modal and release notes now render section headers correctly.
+
+**Key commits:** 583a52d, a945aac
+
+---
+
+## v1.2.0 — Enhanced Timer, Stats Dashboard, Auth Fixes (2026-04-11–12)
+
+**Session type:** Feature implementation + bug fixes
+
+**What was built:**
+
+- **Enhanced timer (#61)** — Long break support, flowtime (open-ended focus) mode, session stats summary. 10 files changed.
+- **Stats: clickable KPI drilldown** — KPI cards open filtered task lists on click. 5 files changed.
+- **Stats: enhanced dashboard** — Streaks at top, priority/project breakdown charts, day-of-week activity chart. 4 files changed.
+- **Fix: RLS auth detection** — RLS violations detected as auth errors, automatic session refresh.
+- **Fix: UUID DB regression** — Database naming regression, sync overhaul, timer fixes, stats enhancements. 17 files changed.
+
+**Key commits:** 4aa78d1, bbe0d92, d175681, b97f906, 8f5da48, e1abdd3
+
+---
+
 ## v1.1.6 — Stories #55-61, Update Modal, Sync and UX Fixes (2026-04-08 to 2026-04-11)
 
 **Session type:** Feature implementation + bug fixes + releases
