@@ -108,10 +108,26 @@ html.is-dragging * {
   border-radius: 0.3rem !important;
 }
 
-.react-datepicker__day--selected,
-.react-datepicker__day--keyboard-selected {
+.react-datepicker__day--selected {
   background-color: var(--color-accent) !important;
   color: white !important;
+}
+
+/* Keyboard-selected mirrors the selected day-of-month across navigated months
+   and falls back to today when nothing is selected — neutralize it so only the
+   real --selected day is filled. */
+.react-datepicker__day--keyboard-selected:not(.react-datepicker__day--selected) {
+  background-color: transparent !important;
+  color: var(--color-foreground) !important;
+}
+
+/* Today: subtle bordered indicator (no fill) when not the selected date. Uses
+   inset box-shadow to avoid shifting layout. */
+.react-datepicker__day--today:not(.react-datepicker__day--selected) {
+  background-color: transparent !important;
+  color: var(--color-foreground) !important;
+  font-weight: 400 !important;
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 
 .react-datepicker__day--outside-month {
