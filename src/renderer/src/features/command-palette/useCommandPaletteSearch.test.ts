@@ -6,7 +6,8 @@ import {
   matchesLabel,
   matchesStatus,
   matchesDue,
-  matchesHas
+  matchesHas,
+  matchesTextTerms
 } from './useCommandPaletteSearch'
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -372,5 +373,59 @@ describe('matchesHas', () => {
     const child = makeTask({ id: 'child-1', parent_id: 'parent-1' })
     const allTasks: Record<string, Task> = { 'parent-1': parent, 'child-1': child }
     expect(matchesHas(parent, ['sub'], allTasks)).toBe(true)
+  })
+})
+
+// --- matchesTextTerms ---
+
+describe('matchesTextTerms', () => {
+  const UUID = '609ea5c2-02c3-407a-9c86-3719992a692b'
+
+  it('returns true when no terms', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, [])).toBe(true)
+  })
+
+  it('matches a full UUID', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, [UUID])).toBe(true)
+  })
+
+  it('matches the first 8 chars of a UUID', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, ['609ea5c2'])).toBe(true)
+  })
+
+  it('matches a middle substring of a UUID', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, ['3719992a'])).toBe(true)
+  })
+
+  it('does not match an unrelated UUID', () => {
+    const task = makeTask({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', title: 'Other' })
+    expect(matchesTextTerms(task, ['609ea5c2'])).toBe(false)
+  })
+
+  it('still matches by title (regression)', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, ['milk'])).toBe(true)
+  })
+
+  it('is case-insensitive for both title and id', () => {
+    const task = makeTask({ id: UUID, title: 'Buy Milk' })
+    expect(matchesTextTerms(task, ['MILK'])).toBe(true)
+    expect(matchesTextTerms(task, ['609EA5C2'])).toBe(true)
+  })
+
+  it('requires ALL terms to match (AND semantics)', () => {
+    const task = makeTask({ id: UUID, title: 'Buy urgent milk' })
+    expect(matchesTextTerms(task, ['609ea5c2', 'urgent'])).toBe(true)
+    expect(matchesTextTerms(task, ['609ea5c2', 'nonexistent'])).toBe(false)
+  })
+
+  it('accepts a term that is in title OR id (either side satisfies)', () => {
+    const task = makeTask({ id: UUID, title: 'Buy milk' })
+    expect(matchesTextTerms(task, ['609ea5c2'])).toBe(true)
+    expect(matchesTextTerms(task, ['milk'])).toBe(true)
   })
 })

@@ -168,6 +168,16 @@ export function matchesHas(
   return false
 }
 
+export function matchesTextTerms(task: Task, textTerms: string[]): boolean {
+  if (textTerms.length === 0) return true
+  const titleLower = task.title.toLowerCase()
+  const idLower = task.id.toLowerCase()
+  return textTerms.every((term) => {
+    const t = term.toLowerCase()
+    return titleLower.includes(t) || idLower.includes(t)
+  })
+}
+
 export interface ExternalFilters {
   priorityValues?: number[]
   labelIds?: string[]
@@ -202,12 +212,9 @@ export function useCommandPaletteSearch(
     )
 
     const filtered = allTasks.filter((task) => {
-      // Text search: all text terms must match title (substring)
-      if (parsed.textTerms.length > 0) {
-        const titleLower = task.title.toLowerCase()
-        if (!parsed.textTerms.every((term) => titleLower.includes(term))) {
-          return false
-        }
+      // Text search: all text terms must match title OR task ID (substring)
+      if (!matchesTextTerms(task, parsed.textTerms)) {
+        return false
       }
 
       // Priority filter (typed)
