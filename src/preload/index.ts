@@ -136,7 +136,9 @@ const api: TodoozyAPI = {
   },
 
   fs: {
-    showOpenDialog: () => ipcRenderer.invoke('fs:showOpenDialog')
+    showOpenDialog: (options) => ipcRenderer.invoke('fs:showOpenDialog', options),
+    showSaveDialog: (options) => ipcRenderer.invoke('fs:showSaveDialog', options),
+    readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath)
   },
 
   auth: {

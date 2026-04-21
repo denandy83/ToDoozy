@@ -164,8 +164,16 @@ export interface AttachmentsAPI {
   delete(id: string): Promise<boolean>
 }
 
+export interface FsOpenDialogOptions {
+  filters?: Array<{ name: string; extensions: string[] }>
+  title?: string
+  multiSelections?: boolean
+}
+
 export interface FsAPI {
-  showOpenDialog(): Promise<{ canceled: boolean; filePaths: string[] }>
+  showOpenDialog(options?: FsOpenDialogOptions): Promise<{ canceled: boolean; filePaths: string[] }>
+  showSaveDialog(options: { defaultPath?: string; contents: string }): Promise<{ canceled: boolean; filePath?: string; error?: string }>
+  readFile(filePath: string): Promise<{ ok: boolean; contents?: string; error?: string }>
 }
 
 export interface SupabaseConfig {

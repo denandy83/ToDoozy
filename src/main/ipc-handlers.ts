@@ -880,14 +880,44 @@ export function registerIpcHandlers(): void {
     return fetchVersionNotes(version)
   })
 
-  ipcMain.handle('fs:showOpenDialog', async () => {
+  ipcMain.handle('fs:showOpenDialog', async (_e, options?: { filters?: Array<{ name: string; extensions: string[] }>; title?: string; multiSelections?: boolean }) => {
     const win = getMainWindow()
     if (!win) return { canceled: true, filePaths: [] }
+    const multi = options?.multiSelections ?? true
     const result = await dialog.showOpenDialog(win, {
-      properties: ['openFile', 'multiSelections'],
-      title: 'Select files to attach'
+      properties: multi ? ['openFile', 'multiSelections'] : ['openFile'],
+      title: options?.title ?? 'Select files to attach',
+      filters: options?.filters
     })
     return result
+  })
+
+  ipcMain.handle('fs:showSaveDialog', async (_e, options: { defaultPath?: string; contents: string }) => {
+    const win = getMainWindow()
+    if (!win) return { canceled: true }
+    const result = await dialog.showSaveDialog(win, {
+      defaultPath: options.defaultPath,
+      filters: [{ name: 'ToDoozy Theme', extensions: ['json'] }],
+      title: 'Export theme'
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    try {
+      writeFileSync(result.filePath, options.contents, 'utf8')
+      return { canceled: false, filePath: result.filePath }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Write failed'
+      return { canceled: false, error: message }
+    }
+  })
+
+  ipcMain.handle('fs:readFile', async (_e, filePath: string) => {
+    try {
+      const contents = readFileSync(filePath, 'utf8')
+      return { ok: true, contents }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Read failed'
+      return { ok: false, error: message }
+    }
   })
 }
 

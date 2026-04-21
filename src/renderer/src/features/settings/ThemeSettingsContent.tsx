@@ -2,9 +2,19 @@ import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forward
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
-import { Trash2, RotateCcw, Save } from 'lucide-react'
+import { Trash2, RotateCcw, Save, Download, Upload } from 'lucide-react'
 import { ColorSquare, ColorHex } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
+import { Modal } from '../../shared/components/Modal'
+import {
+  serializeThemePair,
+  validateThemeJson,
+  resolveImportName,
+  slugifyThemeName,
+  stripModeSuffix,
+  errorToMessage,
+  type ValidationError
+} from '../../shared/utils/themeIO'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
 const DEFAULT_CONFIG: ThemeConfig = {
@@ -134,7 +144,9 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const [changedKeys, setChangedKeys] = useState<Set<keyof ThemeConfig>>(new Set())
   const [isNaming, setIsNaming] = useState(false)
   const [blocked, setBlocked] = useState(false)
+  const [importError, setImportError] = useState<ValidationError | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const themesMap = useSettingsStore((s) => s.themes)
 
   const themesForMode = useThemesByMode(mode)
   const sortedThemes = useMemo(
@@ -438,6 +450,90 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
     }
   }, [customName, mode, editConfig, createTheme, setSetting, setCurrentTheme, addToast])
 
+  const handleExport = useCallback(async () => {
+    const selected = selectedThemeId ? themesMap[selectedThemeId] : null
+    if (!selected) {
+      addToast({ message: 'Select a theme first', variant: 'danger' })
+      return
+    }
+    const base = stripModeSuffix(selected.name)
+    const all = Object.values(themesMap)
+    const selectedConfig = parseConfig(selected)
+    const counterpartMode = selected.mode === 'dark' ? 'light' : 'dark'
+    const counterpartName = `${base} ${counterpartMode === 'dark' ? 'Dark' : 'Light'}`
+    const counterpart = all.find((t) => t.name === counterpartName && t.mode === counterpartMode)
+    const counterpartConfig: ThemeConfig = counterpart
+      ? parseConfig(counterpart)
+      : generateCounterpartConfig(selectedConfig)
+
+    const dark = selected.mode === 'dark' ? selectedConfig : counterpartConfig
+    const light = selected.mode === 'light' ? selectedConfig : counterpartConfig
+
+    const contents = serializeThemePair(base, dark, light)
+    const filename = `${slugifyThemeName(base)}.todoozy-theme.json`
+    const res = await window.api.fs.showSaveDialog({ defaultPath: filename, contents })
+    if (res.canceled) return
+    if (res.error) {
+      addToast({ message: 'Could not save file', variant: 'danger' })
+      return
+    }
+    addToast({ message: 'Theme exported' })
+  }, [selectedThemeId, themesMap, addToast])
+
+  const handleImport = useCallback(async () => {
+    const open = await window.api.fs.showOpenDialog({
+      filters: [{ name: 'ToDoozy Theme', extensions: ['json'] }],
+      title: 'Import theme',
+      multiSelections: false
+    })
+    if (open.canceled || open.filePaths.length === 0) return
+    const read = await window.api.fs.readFile(open.filePaths[0])
+    if (!read.ok || typeof read.contents !== 'string') {
+      setImportError({ kind: 'read' })
+      return
+    }
+    const result = validateThemeJson(read.contents)
+    if (!result.ok) {
+      setImportError(result.error)
+      return
+    }
+    const { name, configs } = result.theme
+
+    const existingBases = Array.from(new Set(
+      Object.values(themesMap).map((t) => stripModeSuffix(t.name))
+    ))
+    const baseName = resolveImportName(name, existingBases)
+
+    const darkId = crypto.randomUUID()
+    const lightId = crypto.randomUUID()
+
+    try {
+      await createTheme({
+        id: darkId,
+        name: `${baseName} Dark`,
+        mode: 'dark',
+        config: JSON.stringify(configs.dark)
+      })
+      await createTheme({
+        id: lightId,
+        name: `${baseName} Light`,
+        mode: 'light',
+        config: JSON.stringify(configs.light)
+      })
+    } catch (err) {
+      console.error('[theme import] createTheme failed', err)
+      setImportError({ kind: 'write' })
+      return
+    }
+
+    const newId = mode === 'dark' ? darkId : lightId
+    setSelectedThemeId(newId)
+    await setSetting('theme_id', newId)
+    await setSetting('theme_mode', mode)
+    setCurrentTheme(newId)
+    addToast({ message: 'Theme loaded successfully' })
+  }, [themesMap, mode, createTheme, setSetting, setCurrentTheme, addToast])
+
   return (
     <div className="flex flex-col gap-5">
       {/* Mode toggle */}
@@ -500,6 +596,23 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
               ))}
               <option value="__new__">+ New Theme...</option>
             </select>
+            <button
+              onClick={handleExport}
+              disabled={!selectedThemeId}
+              aria-label="Export theme"
+              title="Export theme to JSON"
+              className="rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground disabled:opacity-40"
+            >
+              <Download size={14} />
+            </button>
+            <button
+              onClick={handleImport}
+              aria-label="Import theme"
+              title="Import theme from JSON"
+              className="rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            >
+              <Upload size={14} />
+            </button>
             {configEdited ? (
               <button
                 onClick={handleApply}
@@ -572,6 +685,24 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       >
         Apply Theme
       </button>
+
+      <Modal
+        open={importError !== null}
+        onClose={() => setImportError(null)}
+        title="Import failed"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm font-light text-foreground">
+            {importError ? errorToMessage(importError) : ''}
+          </p>
+          <button
+            onClick={() => setImportError(null)}
+            className="self-end rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg hover:bg-accent/80"
+          >
+            Close
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 })
