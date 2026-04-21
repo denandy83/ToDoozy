@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forward
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
-import { Trash2, RotateCcw, Save, Download, Upload } from 'lucide-react'
+import { Trash2, RotateCcw, Save, Download, Upload, Pencil } from 'lucide-react'
 import { ColorSquare, ColorHex } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
 import { Modal } from '../../shared/components/Modal'
@@ -144,9 +144,12 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const [colorsEdited, setColorsEdited] = useState(false)
   const [changedKeys, setChangedKeys] = useState<Set<keyof ThemeConfig>>(new Set())
   const [isNaming, setIsNaming] = useState(false)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
   const [blocked, setBlocked] = useState(false)
   const [importError, setImportError] = useState<ValidationError | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const themesMap = useSettingsStore((s) => s.themes)
 
   const themesForMode = useThemesByMode(mode)
@@ -192,20 +195,18 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
     [currentTheme, setSetting, setCurrentTheme]
   )
 
-  const handlePresetChange = useCallback(async (themeId: string) => {
+  const handlePresetChange = useCallback((themeId: string) => {
     const themes = useSettingsStore.getState().themes
     const theme = themes[themeId]
     if (!theme) return
     setSelectedThemeId(themeId)
     setEditConfig(parseConfig(theme))
     applyThemeConfig(parseConfig(theme))
-    await setSetting('theme_id', themeId)
-    await setSetting('theme_mode', theme.mode === 'light' ? 'light' : 'dark')
-    setCurrentTheme(themeId)
-    setConfigEdited(false)
+    const currentId = useSettingsStore.getState().currentThemeId
+    setConfigEdited(themeId !== currentId)
     setColorsEdited(false)
     setChangedKeys(new Set())
-  }, [setSetting, setCurrentTheme])
+  }, [])
 
   const selectedTheme = selectedThemeId ? useSettingsStore.getState().themes[selectedThemeId] : null
 
@@ -304,6 +305,62 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   useEffect(() => {
     if (isNaming) nameInputRef.current?.focus()
   }, [isNaming])
+
+  useEffect(() => {
+    if (isRenaming) {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    }
+  }, [isRenaming])
+
+  const handleStartRename = useCallback(() => {
+    if (!selectedTheme) return
+    setRenameValue(stripModeSuffix(selectedTheme.name))
+    setIsRenaming(true)
+  }, [selectedTheme])
+
+  const handleCancelRename = useCallback(() => {
+    setIsRenaming(false)
+    setRenameValue('')
+  }, [])
+
+  const handleSaveRename = useCallback(async () => {
+    if (!selectedThemeId || !selectedTheme) return
+    const newBase = renameValue.trim()
+    if (!newBase) {
+      addToast({ message: 'Enter a name', variant: 'danger' })
+      return
+    }
+    const oldBase = stripModeSuffix(selectedTheme.name)
+    if (newBase === oldBase) {
+      handleCancelRename()
+      return
+    }
+    try {
+      const currentSuffix = selectedTheme.mode === 'dark' ? 'Dark' : 'Light'
+      await updateTheme(selectedThemeId, { name: `${newBase} ${currentSuffix}` })
+
+      const counterpartMode = selectedTheme.mode === 'dark' ? 'light' : 'dark'
+      const counterpartSuffix = counterpartMode === 'dark' ? 'Dark' : 'Light'
+      const allThemes = useSettingsStore.getState().themes
+      const counterpart = Object.values(allThemes).find(
+        (t) =>
+          t.id !== selectedThemeId &&
+          stripModeSuffix(t.name) === oldBase &&
+          t.mode === counterpartMode &&
+          !t.is_builtin
+      )
+      if (counterpart) {
+        await updateTheme(counterpart.id, { name: `${newBase} ${counterpartSuffix}` })
+      }
+      setIsRenaming(false)
+      setRenameValue('')
+      addToast({ message: 'Theme renamed' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to rename theme'
+      addToast({ message: msg, variant: 'danger' })
+    }
+  }, [selectedThemeId, selectedTheme, renameValue, updateTheme, addToast, handleCancelRename])
 
   const canDeleteSelected = selectedTheme && !selectedTheme.is_builtin
 
@@ -588,6 +645,34 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
               Create
             </button>
           </div>
+        ) : isRenaming ? (
+          <div className="flex flex-1 items-center gap-2">
+            <input
+              ref={renameInputRef}
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveRename()
+                if (e.key === 'Escape') handleCancelRename()
+              }}
+              placeholder="Theme name..."
+              className="flex-1 rounded-lg border border-accent bg-background px-3 py-1.5 text-sm text-foreground outline-none"
+            />
+            <button
+              onClick={handleSaveRename}
+              disabled={!renameValue.trim()}
+              className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Rename
+            </button>
+            <button
+              onClick={handleCancelRename}
+              className="rounded-lg px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
         ) : (
           <>
             <select
@@ -619,7 +704,17 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
             >
               <Upload size={14} />
             </button>
-            {configEdited ? (
+            {canDeleteSelected && (
+              <button
+                onClick={handleStartRename}
+                aria-label="Rename theme"
+                title="Rename theme"
+                className="rounded-lg p-1.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+            {colorsEdited ? (
               <button
                 onClick={handleApply}
                 className="rounded-lg p-1.5 text-muted transition-colors hover:bg-accent/10 hover:text-accent"
