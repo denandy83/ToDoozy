@@ -53,6 +53,13 @@ export function stripModeSuffix(name: string): string {
   return name.replace(/\s+(Dark|Light)$/i, '').trim() || name
 }
 
+export function isThemeConfigEqual(a: ThemeConfig, b: ThemeConfig): boolean {
+  for (const key of CONFIG_KEYS) {
+    if (a[key].toLowerCase() !== b[key].toLowerCase()) return false
+  }
+  return true
+}
+
 export function serializeThemePair(
   baseName: string,
   darkConfig: ThemeConfig,

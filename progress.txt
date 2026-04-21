@@ -11,3 +11,11 @@ Started: Mon Apr 20 23:16:21 CEST 2026
 - On any validation error, an error Modal shows with a typed message; atomically skips DB writes. On success, toast "Theme loaded successfully" (matches AC wording).
 - Vitest: 23 new tests in `themeIO.test.ts` covering slugify, strip-mode, round-trip, every validation failure kind, collision resolution, and exhaustive error messages. Full suite: 537 passed, 1 pre-existing unrelated failure (`packages/telegram-bot/dist/parser.test.js` CJS issue).
 - typecheck clean; `npm run dev` builds main+preload+renderer on port 5200.
+
+## 2026-04-21 — Story #63: Theme save icon only appears when colors actually differ
+
+- **Root cause**: `handlePresetChange` set `configEdited = true` whenever the dropdown selection changed to a theme different from `currentThemeId` (line 186). This triggered the Save icon to appear on any dropdown switch, even when no color values had been edited.
+- **Fix**: Made `handlePresetChange` auto-persist the selection (`setSetting('theme_id', ...)`, `setSetting('theme_mode', ...)`, `setCurrentTheme(themeId)`) and set `configEdited=false`. Switching the dropdown now acts like selection=application, matching user expectation. Same logic applied to `handleModeChange` for consistency (dark/light mode toggle also auto-persists the counterpart theme).
+- **Also**: Updated `handleColorChange` to compute dirty state from the actual diff between `editConfig` and the saved theme config — so reverting edits back to the saved values (e.g., retyping the original hex) clears the Save icon. Added pure helper `isThemeConfigEqual(a, b)` in `themeIO.ts` that does case-insensitive per-key comparison across all 8 theme tokens.
+- Vitest: 4 new tests for `isThemeConfigEqual` (identical, single-key diff, all-keys diff, case-insensitive). Full suite: 541 passed (baseline was 537).
+- Decision: kept the bottom "Apply Theme" button untouched — still works for committing edits, just becomes a no-op idempotent re-apply path now that dropdown selection auto-persists.

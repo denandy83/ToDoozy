@@ -41,8 +41,8 @@
         "Apply Theme button at the bottom of the panel still works for committing color edits",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     },
     {
       "id": "64",

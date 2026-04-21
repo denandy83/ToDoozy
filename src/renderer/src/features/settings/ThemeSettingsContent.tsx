@@ -12,6 +12,7 @@ import {
   resolveImportName,
   slugifyThemeName,
   stripModeSuffix,
+  isThemeConfigEqual,
   errorToMessage,
   type ValidationError
 } from '../../shared/utils/themeIO'
@@ -166,7 +167,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   }, [currentTheme])
 
   const handleModeChange = useCallback(
-    (newMode: 'dark' | 'light') => {
+    async (newMode: 'dark' | 'light') => {
       setMode(newMode)
       const themesInMode = Object.values(useSettingsStore.getState().themes).filter(
         (t) => t.mode === newMode
@@ -180,39 +181,44 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
         setSelectedThemeId(target.id)
         setEditConfig(parseConfig(target))
         applyThemeConfig(parseConfig(target))
+        await setSetting('theme_id', target.id)
+        await setSetting('theme_mode', newMode)
+        setCurrentTheme(target.id)
         setConfigEdited(false)
+        setColorsEdited(false)
+        setChangedKeys(new Set())
       }
     },
-    [currentTheme]
+    [currentTheme, setSetting, setCurrentTheme]
   )
 
-  const handlePresetChange = useCallback((themeId: string) => {
+  const handlePresetChange = useCallback(async (themeId: string) => {
     const themes = useSettingsStore.getState().themes
     const theme = themes[themeId]
-    if (theme) {
-      setSelectedThemeId(themeId)
-      setEditConfig(parseConfig(theme))
-      applyThemeConfig(parseConfig(theme))
-      // Mark as edited if switching to a different theme than the current one
-      const currentId = useSettingsStore.getState().currentThemeId
-      setConfigEdited(themeId !== currentId)
-      setColorsEdited(false)
-      setChangedKeys(new Set())
-    }
-  }, [])
+    if (!theme) return
+    setSelectedThemeId(themeId)
+    setEditConfig(parseConfig(theme))
+    applyThemeConfig(parseConfig(theme))
+    await setSetting('theme_id', themeId)
+    await setSetting('theme_mode', theme.mode === 'light' ? 'light' : 'dark')
+    setCurrentTheme(themeId)
+    setConfigEdited(false)
+    setColorsEdited(false)
+    setChangedKeys(new Set())
+  }, [setSetting, setCurrentTheme])
 
   const selectedTheme = selectedThemeId ? useSettingsStore.getState().themes[selectedThemeId] : null
 
   const handleColorChange = useCallback((key: keyof ThemeConfig, value: string) => {
-    setEditConfig((prev) => {
-      const next = { ...prev, [key]: value }
-      applyThemeConfig(next)
-      return next
-    })
-    setConfigEdited(true)
-    setColorsEdited(true)
+    const next = { ...editConfig, [key]: value }
+    setEditConfig(next)
+    applyThemeConfig(next)
+    const saved = selectedThemeId ? useSettingsStore.getState().themes[selectedThemeId] : null
+    const dirty = saved ? !isThemeConfigEqual(next, parseConfig(saved)) : true
+    setConfigEdited(dirty)
+    setColorsEdited(dirty)
     setChangedKeys((prev) => new Set([...prev, key]))
-  }, [])
+  }, [editConfig, selectedThemeId])
 
   const handleApply = useCallback(async () => {
     if (!selectedThemeId) return

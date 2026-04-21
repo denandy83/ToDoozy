@@ -5,6 +5,7 @@ import {
   serializeThemePair,
   validateThemeJson,
   resolveImportName,
+  isThemeConfigEqual,
   errorToMessage,
   type ValidationError
 } from './themeIO'
@@ -199,6 +200,36 @@ describe('resolveImportName', () => {
       'Twilight (Imported 3)'
     ]
     expect(resolveImportName('Twilight', existing)).toBe('Twilight (Imported 4)')
+  })
+})
+
+describe('isThemeConfigEqual', () => {
+  it('returns true for identical configs', () => {
+    expect(isThemeConfigEqual(DARK, DARK)).toBe(true)
+    expect(isThemeConfigEqual(DARK, { ...DARK })).toBe(true)
+  })
+
+  it('returns false when a single color differs', () => {
+    const changed: ThemeConfig = { ...DARK, accent: '#ff0000' }
+    expect(isThemeConfigEqual(DARK, changed)).toBe(false)
+  })
+
+  it('returns false when all colors differ', () => {
+    expect(isThemeConfigEqual(DARK, LIGHT)).toBe(false)
+  })
+
+  it('ignores hex case differences', () => {
+    const upper: ThemeConfig = {
+      bg: DARK.bg.toUpperCase(),
+      fg: DARK.fg.toUpperCase(),
+      fgSecondary: DARK.fgSecondary.toUpperCase(),
+      fgMuted: DARK.fgMuted.toUpperCase(),
+      muted: DARK.muted.toUpperCase(),
+      accent: DARK.accent.toUpperCase(),
+      accentFg: DARK.accentFg.toUpperCase(),
+      border: DARK.border.toUpperCase()
+    }
+    expect(isThemeConfigEqual(DARK, upper)).toBe(true)
   })
 })
 
