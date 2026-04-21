@@ -1,6 +1,6 @@
 import { autoUpdater, type UpdateInfo, type ProgressInfo } from 'electron-updater'
-import { BrowserWindow, ipcMain } from 'electron'
-import { fetchVersionNotes } from './services/ReleaseNotesService'
+import { BrowserWindow, ipcMain, app } from 'electron'
+import { fetchNotesBetween, fetchVersionNotes } from './services/ReleaseNotesService'
 import { setQuitting } from './index'
 
 export type UpdateStatus =
@@ -61,10 +61,21 @@ export function initUpdater(): void {
       return
     }
 
-    // Try fetching release notes from Supabase first, fall back to GitHub Release body
-    fetchVersionNotes(version)
-      .then((supabaseNotes) => {
-        broadcastStatus({ state: 'available', version, releaseNotes: supabaseNotes || ghReleaseNotes })
+    // Fetch notes for every version the user skipped: (currentVersion, targetVersion].
+    // Falls back to single-version notes, then to GitHub Release body.
+    const currentVersion = app.getVersion()
+    fetchNotesBetween(currentVersion, version)
+      .then(async (rangeNotes) => {
+        if (rangeNotes) {
+          broadcastStatus({ state: 'available', version, releaseNotes: rangeNotes })
+          return
+        }
+        const singleNotes = await fetchVersionNotes(version)
+        broadcastStatus({
+          state: 'available',
+          version,
+          releaseNotes: singleNotes || ghReleaseNotes
+        })
       })
       .catch(() => {
         broadcastStatus({ state: 'available', version, releaseNotes: ghReleaseNotes })

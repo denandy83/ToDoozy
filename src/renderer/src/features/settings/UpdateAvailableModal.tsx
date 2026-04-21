@@ -70,15 +70,52 @@ export function UpdateAvailableModal(): React.JSX.Element | null {
   )
 }
 
-type NoteEntry = { type: 'section'; title: string } | { type: 'item'; title: string; desc: string }
+type NoteEntry =
+  | { type: 'version'; label: string }
+  | { type: 'section'; title: string }
+  | { type: 'item'; title: string; desc: string }
+
+function normalizeNotes(input: string): string {
+  if (!input) return ''
+  const looksLikeHtml = /<\/?(h[1-6]|ul|ol|li|strong|em|code|p|br)\b/i.test(input)
+  if (!looksLikeHtml) return input
+  return input
+    .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, (_, t) => `\n### ${stripTags(t).trim()}\n`)
+    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, t) => `\n- ${htmlToMd(t).trim()}`)
+    .replace(/<\/?(ul|ol|p)[^>]*>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+}
+
+function htmlToMd(html: string): string {
+  return html
+    .replace(/<strong[^>]*>([\s\S]*?)<\/strong>/gi, '**$1**')
+    .replace(/<b[^>]*>([\s\S]*?)<\/b>/gi, '**$1**')
+    .replace(/<em[^>]*>([\s\S]*?)<\/em>/gi, '*$1*')
+    .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+}
+
+function stripTags(html: string): string {
+  return htmlToMd(html).replace(/\*\*/g, '').replace(/\*/g, '').replace(/`/g, '')
+}
 
 function ReleaseNotes({ notes }: { notes: string }): React.JSX.Element | null {
   const parsed = useMemo(() => {
-    if (!notes) return []
+    const normalized = normalizeNotes(notes)
+    if (!normalized) return []
     const entries: NoteEntry[] = []
-    for (const raw of notes.split('\n')) {
+    for (const raw of normalized.split('\n')) {
       const line = raw.trim()
-      if (line.startsWith('### ')) {
+      if (line.startsWith('## ')) {
+        entries.push({ type: 'version', label: line.slice(3) })
+      } else if (line.startsWith('### ')) {
         entries.push({ type: 'section', title: line.slice(4) })
       } else if (line.startsWith('- ')) {
         const content = line.slice(2)
@@ -97,18 +134,34 @@ function ReleaseNotes({ notes }: { notes: string }): React.JSX.Element | null {
 
   return (
     <div className="max-h-60 overflow-y-auto rounded-lg border border-border bg-background p-3">
-      {parsed.map((entry, i) =>
-        entry.type === 'section' ? (
-          <p key={i} className={`text-[10px] font-bold uppercase tracking-[0.3em] text-muted ${i > 0 ? 'mt-3' : ''} mb-1`}>
-            {entry.title}
-          </p>
-        ) : (
+      {parsed.map((entry, i) => {
+        if (entry.type === 'version') {
+          return (
+            <div
+              key={i}
+              className={`${i > 0 ? 'mt-4' : ''} mb-2 inline-block rounded-md bg-accent/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-accent`}
+            >
+              {entry.label}
+            </div>
+          )
+        }
+        if (entry.type === 'section') {
+          return (
+            <p
+              key={i}
+              className={`text-[10px] font-bold uppercase tracking-[0.3em] text-muted ${i > 0 ? 'mt-3' : ''} mb-1`}
+            >
+              {entry.title}
+            </p>
+          )
+        }
+        return (
           <div key={i} className="py-1.5 border-b border-border/30 last:border-0">
             <p className="text-[13px] font-medium text-foreground">{entry.title}</p>
             {entry.desc && <p className="text-[12px] font-light text-muted mt-0.5">{entry.desc}</p>}
           </div>
         )
-      )}
+      })}
     </div>
   )
 }

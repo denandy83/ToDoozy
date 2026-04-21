@@ -5,7 +5,8 @@ export default defineConfig({
     exclude: [
       '.claude/**',
       'ToDoozy/**',
-      '**/node_modules/**'
+      '**/node_modules/**',
+      '**/dist/**'
     ]
   }
 })

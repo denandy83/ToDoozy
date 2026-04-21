@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import semver from 'semver'
 import { SettingsRepository } from '../repositories/SettingsRepository'
 import { getDatabase } from '../database'
 
@@ -81,6 +82,83 @@ export async function fetchVersionNotes(version: string): Promise<string | null>
     return null
   } catch (err) {
     console.error('[ReleaseNotes] Failed to fetch version notes:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/**
+ * Fetch all release notes strictly greater than `fromVersion` and less than or
+ * equal to `toVersion`, concatenated newest-first as:
+ *   ## vX.Y.Z
+ *   <content>
+ *
+ *   ## vX.Y.W
+ *   <content>
+ *
+ * Used by the update modal so a user on 1.3.2 upgrading to 1.4.1 sees notes
+ * for every intermediate version (1.3.3, 1.4.0, 1.4.1). Returns null on error
+ * or when no rows match.
+ */
+/**
+ * Pure helper: from a set of Supabase release rows, keep those strictly greater
+ * than `fromVersion` and less than or equal to `toVersion` (semver), then
+ * concatenate newest-first as `## vX.Y.Z\n<content>\n\n...`.
+ * Exported for unit testing. Returns null when no rows match or versions invalid.
+ */
+export function selectNotesInRange(
+  releases: SupabaseReleaseNote[],
+  fromVersion: string,
+  toVersion: string
+): string | null {
+  const from = semver.coerce(fromVersion)?.version
+  const to = semver.coerce(toVersion)?.version
+  if (!from || !to) return null
+
+  const inRange = releases.filter((r) => {
+    const v = semver.coerce(r.version)?.version
+    if (!v) return false
+    return semver.gt(v, from) && semver.lte(v, to)
+  })
+
+  if (inRange.length === 0) return null
+
+  inRange.sort((a, b) => {
+    const av = semver.coerce(a.version)?.version
+    const bv = semver.coerce(b.version)?.version
+    if (!av || !bv) return 0
+    return semver.rcompare(av, bv)
+  })
+
+  return inRange
+    .map((r) => {
+      const label = r.version.startsWith('v') ? r.version : `v${r.version}`
+      return `## ${label}\n${r.content.trim()}`
+    })
+    .join('\n\n')
+}
+
+export async function fetchNotesBetween(
+  fromVersion: string,
+  toVersion: string
+): Promise<string | null> {
+  try {
+    const client = getClient()
+    const { data, error } = await client
+      .from(SUPABASE_TABLE)
+      .select('version, content, published_at')
+      .order('published_at', { ascending: false })
+
+    if (error) {
+      console.error('[ReleaseNotes] Failed to fetch notes between:', error.message)
+      return null
+    }
+
+    return selectNotesInRange((data ?? []) as SupabaseReleaseNote[], fromVersion, toVersion)
+  } catch (err) {
+    console.error(
+      '[ReleaseNotes] Failed to fetch notes between:',
+      err instanceof Error ? err.message : err
+    )
     return null
   }
 }
