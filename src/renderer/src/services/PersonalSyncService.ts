@@ -8,6 +8,7 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
+import { logEvent } from '../shared/stores/logStore'
 import type { Task, Status, Label } from '../../../shared/types'
 
 /** Mark a successful push in the sync store */
@@ -1194,19 +1195,23 @@ export async function syncTaskLabel(taskId: string, labelId: string): Promise<vo
 
 // ── Realtime Subscriptions for All Projects ──────────────────────────
 
-/** Track active personal-project Realtime channels to prevent duplicates. */
-const personalChannels: Map<string, RealtimeChannel> = new Map()
-
-/**
- * Subscribe to Realtime changes for a personal (non-shared) project.
- * No-ops if a subscription already exists for this project.
- */
-export async function subscribeToPersonalProject(
-  projectId: string,
+interface PersonalChannelState {
+  channel: RealtimeChannel | null
   onChange: (event: string, data: Record<string, unknown>) => void
-): Promise<void> {
-  if (personalChannels.has(projectId)) return
+  cancelled: boolean
+  attempt: number
+  reconnectTimer: ReturnType<typeof setTimeout> | null
+}
 
+/** Track active personal-project Realtime channel state (incl. reconnect). */
+const personalChannelStates: Map<string, PersonalChannelState> = new Map()
+
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+function getReconnectDelay(attempt: number): number {
+  return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
+}
+
+async function createPersonalChannel(projectId: string, state: PersonalChannelState): Promise<void> {
   const supabase = await getSupabase()
   const channel = supabase
     .channel(`personal:${projectId}`)
@@ -1217,20 +1222,72 @@ export async function subscribeToPersonalProject(
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
-        onChange(payload.eventType, data)
+        state.onChange(payload.eventType, data)
       }
     )
     .subscribe((status) => {
+      if (state.cancelled) return
       const pName = projectNameCache.get(projectId) ?? projectId
       console.log(`[Realtime] ${pName}: ${status}`)
       if (status === 'SUBSCRIBED') {
+        state.attempt = 0
         useSyncStore.getState().setRealtimeConnected(true)
+        logEvent('info', 'realtime', `Subscribed to personal project`, pName)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         useSyncStore.getState().setRealtimeConnected(false)
+        const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
+        logEvent(level, 'realtime', `Channel ${status} on personal project`, pName)
+        schedulePersonalReconnect(projectId)
       }
     })
+  state.channel = channel
+}
 
-  personalChannels.set(projectId, channel)
+function schedulePersonalReconnect(projectId: string): void {
+  const state = personalChannelStates.get(projectId)
+  if (!state || state.cancelled || state.reconnectTimer) return
+
+  const delay = getReconnectDelay(state.attempt)
+  state.attempt += 1
+  const pName = projectNameCache.get(projectId) ?? projectId
+  logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, pName)
+
+  state.reconnectTimer = setTimeout(async () => {
+    state.reconnectTimer = null
+    if (state.cancelled) return
+    if (!navigator.onLine) {
+      logEvent('warn', 'realtime', `Reconnect deferred — offline`, pName)
+      schedulePersonalReconnect(projectId)
+      return
+    }
+    try {
+      const supabase = await getSupabase()
+      if (state.channel) await supabase.removeChannel(state.channel)
+    } catch { /* channel may already be dead */ }
+    await createPersonalChannel(projectId, state)
+  }, delay)
+}
+
+/**
+ * Subscribe to Realtime changes for a personal (non-shared) project.
+ * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
+ * No-ops if a subscription already exists for this project.
+ */
+export async function subscribeToPersonalProject(
+  projectId: string,
+  onChange: (event: string, data: Record<string, unknown>) => void
+): Promise<void> {
+  if (personalChannelStates.has(projectId)) return
+
+  const state: PersonalChannelState = {
+    channel: null,
+    onChange,
+    cancelled: false,
+    attempt: 0,
+    reconnectTimer: null
+  }
+  personalChannelStates.set(projectId, state)
+  await createPersonalChannel(projectId, state)
 }
 
 /**
@@ -1238,10 +1295,17 @@ export async function subscribeToPersonalProject(
  */
 export async function unsubscribeAllPersonal(): Promise<void> {
   const supabase = await getSupabase()
-  for (const channel of personalChannels.values()) {
-    await supabase.removeChannel(channel)
+  for (const state of personalChannelStates.values()) {
+    state.cancelled = true
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+    if (state.channel) {
+      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    }
   }
-  personalChannels.clear()
+  personalChannelStates.clear()
 }
 
 // ── Online/Offline Detection ─────────────────────────────────────────
@@ -1256,6 +1320,7 @@ export function startOnlineMonitoring(): () => void {
 
   const handleOnline = (): void => {
     syncStore.setStatus('synced')
+    logEvent('info', 'network', 'Browser reports online')
     // Flush sync queue on reconnect
     import('./SyncService').then(({ processSyncQueue }) => {
       processSyncQueue().then((count) => {
@@ -1266,6 +1331,7 @@ export function startOnlineMonitoring(): () => void {
 
   const handleOffline = (): void => {
     syncStore.setStatus('offline')
+    logEvent('warn', 'network', 'Browser reports offline')
   }
 
   window.addEventListener('online', handleOnline)

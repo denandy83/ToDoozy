@@ -10,9 +10,10 @@ import { LabelSettingsContent } from './LabelSettingsContent'
 import { TimerSettingsContent } from './TimerSettingsContent'
 import { IntegrationsSettingsContent } from './IntegrationsSettingsContent'
 import { AboutSettingsContent } from './AboutSettingsContent'
+import { LogsSettingsContent } from './LogsSettingsContent'
 import { WhatsNewDot } from './WhatsNewSettingsContent'
 
-type Tab = 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'integrations' | 'about'
+type Tab = 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'integrations' | 'logs' | 'about'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -88,7 +89,8 @@ export function UnifiedSettingsModal({
   const tabs: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' }, { key: 'projects', label: 'Projects' },
     { key: 'appearance', label: 'Appearance' }, { key: 'labels', label: 'Labels' },
-    { key: 'timer', label: 'Timer' }, { key: 'integrations', label: 'Integrations' }, { key: 'about', label: 'About' }
+    { key: 'timer', label: 'Timer' }, { key: 'integrations', label: 'Integrations' },
+    { key: 'logs', label: 'Logs' }, { key: 'about', label: 'About' }
   ]
 
   return (
@@ -143,6 +145,7 @@ export function UnifiedSettingsModal({
           {activeTab === 'labels' && <LabelSettingsContent />}
           {activeTab === 'timer' && <TimerSettingsContent />}
           {activeTab === 'integrations' && <IntegrationsSettingsContent />}
+          {activeTab === 'logs' && <LogsSettingsContent />}
           {activeTab === 'about' && <AboutSettingsContent />}
         </div>
       </div>

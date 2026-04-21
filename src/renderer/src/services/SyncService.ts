@@ -7,12 +7,25 @@ import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import type { Task, Status, SyncOperation } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
+import { logEvent } from '../shared/stores/logStore'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
-let channels: Map<string, RealtimeChannel> = new Map()
+interface SharedChannelState {
+  channel: RealtimeChannel | null
+  cancelled: boolean
+  attempt: number
+  reconnectTimer: ReturnType<typeof setTimeout> | null
+}
+
+let channels: Map<string, SharedChannelState> = new Map()
 let onChangeCallback: RealtimeCallback | null = null
 let isOnline = true
+
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+function getReconnectDelay(attempt: number): number {
+  return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
+}
 
 /** Mark a successful push in the sync store */
 function markSynced(): void {
@@ -31,12 +44,7 @@ export function setRealtimeCallback(cb: RealtimeCallback): void {
   onChangeCallback = cb
 }
 
-/**
- * Subscribe to Realtime changes for a shared project.
- */
-export async function subscribeToProject(projectId: string): Promise<void> {
-  if (channels.has(projectId)) return
-
+async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
   const supabase = await getSupabase()
   const channel = supabase
     .channel(`project:${projectId}`)
@@ -64,7 +72,6 @@ export async function subscribeToProject(projectId: string): Promise<void> {
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_members', filter: `project_id=eq.${projectId}` },
       (payload) => {
-        // For DELETE events, pass the old record (new is empty on delete)
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
@@ -79,30 +86,82 @@ export async function subscribeToProject(projectId: string): Promise<void> {
       }
     )
     .subscribe((status) => {
+      if (state.cancelled) return
       if (status === 'SUBSCRIBED') {
+        state.attempt = 0
         console.log(`[Realtime] Subscribed to project ${projectId}`)
-        // Realtime connected — mark as online
+        logEvent('info', 'realtime', `Subscribed to shared project`, projectId)
         const currentStatus = useSyncStore.getState().status
         if (currentStatus === 'offline') {
           useSyncStore.getState().setStatus('synced')
         }
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         console.warn(`[Realtime] Project subscription ${status} for ${projectId}`)
+        const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
+        logEvent(level, 'realtime', `Channel ${status} on shared project`, projectId)
         useSyncStore.getState().setStatus('offline')
+        scheduleSharedReconnect(projectId)
       }
     })
+  state.channel = channel
+}
 
-  channels.set(projectId, channel)
+function scheduleSharedReconnect(projectId: string): void {
+  const state = channels.get(projectId)
+  if (!state || state.cancelled || state.reconnectTimer) return
+
+  const delay = getReconnectDelay(state.attempt)
+  state.attempt += 1
+  logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, projectId)
+
+  state.reconnectTimer = setTimeout(async () => {
+    state.reconnectTimer = null
+    if (state.cancelled) return
+    if (!navigator.onLine) {
+      logEvent('warn', 'realtime', `Reconnect deferred — offline`, projectId)
+      scheduleSharedReconnect(projectId)
+      return
+    }
+    try {
+      const supabase = await getSupabase()
+      if (state.channel) await supabase.removeChannel(state.channel)
+    } catch { /* channel may already be dead */ }
+    await createSharedChannel(projectId, state)
+  }, delay)
+}
+
+/**
+ * Subscribe to Realtime changes for a shared project.
+ * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
+ */
+export async function subscribeToProject(projectId: string): Promise<void> {
+  if (channels.has(projectId)) return
+
+  const state: SharedChannelState = {
+    channel: null,
+    cancelled: false,
+    attempt: 0,
+    reconnectTimer: null
+  }
+  channels.set(projectId, state)
+  await createSharedChannel(projectId, state)
 }
 
 /**
  * Unsubscribe from Realtime changes for a project.
  */
 export async function unsubscribeFromProject(projectId: string): Promise<void> {
-  const channel = channels.get(projectId)
-  if (channel) {
-    const supabase = await getSupabase()
-    await supabase.removeChannel(channel)
+  const state = channels.get(projectId)
+  if (state) {
+    state.cancelled = true
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+    if (state.channel) {
+      const supabase = await getSupabase()
+      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    }
     channels.delete(projectId)
   }
 }
@@ -112,8 +171,15 @@ export async function unsubscribeFromProject(projectId: string): Promise<void> {
  */
 export async function unsubscribeAll(): Promise<void> {
   const supabase = await getSupabase()
-  for (const channel of channels.values()) {
-    await supabase.removeChannel(channel)
+  for (const state of channels.values()) {
+    state.cancelled = true
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+    if (state.channel) {
+      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    }
   }
   channels = new Map()
 }
@@ -437,8 +503,10 @@ export async function subscribeToInvites(
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         console.log('[Invites] Realtime subscription connected')
+        logEvent('info', 'realtime', 'Subscribed to invites channel')
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         console.warn(`[Invites] Subscription failed (attempt ${attempt}):`, status)
+        logEvent('warn', 'realtime', `Invites channel ${status} (attempt ${attempt})`)
         if (channel) supabase.removeChannel(channel)
         if (!cancelled && attempt < 5) {
           retryTimeout = setTimeout(() => subscribe(attempt + 1), 3000 * attempt)
