@@ -33,7 +33,7 @@ interface LabelState {
   excludePriorityFilters: Set<number>
   excludeAssigneeFilters: Set<string>
   excludeProjectFilters: Set<string>
-  labelFilterLogic: 'any' | 'all' // 'any' = OR (default), 'all' = AND
+  labelFilterLogic: 'any' | 'all' // 'any' = OR, 'all' = AND (default)
   dueDatePreset: string | null // 'today' | 'this_week' | 'overdue' | 'no_date'
   dueDateRange: DueDateRange | null // custom date range (relative or absolute)
   keyword: string // search keyword matching title and description
@@ -94,7 +94,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   excludePriorityFilters: new Set(),
   excludeAssigneeFilters: new Set(),
   excludeProjectFilters: new Set(),
-  labelFilterLogic: 'any' as const,
+  labelFilterLogic: 'all' as const,
   dueDatePreset: null,
   dueDateRange: null,
   keyword: '',
@@ -424,7 +424,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       dueDatePreset: null,
       dueDateRange: null,
       keyword: '',
-      labelFilterLogic: 'any'
+      labelFilterLogic: 'all'
     })
   },
 
@@ -522,7 +522,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       dueDatePreset: null,
       dueDateRange: null,
       keyword: '',
-      labelFilterLogic: 'any',
+      labelFilterLogic: 'all',
       sortRules: []
     })
   },

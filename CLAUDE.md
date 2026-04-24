@@ -182,3 +182,16 @@ When tackling a bug/improvement/feature from the ToDoozy task list:
 - **User confirms complete**: Move the task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
 
 For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — move to In Progress when starting, Testing when `passes:true` + `tested:true`, and leave Verified/Done for the user.
+
+## "Show me ToDoozy bugs"
+
+When the user asks for "ToDoozy bugs", "todoozy bugs", "list the bugs", or any equivalent phrasing, return the union (deduplicated) of:
+
+1. **Every task in the "Todoozy Bugs" shared project** (`cc513242-3bfa-439b-a933-ab2513fc2953`) — regardless of labels. Include all open statuses, exclude Done/archived unless the user asks otherwise.
+2. **Every task across ALL projects** that has BOTH of these labels:
+   - `Todoozy` (`82cc13d9-2a78-47aa-ad25-3de837c390c5`)
+   - `Bug` (`8a67ae36-1ed8-4283-93b3-e58ef460cfb7`)
+
+Group the output by source (shared project vs cross-project labels) and show: id (short), title, status, project, priority. Dedupe by id when a task qualifies under both. Default to open tasks only; include Done/archived only if the user asks.
+
+Use `search_tasks` with `label_ids` (returns OR, so filter in jq for both labels present) plus `list_tasks` on the shared project, merge, dedupe.

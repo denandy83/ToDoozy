@@ -1351,12 +1351,30 @@ export async function unsubscribeAllPersonal(): Promise<void> {
 let offlineCleanup: (() => void) | null = null
 
 /**
+ * Debounce offline transitions: brief blips (< OFFLINE_DEBOUNCE_MS) are ignored
+ * so the UI doesn't flash red for sub-second network hiccups.
+ */
+const OFFLINE_DEBOUNCE_MS = 3000
+
+/**
  * Start monitoring online/offline status using Supabase Realtime + navigator.onLine.
  */
 export function startOnlineMonitoring(): () => void {
   const syncStore = useSyncStore.getState()
+  let pendingOfflineTimer: ReturnType<typeof setTimeout> | null = null
+  let committedOffline = false
+
+  const clearPending = (): void => {
+    if (pendingOfflineTimer) {
+      clearTimeout(pendingOfflineTimer)
+      pendingOfflineTimer = null
+    }
+  }
 
   const handleOnline = (): void => {
+    clearPending()
+    if (!committedOffline) return
+    committedOffline = false
     syncStore.setStatus('synced')
     logEvent('info', 'network', 'Browser reports online')
     // Flush sync queue on reconnect
@@ -1368,8 +1386,16 @@ export function startOnlineMonitoring(): () => void {
   }
 
   const handleOffline = (): void => {
-    syncStore.setStatus('offline')
-    logEvent('warn', 'network', 'Browser reports offline')
+    if (pendingOfflineTimer || committedOffline) return
+    pendingOfflineTimer = setTimeout(() => {
+      pendingOfflineTimer = null
+      // Confirm we're still offline before flipping the status
+      if (!navigator.onLine) {
+        committedOffline = true
+        syncStore.setStatus('offline')
+        logEvent('warn', 'network', `Browser offline for ${OFFLINE_DEBOUNCE_MS / 1000}s — marking offline`)
+      }
+    }, OFFLINE_DEBOUNCE_MS)
   }
 
   window.addEventListener('online', handleOnline)
@@ -1377,10 +1403,12 @@ export function startOnlineMonitoring(): () => void {
 
   // Set initial status
   if (!navigator.onLine) {
+    committedOffline = true
     syncStore.setStatus('offline')
   }
 
   const cleanup = (): void => {
+    clearPending()
     window.removeEventListener('online', handleOnline)
     window.removeEventListener('offline', handleOffline)
   }

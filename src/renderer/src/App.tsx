@@ -105,6 +105,22 @@ function App(): React.JSX.Element {
       } catch (err) {
         console.error('[Startup] Failed to initialize personal sync:', err)
       }
+
+      // Warm the What's New cache so first visit doesn't depend on a live fetch
+      try {
+        const result = await window.api.releaseNotes.sync()
+        if (!result.ok) {
+          logEvent(
+            'warn',
+            'sync',
+            `Release notes warm-up failed: ${result.error ?? 'unknown'}`,
+            `cached=${result.cached}`
+          )
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logEvent('warn', 'sync', `Release notes warm-up error: ${msg}`)
+      }
     }
     const timeout = setTimeout(syncShared, 2000)
     return () => {

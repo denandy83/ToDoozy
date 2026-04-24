@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
+import { logEvent } from '../../shared/stores/logStore'
 
 function parseChangelog(content: string): string {
   const lines = content.split('\n')
@@ -7,23 +8,54 @@ function parseChangelog(content: string): string {
   return startIdx >= 0 ? lines.slice(startIdx).join('\n') : content
 }
 
-export function useChangelog(): string {
-  const [changelog, setChangelog] = useState('')
+export interface ChangelogState {
+  content: string
+  syncError: string | null
+}
+
+export function useChangelog(): ChangelogState {
+  const [state, setState] = useState<ChangelogState>({ content: '', syncError: null })
   useEffect(() => {
+    // Show cache immediately if any
     window.api.app.getChangelog().then((content) => {
-      setChangelog(parseChangelog(content))
+      setState((prev) => ({ ...prev, content: parseChangelog(content) }))
     })
-    window.api.releaseNotes.sync().then(() => {
-      window.api.app.getChangelog().then((content) => {
-        setChangelog(parseChangelog(content))
+    // Then run a fresh sync and log the outcome so failures are visible
+    window.api.releaseNotes
+      .sync()
+      .then(async (result) => {
+        if (result.ok) {
+          logEvent(
+            'info',
+            'sync',
+            `Release notes synced (${result.count} versions)`,
+            `cached=${result.cached}`
+          )
+        } else {
+          logEvent(
+            'error',
+            'sync',
+            `Release notes sync failed: ${result.error ?? 'unknown'}`,
+            `cached=${result.cached}`
+          )
+        }
+        const content = await window.api.app.getChangelog()
+        setState({
+          content: parseChangelog(content),
+          syncError: result.ok ? null : result.error ?? 'unknown error'
+        })
       })
-    }).catch(() => {})
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        logEvent('error', 'sync', `Release notes IPC failed: ${msg}`)
+        setState((prev) => ({ ...prev, syncError: msg }))
+      })
   }, [])
-  return changelog
+  return state
 }
 
 export function WhatsNewDot(): React.JSX.Element | null {
-  const whatsNew = useChangelog()
+  const { content: whatsNew } = useChangelog()
   const lastSeen = useSetting('whats_new_seen') ?? ''
 
   if (!whatsNew) return null
@@ -36,7 +68,7 @@ export function WhatsNewDot(): React.JSX.Element | null {
 }
 
 export function WhatsNewSettingsContent(): React.JSX.Element {
-  const whatsNew = useChangelog()
+  const { content: whatsNew, syncError } = useChangelog()
   const { setSetting } = useSettingsStore()
 
   useEffect(() => {
@@ -91,7 +123,16 @@ export function WhatsNewSettingsContent(): React.JSX.Element {
           </div>
         ))
       ) : (
-        <p className="text-sm font-light text-muted">No updates yet.</p>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-light text-muted">
+            {syncError ? 'Unable to load release notes.' : 'No updates yet.'}
+          </p>
+          {syncError && (
+            <p className="text-[11px] font-light text-muted/70">
+              {syncError} — see Settings &gt; Logs for details.
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

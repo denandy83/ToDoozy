@@ -144,9 +144,7 @@ export function SavedViewListView(): React.JSX.Element {
       if (config.sortRules && config.sortRules.length > 0) {
         store.setSortRules(config.sortRules)
       }
-      if (config.labelLogic) {
-        store.setLabelFilterLogic(config.labelLogic)
-      }
+      store.setLabelFilterLogic(config.labelLogic ?? 'all')
       // Track the stored config for dirty-state detection — rebuild from applied state
       // so the serialization matches exactly what currentFilterConfig produces
       requestAnimationFrame(() => {
@@ -167,7 +165,7 @@ export function SavedViewListView(): React.JSX.Element {
         if (s.keyword) applied.keyword = s.keyword
         applied.filterMode = s.filterMode
         if (s.sortRules.length > 0) applied.sortRules = s.sortRules
-        if (s.labelFilterLogic !== 'any') applied.labelLogic = s.labelFilterLogic
+        if (s.labelFilterLogic !== 'all') applied.labelLogic = s.labelFilterLogic
         useSavedViewStore.getState().setActiveViewFilterConfig(JSON.stringify(applied))
       })
     } catch { /* ignore invalid config */ }
@@ -196,7 +194,7 @@ export function SavedViewListView(): React.JSX.Element {
     if (s.keyword) config.keyword = s.keyword
     config.filterMode = s.filterMode
     if (s.sortRules.length > 0) config.sortRules = s.sortRules
-    if (s.labelFilterLogic !== 'any') config.labelLogic = s.labelFilterLogic
+    if (s.labelFilterLogic !== 'all') config.labelLogic = s.labelFilterLogic
     return JSON.stringify(config)
   })
 

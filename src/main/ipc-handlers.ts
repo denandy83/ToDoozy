@@ -871,8 +871,13 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('releaseNotes:sync', async () => {
-    const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
-    return syncReleaseNotes()
+    try {
+      const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
+      return await syncReleaseNotes()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, count: 0, cached: 0, error: `load failed: ${msg}` }
+    }
   })
 
   ipcMain.handle('releaseNotes:fetchVersion', async (_e, version: string) => {

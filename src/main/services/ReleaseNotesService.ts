@@ -28,13 +28,34 @@ function getSettings(): SettingsRepository {
   return new SettingsRepository(getDatabase())
 }
 
+export interface ReleaseNotesSyncResult {
+  ok: boolean
+  count: number
+  cached: number
+  error?: string
+}
+
 /**
  * Fetch all published release notes from Supabase, concatenate into versioned
  * markdown, and cache in the local whats_new setting.
- * Non-blocking — errors are logged, not thrown.
+ * Non-blocking — errors are returned as a structured result, not thrown.
  */
-export async function syncReleaseNotes(): Promise<void> {
+export async function syncReleaseNotes(): Promise<ReleaseNotesSyncResult> {
+  let cached = 0
   try {
+    try {
+      const existing = getSettings().get('', 'whats_new') ?? ''
+      cached = existing ? existing.split('\n').filter((l) => l.startsWith('## ')).length : 0
+    } catch {
+      // DB not ready — cached stays 0
+    }
+
+    const url = process.env.SUPABASE_URL ?? ''
+    const key = process.env.SUPABASE_ANON_KEY ?? ''
+    if (!url || !key) {
+      return { ok: false, count: 0, cached, error: 'Supabase credentials not configured in build' }
+    }
+
     const client = getClient()
     const { data, error } = await client
       .from(SUPABASE_TABLE)
@@ -43,19 +64,31 @@ export async function syncReleaseNotes(): Promise<void> {
 
     if (error) {
       console.error('[ReleaseNotes] Failed to fetch from Supabase:', error.message)
-      return
+      return { ok: false, count: 0, cached, error: `fetch failed: ${error.message}` }
     }
 
     const releases = data as SupabaseReleaseNote[]
-    if (releases.length === 0) return
+    if (releases.length === 0) {
+      return { ok: true, count: 0, cached }
+    }
 
     const markdown = releases
       .map((r) => `## ${r.version}\n${r.content.trim()}`)
       .join('\n\n')
 
-    getSettings().set('', 'whats_new', markdown)
+    try {
+      getSettings().set('', 'whats_new', markdown)
+    } catch (dbErr) {
+      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr)
+      console.error('[ReleaseNotes] Failed to write cache:', msg)
+      return { ok: false, count: releases.length, cached, error: `cache write failed: ${msg}` }
+    }
+
+    return { ok: true, count: releases.length, cached }
   } catch (err) {
-    console.error('[ReleaseNotes] Sync error:', err instanceof Error ? err.message : err)
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[ReleaseNotes] Sync error:', msg)
+    return { ok: false, count: 0, cached, error: msg }
   }
 }
 

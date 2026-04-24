@@ -274,8 +274,15 @@ export interface AppAPI {
   getDatabasePath(): Promise<string>
 }
 
+export interface ReleaseNotesSyncResult {
+  ok: boolean
+  count: number
+  cached: number
+  error?: string
+}
+
 export interface ReleaseNotesAPI {
-  sync(): Promise<void>
+  sync(): Promise<ReleaseNotesSyncResult>
   fetchVersion(version: string): Promise<string | null>
 }
 

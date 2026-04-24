@@ -619,13 +619,30 @@ function SyncStatusIcon(): React.JSX.Element {
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true))
   const [, setTick] = useState(0)
 
-  // Track browser online/offline events
+  // Track browser online/offline events with a 3s debounce on offline transitions
+  // so the UI doesn't flash red for sub-second network hiccups.
   useEffect(() => {
-    const goOnline = (): void => setIsOnline(true)
-    const goOffline = (): void => setIsOnline(false)
+    const OFFLINE_DEBOUNCE_MS = 3000
+    let pendingOffline: ReturnType<typeof setTimeout> | null = null
+
+    const goOnline = (): void => {
+      if (pendingOffline) {
+        clearTimeout(pendingOffline)
+        pendingOffline = null
+      }
+      setIsOnline(true)
+    }
+    const goOffline = (): void => {
+      if (pendingOffline) return
+      pendingOffline = setTimeout(() => {
+        pendingOffline = null
+        if (!navigator.onLine) setIsOnline(false)
+      }, OFFLINE_DEBOUNCE_MS)
+    }
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
     return () => {
+      if (pendingOffline) clearTimeout(pendingOffline)
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
     }
