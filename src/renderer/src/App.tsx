@@ -9,6 +9,7 @@ import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
 import { useUpdateStore } from './shared/stores/updateStore'
 import { useSyncStore } from './shared/stores/syncStore'
+import { logEvent } from './shared/stores/logStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
@@ -340,6 +341,12 @@ function App(): React.JSX.Element {
         const thresholdMs = unit === 'hours' ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000
         const completedAt = new Date(task.completed_date).getTime()
         if (now - completedAt >= thresholdMs) {
+          logEvent(
+            'info',
+            'sync',
+            `Auto-archived "${task.title}"`,
+            `task=${task.id} project=${task.project_id} is_shared=${project.is_shared ?? 0} threshold=${value}${unit} completed=${task.completed_date}`
+          )
           await doUpdate(task.id, { is_archived: 1 })
         }
       }

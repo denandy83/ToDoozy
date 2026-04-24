@@ -166,7 +166,17 @@ export async function pushTask(task: Task): Promise<void> {
     })
     if (error) {
       console.error('[PersonalSync] pushTask error:', error.message, error.code, error.details, 'task:', task.id, 'project:', task.project_id)
-    } else markSynced()
+    } else {
+      markSynced()
+      // Flag pushes of is_archived on shared projects — after the v1.4.3 fix this
+      // should never happen from auto-archive, so any occurrence warrants a look.
+      if (task.is_archived === 1) {
+        const project = await window.api.projects.findById(task.project_id)
+        if (project?.is_shared === 1) {
+          logEvent('warn', 'sync', `Pushed is_archived=1 on shared task "${task.title}"`, `task=${task.id} project=${task.project_id}`)
+        }
+      }
+    }
   } catch (err) {
     console.error('[PersonalSync] pushTask failed:', err)
     // Queue for later
@@ -717,6 +727,7 @@ export async function fullPull(userId: string): Promise<void> {
 
             // Mark as shared so auto-archive skips this project on the local device.
             await window.api.projects.update(project.id, { is_shared: 1 })
+            logEvent('info', 'sync', `Marked project "${project.name}" as shared (initSync)`, `project=${project.id}`)
 
             // Sync auto-archive settings
             if (project.auto_archive_enabled !== undefined) {

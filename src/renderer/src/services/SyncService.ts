@@ -629,6 +629,7 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
       // Project exists locally but isn't marked shared — just mark it and sync members
       // Do NOT call syncProjectDown which would delete/overwrite local tasks
       await window.api.projects.update(m.project_id, { is_shared: 1 })
+      logEvent('warn', 'sync', `Repaired mis-flagged shared project "${local.name}"`, `project=${m.project_id} members=${memberCounts.get(m.project_id)}`)
       await syncMembersDown(m.project_id)
     }
   }
@@ -769,6 +770,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
   // Mark as shared
   await window.api.projects.update(projectId, { is_shared: 1 })
+  logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
 
   // Sync all project labels (create locally if missing, associate with project)
   if (project.label_data) {
