@@ -100,3 +100,19 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** DatePicker (shared component) — used everywhere due dates are edited (TaskRow inline, DetailPanel, quick-add, etc.)
 **Files changed:** `src/renderer/src/assets/main.css`
 **Commit:** 35d7869
+
+## 2026-04-21 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- a463fa6 fix: update modal renders notes for every skipped version (v1.4.1) (2026-04-21) — files: 7
+- 6a02d86 chore: bump version to 1.4.0 (2026-04-21) — files: 2
+- 57e443c fix: restore Apply Theme + add rename pencil for custom themes (2026-04-21) — files: 1
+- 9359cea feat(#64): Cmd+K palette matches against task UUID (2026-04-21) — files: 3
+- 3c01c28 fix(#63): only show theme Save icon when color values actually differ (2026-04-21) — files: 5
+- cd05968 feat(#62): import and export themes as JSON (2026-04-21) — files: 8
+- 3db90cb feat: add stories #62-#64 — theme import/export + save-icon polish + Cmd+K UUID search (2026-04-20) — files: 2
+- 3626163 docs: changelog and release notes for DatePicker keyboard-selected fix (2026-04-20) — files: 5
+
+## 2026-04-22 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- f9b247b chore: bump version to 1.4.2 (2026-04-22) — files: 2
+- c175248 feat: auto-reconnect Realtime channels + in-app connection log (2026-04-22) — files: 5

@@ -8,6 +8,7 @@ import { getSupabase } from '../lib/supabase'
 import type { Task, Status, SyncOperation } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
+import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
@@ -651,31 +652,48 @@ async function syncMembersDown(projectId: string): Promise<void> {
   const localMembers = await window.api.projects.getMembers(projectId)
   const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
+  // Batch-fetch profiles for any members whose local row is missing or stale.
+  const memberIdsNeedingProfile: string[] = []
+  const localUsersById = new Map<string, { id: string; email: string } | undefined>()
   for (const member of members) {
     const localUser = await window.api.users.findById(member.user_id)
-    if (!localUser || localUser.email === 'shared-user') {
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('email, display_name, avatar_url')
-        .eq('id', member.user_id)
-        .single()
+    localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
+    if (!localUser || isPlaceholderEmail(localUser.email)) {
+      memberIdsNeedingProfile.push(member.user_id)
+    }
+  }
+  const profilesById = new Map<string, { email: string; display_name: string | null; avatar_url: string | null }>()
+  if (memberIdsNeedingProfile.length > 0) {
+    const { data: profiles } = await supabase
+      .from('user_profiles')
+      .select('id, email, display_name, avatar_url')
+      .in('id', memberIdsNeedingProfile)
+    for (const p of profiles ?? []) {
+      profilesById.set(p.id as string, {
+        email: (p.email as string | null) ?? '',
+        display_name: (p.display_name as string | null) ?? null,
+        avatar_url: (p.avatar_url as string | null) ?? null
+      })
+    }
+  }
 
-      if (profile) {
-        if (localUser) {
-          await window.api.users.update(member.user_id, {
-            email: profile.email,
-            display_name: profile.display_name,
-            avatar_url: profile.avatar_url
-          })
-        } else {
-          await window.api.users.create({
-            id: member.user_id,
-            email: profile.email,
-            display_name: profile.display_name,
-            avatar_url: profile.avatar_url
-          }).catch(() => { /* already exists */ })
-        }
-      }
+  for (const member of members) {
+    const localUser = localUsersById.get(member.user_id)
+    const profile = profilesById.get(member.user_id)
+
+    if (!localUser) {
+      await window.api.users.create({
+        id: member.user_id,
+        email: profile?.email ?? placeholderEmail(member.user_id),
+        display_name: profile?.display_name ?? null,
+        avatar_url: profile?.avatar_url ?? null
+      }).catch(() => { /* already exists */ })
+    } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
+      await window.api.users.update(member.user_id, {
+        email: profile.email,
+        display_name: profile.display_name,
+        avatar_url: profile.avatar_url
+      })
     }
 
     if (!localMemberIds.has(member.user_id)) {
@@ -722,11 +740,11 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   if (!localOwner) {
     await window.api.users.create({
       id: project.owner_id,
-      email: ownerProfile?.email ?? 'shared-user',
+      email: ownerProfile?.email ?? placeholderEmail(project.owner_id),
       display_name: ownerProfile?.display_name ?? null,
       avatar_url: ownerProfile?.avatar_url ?? null
     }).catch(() => { /* already exists */ })
-  } else if (localOwner.email === 'shared-user' && ownerProfile) {
+  } else if (isPlaceholderEmail(localOwner.email) && ownerProfile) {
     await window.api.users.update(project.owner_id, {
       email: ownerProfile.email,
       display_name: ownerProfile.display_name,
@@ -810,8 +828,8 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   if (remoteTasks) {
     // Ensure every referenced user (owner_id + assigned_to) exists locally before
     // inserting tasks — otherwise tasks.create trips the users FK. We fetch real
-    // profile data in one batched request and fall back to a 'shared-user'
-    // placeholder so the row at least satisfies the constraint.
+    // profile data in one batched request and fall back to a per-user placeholder
+    // email (users.email is UNIQUE, so a shared placeholder collides).
     const referencedUserIds = new Set<string>()
     for (const task of remoteTasks) {
       if (task.owner_id) referencedUserIds.add(task.owner_id as string)
@@ -839,14 +857,22 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
         const profile = profilesById.get(uid)
         await window.api.users.create({
           id: uid,
-          email: profile?.email ?? 'shared-user',
+          email: profile?.email ?? placeholderEmail(uid),
           display_name: profile?.display_name ?? null,
           avatar_url: profile?.avatar_url ?? null
         }).catch(() => { /* already exists */ })
       }
     }
 
-    for (const task of remoteTasks) {
+    // Sort parents before subtasks to satisfy the parent_id FK constraint.
+    // Remote rows arrive in arbitrary order; inserting a subtask before its
+    // parent throws FOREIGN KEY constraint failed on tasks:create.
+    const tasksToInsert = [
+      ...remoteTasks.filter((t) => !t.parent_id),
+      ...remoteTasks.filter((t) => t.parent_id)
+    ]
+
+    for (const task of tasksToInsert) {
       remoteTaskIds.add(task.id)
       const existing = await window.api.tasks.findById(task.id)
       const taskData = {
@@ -864,17 +890,23 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
         reference_url: task.reference_url
       }
 
-      if (existing) {
-        // Update existing task with remote data
-        await window.api.tasks.update(task.id, taskData)
-      } else {
-        await window.api.tasks.create({
-          id: task.id,
-          project_id: task.project_id,
-          owner_id: task.owner_id,
-          is_template: task.is_template,
-          ...taskData
-        })
+      try {
+        if (existing) {
+          // Update existing task with remote data
+          await window.api.tasks.update(task.id, taskData)
+        } else {
+          await window.api.tasks.create({
+            id: task.id,
+            project_id: task.project_id,
+            owner_id: task.owner_id,
+            is_template: task.is_template,
+            ...taskData
+          })
+        }
+      } catch (e) {
+        // Don't let a single task failure (e.g. dangling FK) abort the whole sync
+        console.error(`[SyncService] Failed to sync task "${task.title}" (${task.id}):`, e)
+        continue
       }
 
       // Sync labels (check project labels first to avoid duplicates)
@@ -917,32 +949,49 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     const localMembers = await window.api.projects.getMembers(projectId)
     const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
+    // Batch-fetch all member profiles (N+1 → 1 query) for any local users that
+    // are missing or still have a placeholder email.
+    const memberIdsNeedingProfile: string[] = []
+    const localUsersById = new Map<string, { id: string; email: string } | undefined>()
     for (const member of members) {
-      // Ensure user record exists with real profile data
       const localUser = await window.api.users.findById(member.user_id)
-      if (!localUser || localUser.email === 'shared-user') {
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('email, display_name, avatar_url')
-          .eq('id', member.user_id)
-          .single()
+      localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
+      if (!localUser || isPlaceholderEmail(localUser.email)) {
+        memberIdsNeedingProfile.push(member.user_id)
+      }
+    }
+    const memberProfilesById = new Map<string, { email: string; display_name: string | null; avatar_url: string | null }>()
+    if (memberIdsNeedingProfile.length > 0) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email, display_name, avatar_url')
+        .in('id', memberIdsNeedingProfile)
+      for (const p of profiles ?? []) {
+        memberProfilesById.set(p.id as string, {
+          email: (p.email as string | null) ?? '',
+          display_name: (p.display_name as string | null) ?? null,
+          avatar_url: (p.avatar_url as string | null) ?? null
+        })
+      }
+    }
 
-        if (profile) {
-          if (localUser) {
-            await window.api.users.update(member.user_id, {
-              email: profile.email,
-              display_name: profile.display_name,
-              avatar_url: profile.avatar_url
-            })
-          } else {
-            await window.api.users.create({
-              id: member.user_id,
-              email: profile.email,
-              display_name: profile.display_name,
-              avatar_url: profile.avatar_url
-            }).catch(() => { /* already exists */ })
-          }
-        }
+    for (const member of members) {
+      const localUser = localUsersById.get(member.user_id)
+      const profile = memberProfilesById.get(member.user_id)
+
+      if (!localUser) {
+        await window.api.users.create({
+          id: member.user_id,
+          email: profile?.email ?? placeholderEmail(member.user_id),
+          display_name: profile?.display_name ?? null,
+          avatar_url: profile?.avatar_url ?? null
+        }).catch(() => { /* already exists */ })
+      } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
+        await window.api.users.update(member.user_id, {
+          email: profile.email,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url
+        })
       }
 
       if (!localMemberIds.has(member.user_id)) {

@@ -563,6 +563,27 @@ function ForceSyncButton(): React.JSX.Element {
         await window.api.settings.set(userId, 'last_sync_at', '')
         const { fullUpload } = await import('../../services/PersonalSyncService')
         await fullUpload(userId)
+
+        // Also pull shared project data down — otherwise an invitee whose
+        // initial syncProjectDown failed partway has no in-app recovery path.
+        // Run discover FIRST so any locally-misflagged projects (is_shared=0
+        // when they should be 1) get repaired before the pull loop.
+        const { syncProjectDown, discoverRemoteMemberships } = await import('../../services/SyncService')
+        const missingIds = await discoverRemoteMemberships(userId)
+        for (const pid of missingIds) {
+          await syncProjectDown(pid, userId).catch((err) =>
+            console.warn(`[ForceSync] Failed to pull discovered project ${pid}:`, err)
+          )
+        }
+        const allProjects = await window.api.projects.getProjectsForUser(userId)
+        for (const p of allProjects) {
+          if (p.is_shared === 1) {
+            await syncProjectDown(p.id, userId).catch((err) =>
+              console.warn(`[ForceSync] Failed to pull shared project ${p.name}:`, err)
+            )
+          }
+        }
+
         setDone(true)
         setTimeout(() => setDone(false), 3000)
       }
@@ -584,7 +605,7 @@ function ForceSyncButton(): React.JSX.Element {
       </button>
       {done && <span className="text-[10px] font-bold uppercase tracking-widest text-success">Done</span>}
       <p className="text-[10px] font-light text-foreground/40">
-        Re-uploads all local data to Supabase
+        Re-uploads local data and pulls shared projects from Supabase
       </p>
     </div>
   )

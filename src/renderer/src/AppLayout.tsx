@@ -52,6 +52,7 @@ import { NotificationBell, NotificationPanel, MemberAvatars } from './features/c
 import { useNotificationStore } from './shared/stores/notificationStore'
 import { uploadProjectToSupabase, subscribeToProject, setRealtimeCallback, getSharedProjectMembers, unsubscribeFromProject } from './services/SyncService'
 import { invalidateMemberDisplay } from './shared/hooks/useMemberDisplay'
+import { placeholderEmail, isPlaceholderEmail } from '../../shared/placeholderUser'
 
 export function AppLayout(): React.JSX.Element {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -188,6 +189,26 @@ export function AppLayout(): React.JSX.Element {
         display_name: m.display_name,
         role: m.role
       })))
+      // Upsert local users rows so useMemberDisplay can render real names/emails
+      // instead of falling back to 'unknown'. Without this, a new member who
+      // joins the owner's project never appears in the local users table and
+      // the avatar tooltip shows 'unknown'.
+      for (const m of members) {
+        const localUser = await window.api.users.findById(m.user_id)
+        if (!localUser) {
+          await window.api.users.create({
+            id: m.user_id,
+            email: m.email,
+            display_name: m.display_name,
+            avatar_url: null
+          }).catch(() => { /* already exists */ })
+        } else if (isPlaceholderEmail(localUser.email) && m.email && !isPlaceholderEmail(m.email)) {
+          await window.api.users.update(m.user_id, {
+            email: m.email,
+            display_name: m.display_name
+          }).catch(() => {})
+        }
+      }
       // Sync display customizations to local DB so avatars render correctly
       for (const m of members) {
         await window.api.projects.updateMember(projectId, m.user_id, {
@@ -259,11 +280,30 @@ export function AppLayout(): React.JSX.Element {
                 reference_url: payload.reference_url as string | null
               })
             } else {
-              // Ensure owner user record exists for FK
+              // Ensure owner + assigned user records exist for FK
               const ownerId = payload.owner_id as string
               const localOwner = await window.api.users.findById(ownerId)
               if (!localOwner) {
-                await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+                await window.api.users.create({ id: ownerId, email: placeholderEmail(ownerId), display_name: null, avatar_url: null }).catch(() => {})
+              }
+              const assignedId = payload.assigned_to as string | null
+              if (assignedId) {
+                const localAssignee = await window.api.users.findById(assignedId)
+                if (!localAssignee) {
+                  await window.api.users.create({ id: assignedId, email: placeholderEmail(assignedId), display_name: null, avatar_url: null }).catch(() => {})
+                }
+              }
+              // If this is a subtask, ensure the parent exists locally or the
+              // parent_id FK will throw. Skip the insert if the parent is
+              // missing — the next syncProjectDown / pullNewTasks will pick
+              // it up in the correct parents-first order.
+              const parentId = payload.parent_id as string | null
+              if (parentId) {
+                const localParent = await window.api.tasks.findById(parentId)
+                if (!localParent) {
+                  console.warn(`[Realtime] Skipping subtask ${payload.id} — parent ${parentId} not synced yet`)
+                  return
+                }
               }
               await window.api.tasks.create({
                 id: payload.id as string,

@@ -10,6 +10,7 @@ import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import type { Task, Status, Label } from '../../../shared/types'
+import { placeholderEmail } from '../../../shared/placeholderUser'
 
 /** Mark a successful push in the sync store */
 function markSynced(): void {
@@ -714,6 +715,9 @@ export async function fullPull(userId: string): Promise<void> {
             })
             await window.api.projects.addMember(project.id, userId, project.owner_id === userId ? 'owner' : 'member')
 
+            // Mark as shared so auto-archive skips this project on the local device.
+            await window.api.projects.update(project.id, { is_shared: 1 })
+
             // Sync auto-archive settings
             if (project.auto_archive_enabled !== undefined) {
               await window.api.projects.update(project.id, {
@@ -754,15 +758,21 @@ export async function fullPull(userId: string): Promise<void> {
               .eq('project_id', project.id)
 
             if (tasks) {
-              for (const task of tasks) {
+              // Parents before subtasks so the parent_id FK is always satisfied.
+              const orderedTasks = [
+                ...tasks.filter((t) => !t.parent_id),
+                ...tasks.filter((t) => t.parent_id)
+              ]
+              for (const task of orderedTasks) {
                 const existingTask = await window.api.tasks.findById(task.id)
                 if (!existingTask) {
                   // Ensure owner exists
                   const localOwner = await window.api.users.findById(task.owner_id)
                   if (!localOwner) {
-                    await window.api.users.create({ id: task.owner_id, email: 'shared-user', display_name: null, avatar_url: null }).catch(() => {})
+                    await window.api.users.create({ id: task.owner_id, email: placeholderEmail(task.owner_id), display_name: null, avatar_url: null }).catch(() => {})
                   }
-                  await window.api.tasks.create({
+                  try {
+                    await window.api.tasks.create({
                     id: task.id,
                     project_id: task.project_id,
                     owner_id: task.owner_id,
@@ -780,6 +790,9 @@ export async function fullPull(userId: string): Promise<void> {
                     recurrence_rule: task.recurrence_rule,
                     reference_url: task.reference_url
                   })
+                  } catch (e) {
+                    console.error(`[PersonalSync] initSync: failed to create task "${task.title}" (${task.id}):`, e)
+                  }
                 }
               }
             }
@@ -1016,7 +1029,13 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     let pushed = 0
     const touchedTaskIds: string[] = []
 
-    for (const rt of remoteTasks) {
+    // Parents before subtasks so the parent_id FK is satisfied when inserting.
+    const orderedRemoteTasks = [
+      ...remoteTasks.filter((t) => !t.parent_id),
+      ...remoteTasks.filter((t) => t.parent_id)
+    ]
+
+    for (const rt of orderedRemoteTasks) {
       if (recentlyDeletedIds.has(rt.id)) continue
       const existing = await window.api.tasks.findById(rt.id)
       if (!existing) {
@@ -1024,7 +1043,15 @@ export async function pullNewTasks(projectId: string): Promise<number> {
         const ownerId = rt.owner_id as string
         const localOwner = await window.api.users.findById(ownerId)
         if (!localOwner) {
-          await window.api.users.create({ id: ownerId, email: 'shared-user', display_name: null, avatar_url: null }).catch((e) => console.warn('[PersonalSync] Failed to create local user:', e))
+          await window.api.users.create({ id: ownerId, email: placeholderEmail(ownerId), display_name: null, avatar_url: null }).catch((e) => console.warn('[PersonalSync] Failed to create local user:', e))
+        }
+        // Same for assigned_to, which is also a users FK.
+        if (rt.assigned_to) {
+          const assignedId = rt.assigned_to as string
+          const localAssignee = await window.api.users.findById(assignedId)
+          if (!localAssignee) {
+            await window.api.users.create({ id: assignedId, email: placeholderEmail(assignedId), display_name: null, avatar_url: null }).catch(() => {})
+          }
         }
         try {
           await window.api.tasks.create({
