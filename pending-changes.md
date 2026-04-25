@@ -129,3 +129,8 @@ Working file — entries written here during a session are processed into perman
 ## 2026-04-25 — Session end (git fallback)
 <!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
 - 0d196b4 wip: theme schema migration, applyRemote timestamp preservation, realtime instrumentation (2026-04-24) — files: 29
+
+## 2026-04-25 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- b3e2689 chore: bump version to 1.4.5 (2026-04-25) — files: 2
+- 4fe36d7 fix: sync silent-failure paths, label dedup, and task_labels gap (2026-04-25) — files: 30
