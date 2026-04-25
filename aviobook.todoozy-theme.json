@@ -1,0 +1,27 @@
+{
+  "$todoozy": "theme",
+  "version": 1,
+  "name": "Aviobook",
+  "configs": {
+    "dark": {
+      "bg": "#0D2E3E",
+      "fg": "#DDE9F0",
+      "fgSecondary": "#B3C4CC",
+      "fgMuted": "#7A939F",
+      "muted": "#8FA4AD",
+      "accent": "#4FBDE6",
+      "accentFg": "#0D2E3E",
+      "border": "#144761"
+    },
+    "light": {
+      "bg": "#F5FAFD",
+      "fg": "#0D2E3E",
+      "fgSecondary": "#144761",
+      "fgMuted": "#7A939F",
+      "muted": "#B3C4CC",
+      "accent": "#4FBDE6",
+      "accentFg": "#0D2E3E",
+      "border": "#DDE9F0"
+    }
+  }
+}

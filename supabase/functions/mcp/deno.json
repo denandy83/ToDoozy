@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "mcp-lite": "npm:mcp-lite@^0.8"
+  }
+}

@@ -116,3 +116,12 @@ Working file — entries written here during a session are processed into perman
 <!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
 - f9b247b chore: bump version to 1.4.2 (2026-04-22) — files: 2
 - c175248 feat: auto-reconnect Realtime channels + in-app connection log (2026-04-22) — files: 5
+
+## 2026-04-24 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- ffdc1cf chore: bump version to 1.4.4 (2026-04-24) — files: 2
+- a1c2a25 chore: restore implemented-stories.md (should never be truncated) (2026-04-24) — files: 1
+- 51dc0f6 fix: offline debounce, AND label default, and What's New observability (2026-04-24) — files: 11
+- f67cab3 feat: log sync events that were invisible during shared-project bug (2026-04-24) — files: 3
+- d118a56 chore: bump version to 1.4.3 (2026-04-24) — files: 2
+- 47bc120 fix: shared-project sync bugs (join FK, unknown members, missing tasks, wrong-device auto-archive) (2026-04-24) — files: 8

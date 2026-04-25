@@ -50,7 +50,11 @@ export const useUpdateStore = createWithEqualityFn<UpdateStore>((set, get) => ({
   },
 
   async checkForUpdates(): Promise<void> {
-    await window.api.updater.check()
+    // Release notes belong to specific app versions, so refresh them in the
+    // same flow that looks for a new version. Run in parallel — they're
+    // independent network calls.
+    const { useReleaseNotesStore } = await import('./releaseNotesStore')
+    await Promise.all([window.api.updater.check(), useReleaseNotesStore.getState().sync()])
   },
 
   async downloadUpdate(): Promise<void> {

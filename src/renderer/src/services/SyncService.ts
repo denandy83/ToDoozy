@@ -86,20 +86,27 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )
-    .subscribe((status) => {
+    .subscribe((status, err) => {
       if (state.cancelled) return
+      // Instrumentation: capture channel internal state + server error payload to diagnose loop
+      const ch = channel as unknown as { state?: string; subTopic?: string; joinedOnce?: boolean }
+      const chState = ch.state ?? '(unknown)'
+      const subTopic = ch.subTopic ?? '(unknown)'
+      const errMsg = err
+        ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
+        : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
         console.log(`[Realtime] Subscribed to project ${projectId}`)
-        logEvent('info', 'realtime', `Subscribed to shared project`, projectId)
+        logEvent('info', 'realtime', `Subscribed to shared project`, `${projectId} topic=${subTopic} chState=${chState}`)
         const currentStatus = useSyncStore.getState().status
         if (currentStatus === 'offline') {
           useSyncStore.getState().setStatus('synced')
         }
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        console.warn(`[Realtime] Project subscription ${status} for ${projectId}`)
+        console.warn(`[Realtime] Project subscription ${status} for ${projectId}`, err ?? '')
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
-        logEvent(level, 'realtime', `Channel ${status} on shared project`, projectId)
+        logEvent(level, 'realtime', `Channel ${status} on shared project`, `${projectId} topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         useSyncStore.getState().setStatus('offline')
         scheduleSharedReconnect(projectId)
       }
@@ -877,34 +884,33 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     for (const task of tasksToInsert) {
       remoteTaskIds.add(task.id)
       const existing = await window.api.tasks.findById(task.id)
-      const taskData = {
-        title: task.title,
-        description: task.description,
-        status_id: task.status_id,
-        priority: task.priority,
-        due_date: task.due_date,
-        parent_id: task.parent_id,
-        order_index: task.order_index,
-        assigned_to: task.assigned_to,
-        is_archived: task.is_archived,
-        completed_date: task.completed_date,
-        recurrence_rule: task.recurrence_rule,
-        reference_url: task.reference_url
-      }
 
       try {
-        if (existing) {
-          // Update existing task with remote data
-          await window.api.tasks.update(task.id, taskData)
-        } else {
-          await window.api.tasks.create({
-            id: task.id,
-            project_id: task.project_id,
-            owner_id: task.owner_id,
-            is_template: task.is_template,
-            ...taskData
-          })
-        }
+        // applyRemote preserves remote created_at/updated_at; using create/update
+        // would stamp NOW into updated_at and make the row look "local newer" on
+        // the next sync, triggering redundant pushes back to remote.
+        await window.api.tasks.applyRemote({
+          id: task.id,
+          project_id: task.project_id,
+          owner_id: task.owner_id,
+          assigned_to: task.assigned_to,
+          title: task.title,
+          description: task.description,
+          status_id: task.status_id,
+          priority: task.priority ?? 0,
+          due_date: task.due_date,
+          parent_id: task.parent_id,
+          order_index: task.order_index ?? 0,
+          is_template: task.is_template ?? existing?.is_template ?? 0,
+          is_archived: task.is_archived ?? 0,
+          is_in_my_day: existing?.is_in_my_day ?? 0,
+          completed_date: task.completed_date,
+          recurrence_rule: task.recurrence_rule,
+          reference_url: task.reference_url,
+          my_day_dismissed_date: existing?.my_day_dismissed_date ?? null,
+          created_at: task.created_at ?? existing?.created_at ?? task.updated_at,
+          updated_at: task.updated_at
+        })
       } catch (e) {
         // Don't let a single task failure (e.g. dangling FK) abort the whole sync
         console.error(`[SyncService] Failed to sync task "${task.title}" (${task.id}):`, e)

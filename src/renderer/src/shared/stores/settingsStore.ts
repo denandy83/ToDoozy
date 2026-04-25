@@ -174,9 +174,11 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
             mode: theme.mode,
             bg: config.bg ?? '',
             fg: config.fg ?? '',
-            accent: config.accent ?? '',
-            surface: config.fgSecondary ?? '',
+            fg_secondary: config.fgSecondary ?? '',
+            fg_muted: config.fgMuted ?? '',
             muted: config.muted ?? '',
+            accent: config.accent ?? '',
+            accent_fg: config.accentFg ?? '',
             border: config.border ?? '',
             updated_at: theme.updated_at
           }).catch(() => {})
@@ -209,9 +211,11 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
               mode: theme.mode,
               bg: config.bg ?? '',
               fg: config.fg ?? '',
-              accent: config.accent ?? '',
-              surface: config.fgSecondary ?? '',
+              fg_secondary: config.fgSecondary ?? '',
+              fg_muted: config.fgMuted ?? '',
               muted: config.muted ?? '',
+              accent: config.accent ?? '',
+              accent_fg: config.accentFg ?? '',
               border: config.border ?? '',
               updated_at: theme.updated_at
             }).catch(() => {})

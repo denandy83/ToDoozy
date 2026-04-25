@@ -1,0 +1,49 @@
+# Ralph Progress Log
+Started: Wed Apr  8 15:11:28 CEST 2026
+---
+
+## Story #55 — My Day Auto-Add (2026-04-08)
+- Added migration_16 for my_day_dismissed_date column (SQLite + Supabase)
+- Implemented autoAddMyDayTasks() with full exclusion logic (subtasks, done, archived, dismissed today, permanent dismiss)
+- Simplified findMyDay() in both SQLite and Supabase repos — removed dual filter, now only checks is_in_my_day = 1
+- Auto-add is called from hydrateMyDay() in taskStore before fetching My Day tasks
+- ContextMenu simplified from 3 branches to 2 (removed "move due date to tomorrow" hack)
+- BulkContextMenu and TaskRow.tsx MyDayIndicator now set dismissed dates on removal
+- Settings UI: added auto-add dropdown + re-add dismissed toggle in MyDaySection
+- Telegram bot: getMyDayTasks() now fetches pinned + due/overdue tasks, sorted by due_date
+- 14 new tests covering autoAddMyDayTasks edge cases + findMyDay simplification
+- All tests pass (477/477), typecheck clean
+
+## Story #56 — Per-Integration Default Project (2026-04-08)
+- Removed shared Default Project dropdown from top of Integrations settings
+- Added per-integration default project dropdowns: Telegram in its sub-tab, iOS Shortcut in its sub-tab
+- iOS Shortcut has "Follow Telegram default" option (shows Telegram default name in parentheses)
+- Updated Telegram bot /default command: shows both Telegram and iOS defaults with change buttons
+- Added defpick:/defset: callback handlers for per-integration project selection
+- iOS can choose "Follow Telegram" which deletes the ios_shortcut_default_project setting
+- Updated quick_add_task Supabase RPC: checks ios_shortcut_default_project first, falls back to telegram_default_project, then first owned project
+- Added 'default', 'list', 'recent' to parser.ts reserved commands list
+- Typecheck clean, all tests pass
+
+## Story #58 — Per-Project Auto-Archive (2026-04-08)
+- Added migration_17: auto_archive_enabled/value/unit columns on projects table
+- Migration migrates global auto_archive_* settings to all personal projects, then deletes global keys
+- Updated Project type and UpdateProjectInput with new fields
+- Updated ProjectRepository.update() with new field handlers
+- Refactored checkAutoArchive() in App.tsx to per-project logic (no global settings)
+- Removed global auto-archive UI from GeneralSettingsContent SystemSection
+- Added per-project auto-archive UI in ProjectsSettingsContent (with shared project "manual only" message)
+- Updated PersonalSyncService pushProject to sync auto_archive fields, pull mapping to set them on creation
+- My Day Done bucket now only shows tasks completed today — previous days' done tasks are hidden, not archived
+- Typecheck clean, all tests pass
+
+## Story #57 — AND/OR Label Filter Logic (2026-04-08)
+- Added labelFilterLogic ('any' | 'all') to labelStore with selector and setter
+- Created LabelOperatorToggle component (3-way: is any of / is all of / is not)
+- Updated LabelFilterPicker to use LabelOperatorToggle instead of OperatorToggle
+- Updated label filter chips to show "Label is any of" / "Label is all of" prefix when 2+ labels selected
+- Updated client-side filtering in SavedViewListView, MyDayView, TaskListView, CalendarView — .every() for AND, .some() for OR
+- Updated TaskRepository.search() SQL — AND uses subquery with HAVING COUNT(DISTINCT)
+- Updated MCP search_tasks tool with label_logic parameter
+- Added labelLogic to saved view FilterConfig serialization/deserialization
+- Typecheck clean, all tests pass

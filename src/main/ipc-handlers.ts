@@ -186,6 +186,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.create(input)
   })
 
+  ipcMain.handle('tasks:applyRemote', (_e, task: Parameters<Repositories['tasks']['applyRemoteTask']>[0]) => {
+    return getRepos().tasks.applyRemoteTask(task)
+  })
+
   ipcMain.handle(
     'tasks:update',
     (_e, id: string, input: Parameters<Repositories['tasks']['update']>[1]) => {

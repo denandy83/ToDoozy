@@ -14,6 +14,7 @@ const api: TodoozyAPI = {
     findSubtasks: (parentId) => ipcRenderer.invoke('tasks:findSubtasks', parentId),
     getSubtaskCount: (parentId) => ipcRenderer.invoke('tasks:getSubtaskCount', parentId),
     create: (input) => ipcRenderer.invoke('tasks:create', input),
+    applyRemote: (task) => ipcRenderer.invoke('tasks:applyRemote', task),
     update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
     delete: (id) => ipcRenderer.invoke('tasks:delete', id),
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),

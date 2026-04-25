@@ -28,7 +28,7 @@ export function McpSettingsContent({ apiKey }: McpSettingsContentProps): React.J
   }
 
   const claudeCmd = `claude mcp add -t http -s user ToDoozy ${MCP_URL} -H "Authorization: Bearer ${apiKey}"`
-  const geminiCmd = `gemini mcp add --transport http ToDoozy ${MCP_URL} --header "Authorization: Bearer ${apiKey}"`
+  const geminiCmd = `gemini mcp add --transport http --header "Authorization: Bearer ${apiKey}" --header "Accept: application/json" ToDoozy ${MCP_URL}`
   const codexCmd = `codex mcp add ToDoozy --url ${MCP_URL}`
   const jsonConfig = JSON.stringify({
     url: MCP_URL,

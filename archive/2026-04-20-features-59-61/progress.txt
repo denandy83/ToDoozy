@@ -1,0 +1,84 @@
+# Ralph Progress Log
+Started: Sat Apr 11 22:32:43 CEST 2026
+---
+
+## Story #59: Remote MCP Server via Supabase Edge Function
+- Created `api_keys` table migration (003) with RLS and migration from user_settings
+- Created Supabase Edge Function at `supabase/functions/mcp/index.ts` with Streamable HTTP transport
+  - All 45 tool handlers ported from local mcp-server.ts
+  - API key authentication via `api_keys` table with request_count tracking
+  - CORS headers, session management, proper error responses (401/400)
+  - Repos inlined for Deno compatibility (npm: specifiers for @supabase/supabase-js and @modelcontextprotocol/sdk)
+  - Recurrence utils inlined to avoid cross-module Deno import issues
+- Removed local stdio MCP server entirely:
+  - Deleted `src/main/mcp-server.ts`
+  - Removed `mcp-server` from rollupOptions in electron.vite.config.ts
+  - Removed `writeMcpSession`, `deleteMcpSession`, `getMcpSessionPath` from ipc-handlers.ts
+  - Removed `mcp:getInfo` and `mcp:isRunning` IPC handlers
+  - Removed `McpAPI` interface and `mcp` property from preload bridge
+  - Removed `McpIndicator` component from sidebar
+  - Removed `execSync` import (no longer needed)
+- Restructured Settings > Integrations UI:
+  - API key section moved above sub-tabs (shared across all integrations)
+  - API key handlers updated to write to `api_keys` table instead of `user_settings`
+  - MCP tab rewritten with setup instructions for Claude Code, Gemini CLI, Codex CLI, and JSON config
+  - All setup commands auto-fill user's API key
+  - MCP on/off toggle removed, no ELECTRON_RUN_AS_NODE references
+  - iOS Shortcut tab references shared API key above
+- Updated `.mcp.json` with ToDoozy remote entry (manual update needed — file is sensitive)
+- Created migration 004 updating `quick_add_task` function to use `api_keys` table with backward compatibility
+- Decision: deploy_project_template handler throws "not available via remote" since ProjectTemplateRepository is local-only
+- Note: `.mcp.json` update was denied by permission system — user needs to add ToDoozy entry manually
+
+## Story #60: Natural Language Date & Recurrence Parsing
+
+### What was built
+- Created `src/shared/nlpDateParser.ts` — shared utility using chrono-node and rrule.js for NLP date detection
+- Integrated NLP into `smartInputParser.ts` filterDates() as fallback when presets/explicit formats don't match
+- Added always-on NLP detection to `useSmartInput.ts` (Todoist-style inline detection)
+- Added NLP date chip to `AddTaskInput.tsx` — shows detected date with dismiss button
+- Added `recurrenceRule` to `SmartTaskData` interface and wired through TaskListView and MyDayView
+- Integrated NLP into Telegram bot parser — detects dates and recurring patterns from plain text
+- Added NLP fallback to MCP `set_task_recurrence` handler via rrule.js in Supabase Edge Function
+
+### Key decisions
+- Used chrono-node for one-time dates (robust NLP parser) and rrule.js for recurring patterns ("every ..." syntax)
+- 80% length threshold to avoid false positives (e.g., "Call May" won't match)
+- NLP dismissed state resets on input clear; explicit d: operator always takes priority
+- Date chip (not inline highlight) for NLP — simpler implementation, consistent with existing chip pattern
+- Time preserved in due_date as full ISO string when chrono detects time; date-only uses YYYY-MM-DD
+- Telegram bot: "Untitled" fallback only when NLP stripping empties title, not when operators consume all input
+- MCP handler: rrule.js NLP via npm: specifier in Deno edge function; chrono-node not needed (rrule covers "every ..." patterns)
+
+### Tests added
+- `src/shared/nlpDateParser.test.ts`: 15 tests covering parseNlpDate, stripDateFromTitle, formatNlpDate, rruleOptsToCanonical
+- `packages/telegram-bot/src/parser.test.ts`: 7 new NLP tests (total 35 tests in file)
+- All 506 tests pass
+
+## Story #61 — Enhanced Timer: Long Break, Flowtime Mode, Session Stats
+
+### What was built
+- **Long Break**: After N configurable work sessions, the break phase uses a longer duration with amber "Long Break" label in overlay and yoga emoji in tray
+- **Flowtime Mode**: Open-ended focus mode where timer counts UP instead of down; user decides when to stop; logs elapsed time as focus session if > 1 minute
+- **Session Stats**: Overlay footer shows "N sessions · Xm focused today"; stats reset when date changes
+
+### Files modified
+- `src/renderer/src/shared/stores/timerStore.ts` — Extended TimerState with 8 new fields, updated startTimer/tick/stop/completePhase for flowtime counting up, long break transitions, session tracking
+- `src/renderer/src/shared/hooks/useTimerSettings.ts` — Added flowtimeEnabled, longBreakEnabled, longBreakMinutes, longBreakInterval settings
+- `src/renderer/src/shared/components/TimerOverlay.tsx` — Flowtime display (count up), long break amber styling, session stats footer
+- `src/renderer/src/shared/components/TimerPlayButton.tsx` — Flowtime toggle in popup, conditional preset/rep hiding, updated onStart signature
+- `src/renderer/src/features/settings/TimerSettingsContent.tsx` — Long break settings (toggle, duration, interval), flowtime toggle
+- `src/preload/index.d.ts` — Extended TimerTrayState with 5 new fields
+- `src/main/tray.ts` — Flowtime count-up display, long break yoga emoji, flowtime wave emoji
+
+### Key decisions
+- Session stats not persisted to DB — resets on app restart (acceptable for v1, kept simple)
+- Long break interval = 0 disables long breaks entirely
+- Flowtime hides preset and rep controls in popup (irrelevant in open-ended mode)
+- Direct start (no popup) only when both repetition AND flowtime are disabled
+- Session stats preserved across stop() calls within same day but reset on date change
+- Tray syncs every 5 seconds in flowtime to avoid excessive IPC
+
+### Tests added
+- 8 new tests in timerStore.test.ts covering flowtime tick counting, pause behavior, long break params, session stats preservation, date reset, default isFlowtime
+- All 514 tests pass (21 test files)

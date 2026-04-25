@@ -181,6 +181,62 @@ export class TaskRepository {
     return this.findById(id)
   }
 
+  // Sync-only path: write a task as-is, preserving remote created_at/updated_at.
+  // Using create()/update() in sync code stamps NOW into updated_at, which makes
+  // the row look "local-newer" on the next pull and triggers a redundant push.
+  applyRemoteTask(task: Task): Task {
+    this.db
+      .prepare(
+        `INSERT INTO tasks (id, project_id, owner_id, assigned_to, title, description, status_id,
+         priority, due_date, parent_id, order_index, is_template, is_archived, is_in_my_day,
+         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id = excluded.project_id,
+           owner_id = excluded.owner_id,
+           assigned_to = excluded.assigned_to,
+           title = excluded.title,
+           description = excluded.description,
+           status_id = excluded.status_id,
+           priority = excluded.priority,
+           due_date = excluded.due_date,
+           parent_id = excluded.parent_id,
+           order_index = excluded.order_index,
+           is_template = excluded.is_template,
+           is_archived = excluded.is_archived,
+           is_in_my_day = excluded.is_in_my_day,
+           completed_date = excluded.completed_date,
+           recurrence_rule = excluded.recurrence_rule,
+           reference_url = excluded.reference_url,
+           my_day_dismissed_date = excluded.my_day_dismissed_date,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        task.id,
+        task.project_id,
+        task.owner_id,
+        task.assigned_to ?? null,
+        task.title,
+        task.description ?? null,
+        task.status_id,
+        task.priority ?? 0,
+        task.due_date ?? null,
+        task.parent_id ?? null,
+        task.order_index ?? 0,
+        task.is_template ?? 0,
+        task.is_archived ?? 0,
+        task.is_in_my_day ?? 0,
+        task.completed_date ?? null,
+        task.recurrence_rule ?? null,
+        task.reference_url ?? null,
+        task.my_day_dismissed_date ?? null,
+        task.created_at,
+        task.updated_at
+      )
+    return this.findById(task.id)!
+  }
+
   delete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return result.changes > 0

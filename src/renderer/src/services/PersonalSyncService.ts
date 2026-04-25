@@ -375,9 +375,11 @@ export async function pushTheme(theme: {
   mode: string
   bg: string
   fg: string
-  accent: string
-  surface: string
+  fg_secondary: string
+  fg_muted: string
   muted: string
+  accent: string
+  accent_fg: string
   border: string
   updated_at?: string
 }): Promise<void> {
@@ -390,9 +392,13 @@ export async function pushTheme(theme: {
       mode: theme.mode,
       bg: theme.bg,
       fg: theme.fg,
-      accent: theme.accent,
-      surface: theme.surface,
+      fg_secondary: theme.fg_secondary,
+      fg_muted: theme.fg_muted,
       muted: theme.muted,
+      accent: theme.accent,
+      accent_fg: theme.accent_fg,
+      // Legacy column, still NOT NULL — kept in sync with fg_secondary.
+      surface: theme.fg_secondary,
       border: theme.border,
       updated_at: theme.updated_at ?? new Date().toISOString()
     })
@@ -614,9 +620,11 @@ export async function fullUpload(userId: string): Promise<void> {
             mode: theme.mode,
             bg: config.bg ?? '',
             fg: config.fg ?? '',
-            accent: config.accent ?? '',
-            surface: config.fgSecondary ?? '',
+            fg_secondary: config.fgSecondary ?? '',
+            fg_muted: config.fgMuted ?? '',
             muted: config.muted ?? '',
+            accent: config.accent ?? '',
+            accent_fg: config.accentFg ?? '',
             border: config.border ?? '',
             updated_at: theme.updated_at
           })
@@ -1065,7 +1073,9 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           }
         }
         try {
-          await window.api.tasks.create({
+          // applyRemote preserves remote timestamps; tasks.create would stamp NOW
+          // into updated_at and trigger a redundant push on the next pull.
+          await window.api.tasks.applyRemote({
             id: rt.id,
             project_id: rt.project_id,
             owner_id: ownerId,
@@ -1083,7 +1093,9 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             completed_date: rt.completed_date,
             recurrence_rule: rt.recurrence_rule,
             reference_url: rt.reference_url,
-            my_day_dismissed_date: rt.my_day_dismissed_date ?? null
+            my_day_dismissed_date: rt.my_day_dismissed_date ?? null,
+            created_at: rt.created_at,
+            updated_at: rt.updated_at
           })
           touchedTaskIds.push(rt.id)
           pulled++
@@ -1091,9 +1103,12 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           console.error(`[PersonalSync] Failed to create task "${rt.title}" (${rt.id}):`, e)
         }
       } else if (rt.updated_at && existing.updated_at && rt.updated_at > existing.updated_at) {
-        // Remote is newer — update locally
+        // Remote is newer — update locally (preserve remote timestamps via applyRemote)
         try {
-          await window.api.tasks.update(rt.id, {
+          await window.api.tasks.applyRemote({
+            id: rt.id,
+            project_id: rt.project_id,
+            owner_id: existing.owner_id,
             title: rt.title,
             description: rt.description,
             status_id: rt.status_id,
@@ -1102,12 +1117,15 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             parent_id: rt.parent_id,
             order_index: rt.order_index ?? 0,
             assigned_to: rt.assigned_to,
+            is_template: rt.is_template ?? existing.is_template ?? 0,
             is_archived: rt.is_archived ?? 0,
             is_in_my_day: rt.is_in_my_day ?? 0,
             completed_date: rt.completed_date,
             recurrence_rule: rt.recurrence_rule,
             reference_url: rt.reference_url,
-            my_day_dismissed_date: rt.my_day_dismissed_date ?? null
+            my_day_dismissed_date: rt.my_day_dismissed_date ?? null,
+            created_at: existing.created_at,
+            updated_at: rt.updated_at
           })
           touchedTaskIds.push(rt.id)
           pulled++
@@ -1263,18 +1281,25 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         state.onChange(payload.eventType, data)
       }
     )
-    .subscribe((status) => {
+    .subscribe((status, err) => {
       if (state.cancelled) return
       const pName = projectNameCache.get(projectId) ?? projectId
-      console.log(`[Realtime] ${pName}: ${status}`)
+      console.log(`[Realtime] ${pName}: ${status}`, err ?? '')
+      // Instrumentation: capture channel internal state + server error payload to diagnose loop
+      const ch = channel as unknown as { state?: string; subTopic?: string; joinedOnce?: boolean }
+      const chState = ch.state ?? '(unknown)'
+      const subTopic = ch.subTopic ?? '(unknown)'
+      const errMsg = err
+        ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
+        : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
         useSyncStore.getState().setRealtimeConnected(true)
-        logEvent('info', 'realtime', `Subscribed to personal project`, pName)
+        logEvent('info', 'realtime', `Subscribed to personal project`, `${pName} topic=${subTopic} chState=${chState}`)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         useSyncStore.getState().setRealtimeConnected(false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
-        logEvent(level, 'realtime', `Channel ${status} on personal project`, pName)
+        logEvent(level, 'realtime', `Channel ${status} on personal project`, `${pName} topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         schedulePersonalReconnect(projectId)
       }
     })

@@ -53,6 +53,7 @@ export interface TasksAPI {
   findSubtasks(parentId: string): Promise<Task[]>
   getSubtaskCount(parentId: string): Promise<{ total: number; done: number }>
   create(input: CreateTaskInput): Promise<Task>
+  applyRemote(task: Task): Promise<Task>
   update(id: string, input: UpdateTaskInput): Promise<Task | null>
   delete(id: string): Promise<boolean>
   reorder(taskIds: string[]): Promise<void>
