@@ -106,6 +106,12 @@ function App(): React.JSX.Element {
         console.error('[Startup] Failed to initialize personal sync:', err)
       }
 
+      // Reconcile pass: detect and repair drift between local SQLite and Supabase.
+      // Fire-and-forget so startup isn't blocked on it.
+      void import('./services/PersonalSyncService').then(({ reconcile }) =>
+        reconcile(currentUser.id).catch((err) => console.error('[Startup] Reconcile failed:', err))
+      )
+
       // Warm the What's New cache so first visit doesn't depend on a live fetch.
       // loadCached() seeds the store from the bundled markdown (offline-safe);
       // sync() fetches the latest from GitHub and updates the cache.

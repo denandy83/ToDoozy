@@ -13,6 +13,7 @@ import type { Label } from '../../../../shared/types'
 function makeLabel(id: string, name: string, color: string, _projectId = 'proj1'): Label {
   return {
     id,
+    user_id: 'user-1',
     name,
     color,
     order_index: 0,

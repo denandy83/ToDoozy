@@ -10,6 +10,8 @@ import type {
 } from '../../../../shared/types'
 import { useSettingsStore } from './settingsStore'
 import { useAuthStore } from './authStore'
+import { logEvent } from './logStore'
+import { useSyncStore } from './syncStore'
 
 function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
@@ -57,7 +59,18 @@ async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE
       }
     }
   } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown error'
     console.error('[TaskStore] Failed to sync task to Supabase:', err)
+    // Inner push functions normally route their own failures, but if anything
+    // bubbles up here (e.g., project lookup threw), make sure the user sees it.
+    logEvent('error', 'sync', `syncIfShared (${operation}) failed: ${msg}`, `task=${task.id} project=${task.project_id}`)
+    try {
+      await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
+      void useSyncStore.getState().refreshPendingCount()
+    } catch (e) {
+      console.error('[TaskStore] Failed to enqueue:', e)
+    }
+    useSyncStore.getState().setError(msg)
   }
 }
 

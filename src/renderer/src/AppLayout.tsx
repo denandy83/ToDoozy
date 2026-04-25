@@ -337,7 +337,7 @@ export function AppLayout(): React.JSX.Element {
                   label = await window.api.labels.findByName(userId, name)
                 }
                 if (!label) {
-                  label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
+                  label = await window.api.labels.create({ id: crypto.randomUUID(), user_id: userId, name, color })
                 }
                 await window.api.labels.addToProject(selectedProject.id, label.id).catch(() => {})
                 await window.api.tasks.addLabel(payload.id as string, label.id).catch(() => {})

@@ -217,6 +217,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.getLabels(taskId)
   })
 
+  ipcMain.handle('tasks:getTaskLabelsForUser', (_e, userId: string) => {
+    return getRepos().tasks.getTaskLabelsForUser(userId)
+  })
+
   ipcMain.handle('tasks:duplicate', (_e, id: string, newId: string) => {
     return getRepos().tasks.duplicate(id, newId) ?? null
   })

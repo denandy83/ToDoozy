@@ -271,6 +271,19 @@ export class TaskRepository {
       .all(taskId) as unknown as TaskLabel[]
   }
 
+  getTaskLabelsForUser(userId: string): TaskLabel[] {
+    return this.db
+      .prepare(
+        `SELECT tl.task_id, tl.label_id
+         FROM task_labels tl
+         JOIN tasks t ON t.id = tl.task_id
+         JOIN projects p ON p.id = t.project_id
+         WHERE t.owner_id = ?
+           AND COALESCE(p.is_shared, 0) = 0`
+      )
+      .all(userId) as unknown as TaskLabel[]
+  }
+
   findAllTemplates(userId: string): Task[] {
     return this.db
       .prepare(

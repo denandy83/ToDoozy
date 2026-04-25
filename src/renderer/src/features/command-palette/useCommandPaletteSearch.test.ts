@@ -39,6 +39,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 function makeLabel(overrides: Partial<Label> = {}): Label {
   return {
     id: 'label-1',
+    user_id: 'user-1',
     name: 'Bug',
     color: '#ff0000',
     order_index: 0,

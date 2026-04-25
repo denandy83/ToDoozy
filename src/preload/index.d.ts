@@ -60,6 +60,7 @@ export interface TasksAPI {
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   getLabels(taskId: string): Promise<TaskLabel[]>
+  getTaskLabelsForUser(userId: string): Promise<TaskLabel[]>
   duplicate(id: string, newId: string): Promise<Task | null>
   findAllTemplates(userId: string): Promise<Task[]>
   saveAsTemplate(id: string, newId: string): Promise<Task | null>

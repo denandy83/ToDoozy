@@ -215,9 +215,9 @@ export default function QuickAddApp(): React.JSX.Element {
       if (data.type === 'label') {
         smart.selectLabel(data.label)
       } else if (data.type === 'label-create') {
-        if (targetProjectId) {
+        if (targetProjectId && userId) {
           window.api.labels
-            .create({ id: crypto.randomUUID(), project_id: targetProjectId, name: data.name, color: data.color })
+            .create({ id: crypto.randomUUID(), user_id: userId, project_id: targetProjectId, name: data.name, color: data.color })
             .then((created) => {
               smart.selectLabel(created)
               setAllLabels((prev) => [...prev, created])

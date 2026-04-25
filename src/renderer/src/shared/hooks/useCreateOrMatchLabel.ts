@@ -27,6 +27,7 @@ export function useCreateOrMatchLabel(projectId: string): (name: string, color: 
       // Create new global label linked to project
       return await createLabel({
         id: crypto.randomUUID(),
+        user_id: userId,
         project_id: projectId,
         name,
         color

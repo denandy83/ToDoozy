@@ -125,3 +125,7 @@ Working file — entries written here during a session are processed into perman
 - f67cab3 feat: log sync events that were invisible during shared-project bug (2026-04-24) — files: 3
 - d118a56 chore: bump version to 1.4.3 (2026-04-24) — files: 2
 - 47bc120 fix: shared-project sync bugs (join FK, unknown members, missing tasks, wrong-device auto-archive) (2026-04-24) — files: 8
+
+## 2026-04-25 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 0d196b4 wip: theme schema migration, applyRemote timestamp preservation, realtime instrumentation (2026-04-24) — files: 29

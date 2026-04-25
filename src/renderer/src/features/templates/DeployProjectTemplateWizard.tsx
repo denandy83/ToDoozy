@@ -177,6 +177,7 @@ export function DeployProjectTemplateWizard({
           const labelId = crypto.randomUUID()
           await window.api.labels.create({
             id: labelId,
+            user_id: currentUser.id,
             project_id: project.id,
             name: l.name,
             color: l.color

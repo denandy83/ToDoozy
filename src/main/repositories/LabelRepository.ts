@@ -38,30 +38,50 @@ export class LabelRepository {
       .all(projectId) as unknown as Label[]
   }
 
-  /** Find a label by exact name scoped to user's projects (case-insensitive) */
+  /**
+   * Find a label by name owned by this user (case-insensitive).
+   * Falls back to the legacy project_labels join for any pre-migration rows
+   * whose user_id is still NULL — once those are healed we can drop the fallback.
+   */
   findByName(userId: string, name: string): Label | undefined {
-    return this.db
+    const direct = this.db
+      .prepare(
+        `SELECT * FROM labels
+         WHERE user_id = ? AND LOWER(name) = LOWER(?)
+         ORDER BY created_at ASC
+         LIMIT 1`
+      )
+      .get(userId, name) as unknown as Label | undefined
+    if (direct) return direct
+
+    const legacy = this.db
       .prepare(
         `SELECT DISTINCT l.* FROM labels l
          INNER JOIN project_labels pl ON pl.label_id = l.id
          INNER JOIN project_members pm ON pm.project_id = pl.project_id
-         WHERE pm.user_id = ? AND LOWER(l.name) = LOWER(?)
+         WHERE pm.user_id = ? AND LOWER(l.name) = LOWER(?) AND l.user_id IS NULL
          LIMIT 1`
       )
       .get(userId, name) as unknown as Label | undefined
+    if (legacy) {
+      // Heal: stamp user_id so subsequent lookups hit the fast path.
+      this.db.prepare(`UPDATE labels SET user_id = ? WHERE id = ? AND user_id IS NULL`).run(userId, legacy.id)
+      legacy.user_id = userId
+    }
+    return legacy
   }
 
-  /** Create a new global label. If project_id is provided, also links to that project. */
+  /** Create a new label owned by user_id. If project_id is provided, also links to that project. */
   create(input: CreateLabelInput): Label {
     const now = new Date().toISOString()
     // Shift existing labels down to make room at top
     this.db.prepare('UPDATE labels SET order_index = order_index + 1').run()
     this.db
       .prepare(
-        `INSERT INTO labels (id, name, color, order_index, created_at, updated_at)
-         VALUES (?, ?, ?, 0, ?, ?)`
+        `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, ?, ?)`
       )
-      .run(input.id, input.name, input.color ?? '#888888', now, now)
+      .run(input.id, input.user_id, input.name, input.color ?? '#888888', now, now)
 
     // If project_id provided, link label to that project
     if (input.project_id) {

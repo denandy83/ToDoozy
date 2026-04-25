@@ -64,6 +64,7 @@ export function UseTemplateModal({
         // Auto-create new global label linked to target project
         const newLabel = await useLabelStore.getState().createLabel({
           id: crypto.randomUUID(),
+          user_id: currentUser.id,
           project_id: selectedProjectId,
           name: tl.name,
           color: tl.color

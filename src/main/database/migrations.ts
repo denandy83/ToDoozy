@@ -456,4 +456,118 @@ const migration_17: Migration = (db) => {
   db.exec("DELETE FROM settings WHERE key IN ('auto_archive_enabled', 'auto_archive_value', 'auto_archive_unit')")
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17]
+const migration_18: Migration = (db) => {
+  // Add user_id to labels — labels are user-owned, not project-owned.
+  // Previously findByName had to join via project_labels + project_members,
+  // which produced duplicates whenever a pulled label had no project link yet.
+  db.exec(`ALTER TABLE labels ADD COLUMN user_id TEXT DEFAULT NULL`)
+
+  // Backfill: pick the user with the most owned tasks (the logged-in user on this
+  // machine). The users table can also hold placeholder rows for shared-project
+  // owners/assignees, so picking by tasks.owner_id frequency is more reliable
+  // than ORDER BY created_at.
+  const owner = db.prepare(
+    `SELECT owner_id AS id FROM tasks
+     WHERE owner_id IS NOT NULL
+     GROUP BY owner_id
+     ORDER BY COUNT(*) DESC
+     LIMIT 1`
+  ).get() as { id: string } | undefined
+  const fallback = db.prepare(`SELECT id FROM users ORDER BY created_at LIMIT 1`).get() as
+    | { id: string }
+    | undefined
+  const userId = owner?.id ?? fallback?.id
+  if (userId) {
+    db.prepare(`UPDATE labels SET user_id = ? WHERE user_id IS NULL`).run(userId)
+  }
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_labels_user_name ON labels(user_id, name COLLATE NOCASE)`)
+}
+
+const migration_19: Migration = (db) => {
+  // Mirror of supabase/migrations/20260425010000_dedupe_user_labels.sql.
+  // Local SQLite has the same per-user duplicate labels (e.g. "Bug" vs "bug"
+  // and exact-name races from the create-or-find pattern). After the Supabase
+  // unique index landed, every push of a local duplicate trips 23505 and the
+  // ghost label_id stays referenced by task_labels — so tasks tagged via the
+  // ghost don't appear in label-filtered views (the canonical doesn't know
+  // about them locally).
+  //
+  // Pick canonical per (user_id, LOWER(name)) by task_labels count desc, then
+  // created_at asc as tiebreaker. Rewrite task_labels + project_labels to
+  // point at canonical, drop duplicates, drop sync_queue entries for removed
+  // ghost rows, then add a unique index.
+  db.exec(`
+    CREATE TEMP TABLE label_dedup_plan AS
+    WITH counts AS (
+      SELECT
+        l.id,
+        l.user_id,
+        l.name,
+        LOWER(l.name) AS lname,
+        l.created_at,
+        (SELECT COUNT(*) FROM task_labels tl WHERE tl.label_id = l.id) AS uses
+      FROM labels l
+      WHERE l.user_id IS NOT NULL
+    ),
+    ranked AS (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY user_id, lname
+          ORDER BY uses DESC, created_at ASC
+        ) AS rn,
+        FIRST_VALUE(id) OVER (
+          PARTITION BY user_id, lname
+          ORDER BY uses DESC, created_at ASC
+        ) AS canonical_id
+      FROM counts
+    )
+    SELECT id AS duplicate_id, canonical_id
+    FROM ranked
+    WHERE rn > 1
+  `)
+
+  db.exec(`
+    INSERT OR IGNORE INTO task_labels (task_id, label_id)
+    SELECT tl.task_id, p.canonical_id
+    FROM task_labels tl
+    JOIN label_dedup_plan p ON p.duplicate_id = tl.label_id
+  `)
+  db.exec(`
+    DELETE FROM task_labels
+    WHERE label_id IN (SELECT duplicate_id FROM label_dedup_plan)
+  `)
+
+  db.exec(`
+    INSERT OR IGNORE INTO project_labels (project_id, label_id)
+    SELECT pl.project_id, p.canonical_id
+    FROM project_labels pl
+    JOIN label_dedup_plan p ON p.duplicate_id = pl.label_id
+  `)
+  db.exec(`
+    DELETE FROM project_labels
+    WHERE label_id IN (SELECT duplicate_id FROM label_dedup_plan)
+  `)
+
+  db.exec(`
+    DELETE FROM sync_queue
+    WHERE table_name = 'user_labels'
+      AND row_id IN (SELECT duplicate_id FROM label_dedup_plan)
+  `)
+
+  db.exec(`
+    DELETE FROM labels
+    WHERE id IN (SELECT duplicate_id FROM label_dedup_plan)
+  `)
+
+  db.exec(`DROP TABLE label_dedup_plan`)
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS labels_user_name_unique
+      ON labels(user_id, LOWER(name))
+      WHERE user_id IS NOT NULL
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19]

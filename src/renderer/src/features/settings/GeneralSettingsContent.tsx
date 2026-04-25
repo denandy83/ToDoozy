@@ -546,6 +546,50 @@ export function GeneralSettingsContent(): React.JSX.Element {
 
       <SectionLabel>Sync</SectionLabel>
       <ForceSyncButton />
+      <ReconcileButton />
+    </div>
+  )
+}
+
+function ReconcileButton(): React.JSX.Element {
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<{ pushed: number; pulled: number } | null>(null)
+
+  const handleReconcile = useCallback(async () => {
+    setRunning(true)
+    setResult(null)
+    try {
+      const userId = (await window.api.users.list())[0]?.id
+      if (userId) {
+        const { reconcile } = await import('../../services/PersonalSyncService')
+        const r = await reconcile(userId)
+        setResult(r)
+        setTimeout(() => setResult(null), 5000)
+      }
+    } catch (err) {
+      console.error('Reconcile failed:', err)
+    } finally {
+      setRunning(false)
+    }
+  }, [])
+
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <button
+        onClick={handleReconcile}
+        disabled={running}
+        className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-50"
+      >
+        {running ? 'Reconciling...' : 'Reconcile'}
+      </button>
+      {result && (
+        <span className="text-[10px] font-bold uppercase tracking-widest text-success">
+          Pushed {result.pushed} · Pulled {result.pulled}
+        </span>
+      )}
+      <p className="text-[10px] font-light text-foreground/40">
+        Detect and repair drift between local data and Supabase
+      </p>
     </div>
   )
 }

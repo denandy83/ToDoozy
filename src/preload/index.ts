@@ -21,6 +21,7 @@ const api: TodoozyAPI = {
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
+    getTaskLabelsForUser: (userId) => ipcRenderer.invoke('tasks:getTaskLabelsForUser', userId),
     duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId),
     findAllTemplates: (userId) => ipcRenderer.invoke('tasks:findAllTemplates', userId),
     saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId),

@@ -262,6 +262,34 @@ export async function uploadProjectToSupabase(
   }
 }
 
+/**
+ * Route a sync push failure through every channel a user/operator might watch.
+ * Mirrors PersonalSyncService.reportPushFailure; lives here so SyncService
+ * stays self-contained (no cross-service imports).
+ */
+async function reportPushFailure(
+  context: string,
+  error: { message?: string; code?: string; details?: string } | unknown,
+  table: string,
+  rowId: string,
+  payload: string,
+  operation: SyncOperation = 'UPDATE'
+): Promise<void> {
+  const err = error as { message?: string; code?: string; details?: string }
+  const msg = err?.message ?? (typeof error === 'string' ? error : 'unknown error')
+  const code = err?.code ?? ''
+  const details = err?.details ?? ''
+  console.error(`[SyncService] ${context} error:`, msg, code, details, `id=${rowId}`)
+  logEvent('error', 'sync', `${context} failed: ${msg}`, `table=${table} id=${rowId} code=${code} details=${details}`)
+  try {
+    await window.api.sync.enqueue(table, rowId, operation, payload)
+  } catch (e) {
+    console.error('[SyncService] Failed to enqueue after push error:', e)
+  }
+  useSyncStore.getState().setError(msg || `${context} failed`)
+  void useSyncStore.getState().refreshPendingCount()
+}
+
 async function syncTaskToSupabase(
   supabase: SupabaseClient,
   task: Task,
@@ -301,17 +329,27 @@ export async function syncTaskChange(
 ): Promise<void> {
   if (!isOnline) {
     await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
+    void useSyncStore.getState().refreshPendingCount()
     return
   }
 
   const supabase = await getSupabase()
 
-  if (operation === 'DELETE') {
-    await supabase.from('tasks').delete().eq('id', task.id)
-  } else {
-    await syncTaskToSupabase(supabase, task, labelData ?? [])
+  try {
+    if (operation === 'DELETE') {
+      const { error } = await supabase.from('tasks').delete().eq('id', task.id)
+      if (error) {
+        await reportPushFailure('syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
+        return
+      }
+    } else {
+      // syncTaskToSupabase throws on error; the catch routes it.
+      await syncTaskToSupabase(supabase, task, labelData ?? [])
+    }
+    markSynced()
+  } catch (err) {
+    await reportPushFailure('syncTaskChange', err, 'tasks', task.id, JSON.stringify(task), operation)
   }
-  markSynced()
 }
 
 /**
@@ -323,28 +361,41 @@ export async function syncStatusChange(
 ): Promise<void> {
   if (!isOnline) {
     await window.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
+    void useSyncStore.getState().refreshPendingCount()
     return
   }
 
   const supabase = await getSupabase()
 
-  if (operation === 'DELETE') {
-    await supabase.from('statuses').delete().eq('id', status.id)
-  } else {
-    await supabase.from('statuses').upsert({
-      id: status.id,
-      project_id: status.project_id,
-      name: status.name,
-      color: status.color,
-      icon: status.icon,
-      order_index: status.order_index,
-      is_done: status.is_done,
-      is_default: status.is_default,
-      created_at: status.created_at,
-      updated_at: status.updated_at
-    })
+  try {
+    if (operation === 'DELETE') {
+      const { error } = await supabase.from('statuses').delete().eq('id', status.id)
+      if (error) {
+        await reportPushFailure('syncStatusChange:DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id }), 'DELETE')
+        return
+      }
+    } else {
+      const { error } = await supabase.from('statuses').upsert({
+        id: status.id,
+        project_id: status.project_id,
+        name: status.name,
+        color: status.color,
+        icon: status.icon,
+        order_index: status.order_index,
+        is_done: status.is_done,
+        is_default: status.is_default,
+        created_at: status.created_at,
+        updated_at: status.updated_at
+      })
+      if (error) {
+        await reportPushFailure('syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
+        return
+      }
+    }
+    markSynced()
+  } catch (err) {
+    await reportPushFailure('syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
   }
-  markSynced()
 }
 
 /**
@@ -405,6 +456,17 @@ export async function processSyncQueue(): Promise<number> {
     } catch (err) {
       console.error(`Failed to sync delete ${entry.id}:`, err)
       break
+    }
+  }
+
+  // After a drain attempt, refresh the queue count and clear stale error if drained clean.
+  await useSyncStore.getState().refreshPendingCount()
+  const finalCount = useSyncStore.getState().pendingCount
+  if (finalCount === 0) {
+    useSyncStore.getState().setError(null)
+    useSyncStore.getState().setLastSynced()
+    if (processed > 0) {
+      logEvent('info', 'sync', `Sync queue drained: ${processed} items pushed`)
     }
   }
 
@@ -794,6 +856,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       if (!label) {
         label = await window.api.labels.create({
           id: crypto.randomUUID(),
+          user_id: userId,
           name: entry.name,
           color: entry.color
         })
@@ -930,7 +993,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
             label = await window.api.labels.findByName(userId, name) ?? undefined
           }
           if (!label) {
-            label = await window.api.labels.create({ id: crypto.randomUUID(), name, color })
+            label = await window.api.labels.create({ id: crypto.randomUUID(), user_id: userId, name, color })
           }
           await window.api.labels.addToProject(projectId, label.id).catch(() => {})
           await window.api.tasks.addLabel(task.id, label.id).catch(() => {})

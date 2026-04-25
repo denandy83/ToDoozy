@@ -966,29 +966,29 @@ describe('LabelRepository', () => {
 
   it('creates a global label and finds it', () => {
     const id = randomUUID()
-    const label = repo.create({ id, name: 'Bug', color: '#ff0000' })
+    const label = repo.create({ id, user_id: userId, name: 'Bug', color: '#ff0000' })
     expect(label.name).toBe('Bug')
     expect(repo.findById(id)).toBeDefined()
   })
 
   it('creates a label linked to a project', () => {
     const id = randomUUID()
-    repo.create({ id, project_id: projectId, name: 'Feature', color: '#00ff00' })
+    repo.create({ id, user_id: userId, project_id: projectId, name: 'Feature', color: '#00ff00' })
     const labels = repo.findByProjectId(projectId)
     expect(labels).toHaveLength(1)
     expect(labels[0].name).toBe('Feature')
   })
 
   it('finds all labels for user', () => {
-    repo.create({ id: randomUUID(), project_id: projectId, name: 'Zzz' })
-    repo.create({ id: randomUUID(), project_id: projectId, name: 'Aaa' })
+    repo.create({ id: randomUUID(), user_id: userId, project_id: projectId, name: 'Zzz' })
+    repo.create({ id: randomUUID(), user_id: userId, project_id: projectId, name: 'Aaa' })
     const labels = repo.findAllForUser(userId)
     expect(labels).toHaveLength(2)
   })
 
   it('finds labels by project sorted by order_index', () => {
-    repo.create({ id: randomUUID(), project_id: projectId, name: 'Zzz' })
-    repo.create({ id: randomUUID(), project_id: projectId, name: 'Aaa' })
+    repo.create({ id: randomUUID(), user_id: userId, project_id: projectId, name: 'Zzz' })
+    repo.create({ id: randomUUID(), user_id: userId, project_id: projectId, name: 'Aaa' })
     const labels = repo.findByProjectId(projectId)
     expect(labels).toHaveLength(2)
     // Most recent is at index 0 (shifted to top)
@@ -996,15 +996,58 @@ describe('LabelRepository', () => {
   })
 
   it('finds label by name case-insensitively', () => {
-    repo.create({ id: randomUUID(), project_id: projectId, name: 'Bug' })
+    repo.create({ id: randomUUID(), user_id: userId, project_id: projectId, name: 'Bug' })
     expect(repo.findByName(userId, 'bug')).toBeDefined()
     expect(repo.findByName(userId, 'BUG')).toBeDefined()
     expect(repo.findByName(userId, 'nonexistent')).toBeUndefined()
   })
 
+  it('findByName works for an orphan label without project_labels link (the duplicate-creation bug)', () => {
+    // Reproduce the bug: a label was pulled from Supabase and exists in the
+    // labels table but is NOT linked to any project yet. The legacy join-based
+    // findByName missed these and minted duplicates. The new user_id query finds it.
+    const id = randomUUID()
+    repo.create({ id, user_id: userId, name: 'Bug' }) // no project_id → no project_labels row
+    const found = repo.findByName(userId, 'Bug')
+    expect(found).toBeDefined()
+    expect(found!.id).toBe(id)
+  })
+
+  it('findByName falls back to the legacy project_labels join for pre-migration rows', () => {
+    // A label inserted before migration_18 has user_id = NULL but is linked to
+    // a project. findByName should still find it via the legacy join AND heal
+    // it by stamping user_id.
+    const id = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES (?, NULL, ?, '#888888', 0, ?, ?)`
+    ).run(id, 'Legacy', now, now)
+    db.prepare(`INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)`).run(projectId, id, now)
+
+    const found = repo.findByName(userId, 'Legacy')
+    expect(found).toBeDefined()
+    expect(found!.id).toBe(id)
+    // Should now be healed (user_id stamped)
+    expect(found!.user_id).toBe(userId)
+    const reread = repo.findById(id)
+    expect(reread!.user_id).toBe(userId)
+  })
+
+  it('findByName scopes by user — does not return another user\'s same-named label', () => {
+    const otherUserId = randomUUID()
+    const now = new Date().toISOString()
+    db.prepare(
+      'INSERT INTO users (id, email, created_at, updated_at) VALUES (?, ?, ?, ?)'
+    ).run(otherUserId, 'other@test.com', now, now)
+    repo.create({ id: randomUUID(), user_id: otherUserId, name: 'Bug' })
+
+    expect(repo.findByName(userId, 'Bug')).toBeUndefined()
+  })
+
   it('updates a label globally', () => {
     const id = randomUUID()
-    repo.create({ id, project_id: projectId, name: 'Old' })
+    repo.create({ id, user_id: userId, project_id: projectId, name: 'Old' })
     const updated = repo.update(id, { name: 'New', color: '#00ff00' })
     expect(updated!.name).toBe('New')
     expect(updated!.color).toBe('#00ff00')
@@ -1012,7 +1055,7 @@ describe('LabelRepository', () => {
 
   it('deletes a label globally and cascades', () => {
     const id = randomUUID()
-    repo.create({ id, project_id: projectId, name: 'Temp' })
+    repo.create({ id, user_id: userId, project_id: projectId, name: 'Temp' })
     expect(repo.delete(id)).toBe(true)
     expect(repo.findById(id)).toBeUndefined()
     // project_labels should also be cleaned up (cascade)
@@ -1021,7 +1064,7 @@ describe('LabelRepository', () => {
 
   it('adds and removes labels from projects', () => {
     const id = randomUUID()
-    repo.create({ id, name: 'Global' })
+    repo.create({ id, user_id: userId, name: 'Global' })
     // Not linked to any project initially
     expect(repo.findByProjectId(projectId)).toHaveLength(0)
     // Add to project
@@ -1036,7 +1079,7 @@ describe('LabelRepository', () => {
 
   it('removeFromProject removes task-label associations in that project', () => {
     const labelId = randomUUID()
-    repo.create({ id: labelId, project_id: projectId, name: 'Feature' })
+    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Feature' })
 
     const base = seedBase(db)
     const taskId = randomUUID()
@@ -1053,7 +1096,7 @@ describe('LabelRepository', () => {
 
   it('finds labels by task id', () => {
     const labelId = randomUUID()
-    repo.create({ id: labelId, project_id: projectId, name: 'Feature' })
+    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Feature' })
 
     const base = seedBase(db)
     const taskId = randomUUID()
@@ -1071,7 +1114,7 @@ describe('LabelRepository', () => {
 
   it('findAllWithUsage returns usage counts', () => {
     const labelId = randomUUID()
-    repo.create({ id: labelId, project_id: projectId, name: 'Bug' })
+    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Bug' })
     const usage = repo.findAllWithUsage(userId)
     expect(usage).toHaveLength(1)
     expect(usage[0].project_count).toBe(1)
@@ -1080,7 +1123,7 @@ describe('LabelRepository', () => {
 
   it('findProjectsUsingLabel returns project info', () => {
     const labelId = randomUUID()
-    repo.create({ id: labelId, project_id: projectId, name: 'Bug' })
+    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Bug' })
     const projects = repo.findProjectsUsingLabel(userId, labelId)
     expect(projects).toHaveLength(1)
     expect(projects[0].project_id).toBe(projectId)
@@ -1088,7 +1131,7 @@ describe('LabelRepository', () => {
 
   it('findActiveLabelsForProject only includes labels on non-archived tasks', () => {
     const labelId = randomUUID()
-    repo.create({ id: labelId, project_id: projectId, name: 'Active' })
+    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Active' })
 
     const base = seedBase(db)
     const taskId = randomUUID()

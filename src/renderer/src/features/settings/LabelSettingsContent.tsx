@@ -92,7 +92,7 @@ export function LabelSettingsContent(): React.JSX.Element {
       await addToProject(projectId, existing.id)
       addToast({ message: `Existing label added: ${existing.name}` })
     } else {
-      await createLabel({ id: crypto.randomUUID(), project_id: projectId, name, color: newColor })
+      await createLabel({ id: crypto.randomUUID(), user_id: userId, project_id: projectId, name, color: newColor })
     }
     setNewName('')
     await refreshLabels()

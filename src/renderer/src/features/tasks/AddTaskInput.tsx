@@ -12,7 +12,7 @@ import {
   filterProjects,
   getNextAutoColor
 } from '../../shared/hooks/smartInputParser'
-import { useLabelStore } from '../../shared/stores'
+import { useLabelStore, useAuthStore } from '../../shared/stores'
 import { formatDate, useDateFormat } from '../../shared/utils/dateFormat'
 
 export interface SmartTaskData {
@@ -44,6 +44,7 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
     const inputRef = useRef<HTMLInputElement>(null)
     const smart = useSmartInput(inputRef)
     const dateFormat = useDateFormat()
+    const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus()
@@ -108,7 +109,7 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
         } else if (data.type === 'label-create') {
           if (projectId) {
             window.api.labels
-              .create({ id: crypto.randomUUID(), project_id: projectId, name: data.name, color: data.color })
+              .create({ id: crypto.randomUUID(), user_id: userId, project_id: projectId, name: data.name, color: data.color })
               .then((created) => {
                 smart.selectLabel(created)
                 // Refresh label store so the new label appears in future @ queries

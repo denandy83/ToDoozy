@@ -988,7 +988,14 @@ function createHandlers(repos: Repos, userId: string) {
     },
     async list_labels(args) { return await repos.labels.findByProjectId(requireStr(args, 'project_id')) },
     async create_label(args) {
-      return await repos.labels.create({ id: crypto.randomUUID(), project_id: requireStr(args, 'project_id'), name: requireStr(args, 'name'), color: optStr(args, 'color') })
+      const projectId = requireStr(args, 'project_id'); const name = requireStr(args, 'name')
+      // Reuse existing label with the same name (case-insensitive) to prevent duplicates.
+      const existing = await repos.labels.findByName(userId, name)
+      if (existing) {
+        await repos.labels.addToProject(projectId, existing.id)
+        return existing
+      }
+      return await repos.labels.create({ id: crypto.randomUUID(), project_id: projectId, name, color: optStr(args, 'color') })
     },
     async assign_label_to_task(args) {
       const taskId = requireStr(args, 'task_id'); const labelId = requireStr(args, 'label_id')
