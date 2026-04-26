@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
+import { Mutex } from 'async-mutex'
 import { logEvent } from '../shared/stores/logStore'
 
 let supabaseClient: SupabaseClient | null = null
@@ -7,6 +8,81 @@ let initPromise: Promise<SupabaseClient> | null = null
 // Realtime debug counters — instrumentation only (no behavior change).
 let setAuthCount = 0
 let setAuthDedupedCount = 0
+
+// Single-flight mutex around all token-rotating ops (setSession + refreshSession).
+// Supabase invalidates the entire session if the same refresh_token is used twice
+// outside the 10s grace window — sleep/wake races and concurrent windows can
+// produce that. Serializing all rotations through one mutex eliminates the race.
+const authMutex = new Mutex()
+
+/**
+ * Persist tokens to safeStorage. Fire-and-forget caller — never await this
+ * inside `onAuthStateChange` (auth-js #762 deadlocks).
+ */
+async function persistTokens(session: Session): Promise<void> {
+  try {
+    await window.api.auth.storeSession(JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token
+    }))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logEvent('error', 'sync', 'persistTokens failed', msg)
+  }
+}
+
+async function clearStoredTokens(): Promise<void> {
+  try {
+    await window.api.auth.clearSession()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logEvent('error', 'sync', 'clearStoredTokens failed', msg)
+  }
+}
+
+/**
+ * Wrap `setSession(tokens)` with the auth mutex so a cold-start restore can't
+ * race with an `autoRefreshToken` rotation (or with a parallel recovery tick).
+ * Re-persists the rotated session on success.
+ */
+export async function safeSetSession(
+  tokens: { access_token: string; refresh_token: string }
+): Promise<{ session: Session | null; error: { message: string; code?: string } | null }> {
+  return authMutex.runExclusive(async () => {
+    const supabase = await getSupabase()
+    const { data, error } = await supabase.auth.setSession(tokens)
+    if (data.session) {
+      // setSession rotates the refresh_token; persist immediately so the next
+      // cold start uses the new pair instead of the (now revoked) input pair.
+      await persistTokens(data.session)
+    }
+    return {
+      session: data.session ?? null,
+      error: error
+        ? { message: error.message, code: (error as unknown as { code?: string }).code }
+        : null
+    }
+  })
+}
+
+/**
+ * Mutex-guarded refresh. Use this anywhere you'd call `auth.refreshSession()`
+ * directly. Returns the rotated session.
+ */
+export async function safeRefresh(): Promise<Session | null> {
+  return authMutex.runExclusive(async () => {
+    const supabase = await getSupabase()
+    const { data, error } = await supabase.auth.refreshSession()
+    if (error) {
+      logEvent('warn', 'sync', 'safeRefresh failed', error.message)
+      return null
+    }
+    if (data.session) {
+      await persistTokens(data.session)
+    }
+    return data.session ?? null
+  })
+}
 
 function attachRealtimeInstrumentation(client: SupabaseClient): void {
   // NOTE: supabase-js realtime-js has no public onOpen/onClose/onError methods —
@@ -76,6 +152,21 @@ function attachAuthInstrumentation(client: SupabaseClient): void {
       ? `expires_at=${new Date(expiresAt * 1000).toISOString()}`
       : '(no session)'
     logEvent('info', 'realtime', `auth: ${event}`, expInfo)
+
+    // CRITICAL: never await inside onAuthStateChange — auth-js #762 deadlocks
+    // `_acquireLock` if the callback awaits any other Supabase call. Defer all
+    // async work via setTimeout(0) so the lock releases first.
+    //
+    // Persist the rotated session on TOKEN_REFRESHED so the new refresh_token
+    // survives an app restart. Without this, autoRefreshToken silently rotates
+    // the token in memory only, safeStorage keeps the original (now-revoked)
+    // refresh_token, and the next cold start hits "Refresh Token Not Found".
+    if ((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && session) {
+      setTimeout(() => { void persistTokens(session) }, 0)
+    }
+    if (event === 'SIGNED_OUT') {
+      setTimeout(() => { void clearStoredTokens() }, 0)
+    }
   })
 }
 

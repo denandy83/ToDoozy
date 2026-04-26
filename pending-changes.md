@@ -194,3 +194,22 @@ Working file — entries written here during a session are processed into perman
 - 07fd262 fix: project_labels junction table on Supabase + incremental sync (2026-04-26) — files: 9
 - 8593936 fix: sync is_default/sidebar_order/area_id instead of stripping them (2026-04-26) — files: 5
 - 3b129e6 chore: bump version to 1.5.1 (2026-04-26) — files: 1
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 29eae22 fix: full schema parity — project_templates, label_names, invited_by, themes.created_at (2026-04-26) — files: 16
+
+## 2026-04-26 — Fix: Forever auth — persist rotated refresh tokens, single-flight refresh, terminal-error detection (v1.5.2)
+**What was broken:** Users were being silently kicked out of their session every ~hour of usage, then forced to sign in again on the next cold start. The Logs panel showed `Session restore attempt 1/1 failed — Invalid Refresh Token: Refresh Token Not Found` repeating every 30 seconds forever, with `setAuth #N` counters climbing while no real work could happen.
+**Root cause:** Three compounding issues.
+(1) Supabase rotates the `refresh_token` on every use. With `autoRefreshToken: true`, supabase-js silently rotates the access+refresh pair roughly hourly while the app runs and emits `TOKEN_REFRESHED`. Our `onAuthStateChange` listener only logged the event and never re-persisted the rotated session to safeStorage. So after one in-app rotation, safeStorage still held the original (now-revoked) refresh_token, and the next cold start hit "Refresh Token Not Found" — terminally dead. (2) Concurrent rotation paths (cold-start `setSession`, autoRefreshToken loop, sleep/wake timer fanouts, recovery timer ticks) could race and trip Supabase's reuse-detection, killing the entire session chain. (3) The recovery loop in `sessionRecovery.ts` retried `setSession` every 30 seconds forever, even when the error was a permanent `refresh_token_not_found` — wasting cycles and producing noise that masked real issues.
+**What was fixed:**
+- `src/renderer/src/lib/supabase.ts` — `attachAuthInstrumentation` now listens for `TOKEN_REFRESHED` and `SIGNED_IN` and persists the rotated session to safeStorage; on `SIGNED_OUT` it clears stored tokens. All async work in the listener is wrapped in `setTimeout(..., 0)` to avoid the auth-js `_acquireLock` deadlock (community-confirmed bug, supabase/auth-js#762, supabase/supabase-js#2013).
+- Added `async-mutex` dependency. Introduced `safeSetSession()` and `safeRefresh()` exports that wrap Supabase's token-rotating ops in a single-flight mutex, so a cold-start restore can't race with autoRefresh, and parallel timers can't fire two rotations within Supabase's 10-second reuse-detection window.
+- `src/renderer/src/services/sessionRecovery.ts` — `tryRestoreSession` now uses `safeSetSession`. Permanent error codes (`refresh_token_not_found`, `refresh_token_already_used`, `session_not_found`, `bad_jwt`, `user_not_found`) and matching error-message patterns flag the session as `permanentlyDead`, clear safeStorage, and stop the recovery timer. Transient errors (network) keep retrying as before. Exports `resetPermanentlyDeadFlag()` for the auth store to call on successful sign-in.
+- `src/renderer/src/shared/stores/authStore.ts` — `signInWithEmail` and both branches of `signInWithGoogle` now call `resetPermanentlyDeadFlag()` and explicitly clear `isOffline` after a successful login.
+- `src/main/index.ts` — Added `app.requestSingleInstanceLock()`. A second app launch hands its argv (deep links) to the existing instance and quits, eliminating multi-instance auth-client races. Skipped when `TODOOZY_USER_DATA` is set so dev/test multi-instance mode still works.
+**User-facing impact:** After signing in once on v1.5.2, you stay signed in indefinitely — the app correctly persists every silent token rotation, so refresh tokens stay valid forever (until you explicitly sign out, sign out elsewhere with global scope, or Supabase's optional inactivity timeout elapses, which we don't enable). When the refresh chain genuinely is dead, the recovery loop now stops after detecting it and the SessionBanner's "Sign in again" is the only path forward — no more 30-second retry noise.
+**Affected area:** Auth, sync, Electron main process startup.
+**Files changed:** package.json, src/renderer/src/lib/supabase.ts, src/renderer/src/services/sessionRecovery.ts, src/renderer/src/shared/stores/authStore.ts, src/main/index.ts.
+**Commit:** <fill in after squash merge to main>

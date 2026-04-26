@@ -17,6 +17,30 @@ if (process.env.TODOOZY_USER_DATA) {
   app.setPath('userData', process.env.TODOOZY_USER_DATA)
 }
 
+// Single-instance lock — prevents a second app launch from running its own
+// Supabase auth client and racing on refresh-token rotation (which would
+// trigger Supabase's reuse-detection and kill the entire session). The second
+// instance's argv (deep links, etc.) is forwarded to the existing instance.
+// Skip when running with a custom userData (dev/test multi-instance mode).
+if (!process.env.TODOOZY_USER_DATA) {
+  const gotTheLock = app.requestSingleInstanceLock()
+  if (!gotTheLock) {
+    app.quit()
+  } else {
+    app.on('second-instance', (_event, argv) => {
+      // Bring the existing window forward
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+      }
+      // Forward any deep link from the second-instance argv
+      const deepLinkUrl = argv.find((arg) => arg.startsWith('todoozy://'))
+      if (deepLinkUrl) handleDeepLink(deepLinkUrl)
+    })
+  }
+}
+
 let mainWindow: BrowserWindow | null = null
 export let isQuitting = false
 export function setQuitting(): void { isQuitting = true }

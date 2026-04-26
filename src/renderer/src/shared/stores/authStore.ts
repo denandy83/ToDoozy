@@ -4,7 +4,12 @@ import type { User, CreateUserInput, UpdateUserInput } from '../../../../shared/
 import { getSupabase, parseAuthTokensFromUrl } from '../../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 import { useSyncStore } from './syncStore'
-import { tryRestoreSession, startRecoveryTimer, stopRecoveryTimer } from '../../services/sessionRecovery'
+import {
+  tryRestoreSession,
+  startRecoveryTimer,
+  stopRecoveryTimer,
+  resetPermanentlyDeadFlag
+} from '../../services/sessionRecovery'
 import { logEvent } from './logStore'
 
 interface AuthState {
@@ -190,6 +195,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       )
       await get().ensureDefaultProject(localUser.id)
       stopRecoveryTimer()
+      resetPermanentlyDeadFlag()
       set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed'
@@ -289,7 +295,9 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           sessionData.user.user_metadata?.avatar_url ?? null
         )
         await get().ensureDefaultProject(localUser.id)
-        set({ currentUser: localUser, isAuthenticated: true, loading: false })
+        stopRecoveryTimer()
+        resetPermanentlyDeadFlag()
+        set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
         return
       }
 
@@ -312,7 +320,9 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           sessionData.user.user_metadata?.avatar_url ?? null
         )
         await get().ensureDefaultProject(localUser.id)
-        set({ currentUser: localUser, isAuthenticated: true, loading: false })
+        stopRecoveryTimer()
+        resetPermanentlyDeadFlag()
+        set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
         return
       }
 
