@@ -6,6 +6,7 @@ User-facing changes by date. Most recent first.
 
 ## v1.5.1
 
+- **Fix: Adding or removing a label on a project now syncs across devices** — Previously the project↔label association only synced on initial setup, so a label you added to a project on one device wouldn't appear on the next. Adding or removing a label from a project now propagates to every device immediately, and is preserved when reconnecting after offline.
 - **Fix: Project ordering, default-project flag, and area assignments now sync across devices** — These previously only existed on the device you set them on, and reconcile was failing silently every cycle. Now they're proper synced fields like everything else.
 - **Fix: Sync no longer silently breaks when the session expires** — On cold start with a flaky network or an expired refresh token, the app used to fall into a zombie state where everything you did was rejected by the cloud and your changes never went up. The app now retries the session restore three times before falling back, then keeps trying every 30 seconds in the background. As soon as the session comes back, every queued change is pushed automatically — no more logging out and back in.
 - **Fix: "Sync paused" banner when offline** — If the app does fall back to offline mode, you'll now see an amber banner at the top with "Retry now" and "Sign in again" actions. No more silent failures.

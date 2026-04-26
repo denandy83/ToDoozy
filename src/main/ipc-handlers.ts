@@ -321,6 +321,25 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.addToProject(projectId, labelId)
   })
 
+  ipcMain.handle('labels:getProjectLabelsForOwner', (_e, userId: string) => {
+    return getRepos().labels.getProjectLabelsForOwner(userId)
+  })
+
+  ipcMain.handle(
+    'labels:applyRemoteProjectLabel',
+    (
+      _e,
+      remote: {
+        project_id: string
+        label_id: string
+        created_at: string | null
+        deleted_at: string | null
+      }
+    ) => {
+      return getRepos().labels.applyRemoteProjectLabel(remote)
+    }
+  )
+
   ipcMain.handle('labels:findByTaskId', (_e, taskId: string) => {
     return getRepos().labels.findByTaskId(taskId)
   })

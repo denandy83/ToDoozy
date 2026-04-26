@@ -91,6 +91,20 @@ export interface LabelsAPI {
   applyRemote(label: Label): Promise<Label>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
+  getProjectLabelsForOwner(userId: string): Promise<
+    Array<{
+      project_id: string
+      label_id: string
+      created_at: string
+      deleted_at: string | null
+    }>
+  >
+  applyRemoteProjectLabel(remote: {
+    project_id: string
+    label_id: string
+    created_at: string | null
+    deleted_at: string | null
+  }): Promise<void>
   findByTaskId(taskId: string): Promise<Label[]>
   findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
   reorder(labelIds: string[]): Promise<void>

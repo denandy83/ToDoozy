@@ -249,6 +249,9 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
           }
           return { taskLabels: updated }
         })
+        // Tombstone the junction row on Supabase so other devices see the unlink.
+        const { pushProjectLabel } = await import('../../services/PersonalSyncService')
+        void pushProjectLabel(projectId, labelId, new Date().toISOString())
       }
       return result
     } catch (err) {
@@ -268,6 +271,9 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         updatedProjectLabels[projectId] = existing
         return { projectLabels: updatedProjectLabels }
       })
+      // Push the junction row to Supabase so other devices see the link.
+      const { pushProjectLabel } = await import('../../services/PersonalSyncService')
+      void pushProjectLabel(projectId, labelId, null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label to project'
       set({ error: message })

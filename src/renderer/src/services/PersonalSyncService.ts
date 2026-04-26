@@ -354,6 +354,53 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
 }
 
 /**
+ * Push a single project↔label association change to Supabase. `deletedAt`
+ * NULL = active link, ISO string = tombstone. The junction table is the
+ * source of truth; the legacy `projects.label_data` JSON is no longer read
+ * or written by this client (kept on Supabase for one release for safety).
+ */
+export async function pushProjectLabel(
+  projectId: string,
+  labelId: string,
+  deletedAt: string | null
+): Promise<void> {
+  if (!(await hasLiveSession('pushProjectLabel', `${projectId}::${labelId}`))) return
+  try {
+    const supabase = await getSupabase()
+    const { error } = await supabase
+      .from('project_labels')
+      .upsert(
+        {
+          project_id: projectId,
+          label_id: labelId,
+          created_at: new Date().toISOString(),
+          deleted_at: deletedAt
+        },
+        { onConflict: 'project_id,label_id' }
+      )
+    if (error) {
+      await reportPushFailure(
+        'pushProjectLabel',
+        error,
+        'project_labels',
+        `${projectId}::${labelId}`,
+        JSON.stringify({ projectId, labelId, deletedAt })
+      )
+    } else {
+      markSynced()
+    }
+  } catch (err) {
+    await reportPushFailure(
+      'pushProjectLabel',
+      err,
+      'project_labels',
+      `${projectId}::${labelId}`,
+      JSON.stringify({ projectId, labelId, deletedAt })
+    )
+  }
+}
+
+/**
  * Soft-delete a label in Supabase by stamping deleted_at + updated_at.
  * Hard-DELETE is reserved for the 30-day purge job; tombstones are how
  * other devices learn the label is gone (Realtime UPDATE event).
@@ -826,10 +873,29 @@ export async function fullUpload(userId: string): Promise<void> {
         updateProgress()
       }
 
-      // Push all project labels association
+      // Push project↔label associations to the project_labels junction
+      // (the legacy `projects.label_data` JSON is no longer written — the
+      // junction is the source of truth, with proper tombstones + LWW).
       const projectLabels = await window.api.labels.findByProjectId(project.id)
-      const labelData = projectLabels.map((l) => ({ name: l.name, color: l.color }))
-      await supabase.from('projects').update({ label_data: JSON.stringify(labelData) }).eq('id', project.id)
+      if (projectLabels.length > 0) {
+        const rows = projectLabels.map((l) => ({
+          project_id: project.id,
+          label_id: l.id,
+          created_at: new Date().toISOString(),
+          deleted_at: null
+        }))
+        const { error: plErr } = await supabase
+          .from('project_labels')
+          .upsert(rows, { onConflict: 'project_id,label_id' })
+        if (plErr) {
+          logEvent(
+            'warn',
+            'sync',
+            `fullUpload: push project_labels failed for ${project.name}`,
+            plErr.message
+          )
+        }
+      }
 
       // Push ALL tasks (including archived and templates)
       // Parent tasks first, then subtasks (to satisfy FK constraint on parent_id)
@@ -1670,6 +1736,125 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       logEvent('error', 'sync', `Reconcile: task_labels diff failed`, msg)
+    }
+
+    // 5. project_labels junction — composite-PK with no updated_at, same
+    // shape as task_labels. Diff by key set, push deltas, pull missing rows
+    // (with tombstone propagation).
+    try {
+      const localProjectLabels = await window.api.labels.getProjectLabelsForOwner(userId)
+      const pairKey = (projectId: string, labelId: string): string => `${projectId}::${labelId}`
+      const localByKey = new Map<
+        string,
+        { project_id: string; label_id: string; created_at: string; deleted_at: string | null }
+      >(localProjectLabels.map((p) => [pairKey(p.project_id, p.label_id), p]))
+
+      const personalProjectIds = personalProjects.map((p) => p.id)
+      const remotePairs: Array<{
+        project_id: string
+        label_id: string
+        created_at: string | null
+        deleted_at: string | null
+      }> = []
+      const chunkSize = 500
+      let fetchOk = true
+      for (let i = 0; i < personalProjectIds.length; i += chunkSize) {
+        const chunk = personalProjectIds.slice(i, i + chunkSize)
+        const { data, error: plErr } = await supabase
+          .from('project_labels')
+          .select('project_id, label_id, created_at, deleted_at')
+          .in('project_id', chunk)
+        if (plErr) {
+          logEvent('error', 'sync', 'Reconcile: list remote project_labels failed', `err=${plErr.message}`)
+          fetchOk = false
+          break
+        }
+        if (data) {
+          remotePairs.push(
+            ...(data as Array<{
+              project_id: string
+              label_id: string
+              created_at: string | null
+              deleted_at: string | null
+            }>)
+          )
+        }
+      }
+
+      if (fetchOk) {
+        const remoteByKey = new Map(remotePairs.map((p) => [pairKey(p.project_id, p.label_id), p]))
+
+        // Push: rows that exist locally but not remotely, OR whose tombstone
+        // state differs (local tombstoned but remote alive, or vice-versa).
+        const toPush: Array<{
+          project_id: string
+          label_id: string
+          created_at: string
+          deleted_at: string | null
+        }> = []
+        for (const local of localProjectLabels) {
+          const key = pairKey(local.project_id, local.label_id)
+          const remote = remoteByKey.get(key)
+          if (!remote) {
+            toPush.push({
+              project_id: local.project_id,
+              label_id: local.label_id,
+              created_at: local.created_at,
+              deleted_at: local.deleted_at
+            })
+          } else if ((local.deleted_at ?? null) !== (remote.deleted_at ?? null)) {
+            // LWW on tombstone state — we don't have updated_at on the
+            // junction, so use the most-recently-tombstoned wins.
+            const localDelMs = local.deleted_at ? Date.parse(local.deleted_at) : 0
+            const remoteDelMs = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+            if (localDelMs > remoteDelMs) {
+              toPush.push({
+                project_id: local.project_id,
+                label_id: local.label_id,
+                created_at: local.created_at,
+                deleted_at: local.deleted_at
+              })
+            }
+          }
+        }
+        for (let i = 0; i < toPush.length; i += chunkSize) {
+          const chunk = toPush.slice(i, i + chunkSize)
+          const { error: upsertErr } = await supabase
+            .from('project_labels')
+            .upsert(chunk, { onConflict: 'project_id,label_id' })
+          if (upsertErr) {
+            logEvent('error', 'sync', 'Reconcile: push project_labels failed', `err=${upsertErr.message}`)
+            break
+          }
+          totalPushed += chunk.length
+        }
+
+        // Pull: rows on remote that aren't local, or that have a newer
+        // tombstone than local. Skip if the label_id isn't on this device
+        // yet (the labels reconcile in step 3 will pull the label first;
+        // the next reconcile pass picks up the link).
+        for (const remote of remotePairs) {
+          const key = pairKey(remote.project_id, remote.label_id)
+          const local = localByKey.get(key)
+          if (local) {
+            const localDelMs = local.deleted_at ? Date.parse(local.deleted_at) : 0
+            const remoteDelMs = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+            if (remoteDelMs <= localDelMs) continue
+          }
+          const labelExists = await window.api.labels.findById(remote.label_id)
+          if (!labelExists) continue
+          await window.api.labels.applyRemoteProjectLabel({
+            project_id: remote.project_id,
+            label_id: remote.label_id,
+            created_at: remote.created_at,
+            deleted_at: remote.deleted_at
+          })
+          totalPulled++
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      logEvent('error', 'sync', 'Reconcile: project_labels diff failed', msg)
     }
 
     if (totalPushed > 0 || totalPulled > 0) {

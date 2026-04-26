@@ -322,6 +322,55 @@ export class LabelRepository {
       .all(labelId, labelId, userId) as unknown as Array<{ project_id: string; project_name: string; task_count: number }>
   }
 
+  /**
+   * Sync-layer list. Returns every project_labels row (including tombstones)
+   * for projects owned by `userId`. Used by reconcile to diff local vs remote.
+   */
+  getProjectLabelsForOwner(
+    userId: string
+  ): Array<{ project_id: string; label_id: string; created_at: string; deleted_at: string | null }> {
+    return this.db
+      .prepare(
+        `SELECT pl.project_id, pl.label_id, pl.created_at, pl.deleted_at
+         FROM project_labels pl
+         INNER JOIN projects p ON p.id = pl.project_id
+         WHERE p.owner_id = ?`
+      )
+      .all(userId) as unknown as Array<{
+      project_id: string
+      label_id: string
+      created_at: string
+      deleted_at: string | null
+    }>
+  }
+
+  /**
+   * Sync-layer write — apply a remote project_labels row to local SQLite.
+   * Idempotent insert/upsert; preserves remote `deleted_at` for tombstone
+   * propagation across devices.
+   */
+  applyRemoteProjectLabel(remote: {
+    project_id: string
+    label_id: string
+    created_at: string | null
+    deleted_at: string | null
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(project_id, label_id) DO UPDATE SET
+           created_at = excluded.created_at,
+           deleted_at = excluded.deleted_at`
+      )
+      .run(
+        remote.project_id,
+        remote.label_id,
+        remote.created_at ?? new Date().toISOString(),
+        remote.deleted_at
+      )
+  }
+
   /** Get labels assigned to active (non-archived) tasks in a project */
   findActiveLabelsForProject(projectId: string): Label[] {
     return this.db
