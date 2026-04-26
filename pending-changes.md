@@ -246,3 +246,7 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Timer play button, Timer settings, right-click "Start timer with…" submenu.
 **Files changed:** src/renderer/src/shared/components/TimerPlayButton.tsx, src/renderer/src/shared/components/TimerPlayButton.test.ts (new — regression for Gabriel's bug), src/renderer/src/shared/hooks/useTimerSettings.ts, src/renderer/src/features/settings/TimerSettingsContent.tsx, src/renderer/src/shared/components/ContextMenuSubmenus.tsx
 **Commit:** aa5d8c4
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- cbcaf7a docs: bump .last-documented-commit after HELP sync (2026-04-26) — files: 1
