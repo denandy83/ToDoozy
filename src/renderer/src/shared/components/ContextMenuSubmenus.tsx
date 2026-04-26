@@ -318,17 +318,20 @@ export function TimerSubmenu({ taskId, taskTitle, projectId, openLeft, onClose }
     (minutes: number) => {
       if (!currentUser || isRunning) return
       autoMoveToInProgress()
+      const isInfinite = settings.defaultDuration === 'infinite'
       startTimer({
         taskId,
         taskTitle,
         minutes,
-        reps: settings.repetitionEnabled ? settings.defaultReps : 1,
-        isPerpetual: settings.perpetualMode,
+        reps: isInfinite ? 1 : settings.defaultReps,
+        isPerpetual: isInfinite,
         breakMinutes: settings.breakMinutes,
         soundEnabled: settings.soundEnabled,
         notificationEnabled: settings.notificationEnabled,
         autoBreak: settings.autoBreak,
-        userId: currentUser.id
+        userId: currentUser.id,
+        longBreakMinutes: settings.longBreakEnabled ? settings.longBreakMinutes : 0,
+        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0
       })
       onClose()
     },

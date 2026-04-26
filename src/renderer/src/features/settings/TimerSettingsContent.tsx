@@ -47,6 +47,34 @@ function ToggleButton({
   )
 }
 
+function SegmentedChoice({
+  settingKey,
+  options,
+  defaultValue
+}: {
+  settingKey: string
+  options: { value: string; label: string }[]
+  defaultValue: string
+}): React.JSX.Element {
+  const { setSetting } = useSettingsStore()
+  const value = useSetting(settingKey) ?? defaultValue
+  return (
+    <div className="flex rounded-lg border border-border overflow-hidden">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => setSetting(settingKey, opt.value)}
+          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+            value === opt.value ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function TimerSettingsContent(): React.JSX.Element {
   const { setSetting } = useSettingsStore()
   const presets = useTimerPresets()
@@ -56,12 +84,12 @@ export function TimerSettingsContent(): React.JSX.Element {
   const longBreakEnabled = useSetting('timer_long_break_enabled') ?? 'false'
   const longBreakMinutes = useSetting('timer_long_break_minutes') ?? '15'
   const longBreakInterval = useSetting('timer_long_break_interval') ?? '4'
-  const repetitionEnabled = useSetting('timer_repetition_enabled') ?? 'false'
   const perpetualMode = useSetting('timer_perpetual') ?? 'false'
-  const flowtimeEnabled = useSetting('timer_flowtime_enabled') ?? 'false'
+  const flowtimeEnabledLegacy = useSetting('timer_flowtime_enabled')
+  const defaultMode =
+    useSetting('timer_default_mode') ?? (flowtimeEnabledLegacy === 'true' ? 'flowtime' : 'timer')
   const cookieMinutesPerHour = useSetting('timer_cookie_minutes_per_hour') ?? '10'
 
-  // Add preset form
   const [adding, setAdding] = useState(false)
   const [newMinutes, setNewMinutes] = useState('')
 
@@ -194,9 +222,85 @@ export function TimerSettingsContent(): React.JSX.Element {
         </select>
       </div>
 
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Breaks</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Default mode</p>
 
-      {/* Break Duration */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Pre-selected when you press play</p>
+          <p className="text-[10px] text-muted">You can still pick the other mode in the start dialog</p>
+        </div>
+        <SegmentedChoice
+          settingKey="timer_default_mode"
+          defaultValue={defaultMode}
+          options={[
+            { value: 'flowtime', label: 'Flowtime' },
+            { value: 'timer', label: 'Timer' }
+          ]}
+        />
+      </div>
+
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Flowtime</p>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Cookie break minutes per hour</p>
+          <p className="text-[10px] text-muted">Break time earned for every hour of focused work (0 to disable)</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            value={cookieMinutesPerHour}
+            onChange={(e) => setSetting('timer_cookie_minutes_per_hour', e.target.value)}
+            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min/hr</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Cookie time transfers across sessions</p>
+          <p className="text-[10px] text-muted">Unused cookie time carries over to the next session within the same day</p>
+        </div>
+        <ToggleButton settingKey="timer_cookie_transfer" defaultValue="false" />
+      </div>
+
+      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Timer</p>
+
+      {/* Default duration: Limited / Infinite — reuses timer_perpetual */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Default duration</p>
+          <p className="text-[10px] text-muted">Limited cycles a fixed number of reps. Infinite runs until you stop it.</p>
+        </div>
+        <SegmentedChoice
+          settingKey="timer_perpetual"
+          defaultValue="false"
+          options={[
+            { value: 'false', label: 'Limited' },
+            { value: 'true', label: 'Infinite' }
+          ]}
+        />
+      </div>
+
+      {perpetualMode !== 'true' && (
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-light text-foreground">Default repetitions</p>
+            <p className="text-[10px] text-muted">Number of work-break cycles when Limited is selected</p>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={defaultReps}
+            onChange={(e) => setSetting('timer_default_reps', e.target.value)}
+            className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Break duration</p>
@@ -215,7 +319,6 @@ export function TimerSettingsContent(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Auto-break */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Auto-start break</p>
@@ -224,7 +327,6 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_auto_break" defaultValue="true" />
       </div>
 
-      {/* Long Break */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Long break</p>
@@ -233,127 +335,55 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_long_break_enabled" defaultValue="false" />
       </div>
 
-          {longBreakEnabled === 'true' && (
-            <>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-light text-foreground">Long break every</p>
-                  <p className="text-[10px] text-muted">Work sessions before long break</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={2}
-                    max={10}
-                    value={longBreakInterval}
-                    onChange={(e) => setSetting('timer_long_break_interval', e.target.value)}
-                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">sessions</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-light text-foreground">Long break duration</p>
-                  <p className="text-[10px] text-muted">Duration of the long break</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={longBreakMinutes}
-                    onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
-                    className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
-                </div>
-              </div>
-            </>
-          )}
-
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Repetition</p>
-
-      {/* Perpetual mode — shown first since it trumps repetition */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Perpetual mode</p>
-          <p className="text-[10px] text-muted">Run indefinitely until manually stopped</p>
-        </div>
-        <ToggleButton settingKey="timer_perpetual" defaultValue="false" />
-      </div>
-
-      {/* Repetition mode — hidden when perpetual is on */}
-      {perpetualMode !== 'true' && (
+      {longBreakEnabled === 'true' && (
         <>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-light text-foreground">Repetition mode</p>
-              <p className="text-[10px] text-muted">Cycle work-break for multiple repetitions</p>
-            </div>
-            <ToggleButton settingKey="timer_repetition_enabled" defaultValue="false" />
-          </div>
-
-          {repetitionEnabled === 'true' && (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-light text-foreground">Default repetitions</p>
-                <p className="text-[10px] text-muted">Number of work-break cycles</p>
-              </div>
-              <input
-                type="number"
-                min={1}
-                max={99}
-                value={defaultReps}
-                onChange={(e) => setSetting('timer_default_reps', e.target.value)}
-                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-            </div>
-          )}
-        </>
-      )}
-
-      <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Flowtime</p>
-
-      {/* Flowtime */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-light text-foreground">Flowtime mode</p>
-          <p className="text-[10px] text-muted">Open-ended focus — timer counts up, you decide when to stop</p>
-        </div>
-        <ToggleButton settingKey="timer_flowtime_enabled" defaultValue="false" />
-      </div>
-
-      {flowtimeEnabled === 'true' && (
-        <>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-light text-foreground">Cookie break minutes per hour</p>
-              <p className="text-[10px] text-muted">Break time earned for every hour of focused work</p>
+              <p className="text-sm font-light text-foreground">Long break every</p>
+              <p className="text-[10px] text-muted">Work sessions before long break</p>
             </div>
             <div className="flex items-center gap-1">
               <input
                 type="number"
-                value={cookieMinutesPerHour}
-                onChange={(e) => setSetting('timer_cookie_minutes_per_hour', e.target.value)}
+                min={2}
+                max={10}
+                value={longBreakInterval}
+                onChange={(e) => setSetting('timer_long_break_interval', e.target.value)}
                 className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min/hr</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">sessions</span>
             </div>
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-light text-foreground">Cookie time transfers across sessions</p>
-              <p className="text-[10px] text-muted">Unused cookie time carries over to the next session within the same day</p>
+              <p className="text-sm font-light text-foreground">Long break duration</p>
+              <p className="text-[10px] text-muted">Duration of the long break</p>
             </div>
-            <ToggleButton settingKey="timer_cookie_transfer" defaultValue="false" />
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={longBreakMinutes}
+                onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
+                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
+            </div>
           </div>
         </>
       )}
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Behavior</p>
 
-      {/* Minimize on start */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-light text-foreground">Skip start dialog</p>
+          <p className="text-[10px] text-muted">Press play to start instantly with your default mode (no popup)</p>
+        </div>
+        <ToggleButton settingKey="timer_skip_start_dialog" defaultValue="false" />
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Minimize on start</p>
@@ -364,7 +394,6 @@ export function TimerSettingsContent(): React.JSX.Element {
 
       <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mt-6">Alerts</p>
 
-      {/* Sound */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">Sound notification</p>
@@ -373,7 +402,6 @@ export function TimerSettingsContent(): React.JSX.Element {
         <ToggleButton settingKey="timer_sound" defaultValue="true" />
       </div>
 
-      {/* System notification */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-light text-foreground">System notification</p>

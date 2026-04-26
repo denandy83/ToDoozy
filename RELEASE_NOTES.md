@@ -7,6 +7,7 @@ User-facing changes by date. Most recent first.
 ## v1.5.2
 
 - **Fix: Sort menu in My Day now works** — Picking Priority, Due Date, Title, etc. from the Sort menu in My Day used to do nothing. Sorting now applies within each bucket (Not Started / In Progress / Done), and the active sort shows as `Priority - DESC` (literal ASC/DESC text) instead of a small arrow.
+- **Timer modes redone — pick Flowtime or Timer when you press play** — Previously, enabling Flowtime in settings while Perpetual was also on would silently start a non-Flowtime perpetual countdown. Pressing play now opens a small picker pre-selected to your default, where you can pick Flowtime or Timer, and within Timer pick Limited (with reps) or Infinite. Settings now has a single "Default mode" segmented control instead of three competing on/off toggles. Hit Enter or click Start to launch — your existing settings carry over. Prefer the old one-click flow? Settings → Behavior → "Skip start dialog" turns the picker off.
 
 ## v1.5.1
 

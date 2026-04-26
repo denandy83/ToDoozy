@@ -231,3 +231,18 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** My Day view, shared FilterBar SortDropdown.
 **Files changed:** src/renderer/src/features/views/MyDayView.tsx, src/renderer/src/shared/components/FilterBar.tsx
 **Commit:** 4178711
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 9de27c1 chore(workflow): rename Verified → Verifying in lifecycle docs (2026-04-26) — files: 2
+- 4047889 chore(workflow): align ToDoozy task lifecycle in CLAUDE.md, /fix, and /feature (2026-04-26) — files: 3
+- fee8cef docs: My Day sort fix changelog + debug-learnings entries (2026-04-26) — files: 5
+
+## 2026-04-26 — Fix: Timer mode picker replaces silent-perpetual bug
+**What was broken:** With Flowtime mode and Perpetual mode both toggled on in Timer Settings, pressing the play button on a task silently ignored Flowtime and started a non-Flowtime perpetual countdown. The bug came from three independent on/off toggles (`timer_perpetual`, `timer_repetition_enabled`, `timer_flowtime_enabled`) racing for the same "what does play do?" decision in `TimerPlayButton.handleClick` — perpetual short-circuited first and the popup with the Flowtime toggle was never reached.
+**Root cause:** `TimerPlayButton.tsx` had three short-circuit paths checked in order: perpetual → direct perpetual start (no popup, `isFlowtime: false` hard-coded); else if neither repetition nor flowtime → direct countdown; else → popup. The "competing toggles" model in settings made it possible to enable mutually exclusive things simultaneously, and the order of checks gave perpetual the win.
+**What was fixed:** Modeled the timer choice cleanly as `mode: Flowtime | Timer` with a `Timer.duration: Limited | Infinite` sub-choice. Pressing play now always opens a 260×224px fixed-size popup (so toggling between options doesn't resize/jump) pre-selected to the user's defaults; Enter confirms, Escape closes. Settings replaced the three toggles with a single segmented "Default mode" picker plus a "Default duration" sub-picker, and added a "Skip start dialog" toggle in Behavior for users who prefer one-click instant start. Read-side migration in `useTimerSettings.ts` derives the new `defaultMode` from the legacy `timer_flowtime_enabled` and the new `defaultDuration` from the legacy `timer_perpetual`, so existing user settings carry over without a DB migration. The popup is positioned via `useLayoutEffect` from the button's `getBoundingClientRect`, with viewport clamping (flips above the button when there's no room below, clamps to viewport when neither side fits) and reflow on every mode/duration change. `ContextMenuSubmenus.tsx` (the right-click "Start timer with…" preset list) was updated to read `defaultDuration` instead of the removed booleans.
+**User-facing impact:** Pressing play with Flowtime as your default starts in Flowtime — the perpetual setting no longer overrides it. The popup is always the same size, both options are always reachable, and power users can disable the popup entirely with one toggle.
+**Affected area:** Timer play button, Timer settings, right-click "Start timer with…" submenu.
+**Files changed:** src/renderer/src/shared/components/TimerPlayButton.tsx, src/renderer/src/shared/components/TimerPlayButton.test.ts (new — regression for Gabriel's bug), src/renderer/src/shared/hooks/useTimerSettings.ts, src/renderer/src/features/settings/TimerSettingsContent.tsx, src/renderer/src/shared/components/ContextMenuSubmenus.tsx
+**Commit:** <fill in after squash merge to main>

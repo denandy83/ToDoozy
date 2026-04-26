@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, forwardRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Play } from 'lucide-react'
 import { useTimerStore } from '../stores/timerStore'
-import { useTimerSettings } from '../hooks/useTimerSettings'
+import { useTimerSettings, type TimerSettings, type TimerMode, type TimerDuration } from '../hooks/useTimerSettings'
 import { useAuthStore } from '../stores/authStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
@@ -13,9 +13,26 @@ interface TimerPlayButtonProps {
   projectId: string
 }
 
+export interface StartParams {
+  mode: TimerMode
+  duration: TimerDuration
+  minutes: number
+  reps: number
+}
+
+export function paramsToStoreArgs(p: StartParams): { isFlowtime: boolean; isPerpetual: boolean; reps: number; minutes: number } {
+  if (p.mode === 'flowtime') {
+    return { isFlowtime: true, isPerpetual: false, reps: 0, minutes: p.minutes }
+  }
+  if (p.duration === 'infinite') {
+    return { isFlowtime: false, isPerpetual: true, reps: 1, minutes: p.minutes }
+  }
+  return { isFlowtime: false, isPerpetual: false, reps: p.reps, minutes: p.minutes }
+}
+
 export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButtonProps): React.JSX.Element {
   const [popupOpen, setPopupOpen] = useState(false)
-  const [popupPos, setPopupPos] = useState({ top: 0, left: 0 })
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const settings = useTimerSettings()
@@ -38,9 +55,10 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
     }
   }, [task, statuses, updateTask])
 
-  const handleStartTimer = useCallback(
-    (minutes: number, reps: number, isPerpetual: boolean, isFlowtime: boolean = false) => {
+  const startWithParams = useCallback(
+    (params: StartParams) => {
       if (!currentUser) return
+      const { isFlowtime, isPerpetual, reps, minutes } = paramsToStoreArgs(params)
       autoMoveToInProgress()
       startTimer({
         taskId,
@@ -68,35 +86,24 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
       e.stopPropagation()
       if (isTimerRunning) return
 
-      // Perpetual: direct start, no popup needed
-      if (settings.perpetualMode) {
-        handleStartTimer(settings.defaultPreset.minutes, 1, true, false)
+      if (settings.skipStartDialog) {
+        startWithParams({
+          mode: settings.defaultMode,
+          duration: settings.defaultDuration,
+          minutes: settings.defaultPreset.minutes,
+          reps: settings.defaultReps
+        })
         return
       }
 
-      // Direct start only if neither repetition nor flowtime is enabled
-      if (!settings.repetitionEnabled && !settings.flowtimeEnabled) {
-        handleStartTimer(settings.defaultPreset.minutes, 1, false, false)
-        return
-      }
-
-      // Show popup — position will be adjusted after render
       const btn = btnRef.current
-      if (btn) {
-        const rect = btn.getBoundingClientRect()
-        const popupW = 200
-        let left = rect.left - popupW / 2 + rect.width / 2
-        if (left + popupW > window.innerWidth - 8) left = window.innerWidth - popupW - 8
-        if (left < 8) left = 8
-        // Default below the button; will be corrected in useEffect if it overflows
-        setPopupPos({ top: rect.bottom + 4, left })
-      }
+      if (!btn) return
+      setAnchorRect(btn.getBoundingClientRect())
       setPopupOpen(true)
     },
-    [isTimerRunning, settings, handleStartTimer]
+    [isTimerRunning, settings, startWithParams]
   )
 
-  // Close popup on outside click
   useEffect(() => {
     if (!popupOpen) return
     const handleMouseDown = (e: MouseEvent): void => {
@@ -129,13 +136,13 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         <Play size={12} fill="currentColor" />
       </button>
 
-      {popupOpen &&
+      {popupOpen && anchorRect &&
         createPortal(
           <TimerPopup
             ref={popupRef}
-            position={popupPos}
+            anchorRect={anchorRect}
             settings={settings}
-            onStart={handleStartTimer}
+            onStart={startWithParams}
             onClose={() => setPopupOpen(false)}
           />,
           document.body
@@ -145,43 +152,69 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
 }
 
 interface TimerPopupProps {
-  position: { top: number; left: number }
-  settings: ReturnType<typeof import('../hooks/useTimerSettings').useTimerSettings>
-  onStart: (minutes: number, reps: number, isPerpetual: boolean, isFlowtime: boolean) => void
+  anchorRect: DOMRect
+  settings: TimerSettings
+  onStart: (params: StartParams) => void
   onClose: () => void
 }
 
-import { forwardRef } from 'react'
+const SEGMENT_BTN_BASE =
+  'flex-1 rounded-md px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors'
+const SEGMENT_BTN_ACTIVE = 'bg-accent/12 border border-accent/15 text-accent'
+const SEGMENT_BTN_INACTIVE = 'border border-transparent text-muted hover:bg-foreground/6 hover:text-foreground'
 
 const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPopup(
-  { position, settings, onStart, onClose },
+  { anchorRect, settings, onStart, onClose },
   ref
 ) {
+  const [mode, setMode] = useState<TimerMode>(settings.defaultMode)
+  const [duration, setDuration] = useState<TimerDuration>(settings.defaultDuration)
   const [minutes, setMinutes] = useState(settings.defaultPreset.minutes)
   const [reps, setReps] = useState(settings.defaultReps)
-  const [isFlowtime, setIsFlowtime] = useState(settings.flowtimeEnabled)
-  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Position synchronously before paint, and re-run when content (mode/duration)
+  // changes since the popup's height changes too.
+  useLayoutEffect(() => {
+    const el = (ref as React.RefObject<HTMLDivElement>)?.current
+    if (!el) return
+
+    const margin = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const popupRect = el.getBoundingClientRect()
+    const popupW = popupRect.width
+    const popupH = popupRect.height
+
+    // Horizontal: center on the anchor, then clamp inside the viewport.
+    let left = anchorRect.left + anchorRect.width / 2 - popupW / 2
+    if (left + popupW > vw - margin) left = vw - popupW - margin
+    if (left < margin) left = margin
+
+    // Vertical: prefer below, flip above if it overflows, clamp to viewport
+    // if neither side has room.
+    const belowTop = anchorRect.bottom + 4
+    const aboveTop = anchorRect.top - popupH - 4
+    let top: number
+    if (belowTop + popupH <= vh - margin) {
+      top = belowTop
+    } else if (aboveTop >= margin) {
+      top = aboveTop
+    } else {
+      top = Math.max(margin, vh - popupH - margin)
+    }
+
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [anchorRect, mode, duration, ref])
 
   useEffect(() => {
-    inputRef.current?.select()
-    // Reposition if popup overflows viewport
     const el = (ref as React.RefObject<HTMLDivElement>)?.current
-    if (el) {
-      const rect = el.getBoundingClientRect()
-      if (rect.bottom > window.innerHeight - 8) {
-        el.style.top = `${position.top - rect.height - 8}px`
-      }
-    }
-  }, [])
+    el?.focus()
+  }, [ref])
 
   const handleConfirm = useCallback(() => {
-    onStart(
-      minutes,
-      isFlowtime ? 0 : (settings.perpetualMode ? 0 : reps),
-      isFlowtime ? false : settings.perpetualMode,
-      isFlowtime
-    )
-  }, [settings, minutes, reps, isFlowtime, onStart])
+    onStart({ mode, duration, minutes, reps })
+  }, [mode, duration, minutes, reps, onStart])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -201,68 +234,93 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
   return (
     <div
       ref={ref}
-      className="fixed z-[9999] w-[200px] rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-100"
-      style={{ top: position.top, left: position.left }}
+      onKeyDown={handleKeyDown}
+      tabIndex={-1}
+      className="fixed z-[9999] flex h-[224px] w-[260px] flex-col rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-100"
+      style={{ top: -9999, left: -9999 }}
     >
       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
         Start Timer
       </p>
 
-      {/* Flowtime toggle */}
-      {settings.flowtimeEnabled && (
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Flowtime</span>
-          <button
-            onClick={() => setIsFlowtime(!isFlowtime)}
-            className={`relative h-5 w-9 rounded-full transition-colors ${isFlowtime ? 'bg-accent' : 'bg-border'}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${isFlowtime ? 'translate-x-4' : ''}`} />
-          </button>
-        </div>
-      )}
+      {/* Mode selector */}
+      <div className="mb-3 flex gap-1 rounded-lg border border-border p-0.5">
+        <button
+          type="button"
+          onClick={() => setMode('flowtime')}
+          className={`${SEGMENT_BTN_BASE} ${mode === 'flowtime' ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_INACTIVE}`}
+        >
+          Flowtime
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('timer')}
+          className={`${SEGMENT_BTN_BASE} ${mode === 'timer' ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_INACTIVE}`}
+        >
+          Timer
+        </button>
+      </div>
 
-      {/* Preset info and reps — hidden when flowtime is on */}
-      {!isFlowtime && (
+      {mode === 'flowtime' ? (
+        <p className="mb-3 text-[10px] font-light text-muted">
+          Counts up — stop when you&rsquo;re done.
+          {settings.cookieMinutesPerHour > 0 && (
+            <> Earns {settings.cookieMinutesPerHour} min/hr cookie break.</>
+          )}
+        </p>
+      ) : (
         <>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Focus</span>
-            <select
-              value={minutes}
-              onChange={(e) => setMinutes(parseInt(e.target.value, 10))}
-              className="rounded-lg border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+          <div className="mb-3 flex gap-1 rounded-lg border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => setDuration('limited')}
+              className={`${SEGMENT_BTN_BASE} ${duration === 'limited' ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_INACTIVE}`}
             >
-              {settings.presets.map((p) => (
-                <option key={p.id} value={p.minutes}>{p.name}</option>
-              ))}
-            </select>
+              Limited
+            </button>
+            <button
+              type="button"
+              onClick={() => setDuration('infinite')}
+              className={`${SEGMENT_BTN_BASE} ${duration === 'infinite' ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_INACTIVE}`}
+            >
+              Infinite
+            </button>
           </div>
 
-          {settings.perpetualMode ? (
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">
-              Perpetual mode
-            </p>
-          ) : settings.repetitionEnabled ? (
-            <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Focus</span>
+              <select
+                value={minutes}
+                onChange={(e) => setMinutes(parseInt(e.target.value, 10))}
+                className="rounded-lg border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground focus:outline-none cursor-pointer"
+              >
+                {settings.presets.map((p) => (
+                  <option key={p.id} value={p.minutes}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className={`flex items-center gap-2 ${duration === 'limited' ? '' : 'invisible'}`}>
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Reps</span>
               <input
-                ref={inputRef}
                 type="number"
                 min={1}
                 max={99}
                 value={reps}
                 onChange={(e) => setReps(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                onKeyDown={handleKeyDown}
-                className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.currentTarget.select()}
+                className="w-12 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground selection:bg-accent/30 selection:text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
-          ) : null}
+          </div>
         </>
       )}
 
       <button
+        type="button"
         onClick={handleConfirm}
-        onKeyDown={handleKeyDown}
-        className="w-full rounded-lg bg-accent/12 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/20"
+        className="mt-auto w-full rounded-lg bg-accent/12 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/20"
       >
         Start
       </button>

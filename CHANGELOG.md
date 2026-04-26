@@ -7,6 +7,7 @@ All bug fixes and changes to ToDoozy. Most recent first.
 ## v1.5.2
 
 - **My Day sort menu now actually sorts** — Picking Priority / Due Date / Title / etc. from the Sort menu in My Day did nothing previously. The view ignored the sort rules and StatusSection re-sorted internally regardless. Sort now applies within each bucket (Not Started / In Progress / Done), and the active sort is shown as literal `Field - ASC` / `Field - DESC` text instead of arrow icons.
+- **Timer play button now opens a mode picker instead of silently choosing one** — When Flowtime, Repetition, and Perpetual were all toggleable in Settings, Perpetual silently won at the play button: enabling Flowtime then pressing play would still start a perpetual countdown, with Flowtime never reached. The three independent on/off toggles in Timer Settings have been replaced by a single "Default mode" segmented control (Flowtime / Timer) plus a "Default duration" sub-control inside Timer (Limited / Infinite). Pressing play opens a fixed-size popup pre-selected to your default — switch modes, pick reps, hit Enter. A new "Skip start dialog" toggle in Settings → Behavior keeps the one-click flow for users who don't want the popup. Existing `timer_perpetual` / `timer_flowtime_enabled` settings migrate cleanly: the prior flowtime preference becomes the default mode, perpetual becomes the default duration.
 
 ## v1.5.1
 
