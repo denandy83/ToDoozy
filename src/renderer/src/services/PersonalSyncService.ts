@@ -1680,6 +1680,15 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
     logEvent('info', 'sync', 'Reconcile skipped — offline')
     return { pushed: 0, pulled: 0 }
   }
+  // Check session upfront — if there's no session, do NOT touch the cooldown.
+  // Otherwise a pre-login reconcile attempt would block the first real reconcile
+  // after sign-in for 30 seconds, leaving the user staring at "last sync: never".
+  const supabase = await getSupabase()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    logEvent('warn', 'sync', 'Reconcile skipped — no session')
+    return { pushed: 0, pulled: 0 }
+  }
   reconcileInFlight = reconcileImpl(userId)
   try {
     const result = await reconcileInFlight
@@ -1695,11 +1704,6 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
   let totalPulled = 0
   try {
     const supabase = await getSupabase()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      logEvent('warn', 'sync', 'Reconcile skipped — no session')
-      return { pushed: 0, pulled: 0 }
-    }
 
     const runTable = async (
       tableName: Parameters<typeof reconcileTable>[0]['name'] | string,
