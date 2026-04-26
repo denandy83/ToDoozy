@@ -1801,16 +1801,32 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         const remoteKeySet = new Set<string>(remotePairs.map((p) => pairKey(p.task_id, p.label_id)))
 
         const missingInRemote = localPairs.filter((p) => !remoteKeySet.has(pairKey(p.task_id, p.label_id)))
+        if (missingInRemote.length > 0) {
+          // Diagnostic: log the first few pairs we think are missing remotely so
+          // a recurring "31 pushed" loop can be traced — compare these against
+          // remote to find why our SELECT didn't return them (RLS, FK, etc.).
+          const sample = missingInRemote.slice(0, 5).map((p) => `${p.task_id}::${p.label_id}`).join(',')
+          logEvent('info', 'sync', `Reconcile: task_labels diff — local=${localPairs.length} remote=${remotePairs.length} missingInRemote=${missingInRemote.length}`, `sample=${sample}`)
+        }
         for (let i = 0; i < missingInRemote.length; i += chunkSize) {
           const chunk = missingInRemote.slice(i, i + chunkSize)
-          const { error: upsertErr } = await supabase
+          // Use .select() to get back the rows that were actually upserted —
+          // if RLS or a constraint silently drops rows, returned.length < chunk.length.
+          const { data: returned, error: upsertErr } = await supabase
             .from('task_labels')
-            .upsert(chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })))
+            .upsert(chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })), {
+              onConflict: 'task_id,label_id'
+            })
+            .select()
           if (upsertErr) {
             logEvent('error', 'sync', `Reconcile: push task_labels failed`, `err=${upsertErr.message}`)
             break
           }
-          totalPushed += chunk.length
+          const actuallyInserted = returned?.length ?? 0
+          if (actuallyInserted < chunk.length) {
+            logEvent('warn', 'sync', `Reconcile: task_labels partial push — sent=${chunk.length} accepted=${actuallyInserted}`, 'rows silently dropped (likely RLS or FK)')
+          }
+          totalPushed += actuallyInserted
         }
 
         const missingInLocal = remotePairs.filter((p) => !localKeySet.has(pairKey(p.task_id, p.label_id)))
