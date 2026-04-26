@@ -7,6 +7,27 @@ description: Add a new feature to ToDoozy. Use when the user wants to add a new 
 
 You are adding a new feature to ToDoozy. This skill defines the story through a structured interview, writes it to prd.json, and launches ralph to implement it autonomously.
 
+## ToDoozy task lifecycle (every story, every iteration)
+
+Stories implemented through this skill must walk this status lifecycle in real time. Match the trigger to the transition exactly — don't batch and don't skip:
+
+| Trigger | New status | Where it happens |
+|---|---|---|
+| User confirms the story (Phase 5 "no more features") and ralph is about to launch | **In Progress** | Phase 6, after `git checkout -b ralph/...` |
+| Ralph (or you) starts running `npm run typecheck` / `npm run test` for the story | **Testing** | Inside ralph's loop, or Phase 7 manual reruns |
+| All typecheck + Vitest tests pass cleanly (`passes: true` + `tested: true` in prd.json) | **Verified** | Inside ralph's loop after the green run |
+| User confirms ALL acceptance criteria pass during Phase 7 walkthrough | **Done** | Phase 7 step 5 |
+
+Status IDs (Personal project):
+- In Progress: `b85b1973-ebc9-469b-b44c-52c3b91d4197`
+- Testing: `26686d55-1cfb-4fcd-ad19-674436b2392f`
+- Verified: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
+- Done: `6c3b0144-8629-486f-8b10-d9fc4e5c35f5`
+
+A "corresponding ToDoozy task" for a story is one whose title matches the story title or contains `(#NN)` matching the story id. Search via `mcp__ToDoozy__search_tasks` if the link isn't obvious.
+
+---
+
 ## Phase 0: Check scope.md and debug-learnings.md
 
 Before starting, read:
@@ -152,30 +173,30 @@ Now that all stories are defined:
    ```
    feat: add stories #<ids> — <brief summary>
    ```
-5. Tell the user: "Ready to launch ralph to implement these stories. Starting `./ralph.sh --tool claude 3`."
-6. Run:
+5. **Move every corresponding ToDoozy task to In Progress** (`b85b1973-ebc9-469b-b44c-52c3b91d4197`) via `mcp__ToDoozy__update_task` so the dashboard reflects active work before ralph starts.
+6. Tell the user: "Ready to launch ralph to implement these stories. Starting `./ralph.sh --tool claude 3`."
+7. Run:
    ```bash
    ./ralph.sh --tool claude 3
    ```
 
-Wait for ralph to complete.
+Wait for ralph to complete. Ralph follows the lifecycle table at the top of this skill — it moves the task to **Testing** when it starts running typecheck/tests, then to **Verified** the moment `passes: true` + `tested: true` is committed. By the time ralph exits, every successful story should already be in Verified.
 
 ---
 
-## Phase 7: Testing
+## Phase 7: User Verification
 
-After ralph finishes, the stories have `passes: true` but `tested: false`. For each story that has a corresponding ToDoozy task, move it to Testing status (`26686d55-1cfb-4fcd-ad19-674436b2392f`) via MCP.
+After ralph finishes, every successful story should have `passes: true` and `tested: true` in prd.json, and its corresponding ToDoozy task should already be in **Verified** (ralph moved it through In Progress → Testing → Verified per the lifecycle table). If a task is still stuck in In Progress or Testing because ralph crashed or skipped a transition, fix it now: confirm the story passes locally (`npm run typecheck` + relevant tests) and move the task to **Verified** via MCP before continuing.
 
-Testing is done by the user:
+Acceptance-criteria walkthrough is done with the user:
 
-1. Tell the user: "Ralph is done. Let's test the implementation. Here are the acceptance criteria to verify:"
+1. Tell the user: "Ralph is done. Let's verify each story's acceptance criteria together."
 2. For each story, list all acceptance criteria as a numbered checklist.
-3. Walk through each criterion with the user. Ask them to verify each one. If a criterion fails, use `/fix` to address it.
-4. Once the user confirms ALL acceptance criteria pass, update prd.json to set `tested: true` for the story.
-5. Move the corresponding ToDoozy task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`) via MCP.
-6. Only stories with BOTH `passes: true` AND `tested: true` can be archived to implemented-stories.md.
+3. Walk through each criterion with the user. Ask them to verify each one. If a criterion fails, use `/fix` to address it (the fix's own task lifecycle applies to the new fix task, not to this story).
+4. Once the user confirms ALL acceptance criteria pass, update prd.json to set `tested: true` for the story (if not already) and move the corresponding ToDoozy task to **Done** (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`) via MCP.
+5. Only stories with BOTH `passes: true` AND `tested: true` AND a Done ToDoozy task can be archived to implemented-stories.md.
 
-Do NOT set `tested: true` until the user explicitly confirms all criteria are met.
+Do NOT move a task to Done until the user explicitly confirms every acceptance criterion is met.
 
 ---
 

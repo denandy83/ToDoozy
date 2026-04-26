@@ -175,13 +175,15 @@ Task title should be clear and actionable. Description should include enough con
 - Verified: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
 - Done: `6c3b0144-8629-486f-8b10-d9fc4e5c35f5`
 
-When tackling a bug/improvement/feature from the ToDoozy task list:
-- **Starting work**: Move the task to In Progress (`b85b1973-ebc9-469b-b44c-52c3b91d4197`)
-- **Implementation + automated tests done** (`passes:true` + `tested:true`): Move the task to Testing (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
-- **User manually verifies acceptance criteria**: Move the task to Verified (`a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`)
-- **User confirms complete**: Move the task to Done (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
+When tackling a bug/improvement/feature from the ToDoozy task list, follow this lifecycle exactly:
+- **Starting work** (the moment the user says "let's fix X" / "add feature Y"): Move to **In Progress** (`b85b1973-ebc9-469b-b44c-52c3b91d4197`)
+- **Implementation done, starting to run tests/typecheck**: Move to **Testing** (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
+- **All automated tests pass** (`npm run typecheck` + relevant Vitest tests green): Move to **Verified** (`a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`)
+- **User confirms it works** ("yup that works", "confirmed", "ship it", etc.): Move to **Done** (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
 
-For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — move to In Progress when starting, Testing when `passes:true` + `tested:true`, and leave Verified/Done for the user.
+The status must reflect reality at every transition — never leave a task in Testing once tests have passed, and never leave a task in Verified once the user has confirmed. Move it the moment the trigger fires.
+
+For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — In Progress when starting, Testing while running tests, Verified when tests pass, Done when the user confirms.
 
 ## "Show me ToDoozy bugs"
 

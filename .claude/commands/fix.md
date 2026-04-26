@@ -328,7 +328,7 @@ Before signing off, verify every persistent artifact is written and committed. W
 - [ ] `ui-reference.md` updated (only if design spec changed)
 - [ ] `scope.md` updated or cleared
 - [ ] `.last-documented-commit` written with the new HEAD
-- [ ] ToDoozy task moved to Testing (if a task ID was in scope)
+- [ ] ToDoozy task moved to **Done** (if a task ID was in scope) — by Phase 7 the user has confirmed and the merge is in
 - [ ] Final `git status` is clean (or only intentional remaining changes)
 
 Run `git status` one last time to confirm the tree is clean.
