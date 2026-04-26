@@ -4,6 +4,11 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.5.3
+
+- **Fix: Bell icon now closes the notification panel** — Clicking the bell while the notification panel is open now closes it (it used to silently stay open). The panel still closes on Escape, on clicking outside it, or on opening a notification.
+- **Notifications: Trash icon replaces the redundant close X** — The header of the notification panel now has a trash icon instead of an X. Click it and a confirm toast appears at the bottom with **Delete** and **Cancel** buttons; **Delete** clears every notification at once. The icon is dimmed when there's nothing to delete.
+
 ## v1.5.2
 
 - **Fix: Sort menu in My Day now works** — Picking Priority, Due Date, Title, etc. from the Sort menu in My Day used to do nothing. Sorting now applies within each bucket (Not Started / In Progress / Done), and the active sort shows as `Priority - DESC` (literal ASC/DESC text) instead of a small arrow.

@@ -88,6 +88,12 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Fix**: Read `sortRules` from labelStore and use `createSortComparator`. For My Day, build a cross-project `statusOrderMap` (default=−1000, done=1000, else `order_index`) since tasks come from many projects.
 - **Check first**: When a "shared" filter/sort UI doesn't apply in a view, confirm the view actually reads the store the UI writes to. The FilterBar's sort lives in `labelStore.sortRules`.
 
+### Document-level outside-click handler closes a popover that the trigger button is supposed to toggle
+- **Symptoms**: A popover/flyout (notification panel, dropdown, etc.) opens when you click its trigger button, but clicking the trigger again to close it does nothing — the popover stays open.
+- **Root cause**: The popover registers a `mousedown` handler on `document` that closes the popover when the click target is outside `panelRef`. The trigger button is *outside* the panel, so clicking it: (1) the document handler fires first → calls `closePanel()`, then (2) the trigger's `onClick` fires `togglePanel()` → re-opens. State ends up flipped twice — back where it started, looking like the click did nothing.
+- **Fix**: Treat the trigger as "inside" for the outside-click check. Easiest plumbing: render the trigger and the popover inside the same wrapper element (e.g. `<div className="relative">{trigger}{popover}</div>`) and have the handler test against `panelRef.current?.parentElement` instead of `panelRef.current`. No coupling to a sibling ref needed — uses the DOM containment that's already there.
+- **Check first**: Whenever a popover has both an outside-click handler AND a separate trigger button that calls `toggle`, verify the trigger is excluded from the outside-click region. The bell + NotificationPanel in `AppLayout` is the canonical example (`src/renderer/src/features/collaboration/NotificationPanel.tsx`).
+
 ### Realtime subscription churn (2026-04-16 audit)
 - **Symptoms**: Post-optimization check shows RT `list_changes` at 7,068/hr (4.8x worse than pre-opt) and subscription INSERTs at 464/hr (30x worse). Write rates were down, but Realtime load spiked.
 - **Root causes found**:

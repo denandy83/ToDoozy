@@ -4,6 +4,11 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.5.3
+
+- **Bell icon now toggles the notification panel** — Clicking the bell while the panel was open used to do nothing visible. The document-level outside-click handler closed the panel before the bell's `onClick` re-opened it, so it flipped twice and stayed open. The handler now treats the bell+panel's shared `relative` wrapper as "inside," so the bell click reaches `togglePanel` and the panel actually closes.
+- **Replaced X with a trash icon + confirm-to-delete-all flow** — The X in the notification panel header used to just close the panel (redundant with clicking the bell again or pressing Escape). It's now a Trash2 icon: click it and a persistent confirm toast appears at the bottom with **Delete** (danger) and **Cancel** (muted), matching the destructive-confirm pattern used elsewhere. Confirming clears every notification (new `NotificationRepository.deleteAll()` + `notifications:deleteAll` IPC + `deleteAllNotifications` store action). The trash is disabled when the list is empty.
+
 ## v1.5.2
 
 - **My Day sort menu now actually sorts** — Picking Priority / Due Date / Title / etc. from the Sort menu in My Day did nothing previously. The view ignored the sort rules and StatusSection re-sorted internally regardless. Sort now applies within each bucket (Not Started / In Progress / Done), and the active sort is shown as literal `Field - ASC` / `Field - DESC` text instead of arrow icons.
