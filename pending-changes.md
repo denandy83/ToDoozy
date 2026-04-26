@@ -213,3 +213,12 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Auth, sync, Electron main process startup.
 **Files changed:** package.json, src/renderer/src/lib/supabase.ts, src/renderer/src/services/sessionRecovery.ts, src/renderer/src/shared/stores/authStore.ts, src/main/index.ts.
 **Commit:** <fill in after squash merge to main>
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 638df07 chore: update doc trackers (2026-04-26) — files: 2
+- 7f2ab11 fix: diagnostic logging + accurate count for task_labels reconcile push (2026-04-26) — files: 1
+- e7fd413 fix: numeric timestamp compare in reconcileTable (2026-04-26) — files: 1
+- f8b7569 fix: clear stuck syncStore.status='offline' after sign-in / recovery (2026-04-26) — files: 1
+- c0b43c3 fix: don't set reconcile cooldown on pre-session no-op (2026-04-26) — files: 1
+- e2c6ac7 fix: forever auth — persist rotated refresh tokens + single-flight refresh + terminal-error detection (v1.5.2) (2026-04-26) — files: 7
