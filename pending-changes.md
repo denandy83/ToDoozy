@@ -222,3 +222,12 @@ Working file — entries written here during a session are processed into perman
 - f8b7569 fix: clear stuck syncStore.status='offline' after sign-in / recovery (2026-04-26) — files: 1
 - c0b43c3 fix: don't set reconcile cooldown on pre-session no-op (2026-04-26) — files: 1
 - e2c6ac7 fix: forever auth — persist rotated refresh tokens + single-flight refresh + terminal-error detection (v1.5.2) (2026-04-26) — files: 7
+
+## 2026-04-26 — Fix: Sort menu now applies in My Day view
+**What was broken:** Picking a sort option (Priority, Due Date, Title, etc.) from the Sort menu in My Day did nothing — the task order looked identical regardless of which field or direction you chose. Only project views responded to the sort menu.
+**Root cause:** Two layered issues. (1) `MyDayView.tsx` ignored `labelStore.sortRules` and used a local `prioritySortFn` that only honored the legacy `priority_auto_sort` setting + `order_index`. (2) Even if the parent had pre-sorted the tasks, `StatusSection.tsx` re-sorted them internally unless `disableDrag={true}` was passed, throwing away the parent's order. `TaskListView` already passed `disableDrag={!isCustomSort}`; My Day did not.
+**What was fixed:** MyDayView now reads `sortRules` and feeds `createSortComparator(sortRules, statusOrderMap)` — building a cross-project status order map (default first, done last, others by `order_index`). When an explicit (non-custom) sort is active, it passes `disableDrag={!isCustomSort}` to StatusSection so the pre-sorted order is honored. Sort applies *within* each My Day bucket (Not Started / In Progress / Done) — buckets stay grouped. Adjacent UX polish: `SortDropdown` now shows literal `ASC` / `DESC` text instead of chevron icons, and the collapsed summary reads e.g. `Priority - DESC, Created - ASC`.
+**User-facing impact:** The Sort menu in My Day now actually sorts. Priority Descending puts URGENT/HIGH at the top of each bucket; Title Ascending alphabetizes; etc. The active sort is visible in the Sort button label as `Field - DIR` instead of an arrow icon.
+**Affected area:** My Day view, shared FilterBar SortDropdown.
+**Files changed:** src/renderer/src/features/views/MyDayView.tsx, src/renderer/src/shared/components/FilterBar.tsx
+**Commit:** 4178711

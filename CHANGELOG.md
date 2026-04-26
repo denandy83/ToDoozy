@@ -4,6 +4,10 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.5.2
+
+- **My Day sort menu now actually sorts** — Picking Priority / Due Date / Title / etc. from the Sort menu in My Day did nothing previously. The view ignored the sort rules and StatusSection re-sorted internally regardless. Sort now applies within each bucket (Not Started / In Progress / Done), and the active sort is shown as literal `Field - ASC` / `Field - DESC` text instead of arrow icons.
+
 ## v1.5.1
 
 - **`project_templates` now syncs across devices** — Was `local-only feature` per the v1.5.0 scope (the SupabaseProjectTemplateRepository literally threw "not available in Supabase mode"). Promoted to a real synced table on Supabase with the same shape as local SQLite, RLS scoped to the owner, soft-delete column, partial indexes for active rows + tombstones. Local SQLite gained `deleted_at` via migration 23. Wired into the generic `reconcileTable` engine; new push/delete functions; the template store fires push on create/update/delete so changes propagate immediately.

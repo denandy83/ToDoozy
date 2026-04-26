@@ -76,6 +76,18 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Fix**: See CLAUDE.md "Supabase Performance Rules". Key changes: adaptive polling via `syncStore.realtimeConnected`, removed unfiltered RT subs, batch `.in()` queries, debounced settings writes, compound indexes added.
 - **Check first**: When adding any Supabase query or subscription, verify: Is it filtered? Is it batched? Is it on a read path (no writes allowed)? Does the table have indexes for the query pattern?
 
+### Sort applied at parent but child re-sorts internally
+- **Symptoms**: A view passes a pre-sorted task array to `StatusSection`, but the rendered order is whatever the child decides — sort menu picks have no visible effect.
+- **Root cause**: `StatusSection.tsx` does `[...topLevel].sort(...)` internally using its own `autoSort` + `order_index` rules, and only trusts the parent's pre-sorted order when `disableDrag={true}` is passed (the flag does double duty: turns off drag-and-drop AND skips the internal sort). `TaskListView` passes `disableDrag={!isCustomSort || isOfflineShared}`; any new view that wants explicit sort to apply must follow the same pattern.
+- **Fix**: When an explicit sort is active in the parent, pass `disableDrag={!isCustomSort}` to StatusSection. Drag-reorder doesn't make sense when an explicit sort is in effect anyway, so the dual meaning is correct.
+- **Check first**: When wiring a new sort source into a view that uses StatusSection, grep for `disableDrag` and confirm it's plumbed. Compare against `TaskListView.tsx` as the reference implementation.
+
+### My Day uses store sortRules, not its own setting
+- **Symptoms**: My Day's local sort logic only honors the legacy `priority_auto_sort` setting; the cross-cutting Sort menu in FilterBar does nothing.
+- **Root cause**: The shared FilterBar writes to `labelStore.sortRules`. Project views (`TaskListView`) read `selectSortRules` and feed `createSortComparator(sortRules, statusOrderMap)`. My Day had its own `prioritySortFn` and never consulted the store.
+- **Fix**: Read `sortRules` from labelStore and use `createSortComparator`. For My Day, build a cross-project `statusOrderMap` (default=−1000, done=1000, else `order_index`) since tasks come from many projects.
+- **Check first**: When a "shared" filter/sort UI doesn't apply in a view, confirm the view actually reads the store the UI writes to. The FilterBar's sort lives in `labelStore.sortRules`.
+
 ### Realtime subscription churn (2026-04-16 audit)
 - **Symptoms**: Post-optimization check shows RT `list_changes` at 7,068/hr (4.8x worse than pre-opt) and subscription INSERTs at 464/hr (30x worse). Write rates were down, but Realtime load spiked.
 - **Root causes found**:

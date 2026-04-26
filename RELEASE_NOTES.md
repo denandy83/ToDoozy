@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.5.2
+
+- **Fix: Sort menu in My Day now works** — Picking Priority, Due Date, Title, etc. from the Sort menu in My Day used to do nothing. Sorting now applies within each bucket (Not Started / In Progress / Done), and the active sort shows as `Priority - DESC` (literal ASC/DESC text) instead of a small arrow.
+
 ## v1.5.1
 
 - **Project templates now sync across devices** — Templates you create on one device now show up on every other device, and deletions propagate cleanly. Previously they only existed on the device they were created on.
