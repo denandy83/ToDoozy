@@ -570,4 +570,90 @@ const migration_19: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19]
+const migration_20: Migration = (db) => {
+  // Soft-delete foundation: mirror Supabase schema landed in migration
+  // `soft_delete_foundation` (2026-04-25). Adds `deleted_at` to every syncable
+  // table so the reconcile layer can use a uniform tombstone model instead of
+  // hard DELETE + ad-hoc tombstone tracking.
+  //
+  // Also adds `updated_at` to `settings` because Supabase `user_settings`
+  // already has it, and incremental sync (task 9) needs a comparable column.
+  // No `id` column added — local settings PK is (user_id, key); the Supabase
+  // `id` UUID is reconciled in task 9.
+  // SQLite ALTER TABLE ADD COLUMN cannot use non-constant defaults (datetime('now')).
+  // Add updated_at to settings with a constant default, then backfill via UPDATE.
+  // Repository writes (SettingsRepository.set/setMultiple) bump updated_at explicitly
+  // on every mutation — see task 9 (settings vertical slice).
+  db.exec(`
+    ALTER TABLE tasks ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE statuses ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE projects ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE labels ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE themes ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE settings ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    ALTER TABLE settings ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE saved_views ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE project_areas ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE task_labels ADD COLUMN deleted_at TEXT NULL;
+    ALTER TABLE project_labels ADD COLUMN deleted_at TEXT NULL;
+    UPDATE settings SET updated_at = datetime('now') WHERE updated_at = '';
+  `)
+
+  // Active-row partial indexes — power the reconcile high-water-mark query.
+  // task_labels / project_labels have no updated_at and reconcile via key-set
+  // diff, so they don't get an active_idx.
+  // themes uses owner_id (not user_id) — that's a local-only schism; the
+  // reconcile will scope by owner.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS tasks_active_idx ON tasks(project_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS statuses_active_idx ON statuses(project_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS projects_active_idx ON projects(owner_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS labels_active_idx ON labels(user_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS themes_active_idx ON themes(owner_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS settings_active_idx ON settings(user_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS saved_views_active_idx ON saved_views(user_id, updated_at) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS project_areas_active_idx ON project_areas(user_id, updated_at) WHERE deleted_at IS NULL;
+  `)
+}
+
+const migration_21: Migration = (db) => {
+  // sync_meta tracks per-table reconcile state for the uniform sync layer.
+  //   last_high_water — max(updated_at) seen the last successful reconcile pass;
+  //                     short-circuit when remote max <= this value.
+  //   last_reconciled_at — wall clock of the last finished pass (for debug/UI).
+  // Keyed by (user_id, table_name) — owner-scoped tables key by user; project-
+  // scoped tables (tasks, statuses) key by user too because reconcile runs per
+  // user and iterates that user's projects internally.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_meta (
+      user_id TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      last_high_water TEXT,
+      last_reconciled_at TEXT,
+      PRIMARY KEY (user_id, table_name)
+    );
+  `)
+}
+
+const migration_22: Migration = (db) => {
+  // Add scope_id so project-scoped tables (tasks, statuses) get a per-project
+  // high-water — without it, reconciling project A would short-circuit project
+  // B on the next pass even though B has its own pending drift.
+  // For user-scoped tables (labels, themes, settings, saved_views, project_areas,
+  // projects) scope_id == user_id, so the keying is unchanged in practice.
+  // sync_meta is recoverable state — a fresh reconcile rebuilds it — so we
+  // drop+recreate rather than try to migrate values.
+  db.exec(`
+    DROP TABLE IF EXISTS sync_meta;
+    CREATE TABLE sync_meta (
+      user_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      last_high_water TEXT,
+      last_reconciled_at TEXT,
+      PRIMARY KEY (user_id, scope_id, table_name)
+    );
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22]

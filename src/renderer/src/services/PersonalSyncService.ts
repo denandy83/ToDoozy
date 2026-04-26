@@ -9,8 +9,9 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
-import type { Task, Status, Label, SyncOperation } from '../../../shared/types'
+import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
+import { SYNC_TABLES, reconcileTable } from './syncTables'
 
 /** Mark a successful push in the sync store */
 function markSynced(): void {
@@ -206,6 +207,7 @@ export async function pushTask(task: Task): Promise<void> {
       await reportPushFailure('pushTask', error, 'tasks', task.id, JSON.stringify(payload))
     } else {
       markSynced()
+      logEvent('info', 'sync', `Pushed task "${task.title}"`, `id=${task.id} project=${task.project_id}`)
       // Sync the task_labels junction — the tasks.label_names JSON is denormalized
       // metadata only; the junction is what cross-device task_labels reads use.
       // Diff local vs remote and apply both directions so add/remove on this device
@@ -255,16 +257,24 @@ export async function pushTask(task: Task): Promise<void> {
 }
 
 /**
- * Delete a task from Supabase.
+ * Soft-delete a task in Supabase. Sets deleted_at + updated_at; the row stays
+ * for 30 days so other devices observe the tombstone before purge runs.
  */
 export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
   recentlyDeletedIds.add(taskId)
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('tasks')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', taskId)
     if (error) {
       await reportPushFailure('deleteTask', error, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
-    } else markSynced()
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted task', `id=${taskId}`)
+    }
   } catch (err) {
     await reportPushFailure('deleteTask', err, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
   }
@@ -292,7 +302,10 @@ export async function pushStatus(status: Status): Promise<void> {
     const { error } = await supabase.from('statuses').upsert(payload)
     if (error) {
       await reportPushFailure('pushStatus', error, 'statuses', status.id, JSON.stringify(payload))
-    } else markSynced()
+    } else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed status "${status.name}"`, `id=${status.id} project=${status.project_id}`)
+    }
   } catch (err) {
     await reportPushFailure('pushStatus', err, 'statuses', status.id, JSON.stringify(payload))
   }
@@ -308,30 +321,43 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
     name: label.name,
     color: label.color,
     order_index: label.order_index,
-    updated_at: label.updated_at
+    updated_at: label.updated_at,
+    deleted_at: label.deleted_at ?? null
   }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
     if (error) await reportPushFailure('pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
-    else markSynced()
+    else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed label "${label.name}"`, `id=${label.id}`)
+    }
   } catch (err) {
     await reportPushFailure('pushLabel', err, 'user_labels', label.id, JSON.stringify(payload))
   }
 }
 
 /**
- * Delete a label from user_labels in Supabase.
+ * Soft-delete a label in Supabase by stamping deleted_at + updated_at.
+ * Hard-DELETE is reserved for the 30-day purge job; tombstones are how
+ * other devices learn the label is gone (Realtime UPDATE event).
  */
 export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('user_labels').delete().eq('id', labelId)
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('user_labels')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', labelId)
     if (error) {
-      await reportPushFailure('deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'UPDATE')
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted label', `id=${labelId}`)
+    }
   } catch (err) {
-    await reportPushFailure('deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'DELETE')
+    await reportPushFailure('deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'UPDATE')
   }
 }
 
@@ -351,7 +377,10 @@ async function pushSettingImmediate(key: string, value: string, userId: string):
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_settings').upsert(payload)
     if (error) await reportPushFailure('pushSetting', error, 'user_settings', id, JSON.stringify(payload))
-    else markSynced()
+    else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed setting "${key}"`, `id=${id}`)
+    }
   } catch (err) {
     await reportPushFailure('pushSetting', err, 'user_settings', id, JSON.stringify(payload))
   }
@@ -377,13 +406,21 @@ export async function pushSavedView(view: {
   project_id: string | null
   sidebar_order: number
   color: string | null
+  deleted_at?: string | null
 }): Promise<void> {
-  const payload = { ...view, updated_at: new Date().toISOString() }
+  const payload = {
+    ...view,
+    deleted_at: view.deleted_at ?? null,
+    updated_at: new Date().toISOString()
+  }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_saved_views').upsert(payload)
     if (error) await reportPushFailure('pushSavedView', error, 'user_saved_views', view.id, JSON.stringify(payload))
-    else markSynced()
+    else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed saved view "${view.name}"`, `id=${view.id}`)
+    }
   } catch (err) {
     await reportPushFailure('pushSavedView', err, 'user_saved_views', view.id, JSON.stringify(payload))
   }
@@ -400,13 +437,21 @@ export async function pushProjectArea(area: {
   color: string | null
   sidebar_order: number
   is_collapsed: number
+  deleted_at?: string | null
 }): Promise<void> {
-  const payload = { ...area, updated_at: new Date().toISOString() }
+  const payload = {
+    ...area,
+    deleted_at: area.deleted_at ?? null,
+    updated_at: new Date().toISOString()
+  }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_project_areas').upsert(payload)
     if (error) await reportPushFailure('pushProjectArea', error, 'user_project_areas', area.id, JSON.stringify(payload))
-    else markSynced()
+    else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed project area "${area.name}"`, `id=${area.id}`)
+    }
   } catch (err) {
     await reportPushFailure('pushProjectArea', err, 'user_project_areas', area.id, JSON.stringify(payload))
   }
@@ -416,14 +461,19 @@ export async function pushProjectArea(area: {
  * Delete a saved view from Supabase.
  */
 export async function deleteSavedViewFromSupabase(viewId: string): Promise<void> {
+  const now = new Date().toISOString()
+  const payload = { deleted_at: now, updated_at: now }
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('user_saved_views').delete().eq('id', viewId)
+    const { error } = await supabase.from('user_saved_views').update(payload).eq('id', viewId)
     if (error) {
-      await reportPushFailure('deleteSavedView', error, 'user_saved_views', viewId, JSON.stringify({ id: viewId }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteSavedView', error, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted saved view', `id=${viewId}`)
+    }
   } catch (err) {
-    await reportPushFailure('deleteSavedView', err, 'user_saved_views', viewId, JSON.stringify({ id: viewId }), 'DELETE')
+    await reportPushFailure('deleteSavedView', err, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
   }
 }
 
@@ -431,14 +481,19 @@ export async function deleteSavedViewFromSupabase(viewId: string): Promise<void>
  * Delete a project area from Supabase.
  */
 export async function deleteProjectAreaFromSupabase(areaId: string): Promise<void> {
+  const now = new Date().toISOString()
+  const payload = { deleted_at: now, updated_at: now }
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('user_project_areas').delete().eq('id', areaId)
+    const { error } = await supabase.from('user_project_areas').update(payload).eq('id', areaId)
     if (error) {
-      await reportPushFailure('deleteProjectArea', error, 'user_project_areas', areaId, JSON.stringify({ id: areaId }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteProjectArea', error, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted project area', `id=${areaId}`)
+    }
   } catch (err) {
-    await reportPushFailure('deleteProjectArea', err, 'user_project_areas', areaId, JSON.stringify({ id: areaId }), 'DELETE')
+    await reportPushFailure('deleteProjectArea', err, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
   }
 }
 
@@ -459,6 +514,7 @@ export async function pushTheme(theme: {
   accent_fg: string
   border: string
   updated_at?: string
+  deleted_at?: string | null
 }): Promise<void> {
   const payload = {
     id: theme.id,
@@ -475,81 +531,147 @@ export async function pushTheme(theme: {
     // Legacy column, still NOT NULL — kept in sync with fg_secondary.
     surface: theme.fg_secondary,
     border: theme.border,
-    updated_at: theme.updated_at ?? new Date().toISOString()
+    updated_at: theme.updated_at ?? new Date().toISOString(),
+    deleted_at: theme.deleted_at ?? null
   }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_themes').upsert(payload)
     if (error) await reportPushFailure('pushTheme', error, 'user_themes', theme.id, JSON.stringify(payload))
-    else markSynced()
+    else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed theme "${theme.name}"`, `id=${theme.id} mode=${theme.mode}`)
+    }
   } catch (err) {
     await reportPushFailure('pushTheme', err, 'user_themes', theme.id, JSON.stringify(payload))
   }
 }
 
 /**
- * Delete a theme from Supabase.
+ * Soft-delete a theme in Supabase by stamping deleted_at + updated_at.
+ * Hard-DELETE is reserved for the 30-day purge job; tombstones propagate
+ * via Realtime UPDATE so other devices can drop the row.
  */
 export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('user_themes').delete().eq('id', themeId)
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('user_themes')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', themeId)
     if (error) {
-      await reportPushFailure('deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'UPDATE')
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted theme', `id=${themeId}`)
+    }
   } catch (err) {
-    await reportPushFailure('deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'DELETE')
+    await reportPushFailure('deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'UPDATE')
   }
 }
 
 /**
- * Delete a setting from user_settings in Supabase.
+ * Soft-delete a setting in Supabase by stamping deleted_at + updated_at.
+ * Hard-DELETE is reserved for the 30-day purge job.
  */
 export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
   const id = `${userId}:${key}`
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('user_settings').delete().eq('id', id)
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('user_settings')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', id)
     if (error) {
-      await reportPushFailure('deleteSetting', error, 'user_settings', id, JSON.stringify({ id }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteSetting', error, 'user_settings', id, JSON.stringify({ id }), 'UPDATE')
+    } else {
+      markSynced()
+      logEvent('info', 'sync', `Soft-deleted setting "${key}"`, `id=${id}`)
+    }
   } catch (err) {
-    await reportPushFailure('deleteSetting', err, 'user_settings', id, JSON.stringify({ id }), 'DELETE')
+    await reportPushFailure('deleteSetting', err, 'user_settings', id, JSON.stringify({ id }), 'UPDATE')
   }
 }
 
 /**
- * Delete a status from Supabase.
+ * Soft-delete a status in Supabase by setting deleted_at. Hard-DELETE is reserved
+ * for the 30-day purge job — a soft tombstone propagates via Realtime UPDATE.
  */
 export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
+  const now = new Date().toISOString()
   try {
     const supabase = await getSupabase()
-    const { error } = await supabase.from('statuses').delete().eq('id', statusId)
+    const { error } = await supabase
+      .from('statuses')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', statusId)
     if (error) {
-      await reportPushFailure('deleteStatus', error, 'statuses', statusId, JSON.stringify({ id: statusId }), 'DELETE')
-    } else markSynced()
+      await reportPushFailure('deleteStatus', error, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
+    } else {
+      logEvent('info', 'sync', `Soft-deleted status`, `id=${statusId}`)
+      markSynced()
+    }
   } catch (err) {
-    await reportPushFailure('deleteStatus', err, 'statuses', statusId, JSON.stringify({ id: statusId }), 'DELETE')
+    await reportPushFailure('deleteStatus', err, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
   }
 }
 
 /**
- * Delete a project from Supabase (and its membership).
+ * Soft-delete a project in Supabase (and cascade tombstones to its tasks/statuses).
+ * Hard-DELETE is reserved for the 30-day purge job — a soft tombstone propagates
+ * via Realtime UPDATE.
+ *
+ * project_members are physically removed: there's no `deleted_at` on the join row,
+ * and a tombstoned project means no member should still see it. Membership rows
+ * have no separate sync identity.
  */
 export async function deleteProjectFromSupabase(projectId: string): Promise<void> {
+  const now = new Date().toISOString()
   try {
     const supabase = await getSupabase()
+
+    // Cascade tombstones to children first so any device pulling sees consistent state.
+    const { error: tasksErr } = await supabase
+      .from('tasks')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('project_id', projectId)
+      .is('deleted_at', null)
+    if (tasksErr) {
+      logEvent('error', 'sync', `deleteProject tasks soft-delete error: ${tasksErr.message}`, `project=${projectId}`)
+      useSyncStore.getState().setError(tasksErr.message)
+      return
+    }
+
+    const { error: stsErr } = await supabase
+      .from('statuses')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('project_id', projectId)
+      .is('deleted_at', null)
+    if (stsErr) {
+      logEvent('error', 'sync', `deleteProject statuses soft-delete error: ${stsErr.message}`, `project=${projectId}`)
+      useSyncStore.getState().setError(stsErr.message)
+      return
+    }
+
+    // project_members is a junction without sync identity — physical remove is fine.
     const { error: memberErr } = await supabase.from('project_members').delete().eq('project_id', projectId)
     if (memberErr) {
       logEvent('error', 'sync', `deleteProject members error: ${memberErr.message}`, `project=${projectId}`)
       useSyncStore.getState().setError(memberErr.message)
       return
     }
-    const { error: projErr } = await supabase.from('projects').delete().eq('id', projectId)
+
+    const { error: projErr } = await supabase
+      .from('projects')
+      .update({ deleted_at: now, updated_at: now })
+      .eq('id', projectId)
     if (projErr) {
       logEvent('error', 'sync', `deleteProject error: ${projErr.message}`, `project=${projectId}`)
       useSyncStore.getState().setError(projErr.message)
     } else {
+      logEvent('info', 'sync', `Soft-deleted project`, `id=${projectId}`)
       markSynced()
     }
   } catch (err) {
@@ -636,6 +758,11 @@ export async function fullUpload(userId: string): Promise<void> {
     const supabase = await getSupabase()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('No authenticated session')
+
+    // Sentinel: claim last_sync_at up-front so a concurrent initSync caller
+    // sees it and skips fullUpload instead of starting a parallel upload.
+    // The real timestamp is written at the end of this function.
+    await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
 
     // Count total items for progress — only sync projects owned by this user
     const allProjects = await window.api.projects.getProjectsForUser(userId)
@@ -997,7 +1124,7 @@ export async function fullPull(userId: string): Promise<void> {
     }
 
     // 5. Pull project areas
-    syncStore.setFirstSyncProgress(95)
+    syncStore.setFirstSyncProgress(90)
     const { data: remoteAreas } = await supabase
       .from('user_project_areas')
       .select('*')
@@ -1015,6 +1142,41 @@ export async function fullPull(userId: string): Promise<void> {
             sidebar_order: area.sidebar_order
           })
         } catch { /* already exists */ }
+      }
+    }
+
+    // 6. Pull custom themes
+    syncStore.setFirstSyncProgress(95)
+    const { data: remoteThemes } = await supabase
+      .from('user_themes')
+      .select('*')
+      .eq('user_id', userId)
+
+    if (remoteThemes) {
+      for (const theme of remoteThemes) {
+        const existing = await window.api.themes.findById(theme.id)
+        if (existing) continue
+        const config: ThemeConfig = {
+          bg: theme.bg ?? '',
+          fg: theme.fg ?? '',
+          fgSecondary: theme.fg_secondary ?? theme.surface ?? '',
+          fgMuted: theme.fg_muted ?? '',
+          muted: theme.muted ?? '',
+          accent: theme.accent ?? '',
+          accentFg: theme.accent_fg ?? '',
+          border: theme.border ?? ''
+        }
+        try {
+          await window.api.themes.create({
+            id: theme.id,
+            name: theme.name,
+            mode: theme.mode,
+            config: JSON.stringify(config),
+            owner_id: userId
+          })
+        } catch (e) {
+          console.error(`[PersonalSync] fullPull: failed to create theme "${theme.name}" (${theme.id}):`, e)
+        }
       }
     }
 
@@ -1125,11 +1287,8 @@ export async function pullStatuses(projectId: string): Promise<number> {
           is_default: rs.is_default
         })
         changed++
-      } else if (existing.updated_at && rs.updated_at && existing.updated_at > rs.updated_at) {
-        // Local is newer — push to Supabase
-        await pushStatus(existing)
-        changed++
       }
+      // No "local newer → push" branch (same reasoning as pullNewTasks).
     }
     const pName = projectNameCache.get(projectId) ?? projectId
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for "${pName}"`)
@@ -1160,7 +1319,6 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     if (!remoteTasks) return 0
 
     let pulled = 0
-    let pushed = 0
     const touchedTaskIds: string[] = []
 
     // Parents before subtasks so the parent_id FK is satisfied when inserting.
@@ -1210,7 +1368,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             reference_url: rt.reference_url,
             my_day_dismissed_date: rt.my_day_dismissed_date ?? null,
             created_at: rt.created_at,
-            updated_at: rt.updated_at
+            updated_at: rt.updated_at,
+            deleted_at: rt.deleted_at ?? null
           })
           touchedTaskIds.push(rt.id)
           pulled++
@@ -1240,22 +1399,19 @@ export async function pullNewTasks(projectId: string): Promise<number> {
             reference_url: rt.reference_url,
             my_day_dismissed_date: rt.my_day_dismissed_date ?? null,
             created_at: existing.created_at,
-            updated_at: rt.updated_at
+            updated_at: rt.updated_at,
+            deleted_at: rt.deleted_at ?? null
           })
           touchedTaskIds.push(rt.id)
           pulled++
         } catch (e) {
           console.error(`[PersonalSync] Failed to update task "${rt.title}" (${rt.id}):`, e)
         }
-      } else if (existing.updated_at && rt.updated_at && existing.updated_at > rt.updated_at) {
-        // Local is newer — push to Supabase
-        try {
-          await pushTask(existing)
-          pushed++
-        } catch (e) {
-          console.error(`[PersonalSync] Failed to push task "${existing.title}" (${existing.id}):`, e)
-        }
       }
+      // No "local newer → push" branch: pullNewTasks pulls only. Failed mutation
+      // pushes are retried via sync_queue, and reconcile() catches ID-level drift.
+      // Pushing here floods Supabase whenever local timestamps got bumped without
+      // a matching remote update (e.g. residue from the pre-applyRemote era).
     }
 
     // Sync task_labels only for tasks that were actually created or updated
@@ -1308,16 +1464,13 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     }
 
     const pName = projectNameCache.get(projectId) ?? projectId
-    if (pulled > 0 || pushed > 0) {
-      const parts: string[] = []
-      if (pulled > 0) parts.push(`${pulled} pulled`)
-      if (pushed > 0) parts.push(`${pushed} pushed`)
-      console.log(`[PersonalSync] "${pName}": ${parts.join(', ')}`)
+    if (pulled > 0) {
+      console.log(`[PersonalSync] "${pName}": ${pulled} pulled`)
     }
     lastPullAt.set(`tasks:${projectId}`, new Date().toISOString())
     // Supabase responded successfully — clear any auth failure state
     clearAuthFailures()
-    return pulled + pushed
+    return pulled
   } catch (err) {
     handleSyncError('pullNewTasks', err)
     return 0
@@ -1334,12 +1487,35 @@ export async function pullNewTasks(projectId: string): Promise<number> {
  *
  * Returns { pushed, pulled } counts. Silent on success; if more than 10 items
  * needed reconciling, a notification is fired so the user notices.
+ *
+ * Concurrent callers share the same in-flight promise. A 30s cooldown skips
+ * back-to-back runs (e.g. startup-reconcile racing a transient-offline-flap
+ * reconcile triggered by the same boot's WS hiccup).
  */
+let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
+let lastReconcileAt = 0
+const RECONCILE_COOLDOWN_MS = 30_000
 export async function reconcile(userId: string): Promise<{ pushed: number; pulled: number }> {
+  if (reconcileInFlight) return reconcileInFlight
+  if (Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS) {
+    logEvent('info', 'sync', 'Reconcile skipped — within cooldown')
+    return { pushed: 0, pulled: 0 }
+  }
   if (!navigator.onLine) {
     logEvent('info', 'sync', 'Reconcile skipped — offline')
     return { pushed: 0, pulled: 0 }
   }
+  reconcileInFlight = reconcileImpl(userId)
+  try {
+    const result = await reconcileInFlight
+    lastReconcileAt = Date.now()
+    return result
+  } finally {
+    reconcileInFlight = null
+  }
+}
+
+async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: number }> {
   let totalPushed = 0
   let totalPulled = 0
   try {
@@ -1350,130 +1526,65 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
       return { pushed: 0, pulled: 0 }
     }
 
-    // 1. Tasks — per personal project (shared projects have their own pipeline)
+    const runTable = async (
+      tableName: Parameters<typeof reconcileTable>[0]['name'] | string,
+      scopeId: string
+    ): Promise<void> => {
+      const desc = SYNC_TABLES[tableName as keyof typeof SYNC_TABLES]
+      if (!desc) return
+      try {
+        const stats = await reconcileTable(
+          desc as Parameters<typeof reconcileTable>[0],
+          scopeId,
+          userId
+        )
+        totalPushed += stats.pushed
+        totalPulled += stats.pulled
+        if (stats.skipped) {
+          logEvent(
+            'info',
+            'sync',
+            `Reconcile: ${tableName} skipped (no drift)`,
+            `scope=${scopeId}`
+          )
+        } else if (stats.pushed || stats.pulled || stats.failed) {
+          logEvent(
+            stats.failed ? 'warn' : 'info',
+            'sync',
+            `Reconcile: ${tableName}`,
+            `pushed=${stats.pushed} pulled=${stats.pulled} inSync=${stats.inSync} failed=${stats.failed} scope=${scopeId}`
+          )
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        logEvent('error', 'sync', `Reconcile: ${tableName} failed`, `scope=${scopeId} err=${msg}`)
+      }
+    }
+
+    // 1. Owner-scoped: projects (need to land before tasks/statuses so the FK is satisfied).
+    await runTable('projects', userId)
+
+    // 2. Project-scoped: per personal project, statuses then tasks.
     const allProjects = await window.api.projects.getProjectsForUser(userId)
     const personalProjects = allProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
 
     for (const project of personalProjects) {
-      const active = await window.api.tasks.findByProjectId(project.id)
-      const archived = await window.api.tasks.findArchived(project.id)
-      const templates = await window.api.tasks.findTemplates(project.id)
-      const localTasks = [...active, ...archived, ...templates]
-      const localIds = new Set(localTasks.map((t) => t.id))
-
-      const { data: remoteRows, error } = await supabase
-        .from('tasks')
-        .select('id')
-        .eq('project_id', project.id)
-      if (error) {
-        logEvent('error', 'sync', `Reconcile: list remote tasks failed`, `project=${project.id} err=${error.message}`)
-        continue
-      }
-      const remoteIds = new Set<string>((remoteRows ?? []).map((r) => r.id as string))
-
-      // Push local-only tasks (parents-first to satisfy parent_id FK on the remote insert)
-      const missingInRemote = localTasks.filter((t) => !remoteIds.has(t.id))
-      const parents = missingInRemote.filter((t) => !t.parent_id)
-      const subs = missingInRemote.filter((t) => t.parent_id)
-      for (const t of [...parents, ...subs]) {
-        await pushTask(t)
-        totalPushed++
-      }
-
-      // Pull remote-only tasks (parents-first via single batched select)
-      const missingInLocal = [...remoteIds].filter((id) => !localIds.has(id))
-      if (missingInLocal.length > 0) {
-        const { data: pullRows, error: pullErr } = await supabase
-          .from('tasks')
-          .select('*')
-          .in('id', missingInLocal)
-        if (pullErr) {
-          logEvent('error', 'sync', `Reconcile: fetch remote rows failed`, `project=${project.id} err=${pullErr.message}`)
-          continue
-        }
-        const ordered = [
-          ...(pullRows ?? []).filter((r) => !r.parent_id),
-          ...(pullRows ?? []).filter((r) => r.parent_id)
-        ]
-        for (const rt of ordered) {
-          // Ensure FK targets exist locally before applyRemote (mirrors pullNewTasks)
-          const ownerId = rt.owner_id as string
-          const localOwner = await window.api.users.findById(ownerId)
-          if (!localOwner) {
-            await window.api.users.create({
-              id: ownerId,
-              email: placeholderEmail(ownerId),
-              display_name: null,
-              avatar_url: null
-            }).catch(() => {})
-          }
-          if (rt.assigned_to) {
-            const assignedId = rt.assigned_to as string
-            const localAssignee = await window.api.users.findById(assignedId)
-            if (!localAssignee) {
-              await window.api.users.create({
-                id: assignedId,
-                email: placeholderEmail(assignedId),
-                display_name: null,
-                avatar_url: null
-              }).catch(() => {})
-            }
-          }
-          try {
-            await window.api.tasks.applyRemote({
-              id: rt.id,
-              project_id: rt.project_id,
-              owner_id: ownerId,
-              title: rt.title,
-              description: rt.description,
-              status_id: rt.status_id,
-              priority: rt.priority ?? 0,
-              due_date: rt.due_date,
-              parent_id: rt.parent_id,
-              order_index: rt.order_index ?? 0,
-              assigned_to: rt.assigned_to,
-              is_template: rt.is_template ?? 0,
-              is_archived: rt.is_archived ?? 0,
-              is_in_my_day: rt.is_in_my_day ?? 0,
-              completed_date: rt.completed_date,
-              recurrence_rule: rt.recurrence_rule,
-              reference_url: rt.reference_url,
-              my_day_dismissed_date: rt.my_day_dismissed_date ?? null,
-              created_at: rt.created_at,
-              updated_at: rt.updated_at
-            })
-            totalPulled++
-          } catch (e) {
-            logEvent('error', 'sync', `Reconcile: applyRemote failed`, `task=${rt.id} err=${e instanceof Error ? e.message : String(e)}`)
-          }
-        }
-      }
+      await runTable('statuses', project.id)
+      await runTable('tasks', project.id)
     }
 
-    // 2. user_labels — push local-only (pulls are rarely needed; existing labels pipeline handles)
-    const localLabels = await window.api.labels.findAll(userId)
-    const { data: remoteLabels, error: labelErr } = await supabase
-      .from('user_labels')
-      .select('id')
-      .eq('user_id', userId)
-    if (!labelErr) {
-      const remoteLabelIds = new Set<string>((remoteLabels ?? []).map((r) => r.id as string))
-      const missingLabels = localLabels.filter((l) => !remoteLabelIds.has(l.id))
-      for (const label of missingLabels) {
-        await pushLabel(label, userId)
-        totalPushed++
-      }
-    } else {
-      logEvent('error', 'sync', `Reconcile: list remote labels failed`, `err=${labelErr.message}`)
+    // 3. User-scoped: labels, themes, settings, saved_views, project_areas.
+    for (const tableName of ['labels', 'themes', 'settings', 'saved_views', 'project_areas'] as const) {
+      await runTable(tableName, userId)
     }
 
-    // 3. task_labels — diff junction rows for all personal-project tasks owned
-    // by this user. pushTask() only syncs the row's own labels; this catches
-    // gaps that accumulated before pushTask was wired to sync task_labels.
+    // 4. task_labels junction — composite-PK with no updated_at, so it doesn't
+    // fit reconcileTable's high-water-mark flow. Diff via key-set.
     try {
       const localPairs = await window.api.tasks.getTaskLabelsForUser(userId)
-      const localKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
-      const localKeySet = new Set<string>(localPairs.map((p) => localKey(p.task_id, p.label_id)))
+      const pairKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
+      const localKeySet = new Set<string>(localPairs.map((p) => pairKey(p.task_id, p.label_id)))
+
       const personalTaskIds = new Set<string>()
       for (const project of personalProjects) {
         const tasks = await window.api.tasks.findByProjectId(project.id)
@@ -1481,8 +1592,7 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
         const templates = await window.api.tasks.findTemplates(project.id)
         for (const t of [...tasks, ...archived, ...templates]) personalTaskIds.add(t.id)
       }
-      // Batch fetch remote task_labels for our personal task IDs (chunk to stay
-      // within Supabase's URL length limits for `.in()` queries).
+
       const taskIdList = [...personalTaskIds]
       const remotePairs: Array<{ task_id: string; label_id: string }> = []
       const chunkSize = 500
@@ -1500,28 +1610,24 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
         }
         if (data) remotePairs.push(...data)
       }
-      if (fetchOk) {
-        const remoteKeySet = new Set<string>(remotePairs.map((p) => localKey(p.task_id, p.label_id)))
 
-        // Push local-only task_labels to Supabase (batched upsert).
-        const missingInRemote = localPairs.filter((p) => !remoteKeySet.has(localKey(p.task_id, p.label_id)))
-        if (missingInRemote.length > 0) {
-          for (let i = 0; i < missingInRemote.length; i += chunkSize) {
-            const chunk = missingInRemote.slice(i, i + chunkSize)
-            const { error: upsertErr } = await supabase
-              .from('task_labels')
-              .upsert(chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })))
-            if (upsertErr) {
-              logEvent('error', 'sync', `Reconcile: push task_labels failed`, `err=${upsertErr.message}`)
-              break
-            }
-            totalPushed += chunk.length
+      if (fetchOk) {
+        const remoteKeySet = new Set<string>(remotePairs.map((p) => pairKey(p.task_id, p.label_id)))
+
+        const missingInRemote = localPairs.filter((p) => !remoteKeySet.has(pairKey(p.task_id, p.label_id)))
+        for (let i = 0; i < missingInRemote.length; i += chunkSize) {
+          const chunk = missingInRemote.slice(i, i + chunkSize)
+          const { error: upsertErr } = await supabase
+            .from('task_labels')
+            .upsert(chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })))
+          if (upsertErr) {
+            logEvent('error', 'sync', `Reconcile: push task_labels failed`, `err=${upsertErr.message}`)
+            break
           }
+          totalPushed += chunk.length
         }
 
-        // Pull remote-only task_labels into local SQLite. Skip pairs whose label
-        // doesn't exist locally — pullLabels will repair those on the next pass.
-        const missingInLocal = remotePairs.filter((p) => !localKeySet.has(localKey(p.task_id, p.label_id)))
+        const missingInLocal = remotePairs.filter((p) => !localKeySet.has(pairKey(p.task_id, p.label_id)))
         for (const p of missingInLocal) {
           const localLabel = await window.api.labels.findById(p.label_id)
           if (!localLabel) continue
@@ -1568,27 +1674,35 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
 
 /**
  * Check if this is a new device (no last_sync_at) and initiate appropriate sync.
+ * Concurrent callers share the same in-flight promise so we never start two
+ * parallel fullUploads (which would push every task N times).
  */
+let initSyncInFlight: Promise<void> | null = null
 export async function initSync(userId: string): Promise<void> {
-  const lastSyncAt = await window.api.settings.get(userId, 'last_sync_at')
-  const syncStore = useSyncStore.getState()
+  if (initSyncInFlight) return initSyncInFlight
+  initSyncInFlight = (async () => {
+    const lastSyncAt = await window.api.settings.get(userId, 'last_sync_at')
+    const syncStore = useSyncStore.getState()
 
-  if (!lastSyncAt) {
-    // Check if there's local data to decide: upload or pull
-    const localProjects = await window.api.projects.getProjectsForUser(userId)
-    const hasLocalData = localProjects.length > 0
+    if (!lastSyncAt) {
+      const localProjects = await window.api.projects.getProjectsForUser(userId)
+      const hasLocalData = localProjects.length > 0
 
-    if (hasLocalData) {
-      // Local data exists — upload to Supabase (existing device, first sync or retry)
-      console.log('[PersonalSync] Local data found, uploading to Supabase')
-      await fullUpload(userId)
+      if (hasLocalData) {
+        console.log('[PersonalSync] Local data found, uploading to Supabase')
+        await fullUpload(userId)
+      } else {
+        console.log('[PersonalSync] No local data, pulling from Supabase')
+        await fullPull(userId)
+      }
     } else {
-      // No local data — new device, pull from Supabase
-      console.log('[PersonalSync] No local data, pulling from Supabase')
-      await fullPull(userId)
+      syncStore.setLastSynced()
     }
-  } else {
-    syncStore.setLastSynced()
+  })()
+  try {
+    await initSyncInFlight
+  } finally {
+    initSyncInFlight = null
   }
 }
 
@@ -1699,7 +1813,19 @@ function schedulePersonalReconnect(projectId: string): void {
     }
     try {
       const supabase = await getSupabase()
-      if (state.channel) await supabase.removeChannel(state.channel)
+      if (state.channel) {
+        // If supabase-js auto-rejoined the channel under us, tearing it down here would
+        // trigger a clean phx_close → CLOSED → another reconnect → infinite 2s loop.
+        // See: realtime wake-from-sleep storm fix.
+        const ch = state.channel as unknown as { state?: string }
+        if (ch.state === 'joined') {
+          state.attempt = 0
+          useSyncStore.getState().setRealtimeConnected(true)
+          logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
+          return
+        }
+        await supabase.removeChannel(state.channel)
+      }
     } catch { /* channel may already be dead */ }
     await createPersonalChannel(projectId, state)
   }, delay)

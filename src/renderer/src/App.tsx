@@ -49,9 +49,14 @@ function App(): React.JSX.Element {
     }
   }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
 
-  // On startup, sync all shared projects from Supabase + discover missing ones
+  // On startup, sync all shared projects from Supabase + discover missing ones.
+  // Keyed on the primitive userId — depending on the currentUser object would
+  // re-run the effect on every auth-store mutation (token refresh, profile
+  // update, etc.) and storm the upload pipeline with parallel initSync calls.
+  const startupUserId = currentUser?.id ?? null
   useEffect(() => {
-    if (!isAuthenticated || !currentUser) return
+    if (!isAuthenticated || !startupUserId) return
+    const uid = startupUserId
     const syncShared = async (): Promise<void> => {
       try {
         const { syncProjectDown: syncDown, subscribeToProject: subProject, discoverRemoteMemberships } = await import('./services/SyncService')
@@ -60,7 +65,7 @@ function App(): React.JSX.Element {
         const projects = useProjectStore.getState().projects
         for (const p of Object.values(projects)) {
           if (p.is_shared === 1) {
-            await syncDown(p.id, currentUser.id).catch((err) => {
+            await syncDown(p.id, uid).catch((err) => {
               console.warn(`[Startup] Failed to sync shared project ${p.name}:`, err)
               if (String(err).includes('not found')) {
                 window.api.projects.update(p.id, { is_shared: 0 })
@@ -74,22 +79,23 @@ function App(): React.JSX.Element {
 
         // Discover projects we're a member of in Supabase but don't have locally
         // Skip if last check was less than 5 minutes ago
-        const lastMemberCheck = await window.api.settings.get(currentUser.id, 'last_member_discovery')
+        const lastMemberCheck = await window.api.settings.get(uid, 'last_member_discovery')
         const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString()
         const shouldDiscover = !lastMemberCheck || lastMemberCheck < fiveMinAgo
-        const missingIds = shouldDiscover ? await discoverRemoteMemberships(currentUser.id) : []
+        const missingIds = shouldDiscover ? await discoverRemoteMemberships(uid) : []
         if (shouldDiscover) {
-          await window.api.settings.set(currentUser.id, 'last_member_discovery', new Date().toISOString())
+          await window.api.settings.set(uid, 'last_member_discovery', new Date().toISOString())
         }
         if (missingIds.length > 0) {
           for (const pid of missingIds) {
-            await syncDown(pid, currentUser.id).catch((err) =>
+            await syncDown(pid, uid).catch((err) =>
               console.warn(`[Startup] Failed to sync discovered project ${pid}:`, err)
             )
             subProject(pid)
           }
-          // Rehydrate projects to show newly discovered ones
-          await hydrateProjects(currentUser.id)
+          // Rehydrate projects to show newly discovered ones — pulled via getState
+          // so the action isn't a dep that re-triggers this effect.
+          await useProjectStore.getState().hydrateProjects(uid)
         }
       } catch (err) {
         console.error('[Startup] Failed to sync shared projects:', err)
@@ -101,7 +107,7 @@ function App(): React.JSX.Element {
 
       // Initialize personal sync (first-time upload or new-device pull)
       try {
-        await initSync(currentUser.id)
+        await initSync(uid)
       } catch (err) {
         console.error('[Startup] Failed to initialize personal sync:', err)
       }
@@ -109,7 +115,7 @@ function App(): React.JSX.Element {
       // Reconcile pass: detect and repair drift between local SQLite and Supabase.
       // Fire-and-forget so startup isn't blocked on it.
       void import('./services/PersonalSyncService').then(({ reconcile }) =>
-        reconcile(currentUser.id).catch((err) => console.error('[Startup] Reconcile failed:', err))
+        reconcile(uid).catch((err) => console.error('[Startup] Reconcile failed:', err))
       )
 
       // Warm the What's New cache so first visit doesn't depend on a live fetch.
@@ -124,7 +130,7 @@ function App(): React.JSX.Element {
       clearTimeout(timeout)
       import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
     }
-  }, [isAuthenticated, currentUser, hydrateProjects])
+  }, [isAuthenticated, startupUserId])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {

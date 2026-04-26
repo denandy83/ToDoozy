@@ -170,11 +170,14 @@ describe('ProjectRepository', () => {
     expect(updated!.color).toBe('#ff0000')
   })
 
-  it('deletes a project', () => {
+  it('soft-deletes a project — row remains, deleted_at set, hidden from list', () => {
     const id = randomUUID()
     repo.create({ id, name: 'Temp', owner_id: userId })
     expect(repo.delete(id)).toBe(true)
-    expect(repo.findById(id)).toBeUndefined()
+    const raw = repo.findById(id)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    expect(repo.findByOwnerId(userId).find((p) => p.id === id)).toBeUndefined()
   })
 
   it('manages project members', () => {
@@ -249,7 +252,7 @@ describe('StatusRepository', () => {
     expect(updated!.color).toBe('#00ff00')
   })
 
-  it('reassigns tasks and deletes a status', () => {
+  it('reassigns tasks and soft-deletes a status', () => {
     const oldId = randomUUID()
     const newId = randomUUID()
     repo.create({ id: oldId, project_id: projectId, name: 'Old Status' })
@@ -264,7 +267,11 @@ describe('StatusRepository', () => {
     ).run(taskId, base.projectId, base.userId, 'Test Task', oldId, now, now)
 
     expect(repo.reassignAndDelete(oldId, newId)).toBe(true)
-    expect(repo.findById(oldId)).toBeUndefined()
+    // Soft-deleted: row remains, deleted_at is set, hidden from findByProjectId
+    const raw = repo.findById(oldId)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    expect(repo.findByProjectId(projectId).find((s) => s.id === oldId)).toBeUndefined()
 
     const task = db.prepare('SELECT status_id FROM tasks WHERE id = ?').get(taskId) as { status_id: string }
     expect(task.status_id).toBe(newId)
@@ -331,11 +338,16 @@ describe('TaskRepository', () => {
     expect(updated!.priority).toBe(3)
   })
 
-  it('deletes a task', () => {
+  it('soft-deletes a task — row remains, deleted_at set, hidden from findByProjectId', () => {
     const id = randomUUID()
     repo.create({ id, project_id: projectId, owner_id: userId, title: 'Temp', status_id: statusId })
     expect(repo.delete(id)).toBe(true)
-    expect(repo.findById(id)).toBeUndefined()
+    // Raw findById still sees the tombstone (sync layer needs this)
+    const raw = repo.findById(id)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    // List queries filter tombstones
+    expect(repo.findByProjectId(projectId).find((t) => t.id === id)).toBeUndefined()
   })
 
   it('reorders tasks in a batch transaction', () => {
@@ -1053,12 +1065,15 @@ describe('LabelRepository', () => {
     expect(updated!.color).toBe('#00ff00')
   })
 
-  it('deletes a label globally and cascades', () => {
+  it('soft-deletes a label globally — tombstone remains, junctions hidden', () => {
     const id = randomUUID()
     repo.create({ id, user_id: userId, project_id: projectId, name: 'Temp' })
     expect(repo.delete(id)).toBe(true)
-    expect(repo.findById(id)).toBeUndefined()
-    // project_labels should also be cleaned up (cascade)
+    // findById returns the tombstone for the sync layer
+    const raw = repo.findById(id)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    // List queries hide tombstoned labels (and tombstoned junctions)
     expect(repo.findByProjectId(projectId)).toHaveLength(0)
   })
 
@@ -1190,12 +1205,15 @@ describe('ThemeRepository', () => {
     expect(config!.accent).toBeDefined()
   })
 
-  it('deletes a theme', () => {
+  it('soft-deletes a theme — tombstone remains, list hides it', () => {
     const id = randomUUID()
     const config = JSON.stringify({ bg: '#000', fg: '#fff', fgSecondary: '#aaa', fgMuted: '#666', muted: '#888', accent: '#f00', accentFg: '#fff', border: '#333' })
     repo.create({ id, name: 'ToDelete', mode: 'dark', config })
     expect(repo.delete(id)).toBe(true)
-    expect(repo.findById(id)).toBeUndefined()
+    const raw = repo.findById(id)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    expect(repo.list().map((t) => t.id)).not.toContain(id)
   })
 })
 
@@ -1444,11 +1462,14 @@ describe('SavedViewRepository', () => {
     expect(updated!.color).toBe('#ff0000')
   })
 
-  it('deletes a saved view', () => {
+  it('soft-deletes a saved view — tombstone remains, list hides it', () => {
     const id = randomUUID()
     repo.create({ id, user_id: userId, name: 'Delete Me', filter_config: '{}' })
     expect(repo.delete(id)).toBe(true)
-    expect(repo.findById(id)).toBeUndefined()
+    const raw = repo.findById(id)
+    expect(raw).toBeDefined()
+    expect(raw!.deleted_at).not.toBeNull()
+    expect(repo.findByUserId(userId).map((v) => v.id)).not.toContain(id)
   })
 
   it('reorders saved views', () => {

@@ -17,6 +17,10 @@ const api: TodoozyAPI = {
     applyRemote: (task) => ipcRenderer.invoke('tasks:applyRemote', task),
     update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
     delete: (id) => ipcRenderer.invoke('tasks:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('tasks:hardDelete', id),
+    findAllByProject: (projectId, options) =>
+      ipcRenderer.invoke('tasks:findAllByProject', projectId, options),
+    findMaxUpdatedAt: (projectId) => ipcRenderer.invoke('tasks:findMaxUpdatedAt', projectId),
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
@@ -37,6 +41,11 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('labels:create', input),
     update: (id, input) => ipcRenderer.invoke('labels:update', id, input),
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('labels:hardDelete', id),
+    findAllByUser: (userId, options) =>
+      ipcRenderer.invoke('labels:findAllByUser', userId, options),
+    findMaxUpdatedAt: (userId) => ipcRenderer.invoke('labels:findMaxUpdatedAt', userId),
+    applyRemote: (label) => ipcRenderer.invoke('labels:applyRemote', label),
     removeFromProject: (projectId, labelId) =>
       ipcRenderer.invoke('labels:removeFromProject', projectId, labelId),
     addToProject: (projectId, labelId) =>
@@ -59,6 +68,11 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('projects:create', input),
     update: (id, input) => ipcRenderer.invoke('projects:update', id, input),
     delete: (id) => ipcRenderer.invoke('projects:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('projects:hardDelete', id),
+    findAllByOwner: (ownerId, options) =>
+      ipcRenderer.invoke('projects:findAllByOwner', ownerId, options),
+    findMaxUpdatedAt: (ownerId) => ipcRenderer.invoke('projects:findMaxUpdatedAt', ownerId),
+    applyRemote: (project) => ipcRenderer.invoke('projects:applyRemote', project),
     list: (userId) => ipcRenderer.invoke('projects:list', userId),
     addMember: (projectId, userId, role, invitedBy) =>
       ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy),
@@ -80,6 +94,11 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('statuses:create', input),
     update: (id, input) => ipcRenderer.invoke('statuses:update', id, input),
     delete: (id) => ipcRenderer.invoke('statuses:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('statuses:hardDelete', id),
+    findAllByProject: (projectId, options) =>
+      ipcRenderer.invoke('statuses:findAllByProject', projectId, options),
+    findMaxUpdatedAt: (projectId) => ipcRenderer.invoke('statuses:findMaxUpdatedAt', projectId),
+    applyRemote: (status) => ipcRenderer.invoke('statuses:applyRemote', status),
     reassignAndDelete: (statusId, targetStatusId) =>
       ipcRenderer.invoke('statuses:reassignAndDelete', statusId, targetStatusId)
   },
@@ -108,7 +127,12 @@ const api: TodoozyAPI = {
     getAll: (userId) => ipcRenderer.invoke('settings:getAll', userId),
     getMultiple: (userId, keys) => ipcRenderer.invoke('settings:getMultiple', userId, keys),
     setMultiple: (userId, settings) => ipcRenderer.invoke('settings:setMultiple', userId, settings),
-    delete: (userId, key) => ipcRenderer.invoke('settings:delete', userId, key)
+    delete: (userId, key) => ipcRenderer.invoke('settings:delete', userId, key),
+    hardDelete: (userId, key) => ipcRenderer.invoke('settings:hardDelete', userId, key),
+    findAllByUser: (userId, options) => ipcRenderer.invoke('settings:findAllByUser', userId, options),
+    findMaxUpdatedAt: (userId) => ipcRenderer.invoke('settings:findMaxUpdatedAt', userId),
+    applyRemote: (setting) => ipcRenderer.invoke('settings:applyRemote', setting),
+    findRaw: (userId, key) => ipcRenderer.invoke('settings:findRaw', userId, key)
   },
 
   themes: {
@@ -118,6 +142,11 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('themes:create', input),
     update: (id, input) => ipcRenderer.invoke('themes:update', id, input),
     delete: (id) => ipcRenderer.invoke('themes:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('themes:hardDelete', id),
+    findAllByOwner: (ownerId, options) =>
+      ipcRenderer.invoke('themes:findAllByOwner', ownerId, options),
+    findMaxUpdatedAt: (ownerId) => ipcRenderer.invoke('themes:findMaxUpdatedAt', ownerId),
+    applyRemote: (theme) => ipcRenderer.invoke('themes:applyRemote', theme),
     getConfig: (id) => ipcRenderer.invoke('themes:getConfig', id)
   },
 
@@ -241,6 +270,18 @@ const api: TodoozyAPI = {
     count: () => ipcRenderer.invoke('sync:count')
   },
 
+  syncMeta: {
+    getHighWater: (userId, scopeId, tableName) =>
+      ipcRenderer.invoke('syncMeta:getHighWater', userId, scopeId, tableName),
+    setHighWater: (userId, scopeId, tableName, isoTs) =>
+      ipcRenderer.invoke('syncMeta:setHighWater', userId, scopeId, tableName, isoTs),
+    getLastReconciledAt: (userId, scopeId, tableName) =>
+      ipcRenderer.invoke('syncMeta:getLastReconciledAt', userId, scopeId, tableName),
+    setLastReconciledAt: (userId, scopeId, tableName, isoTs) =>
+      ipcRenderer.invoke('syncMeta:setLastReconciledAt', userId, scopeId, tableName, isoTs),
+    clearAll: (userId) => ipcRenderer.invoke('syncMeta:clearAll', userId)
+  },
+
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
   },
@@ -258,7 +299,12 @@ const api: TodoozyAPI = {
     update: (id, input) => ipcRenderer.invoke('projectAreas:update', id, input),
     delete: (id) => ipcRenderer.invoke('projectAreas:delete', id),
     reorder: (areaIds) => ipcRenderer.invoke('projectAreas:reorder', areaIds),
-    assignProject: (projectId, areaId) => ipcRenderer.invoke('projectAreas:assignProject', projectId, areaId)
+    assignProject: (projectId, areaId) => ipcRenderer.invoke('projectAreas:assignProject', projectId, areaId),
+    hardDelete: (id) => ipcRenderer.invoke('projectAreas:hardDelete', id),
+    findAllByUser: (userId, options) =>
+      ipcRenderer.invoke('projectAreas:findAllByUser', userId, options),
+    findMaxUpdatedAt: (userId) => ipcRenderer.invoke('projectAreas:findMaxUpdatedAt', userId),
+    applyRemote: (remote) => ipcRenderer.invoke('projectAreas:applyRemote', remote)
   },
 
   stats: {
@@ -292,7 +338,12 @@ const api: TodoozyAPI = {
     update: (id, input) => ipcRenderer.invoke('savedViews:update', id, input),
     delete: (id) => ipcRenderer.invoke('savedViews:delete', id),
     reorder: (viewIds) => ipcRenderer.invoke('savedViews:reorder', viewIds),
-    countMatching: (filterConfig, userId) => ipcRenderer.invoke('savedViews:countMatching', filterConfig, userId)
+    countMatching: (filterConfig, userId) => ipcRenderer.invoke('savedViews:countMatching', filterConfig, userId),
+    hardDelete: (id) => ipcRenderer.invoke('savedViews:hardDelete', id),
+    findAllByUser: (userId, options) =>
+      ipcRenderer.invoke('savedViews:findAllByUser', userId, options),
+    findMaxUpdatedAt: (userId) => ipcRenderer.invoke('savedViews:findMaxUpdatedAt', userId),
+    applyRemote: (remote) => ipcRenderer.invoke('savedViews:applyRemote', remote)
   },
 
   releaseNotes: {

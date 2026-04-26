@@ -4,6 +4,34 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## v1.5.0 — Uniform sync architecture (2026-04-25)
+
+**Session type:** Architectural rebuild — 17-task workstream on `fix/realtime-wake-storm`
+
+**What was built/fixed:**
+
+- **Soft-delete everywhere.** Added `deleted_at TIMESTAMPTZ` + active-row indexes to all eight syncable tables (Supabase + local SQLite via versioned migrations). Every delete path now sets `deleted_at` instead of hard-DELETE; reads filter; the only hard-DELETE is the 30-day purge.
+- **Generic two-way reconcile.** Built `reconcileTable<TLocal, TRemote>` in `src/renderer/src/services/syncTables.ts` — a single helper that diffs all eight tables, pushes local-only, pulls remote-only, applies LWW per row. Replaces eight bespoke per-table pull functions.
+- **Per-(user, scope, table) high-water mark.** Added `sync_meta` table + `SyncMetaRepository` with primary key `(user_id, scope_id, table_name)` so project-scoped tables (tasks, statuses) don't shadow each other. Pre-reconcile fetches local + remote `max(updated_at)` and stored high-water in parallel; if both sides ≤ stored, the diff is skipped entirely. `findMaxUpdatedAt` was extended to include tombstones so soft-deletes bump the high-water and failed pushes retry.
+- **Realtime UPDATE → soft-delete propagation.** The Realtime handlers now recognize `deleted_at` transitions and apply them locally. Cross-device deletes converge in seconds.
+- **Resurrect protection.** `applyRemote` keeps remote's `deleted_at`, so a locally tombstoned row stays tombstoned even when a newer remote update arrives without clearing the tombstone.
+- **30-day tombstone purge.** Supabase `pg_cron` job `purge-tombstones` runs `select public.purge_tombstones()` daily at 03:00 UTC. Local equivalent runs once on boot from `src/main/index.ts` after `initDatabase()`.
+- **Storm fixes (also on this branch).** Realtime reconnect timer checks `channel.state === 'joined'` and skips rebuild if the lib already healed. `setAuth` deduped at the wrapper. `fullUpload` writes `last_sync_at` at the start as a sentinel; `initSync` wrapped in a shared in-flight promise. `App.tsx` syncShared effect switched from object/function deps to primitive `startupUserId`. `reconcile()` got in-flight guard + 30s cooldown. `pullNewTasks` / `pullStatuses` no longer push — polling is read-only, recovery owned by `sync_queue` and `reconcile()`.
+
+**Test coverage added:**
+
+- `PurgeService.test.ts` — 6 tests, retention boundary + multi-table + idempotency + byTable completeness.
+- `SyncMetaRepository.test.ts` — 8 tests including scope isolation.
+- `syncTables.test.ts` — 5 tests covering high-water short-circuit, push case, pull case, first-reconcile, failure-blocks-advance.
+- All eight repository test suites updated for tombstone-inclusive `findMaxUpdatedAt` and the `applyRemote` LWW + tombstone-propagation contract.
+- `TaskRepository.test.ts` — added explicit Scenario D (resurrect protection) test.
+
+**Manual drift verification runbook:** documented in `scope.md` for the user to execute Scenarios A-D against a dev DB before tagging.
+
+**Key commits:** TBD after squash merge to `main`.
+
+---
+
 ## v1.3.1 — Performance, Update Banner, Reference URL Fix (2026-04-14)
 
 **Session type:** Performance optimization + feature + bug fix

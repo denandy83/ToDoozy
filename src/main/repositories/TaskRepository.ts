@@ -42,13 +42,15 @@ export class TaskRepository {
         `UPDATE tasks SET status_id = (
            SELECT id FROM statuses WHERE project_id = ? AND is_default = 1 LIMIT 1
          ), updated_at = ?
-         WHERE project_id = ? AND is_template = 0
+         WHERE project_id = ? AND is_template = 0 AND deleted_at IS NULL
          AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)`
       )
       .run(projectId, new Date().toISOString(), projectId, projectId)
     return Number(result.changes)
   }
 
+  // Raw find — returns the row even if soft-deleted (sync layer needs this to
+  // compare local vs remote timestamps and to detect tombstones).
   findById(id: string): Task | undefined {
     return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as unknown as Task | undefined
   }
@@ -57,7 +59,7 @@ export class TaskRepository {
     this.repairOrphanedStatuses(projectId)
     return this.db
       .prepare(
-        'SELECT * FROM tasks WHERE project_id = ? AND is_archived = 0 AND is_template = 0 ORDER BY order_index ASC'
+        'SELECT * FROM tasks WHERE project_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC'
       )
       .all(projectId) as unknown as Task[]
   }
@@ -65,7 +67,7 @@ export class TaskRepository {
   findByStatusId(statusId: string): Task[] {
     return this.db
       .prepare(
-        'SELECT * FROM tasks WHERE status_id = ? AND is_archived = 0 AND is_template = 0 ORDER BY order_index ASC'
+        'SELECT * FROM tasks WHERE status_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC'
       )
       .all(statusId) as unknown as Task[]
   }
@@ -77,7 +79,7 @@ export class TaskRepository {
         `UPDATE tasks SET status_id = (
            SELECT s.id FROM statuses s WHERE s.project_id = tasks.project_id AND s.is_default = 1 LIMIT 1
          ), updated_at = ?
-         WHERE owner_id = ? AND is_template = 0
+         WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
          AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)`
       )
       .run(new Date().toISOString(), userId)
@@ -85,7 +87,7 @@ export class TaskRepository {
     return this.db
       .prepare(
         `SELECT * FROM tasks
-         WHERE owner_id = ? AND is_archived = 0 AND is_template = 0
+         WHERE owner_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL
          AND is_in_my_day = 1
          ORDER BY order_index ASC`
       )
@@ -94,19 +96,19 @@ export class TaskRepository {
 
   findArchived(projectId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_archived = 1 ORDER BY updated_at DESC')
+      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_archived = 1 AND deleted_at IS NULL ORDER BY updated_at DESC')
       .all(projectId) as unknown as Task[]
   }
 
   findTemplates(projectId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_template = 1 ORDER BY created_at ASC')
+      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_template = 1 AND deleted_at IS NULL ORDER BY created_at ASC')
       .all(projectId) as unknown as Task[]
   }
 
   findSubtasks(parentId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE parent_id = ? ORDER BY order_index ASC')
+      .prepare('SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ORDER BY order_index ASC')
       .all(parentId) as unknown as Task[]
   }
 
@@ -116,10 +118,44 @@ export class TaskRepository {
         `SELECT
            COUNT(*) as total,
            SUM(CASE WHEN status_id IN (SELECT id FROM statuses WHERE is_done = 1) THEN 1 ELSE 0 END) as done
-         FROM tasks WHERE parent_id = ?`
+         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL`
       )
       .get(parentId) as { total: number; done: number }
     return { total: row.total, done: row.done ?? 0 }
+  }
+
+  /**
+   * Sync-layer list. Returns ALL rows for a project regardless of archive/template
+   * state, optionally including tombstones (deleted_at IS NOT NULL).
+   * Drives the reconcileTable<L,R> loop (see syncTables.ts).
+   */
+  findAllByProject(projectId: string, options: { includeTombstones?: boolean; sinceUpdatedAt?: string | null } = {}): Task[] {
+    const includeTombstones = options.includeTombstones ?? false
+    const since = options.sinceUpdatedAt ?? null
+    let sql = 'SELECT * FROM tasks WHERE project_id = ?'
+    const params: (string | number)[] = [projectId]
+    if (!includeTombstones) sql += ' AND deleted_at IS NULL'
+    if (since) {
+      sql += ' AND updated_at > ?'
+      params.push(since)
+    }
+    sql += ' ORDER BY updated_at ASC'
+    return this.db.prepare(sql).all(...params) as unknown as Task[]
+  }
+
+  /**
+   * High-water mark for incremental sync: max(updated_at) across ALL rows
+   * including tombstones. Including tombstones is required so that a soft-delete
+   * (which bumps updated_at and sets deleted_at) is visible to the high-water
+   * short-circuit in `reconcileTable`. If we excluded tombstones, a freshly
+   * deleted row could leave the high-water unchanged and a failed eager push
+   * would never re-attempt on the next reconcile pass.
+   */
+  findMaxUpdatedAt(projectId: string): string | null {
+    const row = this.db
+      .prepare('SELECT MAX(updated_at) as max FROM tasks WHERE project_id = ?')
+      .get(projectId) as { max: string | null }
+    return row.max
   }
 
   create(input: CreateTaskInput): Task {
@@ -181,16 +217,22 @@ export class TaskRepository {
     return this.findById(id)
   }
 
-  // Sync-only path: write a task as-is, preserving remote created_at/updated_at.
+  // Sync-only path: write a task as-is, preserving remote created_at/updated_at
+  // and remote deleted_at. Skips the write entirely when the local row's
+  // updated_at is newer (LWW conflict resolution).
   // Using create()/update() in sync code stamps NOW into updated_at, which makes
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
+    const existing = this.findById(task.id)
+    if (existing && existing.updated_at >= task.updated_at) {
+      return existing
+    }
     this.db
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, assigned_to, title, description, status_id,
          priority, due_date, parent_id, order_index, is_template, is_archived, is_in_my_day,
-         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            owner_id = excluded.owner_id,
@@ -210,7 +252,8 @@ export class TaskRepository {
            reference_url = excluded.reference_url,
            my_day_dismissed_date = excluded.my_day_dismissed_date,
            created_at = excluded.created_at,
-           updated_at = excluded.updated_at`
+           updated_at = excluded.updated_at,
+           deleted_at = excluded.deleted_at`
       )
       .run(
         task.id,
@@ -232,12 +275,29 @@ export class TaskRepository {
         task.reference_url ?? null,
         task.my_day_dismissed_date ?? null,
         task.created_at,
-        task.updated_at
+        task.updated_at,
+        task.deleted_at ?? null
       )
     return this.findById(task.id)!
   }
 
+  /**
+   * Soft-delete: marks the row tombstoned. Idempotent — a re-delete on an
+   * already-tombstoned row is a no-op (and returns false).
+   */
   delete(id: string): boolean {
+    const now = new Date().toISOString()
+    const result = this.db
+      .prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(now, now, id)
+    return result.changes > 0
+  }
+
+  /**
+   * Hard delete — physically removes the row. ONLY used by the 30-day purge job.
+   * UI/sync paths must use delete() (soft).
+   */
+  hardDelete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return result.changes > 0
   }
@@ -279,6 +339,7 @@ export class TaskRepository {
          JOIN tasks t ON t.id = tl.task_id
          JOIN projects p ON p.id = t.project_id
          WHERE t.owner_id = ?
+           AND t.deleted_at IS NULL
            AND COALESCE(p.is_shared, 0) = 0`
       )
       .all(userId) as unknown as TaskLabel[]
@@ -289,7 +350,7 @@ export class TaskRepository {
       .prepare(
         `SELECT t.* FROM tasks t
          INNER JOIN project_members pm ON pm.project_id = t.project_id
-         WHERE t.is_template = 1 AND pm.user_id = ?
+         WHERE t.is_template = 1 AND pm.user_id = ? AND t.deleted_at IS NULL
          ORDER BY t.created_at ASC`
       )
       .all(userId) as unknown as Task[]
@@ -382,6 +443,7 @@ export class TaskRepository {
         `SELECT * FROM tasks
          WHERE is_archived = 0
          AND is_template = 0
+         AND deleted_at IS NULL
          AND due_date IS NOT NULL
          AND due_date LIKE '%T%'
          AND due_date >= ?
@@ -394,7 +456,7 @@ export class TaskRepository {
 
   search(filters: TaskSearchFilters): Task[] {
     let sql = 'SELECT DISTINCT t.* FROM tasks t'
-    const conditions: string[] = ['t.is_template = 0']
+    const conditions: string[] = ['t.is_template = 0', 't.deleted_at IS NULL']
     const params: (string | number)[] = []
 
     // Label filters — single or multiple
@@ -692,6 +754,7 @@ export class TaskRepository {
       WHERE t.completed_date IS NOT NULL
         AND t.completed_date >= ? AND t.completed_date <= ?
         AND t.is_template = 0
+        AND t.deleted_at IS NULL
     `
     const params: (string | number)[] = [userId, startDate, endDate]
     if (projectIds && projectIds.length > 0) {
@@ -708,7 +771,7 @@ export class TaskRepository {
       .prepare(
         `SELECT DISTINCT date(al.created_at) as date
          FROM activity_log al
-         INNER JOIN tasks t ON t.id = al.task_id
+         INNER JOIN tasks t ON t.id = al.task_id AND t.deleted_at IS NULL
          INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
          ORDER BY date DESC`
       )
@@ -786,7 +849,7 @@ export class TaskRepository {
       INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
       INNER JOIN statuses s ON s.id = t.status_id
       INNER JOIN projects p ON p.id = t.project_id
-      WHERE t.is_template = 0 AND t.is_archived = 0 ${where}
+      WHERE t.is_template = 0 AND t.is_archived = 0 AND t.deleted_at IS NULL ${where}
     `
     const params: string[] = [userId]
     if (filter === 'completed_range' && startDate && endDate) {
@@ -808,7 +871,7 @@ export class TaskRepository {
       FROM tasks t
       INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
       INNER JOIN statuses s ON s.id = t.status_id
-      WHERE t.is_template = 0 AND t.is_archived = 0
+      WHERE t.is_template = 0 AND t.is_archived = 0 AND t.deleted_at IS NULL
     `
     const params: string[] = [userId]
     if (projectIds && projectIds.length > 0) {
@@ -841,7 +904,7 @@ export class TaskRepository {
       FROM tasks t
       INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
       INNER JOIN statuses s ON s.id = t.status_id
-      WHERE t.is_template = 0 AND t.is_archived = 0 AND s.is_done = 0
+      WHERE t.is_template = 0 AND t.is_archived = 0 AND t.deleted_at IS NULL AND s.is_done = 0
     `
     const params: string[] = [userId]
     if (projectIds && projectIds.length > 0) {
@@ -865,6 +928,7 @@ export class TaskRepository {
       WHERE t.completed_date IS NOT NULL
         AND t.completed_date >= ? AND t.completed_date <= ?
         AND t.is_template = 0
+        AND t.deleted_at IS NULL
     `
     const params: (string | number)[] = [userId, startDate, endDate]
     if (projectIds && projectIds.length > 0) {
@@ -886,7 +950,7 @@ export class TaskRepository {
       INNER JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = ?
       INNER JOIN statuses s ON s.id = t.status_id
       INNER JOIN projects p ON p.id = t.project_id
-      WHERE t.is_template = 0 AND t.is_archived = 0
+      WHERE t.is_template = 0 AND t.is_archived = 0 AND t.deleted_at IS NULL
       GROUP BY t.project_id
       ORDER BY (open + completed) DESC
     `).all(userId) as Array<{ projectId: string; projectName: string; open: number; completed: number }>
@@ -906,6 +970,7 @@ export class TaskRepository {
       WHERE t.owner_id = ?
         AND t.is_archived = 0
         AND t.is_template = 0
+        AND t.deleted_at IS NULL
         AND t.is_in_my_day = 0
         AND s.is_done = 0
         AND t.due_date IS NOT NULL
@@ -935,7 +1000,7 @@ export class TaskRepository {
     // Auto-flag parents of auto-added subtasks
     for (const parentId of parentIds) {
       if (!ids.includes(parentId)) {
-        const parent = this.db.prepare(`SELECT is_in_my_day FROM tasks WHERE id = ?`).get(parentId) as { is_in_my_day: number } | undefined
+        const parent = this.db.prepare(`SELECT is_in_my_day FROM tasks WHERE id = ? AND deleted_at IS NULL`).get(parentId) as { is_in_my_day: number } | undefined
         if (parent && parent.is_in_my_day !== 1) {
           updateStmt.run(now, parentId)
           ids.push(parentId)

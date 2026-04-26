@@ -32,6 +32,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     my_day_dismissed_date: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
+    deleted_at: null,
     ...overrides
   }
 }
@@ -45,6 +46,7 @@ function makeLabel(overrides: Partial<Label> = {}): Label {
     order_index: 0,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
+    deleted_at: null,
     ...overrides
   }
 }
@@ -222,7 +224,8 @@ describe('matchesStatus', () => {
       is_done: 0,
       is_default: 0,
       created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:00:00.000Z'
+      updated_at: '2026-01-01T00:00:00.000Z',
+      deleted_at: null
     }
   }
 

@@ -259,9 +259,39 @@ export function AppLayout(): React.JSX.Element {
 
         if (table === 'task') {
           if (event === 'DELETE' && payload?.id) {
-            // Delete locally
-            await window.api.tasks.delete(payload.id as string).catch(() => {})
+            // Hard-delete fallback (e.g. 30-day purge job removed the row).
+            // Soft-deletes arrive as UPDATE with deleted_at set — handled below.
+            await window.api.tasks.hardDelete(payload.id as string).catch(() => {})
           } else if ((event === 'INSERT' || event === 'UPDATE') && payload?.id) {
+            // Soft-delete propagation: an UPDATE with deleted_at !== null is a
+            // tombstone. Use applyRemote so the local row preserves the remote
+            // deleted_at + updated_at (no NOW() bump that would force a push back).
+            if (payload.deleted_at != null) {
+              await window.api.tasks.applyRemote({
+                id: payload.id as string,
+                project_id: payload.project_id as string,
+                owner_id: payload.owner_id as string,
+                assigned_to: (payload.assigned_to as string | null) ?? null,
+                title: payload.title as string,
+                description: (payload.description as string | null) ?? null,
+                status_id: payload.status_id as string,
+                priority: (payload.priority as number) ?? 0,
+                due_date: (payload.due_date as string | null) ?? null,
+                parent_id: (payload.parent_id as string | null) ?? null,
+                order_index: (payload.order_index as number) ?? 0,
+                is_template: (payload.is_template as number) ?? 0,
+                is_archived: (payload.is_archived as number) ?? 0,
+                is_in_my_day: (payload.is_in_my_day as number) ?? 0,
+                completed_date: (payload.completed_date as string | null) ?? null,
+                recurrence_rule: (payload.recurrence_rule as string | null) ?? null,
+                reference_url: (payload.reference_url as string | null) ?? null,
+                my_day_dismissed_date: (payload.my_day_dismissed_date as string | null) ?? null,
+                created_at: payload.created_at as string,
+                updated_at: payload.updated_at as string,
+                deleted_at: payload.deleted_at as string
+              }).catch(() => {})
+              return
+            }
             // Upsert locally — check if exists
             const existing = await window.api.tasks.findById(payload.id as string)
             if (existing) {

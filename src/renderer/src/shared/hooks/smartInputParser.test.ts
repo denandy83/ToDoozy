@@ -18,7 +18,8 @@ function makeLabel(id: string, name: string, color: string, _projectId = 'proj1'
     color,
     order_index: 0,
     created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z'
+    updated_at: '2026-01-01T00:00:00Z',
+    deleted_at: null
   }
 }
 

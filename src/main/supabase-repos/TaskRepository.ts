@@ -264,8 +264,9 @@ export class SupabaseTaskRepository implements AsyncTaskRepository {
   async getLabels(taskId: string): Promise<TaskLabel[]> {
     const { data } = await this.client
       .from('task_labels')
-      .select('task_id, label_id')
+      .select('task_id, label_id, deleted_at')
       .eq('task_id', taskId)
+      .is('deleted_at', null)
     return data ?? []
   }
 

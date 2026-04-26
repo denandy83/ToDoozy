@@ -132,7 +132,20 @@ function scheduleSharedReconnect(projectId: string): void {
     }
     try {
       const supabase = await getSupabase()
-      if (state.channel) await supabase.removeChannel(state.channel)
+      if (state.channel) {
+        // If supabase-js auto-rejoined the channel under us, tearing it down here would
+        // trigger a clean phx_close → CLOSED → another reconnect → infinite 2s loop.
+        // See: realtime wake-from-sleep storm fix.
+        const ch = state.channel as unknown as { state?: string }
+        if (ch.state === 'joined') {
+          state.attempt = 0
+          const currentStatus = useSyncStore.getState().status
+          if (currentStatus === 'offline') useSyncStore.getState().setStatus('synced')
+          logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, projectId)
+          return
+        }
+        await supabase.removeChannel(state.channel)
+      }
     } catch { /* channel may already be dead */ }
     await createSharedChannel(projectId, state)
   }, delay)
@@ -337,7 +350,11 @@ export async function syncTaskChange(
 
   try {
     if (operation === 'DELETE') {
-      const { error } = await supabase.from('tasks').delete().eq('id', task.id)
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('tasks')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', task.id)
       if (error) {
         await reportPushFailure('syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
         return
@@ -369,9 +386,14 @@ export async function syncStatusChange(
 
   try {
     if (operation === 'DELETE') {
-      const { error } = await supabase.from('statuses').delete().eq('id', status.id)
+      // Soft-delete: set deleted_at, keep the row. Hard-DELETE is reserved for the 30-day purge.
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('statuses')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', status.id)
       if (error) {
-        await reportPushFailure('syncStatusChange:DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id }), 'DELETE')
+        await reportPushFailure('syncStatusChange:SOFT_DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id, deleted_at: now }), 'UPDATE')
         return
       }
     } else {
@@ -385,7 +407,8 @@ export async function syncStatusChange(
         is_done: status.is_done,
         is_default: status.is_default,
         created_at: status.created_at,
-        updated_at: status.updated_at
+        updated_at: status.updated_at,
+        deleted_at: status.deleted_at ?? null
       })
       if (error) {
         await reportPushFailure('syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
@@ -972,7 +995,8 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
           reference_url: task.reference_url,
           my_day_dismissed_date: existing?.my_day_dismissed_date ?? null,
           created_at: task.created_at ?? existing?.created_at ?? task.updated_at,
-          updated_at: task.updated_at
+          updated_at: task.updated_at,
+          deleted_at: task.deleted_at ?? null
         })
       } catch (e) {
         // Don't let a single task failure (e.g. dangling FK) abort the whole sync

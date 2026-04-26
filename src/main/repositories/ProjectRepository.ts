@@ -10,20 +10,53 @@ import type {
 export class ProjectRepository {
   constructor(private db: DatabaseSync) {}
 
+  // Raw — sync layer needs to see tombstones to compare timestamps.
   findById(id: string): Project | undefined {
     return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined
   }
 
   findByOwnerId(ownerId: string): Project[] {
     return this.db
-      .prepare('SELECT * FROM projects WHERE owner_id = ? ORDER BY created_at ASC')
+      .prepare('SELECT * FROM projects WHERE owner_id = ? AND deleted_at IS NULL ORDER BY created_at ASC')
       .all(ownerId) as unknown as Project[]
   }
 
   findDefault(ownerId: string): Project | undefined {
     return this.db
-      .prepare('SELECT * FROM projects WHERE owner_id = ? AND is_default = 1')
+      .prepare('SELECT * FROM projects WHERE owner_id = ? AND deleted_at IS NULL AND is_default = 1')
       .get(ownerId) as unknown as Project | undefined
+  }
+
+  /**
+   * Sync-layer list. Returns ALL rows for an owner, optionally including tombstones.
+   */
+  findAllByOwner(
+    ownerId: string,
+    options: { includeTombstones?: boolean; sinceUpdatedAt?: string | null } = {}
+  ): Project[] {
+    const includeTombstones = options.includeTombstones ?? false
+    const since = options.sinceUpdatedAt ?? null
+    let sql = 'SELECT * FROM projects WHERE owner_id = ?'
+    const params: (string | number)[] = [ownerId]
+    if (!includeTombstones) sql += ' AND deleted_at IS NULL'
+    if (since) {
+      sql += ' AND updated_at > ?'
+      params.push(since)
+    }
+    sql += ' ORDER BY updated_at ASC'
+    return this.db.prepare(sql).all(...params) as unknown as Project[]
+  }
+
+  /**
+   * High-water mark for incremental sync: max(updated_at) across ALL rows
+   * including tombstones (so a fresh soft-delete bumps the high-water and
+   * the next reconcile retries any failed tombstone push).
+   */
+  findMaxUpdatedAt(ownerId: string): string | null {
+    const row = this.db
+      .prepare('SELECT MAX(updated_at) as max FROM projects WHERE owner_id = ?')
+      .get(ownerId) as { max: string | null }
+    return row.max
   }
 
   create(input: CreateProjectInput): Project {
@@ -99,21 +132,108 @@ export class ProjectRepository {
     return this.findById(id)
   }
 
+  /**
+   * Sync-only: write a project as-is, preserving remote timestamps and deleted_at.
+   * Skips when local row's updated_at is newer (LWW).
+   */
+  applyRemote(remote: Project): Project {
+    const existing = this.findById(remote.id)
+    if (existing && existing.updated_at >= remote.updated_at) {
+      return existing
+    }
+    this.db
+      .prepare(
+        `INSERT INTO projects (
+          id, name, description, color, icon, owner_id, is_default, is_shared, sidebar_order,
+          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit,
+          created_at, updated_at, deleted_at
+        )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           description = excluded.description,
+           color = excluded.color,
+           icon = excluded.icon,
+           owner_id = excluded.owner_id,
+           is_default = excluded.is_default,
+           is_shared = excluded.is_shared,
+           sidebar_order = excluded.sidebar_order,
+           area_id = excluded.area_id,
+           auto_archive_enabled = excluded.auto_archive_enabled,
+           auto_archive_value = excluded.auto_archive_value,
+           auto_archive_unit = excluded.auto_archive_unit,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at,
+           deleted_at = excluded.deleted_at`
+      )
+      .run(
+        remote.id,
+        remote.name,
+        remote.description,
+        remote.color,
+        remote.icon,
+        remote.owner_id,
+        remote.is_default,
+        remote.is_shared,
+        remote.sidebar_order,
+        remote.area_id,
+        remote.auto_archive_enabled,
+        remote.auto_archive_value,
+        remote.auto_archive_unit,
+        remote.created_at,
+        remote.updated_at,
+        remote.deleted_at ?? null
+      )
+    return this.findById(remote.id)!
+  }
+
+  /**
+   * Soft-delete: tombstone the project AND cascade tombstones to all child rows
+   * (statuses, tasks, project_labels). FK CASCADE no longer fires under soft-delete,
+   * so we do it explicitly in one transaction. Each child row gets its own
+   * `updated_at` bump for the sync layer to pick up via per-table reconcile.
+   */
   delete(id: string): boolean {
     return withTransaction(this.db, () => {
-      // tasks.status_id references statuses(id) with no CASCADE.
-      // Deleting the project cascades to statuses, which would fail if any task
-      // (including tasks from other projects) still references those statuses.
-      // Delete all such tasks first.
-      this.db.prepare('DELETE FROM tasks WHERE status_id IN (SELECT id FROM statuses WHERE project_id = ?)').run(id)
-      this.db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
-      const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+      const row = this.findById(id)
+      if (!row || row.deleted_at) return false
+
+      const now = new Date().toISOString()
+
+      // Cascade to tasks (active only — tombstoned ones already done)
+      this.db
+        .prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL')
+        .run(now, now, id)
+
+      // Cascade to statuses (active only)
+      this.db
+        .prepare('UPDATE statuses SET deleted_at = ?, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL')
+        .run(now, now, id)
+
+      // Cascade to project_labels (composite-PK junction; no updated_at — physical delete is fine
+      // because applyRemote on labels handles re-sync, and the link is implied by membership).
+      this.db.prepare('DELETE FROM project_labels WHERE project_id = ?').run(id)
+
+      // Tombstone the project itself
+      const result = this.db
+        .prepare('UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+        .run(now, now, id)
       return result.changes > 0
     })
   }
 
+  /**
+   * Hard delete — physical removal. ONLY used by the 30-day purge job.
+   */
+  hardDelete(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+    return result.changes > 0
+  }
+
   list(): Project[] {
-    return this.db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all() as unknown as Project[]
+    return this.db
+      .prepare('SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at ASC')
+      .all() as unknown as Project[]
   }
 
   // Project members
@@ -153,7 +273,7 @@ export class ProjectRepository {
       .prepare(
         `SELECT p.* FROM projects p
          INNER JOIN project_members pm ON pm.project_id = p.id
-         WHERE pm.user_id = ?
+         WHERE pm.user_id = ? AND p.deleted_at IS NULL
          ORDER BY p.sidebar_order ASC, p.created_at ASC`
       )
       .all(userId) as unknown as Project[]

@@ -26,6 +26,7 @@ export interface Project {
   auto_archive_unit: string
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface ProjectMember {
@@ -49,6 +50,7 @@ export interface Status {
   is_default: number
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface Task {
@@ -72,6 +74,7 @@ export interface Task {
   my_day_dismissed_date: string | null
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface Label {
@@ -82,17 +85,20 @@ export interface Label {
   order_index: number
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface ProjectLabel {
   project_id: string
   label_id: string
   created_at: string
+  deleted_at: string | null
 }
 
 export interface TaskLabel {
   task_id: string
   label_id: string
+  deleted_at: string | null
 }
 
 export interface TaskLabelMapping extends Label {
@@ -105,8 +111,10 @@ export interface Theme {
   mode: string
   config: string // JSON string of ThemeConfig
   is_builtin: number
+  owner_id: string | null
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface ThemeConfig {
@@ -121,8 +129,11 @@ export interface ThemeConfig {
 }
 
 export interface Setting {
+  user_id: string
   key: string
   value: string | null
+  updated_at: string
+  deleted_at: string | null
 }
 
 export interface ActivityLogEntry {
@@ -426,6 +437,7 @@ export interface ProjectArea {
   is_collapsed: number
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface CreateProjectAreaInput {
@@ -458,6 +470,7 @@ export interface SavedView {
   filter_config: string // JSON serialized filter state
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface CreateSavedViewInput {

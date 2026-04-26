@@ -134,3 +134,30 @@ Working file — entries written here during a session are processed into perman
 <!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
 - b3e2689 chore: bump version to 1.4.5 (2026-04-25) — files: 2
 - 4fe36d7 fix: sync silent-failure paths, label dedup, and task_labels gap (2026-04-25) — files: 30
+
+## 2026-04-25 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 97433df wip: save state before fix realtime reconnect storm (2026-04-25) — files: 3
+
+## 2026-04-25 — Refactor: Uniform sync architecture (v1.5.0)
+**What was broken:** Sync between local SQLite and Supabase was best-effort with several gaps. Deletes were propagated by hard-DELETE so any peer that was offline at the wrong moment never saw the delete and would resurrect the row on next push. Custom themes had no two-way sync at all. Per-table pull logic had a "local newer → push" branch that re-pushed every task on every poll cycle whenever local timestamps got ahead of remote. macOS wake-from-sleep produced a 2s reconnect loop because the lib's auto-rejoin raced our manual rebuild. Token refresh fanned `setAuth` out one push per channel. `initSync` had no concurrency guard so concurrent callers each launched a parallel `fullUpload`, producing a mass push storm of every project's tasks on boot.
+**Root cause:** No `deleted_at` columns, eight bespoke pull functions each with different gaps, no single source of truth for "what is the newest row I've seen on this (user, scope, table)?", and no idempotency guards on the entry points (`reconcile`, `initSync`).
+**What was fixed:**
+- Added `deleted_at TIMESTAMPTZ` + active-row indexes to all eight syncable tables on both Supabase and local SQLite via versioned migrations.
+- Switched every delete path from hard DELETE to UPDATE deleted_at; reads filter; the only hard-DELETE is the 30-day purge.
+- Built `reconcileTable<TLocal, TRemote>` — a single generic helper that diffs all eight tables, pushes local-only, pulls remote-only, applies LWW per row, and reports stats.
+- Added `sync_meta(user_id, scope_id, table_name)` storing per-(user, scope, table) `high_water` and `last_reconciled_at`. Project-scoped tables (tasks, statuses) use project_id as scope_id; user-scoped tables use user_id.
+- High-water short-circuit: pre-reconcile, fetch local + remote `max(updated_at)` and stored high-water in parallel; if both sides ≤ stored, skip the diff entirely. `findMaxUpdatedAt` now includes tombstones so soft-deletes bump the high-water and failed pushes retry.
+- Realtime UPDATE handlers now recognize `deleted_at` transitions and apply them as soft-deletes locally.
+- Resurrect protection: applyRemote keeps `deleted_at` from the remote row, so a tombstoned local row stays tombstoned even when the remote sends a newer non-tombstone-clearing update.
+- 30-day tombstone purge: Supabase `pg_cron` job `purge-tombstones` at `0 3 * * *` plus a boot-time `purgeOldTombstones(db)` in the Electron main process.
+- Realtime reconnect timer now checks `channel.state === 'joined'` at fire time and skips the rebuild if supabase-js already healed.
+- `setAuth` deduped at the wrapper layer; token refresh no longer fans out per channel.
+- `fullUpload` writes `last_sync_at` at the START as a sentinel; `initSync` body wrapped in a shared in-flight promise.
+- `App.tsx` syncShared effect deps switched from `currentUser` / `hydrateProjects` to primitive `startupUserId`.
+- `reconcile()` got an in-flight guard + 30s cooldown.
+- Removed the "local newer → push" branch from `pullNewTasks` and `pullStatuses` — polling is now read-only.
+**User-facing impact:** Cross-device sync is now byte-equal: anything you change anywhere shows up everywhere within seconds (online) or on reconnect (offline). Deletes propagate cleanly without zombies. Custom themes sync. Wake from sleep no longer produces a connection storm. Boot is quieter and faster.
+**Affected area:** Sync, schema, all repositories, Realtime, Electron main process startup.
+**Files changed:** src/main/database/migrations.ts, src/main/repositories/{Task,Label,Project,Status,Theme,Settings,SavedView,ProjectArea,SyncMeta}Repository.ts (+ tests), src/main/services/PurgeService.ts (new + tests), src/main/index.ts, src/main/ipc-handlers.ts, src/preload/index.ts, src/preload/index.d.ts, src/renderer/src/services/syncTables.ts (new + tests), src/renderer/src/services/PersonalSyncService.ts, src/renderer/src/services/SyncService.ts, src/renderer/src/lib/supabase.ts, src/renderer/src/App.tsx. Supabase migrations: deleted_at columns, indexes, purge_tombstones() function + pg_cron schedule.
+**Commit:** <fill in after squash merge to main>

@@ -56,6 +56,12 @@ export interface TasksAPI {
   applyRemote(task: Task): Promise<Task>
   update(id: string, input: UpdateTaskInput): Promise<Task | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByProject(
+    projectId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Task[]>
+  findMaxUpdatedAt(projectId: string): Promise<string | null>
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
@@ -76,6 +82,13 @@ export interface LabelsAPI {
   create(input: CreateLabelInput): Promise<Label>
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByUser(
+    userId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Label[]>
+  findMaxUpdatedAt(userId: string): Promise<string | null>
+  applyRemote(label: Label): Promise<Label>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
   findByTaskId(taskId: string): Promise<Label[]>
@@ -93,6 +106,13 @@ export interface ProjectsAPI {
   create(input: CreateProjectInput): Promise<Project>
   update(id: string, input: UpdateProjectInput): Promise<Project | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByOwner(
+    ownerId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Project[]>
+  findMaxUpdatedAt(ownerId: string): Promise<string | null>
+  applyRemote(project: Project): Promise<Project>
   list(userId: string): Promise<Project[]>
   addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
@@ -110,6 +130,13 @@ export interface StatusesAPI {
   create(input: CreateStatusInput): Promise<Status>
   update(id: string, input: UpdateStatusInput): Promise<Status | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByProject(
+    projectId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Status[]>
+  findMaxUpdatedAt(projectId: string): Promise<string | null>
+  applyRemote(status: Status): Promise<Status>
   reassignAndDelete(statusId: string, targetStatusId: string): Promise<boolean>
 }
 
@@ -138,6 +165,14 @@ export interface SettingsAPI {
   getMultiple(userId: string, keys: string[]): Promise<Setting[]>
   setMultiple(userId: string, settings: Setting[]): Promise<void>
   delete(userId: string, key: string): Promise<boolean>
+  hardDelete(userId: string, key: string): Promise<boolean>
+  findAllByUser(
+    userId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Setting[]>
+  findMaxUpdatedAt(userId: string): Promise<string | null>
+  applyRemote(setting: Setting): Promise<Setting>
+  findRaw(userId: string, key: string): Promise<Setting | null>
 }
 
 export interface ThemesAPI {
@@ -147,6 +182,13 @@ export interface ThemesAPI {
   create(input: CreateThemeInput & { owner_id?: string }): Promise<Theme>
   update(id: string, input: UpdateThemeInput): Promise<Theme | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByOwner(
+    ownerId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<Theme[]>
+  findMaxUpdatedAt(ownerId: string): Promise<string | null>
+  applyRemote(theme: Theme): Promise<Theme>
   getConfig(id: string): Promise<ThemeConfig | null>
 }
 
@@ -265,6 +307,44 @@ export interface SyncAPI {
   count(): Promise<number>
 }
 
+export type SyncTableName =
+  | 'tasks'
+  | 'statuses'
+  | 'projects'
+  | 'labels'
+  | 'themes'
+  | 'settings'
+  | 'saved_views'
+  | 'project_areas'
+  | 'task_labels'
+  | 'project_labels'
+
+export interface SyncMetaAPI {
+  getHighWater(
+    userId: string,
+    scopeId: string,
+    tableName: SyncTableName
+  ): Promise<string | null>
+  setHighWater(
+    userId: string,
+    scopeId: string,
+    tableName: SyncTableName,
+    isoTs: string
+  ): Promise<void>
+  getLastReconciledAt(
+    userId: string,
+    scopeId: string,
+    tableName: SyncTableName
+  ): Promise<string | null>
+  setLastReconciledAt(
+    userId: string,
+    scopeId: string,
+    tableName: SyncTableName,
+    isoTs: string
+  ): Promise<void>
+  clearAll(userId: string): Promise<number>
+}
+
 export interface ShellAPI {
   openExternal(url: string): Promise<void>
 }
@@ -314,6 +394,13 @@ export interface ProjectAreasAPI {
   delete(id: string): Promise<boolean>
   reorder(areaIds: string[]): Promise<void>
   assignProject(projectId: string, areaId: string | null): Promise<void>
+  hardDelete(id: string): Promise<boolean>
+  findAllByUser(
+    userId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<ProjectArea[]>
+  findMaxUpdatedAt(userId: string): Promise<string | null>
+  applyRemote(remote: ProjectArea): Promise<ProjectArea>
 }
 
 export interface StatsAPI {
@@ -338,6 +425,13 @@ export interface SavedViewsAPI {
   delete(id: string): Promise<boolean>
   reorder(viewIds: string[]): Promise<void>
   countMatching(filterConfig: string, userId: string): Promise<number>
+  hardDelete(id: string): Promise<boolean>
+  findAllByUser(
+    userId: string,
+    options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }
+  ): Promise<SavedView[]>
+  findMaxUpdatedAt(userId: string): Promise<string | null>
+  applyRemote(remote: SavedView): Promise<SavedView>
 }
 
 export interface TodoozyAPI {
@@ -359,6 +453,7 @@ export interface TodoozyAPI {
   timer: TimerAPI
   notifications: NotificationsAPI
   sync: SyncAPI
+  syncMeta: SyncMetaAPI
   shell: ShellAPI
   app: AppAPI
   projectAreas: ProjectAreasAPI

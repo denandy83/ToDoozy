@@ -7,19 +7,26 @@ const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'filter_con
 export class SavedViewRepository {
   constructor(private db: DatabaseSync) {}
 
+  /**
+   * Raw lookup — returns tombstones too (sync layer needs them).
+   */
   findById(id: string): SavedView | undefined {
     return this.db.prepare('SELECT * FROM saved_views WHERE id = ?').get(id) as SavedView | undefined
   }
 
   findByUserId(userId: string): SavedView[] {
     return this.db
-      .prepare('SELECT * FROM saved_views WHERE user_id = ? ORDER BY sidebar_order ASC')
+      .prepare(
+        'SELECT * FROM saved_views WHERE user_id = ? AND deleted_at IS NULL ORDER BY sidebar_order ASC'
+      )
       .all(userId) as unknown as SavedView[]
   }
 
   findByProjectId(projectId: string): SavedView[] {
     return this.db
-      .prepare('SELECT * FROM saved_views WHERE project_id = ? ORDER BY sidebar_order ASC')
+      .prepare(
+        'SELECT * FROM saved_views WHERE project_id = ? AND deleted_at IS NULL ORDER BY sidebar_order ASC'
+      )
       .all(projectId) as unknown as SavedView[]
   }
 
@@ -67,18 +74,110 @@ export class SavedViewRepository {
     return this.findById(id) ?? null
   }
 
+  /**
+   * Soft-delete — tombstone the row and bump updated_at so peers learn about it.
+   * Returns false if the row is missing or already tombstoned.
+   */
   delete(id: string): boolean {
+    const row = this.findById(id)
+    if (!row || row.deleted_at) return false
+    const now = new Date().toISOString()
+    const result = this.db
+      .prepare('UPDATE saved_views SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(now, now, id)
+    return result.changes > 0
+  }
+
+  /**
+   * Hard delete — physical removal. Only the 30-day purge job should call this.
+   */
+  hardDelete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM saved_views WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   reorder(viewIds: string[]): void {
+    const now = new Date().toISOString()
     withTransaction(this.db, () => {
-      const stmt = this.db.prepare('UPDATE saved_views SET sidebar_order = ? WHERE id = ?')
+      const stmt = this.db.prepare(
+        'UPDATE saved_views SET sidebar_order = ?, updated_at = ? WHERE id = ?'
+      )
       for (let i = 0; i < viewIds.length; i++) {
-        stmt.run(i, viewIds[i])
+        stmt.run(i, now, viewIds[i])
       }
     })
+  }
+
+  /**
+   * Sync-layer list. Returns rows for `userId`, optionally including tombstones.
+   */
+  findAllByUser(
+    userId: string,
+    options: { includeTombstones?: boolean; sinceUpdatedAt?: string | null } = {}
+  ): SavedView[] {
+    const includeTombstones = options.includeTombstones ?? false
+    const since = options.sinceUpdatedAt ?? null
+    let sql = 'SELECT * FROM saved_views WHERE user_id = ?'
+    const params: (string | number)[] = [userId]
+    if (!includeTombstones) sql += ' AND deleted_at IS NULL'
+    if (since) {
+      sql += ' AND updated_at > ?'
+      params.push(since)
+    }
+    sql += ' ORDER BY updated_at ASC'
+    return this.db.prepare(sql).all(...params) as unknown as SavedView[]
+  }
+
+  /**
+   * High-water mark for incremental sync: max(updated_at) across ALL rows
+   * including tombstones (so a fresh soft-delete bumps the high-water and
+   * the next reconcile retries any failed tombstone push).
+   */
+  findMaxUpdatedAt(userId: string): string | null {
+    const row = this.db
+      .prepare('SELECT MAX(updated_at) as max FROM saved_views WHERE user_id = ?')
+      .get(userId) as { max: string | null }
+    return row.max
+  }
+
+  /**
+   * Sync-only: write a saved view as-is, preserving remote timestamps and deleted_at.
+   * Skips when local row's updated_at is newer (LWW).
+   */
+  applyRemote(remote: SavedView): SavedView {
+    const existing = this.findById(remote.id)
+    if (existing && existing.updated_at >= remote.updated_at) {
+      return existing
+    }
+    this.db
+      .prepare(
+        `INSERT INTO saved_views (id, user_id, project_id, name, color, icon, sidebar_order, filter_config, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           user_id = excluded.user_id,
+           project_id = excluded.project_id,
+           name = excluded.name,
+           color = excluded.color,
+           icon = excluded.icon,
+           sidebar_order = excluded.sidebar_order,
+           filter_config = excluded.filter_config,
+           updated_at = excluded.updated_at,
+           deleted_at = excluded.deleted_at`
+      )
+      .run(
+        remote.id,
+        remote.user_id,
+        remote.project_id,
+        remote.name,
+        remote.color,
+        remote.icon,
+        remote.sidebar_order,
+        remote.filter_config,
+        remote.created_at,
+        remote.updated_at,
+        remote.deleted_at ?? null
+      )
+    return this.findById(remote.id)!
   }
 
   countMatchingTasks(filterConfig: string, _userId: string): number {

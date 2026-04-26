@@ -4,6 +4,21 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.5.0
+
+- **Uniform sync architecture** — Every syncable table (tasks, statuses, projects, labels, themes, settings, saved views, project areas) now uses the same soft-delete + reconcile pipeline. Deletes set `deleted_at` and propagate via Supabase Realtime UPDATE events instead of hard DELETE so peers can converge after offline gaps.
+- **Generic two-way reconcile** — A single `reconcileTable` helper diffs all eight tables, pushing local-only rows and pulling remote-only rows with last-writer-wins on `updated_at`. Replaces eight bespoke per-table pull functions that each had different gaps.
+- **Per-(user, scope, table) high-water mark** — Idle reconcile now does N tiny `max(updated_at)` queries instead of N table scans; if neither side has new data since the stored high-water, the diff is skipped entirely. Per-project scoping prevents one project's high-water from masking another's drift.
+- **Cross-device delete propagation** — Realtime UPDATE handlers now recognize `deleted_at` transitions and apply them locally as soft-deletes. Deletes made on one device disappear on every other device within seconds.
+- **Resurrect protection** — A locally tombstoned row stays tombstoned even when a newer remote update arrives, as long as the remote keeps `deleted_at` set. Prevents zombie rows after Realtime gaps.
+- **30-day tombstone purge** — Daily Supabase `pg_cron` job at 03:00 UTC plus a boot-time local sweep hard-DELETE rows tombstoned for more than 30 days. Keeps storage bounded and gives every honest peer time to see the tombstone before it disappears.
+- **Realtime wake-from-sleep storm fix** — On macOS wake, supabase-js auto-rejoins channels; our reconnect timer was tearing down freshly-rejoined channels and looping every 2s. The timer-fire callback now checks `channel.state === 'joined'` and skips the rebuild if the lib already healed.
+- **`setAuth` token-refresh fanout fix** — Token refresh used to push one `setAuth` per channel; identical tokens are now deduped at the wrapper layer in `lib/supabase.ts`.
+- **`fullUpload` concurrency guard** — `initSync` now writes `last_sync_at` at the start as a sentinel and wraps its body in a shared in-flight promise. Prevents the parallel-callers-each-see-null race that produced a mass push storm of every project's tasks on boot.
+- **Reconcile dedupe** — `reconcile()` now uses an in-flight guard plus a 30s cooldown, so the startup reconcile and the online-recovery reconcile no longer both fire on a transient WS hiccup.
+- **`syncShared` effect deps fix** — `App.tsx` switched from object/function deps (`currentUser`, `hydrateProjects`) to a stable primitive (`startupUserId`). Stops the effect from re-firing on every auth-store mutation including token refresh.
+- **`pullNewTasks` / `pullStatuses` no longer push** — Removed the "local newer → push" branch from polling pulls. Recovery is owned by `sync_queue` (mutation retries) and `reconcile()` (ID-set diff). Polling is read-only.
+
 ## v1.3.3
 
 - **Fix: DatePicker only highlights the real due date** — Opening the calendar with no due date set used to show today filled across every month you navigated to, and with a date like April 18 set, navigating to May would also highlight May 18. Now only the actual selected date gets the accent fill, today shows a subtle accent-colored border when it isn't the selected date, and every other day renders neutrally

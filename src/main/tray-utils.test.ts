@@ -14,6 +14,7 @@ function makeStatus(overrides: Partial<Status> = {}): Status {
     is_default: 0,
     created_at: '',
     updated_at: '',
+    deleted_at: null,
     ...overrides
   }
 }
@@ -40,6 +41,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     my_day_dismissed_date: null,
     created_at: '',
     updated_at: '',
+    deleted_at: null,
     ...overrides
   }
 }

@@ -9,6 +9,7 @@ import { createTray, destroyTray } from './tray'
 import { SettingsRepository } from './repositories/SettingsRepository'
 import { startNotificationChecker, stopNotificationChecker } from './notifications'
 import { initUpdater, stopUpdater } from './updater'
+import { purgeOldTombstones } from './services/PurgeService'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
 
 // Override userData path if TODOOZY_USER_DATA is set — allows running multiple independent instances
@@ -206,6 +207,24 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.todoozy')
 
   initDatabase()
+
+  // 30-day tombstone purge (counterpart to the Supabase pg_cron job). Runs
+  // best-effort once per boot — failures here must not block app startup.
+  try {
+    const stats = purgeOldTombstones(getDatabase())
+    if (stats.total > 0) {
+      console.log(
+        `[purge] removed ${stats.total} tombstones older than ${stats.cutoffIso}: ` +
+          Object.entries(stats.byTable)
+            .filter(([, count]) => count > 0)
+            .map(([table, count]) => `${table}=${count}`)
+            .join(' ')
+      )
+    }
+  } catch (err) {
+    console.error('[purge] tombstone purge failed', err)
+  }
+
   registerIpcHandlers()
 
   app.on('browser-window-created', (_, window) => {

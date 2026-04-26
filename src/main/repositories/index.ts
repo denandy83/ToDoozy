@@ -11,6 +11,7 @@ import { ProjectTemplateRepository } from './ProjectTemplateRepository'
 import { AttachmentRepository } from './AttachmentRepository'
 import { NotificationRepository } from './NotificationRepository'
 import { SyncQueueRepository } from './SyncQueueRepository'
+import { SyncMetaRepository } from './SyncMetaRepository'
 import { SavedViewRepository } from './SavedViewRepository'
 import { ProjectAreaRepository } from './ProjectAreaRepository'
 
@@ -27,6 +28,7 @@ export interface Repositories {
   attachments: AttachmentRepository
   notifications: NotificationRepository
   syncQueue: SyncQueueRepository
+  syncMeta: SyncMetaRepository
   savedViews: SavedViewRepository
   projectAreas: ProjectAreaRepository
 }
@@ -45,6 +47,7 @@ export function createRepositories(db: DatabaseSync): Repositories {
     attachments: new AttachmentRepository(db),
     notifications: new NotificationRepository(db),
     syncQueue: new SyncQueueRepository(db),
+    syncMeta: new SyncMetaRepository(db),
     savedViews: new SavedViewRepository(db),
     projectAreas: new ProjectAreaRepository(db)
   }
@@ -63,6 +66,7 @@ export {
   AttachmentRepository,
   NotificationRepository,
   SyncQueueRepository,
+  SyncMetaRepository,
   SavedViewRepository,
   ProjectAreaRepository
 }

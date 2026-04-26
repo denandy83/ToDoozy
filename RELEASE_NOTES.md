@@ -4,6 +4,15 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.5.0
+
+- **Reliable cross-device sync** — Tasks, projects, labels, themes, settings, saved views, and areas now sync the same way: anything you change on one device shows up on every device, and deletes propagate cleanly without zombies coming back.
+- **Local and cloud always converge** — On reconnect after going offline (or after a sleep/wake), the app reconciles every change in both directions in a single pass. No more lost edits, no more "why is this still here" stale rows.
+- **Custom themes sync everywhere** — Custom themes you create on one device now appear on every other device automatically, the same as everything else.
+- **No more wake-from-sleep storm** — Closing the laptop lid no longer makes the app spend the next minute reconnecting Realtime channels in a loop.
+- **Faster, quieter idle sync** — When nothing has changed, reconcile finishes near-instantly instead of scanning every table. Boots are quicker and the sync log is much less noisy.
+- **Storage stays bounded** — Soft-deleted rows are now hard-deleted automatically after 30 days, both in the cloud and locally.
+
 ## v1.3.3
 
 - **Fix: Due date calendar only highlights the real date** — The date picker no longer shows today (or the matching day-of-month) filled in every month you navigate to. Only the actual due date is filled; today shows a subtle border when it isn't the selected date

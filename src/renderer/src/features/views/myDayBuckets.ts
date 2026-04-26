@@ -67,6 +67,7 @@ export function createBucketStatus(bucket: StatusBucket): Status {
     is_default: bucket.key === 'not_started' ? 1 : 0,
     is_done: bucket.key === 'done' ? 1 : 0,
     created_at: '',
-    updated_at: ''
+    updated_at: '',
+    deleted_at: null
   }
 }
