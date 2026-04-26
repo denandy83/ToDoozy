@@ -196,6 +196,10 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       await get().ensureDefaultProject(localUser.id)
       stopRecoveryTimer()
       resetPermanentlyDeadFlag()
+      // Clear any stuck 'offline' status from the cold-start offlineFallback path.
+      // Without this, the sidebar dot stays orange forever and setLastSynced
+      // is a no-op (its guard bails when status === 'offline').
+      useSyncStore.getState().setStatus('synced')
       set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed'
@@ -297,6 +301,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         await get().ensureDefaultProject(localUser.id)
         stopRecoveryTimer()
         resetPermanentlyDeadFlag()
+        useSyncStore.getState().setStatus('synced')
         set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
         return
       }
@@ -322,6 +327,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         await get().ensureDefaultProject(localUser.id)
         stopRecoveryTimer()
         resetPermanentlyDeadFlag()
+        useSyncStore.getState().setStatus('synced')
         set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
         return
       }
@@ -374,6 +380,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
                 user.user_metadata?.full_name ?? null,
                 user.user_metadata?.avatar_url ?? null
               )
+              useSyncStore.getState().setStatus('synced')
               set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
               try {
                 const { processSyncQueue } = await import('../../services/SyncService')
