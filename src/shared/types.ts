@@ -312,6 +312,7 @@ export interface ProjectTemplate {
   data: string // JSON string of ProjectTemplateData
   created_at: string
   updated_at: string
+  deleted_at: string | null
 }
 
 export interface ProjectTemplateData {

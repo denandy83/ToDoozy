@@ -188,3 +188,9 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Sync (projects table only — task/status/label/etc. paths unchanged here).
 **Files changed:** src/renderer/src/services/syncTables.ts, src/main/repositories/ProjectRepository.ts.
 **Commit:** <fill in after squash merge to main>
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 07fd262 fix: project_labels junction table on Supabase + incremental sync (2026-04-26) — files: 9
+- 8593936 fix: sync is_default/sidebar_order/area_id instead of stripping them (2026-04-26) — files: 5
+- 3b129e6 chore: bump version to 1.5.1 (2026-04-26) — files: 1

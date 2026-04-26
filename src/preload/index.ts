@@ -160,7 +160,12 @@ const api: TodoozyAPI = {
     findAll: (userId) => ipcRenderer.invoke('projectTemplates:findAll', userId),
     create: (input) => ipcRenderer.invoke('projectTemplates:create', input),
     update: (id, input) => ipcRenderer.invoke('projectTemplates:update', id, input),
-    delete: (id) => ipcRenderer.invoke('projectTemplates:delete', id)
+    delete: (id) => ipcRenderer.invoke('projectTemplates:delete', id),
+    hardDelete: (id) => ipcRenderer.invoke('projectTemplates:hardDelete', id),
+    findAllByOwner: (ownerId, options) =>
+      ipcRenderer.invoke('projectTemplates:findAllByOwner', ownerId, options),
+    findMaxUpdatedAt: (ownerId) => ipcRenderer.invoke('projectTemplates:findMaxUpdatedAt', ownerId),
+    applyRemote: (template) => ipcRenderer.invoke('projectTemplates:applyRemote', template)
   },
 
   attachments: {

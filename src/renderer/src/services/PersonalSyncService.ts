@@ -186,11 +186,13 @@ export async function pushTask(task: Task): Promise<void> {
     // Ensure the project exists in Supabase (RLS requires project_members entry)
     await ensureProjectInSupabase(task.project_id)
 
-    // Get label names for this task (batch query instead of N+1)
+    // task_labels is the source of truth; we used to also write a denormalized
+    // `tasks.label_names` JSON for the shared-project Realtime fast-path, but
+    // it caused rename drift and isn't needed once realtime handlers query the
+    // junction directly. We still load labelIds here for the post-push junction
+    // diff below.
     const taskLabels = await window.api.tasks.getLabels(task.id)
     const labelIds = taskLabels.map((tl) => tl.label_id)
-    const allLabels = labelIds.length > 0 ? await window.api.labels.findByIds(labelIds) : []
-    const labelData = allLabels.map((l) => ({ name: l.name, color: l.color }))
 
     const payload = {
       id: task.id,
@@ -211,7 +213,6 @@ export async function pushTask(task: Task): Promise<void> {
       recurrence_rule: task.recurrence_rule,
       reference_url: task.reference_url,
       my_day_dismissed_date: task.my_day_dismissed_date ?? null,
-      label_names: JSON.stringify(labelData),
       created_at: task.created_at,
       updated_at: task.updated_at
     }
@@ -525,6 +526,82 @@ export async function pushProjectArea(area: {
 }
 
 /**
+ * Push a project template (full project blueprint stored as JSON in `data`).
+ * v1.5.1 promoted this table from local-only to synced.
+ */
+export async function pushProjectTemplate(template: {
+  id: string
+  name: string
+  color: string
+  owner_id: string
+  data: string
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}): Promise<void> {
+  if (!(await hasLiveSession('pushProjectTemplate', `template=${template.id}`))) return
+  try {
+    const supabase = await getSupabase()
+    const { error } = await supabase.from('project_templates').upsert(template)
+    if (error) {
+      await reportPushFailure(
+        'pushProjectTemplate',
+        error,
+        'project_templates',
+        template.id,
+        JSON.stringify(template)
+      )
+    } else {
+      markSynced()
+      logEvent('info', 'sync', `Pushed project template "${template.name}"`, `id=${template.id}`)
+    }
+  } catch (err) {
+    await reportPushFailure(
+      'pushProjectTemplate',
+      err,
+      'project_templates',
+      template.id,
+      JSON.stringify(template)
+    )
+  }
+}
+
+/**
+ * Soft-delete a project template on Supabase.
+ */
+export async function deleteProjectTemplateFromSupabase(templateId: string): Promise<void> {
+  const now = new Date().toISOString()
+  const payload = { deleted_at: now, updated_at: now }
+  if (!(await hasLiveSession('deleteProjectTemplate', `id=${templateId}`))) return
+  try {
+    const supabase = await getSupabase()
+    const { error } = await supabase.from('project_templates').update(payload).eq('id', templateId)
+    if (error) {
+      await reportPushFailure(
+        'deleteProjectTemplate',
+        error,
+        'project_templates',
+        templateId,
+        JSON.stringify(payload),
+        'UPDATE'
+      )
+    } else {
+      markSynced()
+      logEvent('info', 'sync', 'Soft-deleted project template', `id=${templateId}`)
+    }
+  } catch (err) {
+    await reportPushFailure(
+      'deleteProjectTemplate',
+      err,
+      'project_templates',
+      templateId,
+      JSON.stringify(payload),
+      'UPDATE'
+    )
+  }
+}
+
+/**
  * Delete a saved view from Supabase.
  */
 export async function deleteSavedViewFromSupabase(viewId: string): Promise<void> {
@@ -582,9 +659,11 @@ export async function pushTheme(theme: {
   accent: string
   accent_fg: string
   border: string
+  created_at?: string
   updated_at?: string
   deleted_at?: string | null
 }): Promise<void> {
+  const now = new Date().toISOString()
   const payload = {
     id: theme.id,
     user_id: theme.user_id,
@@ -600,7 +679,8 @@ export async function pushTheme(theme: {
     // Legacy column, still NOT NULL — kept in sync with fg_secondary.
     surface: theme.fg_secondary,
     border: theme.border,
-    updated_at: theme.updated_at ?? new Date().toISOString(),
+    created_at: theme.created_at ?? now,
+    updated_at: theme.updated_at ?? now,
     deleted_at: theme.deleted_at ?? null
   }
   if (!(await hasLiveSession('pushTheme', `id=${theme.id}`))) return
@@ -954,6 +1034,7 @@ export async function fullUpload(userId: string): Promise<void> {
             accent: config.accent ?? '',
             accent_fg: config.accentFg ?? '',
             border: config.border ?? '',
+            created_at: theme.created_at,
             updated_at: theme.updated_at
           })
         } catch { /* skip themes with invalid config */ }
@@ -1667,8 +1748,15 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
       await runTable('tasks', project.id)
     }
 
-    // 3. User-scoped: labels, themes, settings, saved_views, project_areas.
-    for (const tableName of ['labels', 'themes', 'settings', 'saved_views', 'project_areas'] as const) {
+    // 3. User-scoped: labels, themes, settings, saved_views, project_areas, project_templates.
+    for (const tableName of [
+      'labels',
+      'themes',
+      'settings',
+      'saved_views',
+      'project_areas',
+      'project_templates'
+    ] as const) {
       await runTable(tableName, userId)
     }
 

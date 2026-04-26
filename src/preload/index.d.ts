@@ -213,6 +213,13 @@ export interface ProjectTemplatesAPI {
   create(input: CreateProjectTemplateInput): Promise<ProjectTemplate>
   update(id: string, input: UpdateProjectTemplateInput): Promise<ProjectTemplate | null>
   delete(id: string): Promise<boolean>
+  hardDelete(id: string): Promise<boolean>
+  findAllByOwner(
+    ownerId: string,
+    options?: { includeTombstones?: boolean }
+  ): Promise<ProjectTemplate[]>
+  findMaxUpdatedAt(ownerId: string): Promise<string | null>
+  applyRemote(template: ProjectTemplate): Promise<ProjectTemplate>
 }
 
 export interface AttachmentsAPI {
@@ -332,6 +339,7 @@ export type SyncTableName =
   | 'project_areas'
   | 'task_labels'
   | 'project_labels'
+  | 'project_templates'
 
 export interface SyncMetaAPI {
   getHighWater(

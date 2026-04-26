@@ -656,4 +656,15 @@ const migration_22: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22]
+const migration_23: Migration = (db) => {
+  // project_templates was a local-only feature in the v1.5.0 sync rebuild.
+  // v1.5.1 promotes it to a synced table — same shape on Supabase.
+  // Add deleted_at locally so reconcile can use the uniform tombstone model.
+  db.exec(`
+    ALTER TABLE project_templates ADD COLUMN deleted_at TEXT NULL;
+    CREATE INDEX IF NOT EXISTS project_templates_active_idx
+      ON project_templates(owner_id, updated_at) WHERE deleted_at IS NULL;
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23]

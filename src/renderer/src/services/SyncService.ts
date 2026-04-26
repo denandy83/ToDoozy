@@ -790,7 +790,12 @@ async function syncMembersDown(projectId: string): Promise<void> {
     }
 
     if (!localMemberIds.has(member.user_id)) {
-      await window.api.projects.addMember(projectId, member.user_id, member.role)
+      await window.api.projects.addMember(
+        projectId,
+        member.user_id,
+        member.role,
+        member.invited_by ?? undefined
+      )
     }
 
     if (member.display_color || member.display_initials) {

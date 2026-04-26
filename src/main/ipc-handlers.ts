@@ -716,6 +716,28 @@ export function registerIpcHandlers(): void {
     return getRepos().projectTemplates.delete(id)
   })
 
+  ipcMain.handle('projectTemplates:hardDelete', (_e, id: string) => {
+    return getRepos().projectTemplates.hardDelete(id)
+  })
+
+  ipcMain.handle(
+    'projectTemplates:findAllByOwner',
+    (_e, ownerId: string, options?: { includeTombstones?: boolean }) => {
+      return getRepos().projectTemplates.findAllByOwner(ownerId, options ?? {})
+    }
+  )
+
+  ipcMain.handle('projectTemplates:findMaxUpdatedAt', (_e, ownerId: string) => {
+    return getRepos().projectTemplates.findMaxUpdatedAt(ownerId)
+  })
+
+  ipcMain.handle(
+    'projectTemplates:applyRemote',
+    (_e, template: Parameters<Repositories['projectTemplates']['applyRemote']>[0]) => {
+      return getRepos().projectTemplates.applyRemote(template)
+    }
+  )
+
   // ── Quick Add ─────────────────────────────────────────────────────
   ipcMain.handle('quickadd:hide', () => {
     hideQuickAddWindow()

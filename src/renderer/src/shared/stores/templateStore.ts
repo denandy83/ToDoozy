@@ -54,6 +54,8 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
         set((state) => ({
           projectTemplates: { ...state.projectTemplates, [template.id]: template }
         }))
+        const { pushProjectTemplate } = await import('../../services/PersonalSyncService')
+        void pushProjectTemplate(template)
         return template
       } catch (err) {
         const message =
@@ -73,6 +75,8 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
           set((state) => ({
             projectTemplates: { ...state.projectTemplates, [template.id]: template }
           }))
+          const { pushProjectTemplate } = await import('../../services/PersonalSyncService')
+          void pushProjectTemplate(template)
         }
         return template
       } catch (err) {
@@ -91,6 +95,10 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
             const { [id]: _, ...remaining } = state.projectTemplates
             return { projectTemplates: remaining }
           })
+          const { deleteProjectTemplateFromSupabase } = await import(
+            '../../services/PersonalSyncService'
+          )
+          void deleteProjectTemplateFromSupabase(id)
         }
         return result
       } catch (err) {

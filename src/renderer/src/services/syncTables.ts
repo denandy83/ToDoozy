@@ -8,7 +8,8 @@ import type {
   ThemeConfig,
   Setting,
   SavedView,
-  ProjectArea
+  ProjectArea,
+  ProjectTemplate
 } from '../../../shared/types'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
@@ -475,6 +476,7 @@ interface RemoteTheme {
   accent_fg: string | null
   surface: string
   border: string
+  created_at: string
   updated_at: string
   deleted_at: string | null
 }
@@ -576,6 +578,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
       // Legacy NOT NULL column on the remote schema — keep in sync with fgSecondary.
       surface: cfg.fgSecondary,
       border: cfg.border,
+      created_at: local.created_at,
       updated_at: local.updated_at,
       deleted_at: local.deleted_at ?? null
     }
@@ -599,7 +602,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
       config: JSON.stringify(config),
       is_builtin: 0,
       owner_id: remote.user_id,
-      created_at: remote.updated_at,
+      created_at: remote.created_at ?? remote.updated_at,
       updated_at: remote.updated_at,
       deleted_at: remote.deleted_at ?? null
     }
@@ -940,6 +943,87 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
 }
 
 SYNC_TABLES['project_areas'] = projectAreasDescriptor as SyncTableDescriptor<unknown, unknown>
+
+// ── project_templates ────────────────────────────────────────────────────
+// Same shape locally and remotely. Owner-scoped — every template belongs to
+// exactly one user. v1.5.0 left this table local-only; v1.5.1 promotes it.
+
+const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTemplate> = {
+  name: 'project_templates',
+  remoteName: 'project_templates',
+  scope: 'owner',
+  localScopeColumn: 'owner_id',
+  remoteScopeColumn: 'owner_id',
+
+  async localList(ownerId, includeTombstones) {
+    return window.api.projectTemplates.findAllByOwner(ownerId, { includeTombstones })
+  },
+
+  async localGetById(id) {
+    return (await window.api.projectTemplates.findById(id)) ?? null
+  },
+
+  async localApplyRemote(remote) {
+    await window.api.projectTemplates.applyRemote(remote)
+  },
+
+  async localMaxUpdatedAt(ownerId) {
+    return window.api.projectTemplates.findMaxUpdatedAt(ownerId)
+  },
+
+  async remoteList(ownerId, sinceUpdatedAt, includeTombstones) {
+    const supabase = await getSupabase()
+    let query = supabase.from('project_templates').select('*').eq('owner_id', ownerId)
+    if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
+    if (!includeTombstones) query = query.is('deleted_at', null)
+    const { data, error } = await query
+    if (error) throw error
+    return (data ?? []) as ProjectTemplate[]
+  },
+
+  async remoteUpsert(local) {
+    const supabase = await getSupabase()
+    const { error } = await supabase
+      .from('project_templates')
+      .upsert(projectTemplatesDescriptor.toRemote(local))
+    if (error) throw error
+  },
+
+  async remoteSoftDelete(id, deletedAt) {
+    const supabase = await getSupabase()
+    const { error } = await supabase
+      .from('project_templates')
+      .update({ deleted_at: deletedAt, updated_at: deletedAt })
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async remoteMaxUpdatedAt(ownerId) {
+    const supabase = await getSupabase()
+    const { data, error } = await supabase
+      .from('project_templates')
+      .select('updated_at')
+      .eq('owner_id', ownerId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    return (data?.updated_at as string | undefined) ?? null
+  },
+
+  toRemote(local) {
+    return local
+  },
+
+  fromRemote(remote) {
+    return remote
+  }
+}
+
+SYNC_TABLES['project_templates'] = projectTemplatesDescriptor as SyncTableDescriptor<
+  unknown,
+  unknown
+>
 
 // ── Generic reconcile engine ─────────────────────────────────────────────
 

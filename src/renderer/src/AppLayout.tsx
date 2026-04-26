@@ -1007,7 +1007,8 @@ export function AppLayout(): React.JSX.Element {
       owner_id: currentUser.id,
       data: JSON.stringify(data),
       created_at: '',
-      updated_at: ''
+      updated_at: '',
+      deleted_at: null
     })
   }, [selectedProject, currentUser, statuses, allTasks])
 
