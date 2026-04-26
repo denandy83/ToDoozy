@@ -25,7 +25,8 @@ import {
   selectDueDateRange,
   selectKeyword,
   selectHasAnyFilter,
-  selectLabelFilterLogic
+  selectLabelFilterLogic,
+  selectSortRules
 } from '../../shared/stores'
 import { useViewStore, selectLayoutMode } from '../../shared/stores/viewStore'
 import { useSetting } from '../../shared/stores/settingsStore'
@@ -33,6 +34,7 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
+import { createSortComparator } from '../../shared/utils/sortTasks'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
@@ -276,16 +278,32 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return map
   }, [myDayTasks, hasAnyFilterGlobal, filterMode, blurOpacity, taskMatchesFilters])
 
-  const prioritySortFn = useCallback(
-    (a: Task, b: Task): number => {
+  const sortRules = useLabelStore(selectSortRules)
+  const isCustomSort = sortRules.length === 0 || (sortRules.length === 1 && sortRules[0].field === 'custom')
+
+  // Cross-project status order map: default first, done last, others by order_index
+  const statusOrderMap = useMemo((): Map<string, number> => {
+    const m = new Map<string, number>()
+    for (const s of Object.values(allStatuses)) {
+      const order = s.is_default === 1 ? -1000 : s.is_done === 1 ? 1000 : s.order_index
+      m.set(s.id, order)
+    }
+    return m
+  }, [allStatuses])
+
+  const prioritySortFn = useMemo(() => {
+    if (sortRules.length > 0 && !isCustomSort) {
+      return createSortComparator(sortRules, statusOrderMap)
+    }
+    // Legacy fallback: priority auto-sort setting (pre-sortRules), then order_index
+    return (a: Task, b: Task): number => {
       if (priorityAutoSort) {
         const priDiff = b.priority - a.priority
         if (priDiff !== 0) return priDiff
       }
       return a.order_index - b.order_index
-    },
-    [priorityAutoSort]
-  )
+    }
+  }, [sortRules, isCustomSort, statusOrderMap, priorityAutoSort])
 
   // Group tasks into 3 universal buckets based on status flags
   const bucketGroups = useMemo(() => {
@@ -873,6 +891,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
                 selectedTaskIds={selectedTaskIds}
                 taskFilterOpacity={taskFilterOpacity}
                 dropIndicator={dropIndicator}
+                disableDrag={!isCustomSort}
                 onSelectTask={handleSelectTask}
                 onStatusChange={handleMyDayStatusChange}
                 onTitleChange={handleTitleChange}

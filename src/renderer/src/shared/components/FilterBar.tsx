@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
-import { X, Plus, Search, Save, Minus, Calendar, ArrowUpDown, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
+import { X, Plus, Search, Save, Minus, Calendar, ArrowUpDown, Trash2 } from 'lucide-react'
 import {
   useLabelStore,
   selectActiveLabelFilters,
@@ -504,7 +504,7 @@ function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dropdownR
   }, [rules, onChange])
 
   const primaryLabel = rules.length > 0
-    ? rules.map((r) => `${SORT_FIELD_LABELS[r.field]} ${r.direction === 'asc' ? '↑' : '↓'}`).join(', ')
+    ? rules.map((r) => `${SORT_FIELD_LABELS[r.field]} - ${r.direction === 'asc' ? 'ASC' : 'DESC'}`).join(', ')
     : null
 
   return (
@@ -548,10 +548,10 @@ function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dropdownR
               </select>
               <button
                 onClick={() => handleToggleDirection(idx)}
-                className="rounded p-0.5 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+                className="rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
                 title={rule.direction === 'asc' ? 'Ascending' : 'Descending'}
               >
-                {rule.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                {rule.direction === 'asc' ? 'ASC' : 'DESC'}
               </button>
               <button
                 onClick={() => handleRemoveRule(idx)}
