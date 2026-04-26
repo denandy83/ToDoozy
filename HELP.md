@@ -405,14 +405,18 @@ Shared projects sync in real-time — all members see task changes, status updat
 To start a timer on a task:
 1. Hover over any task row
 2. Click the play button (appears on hover)
+3. In the popup, pick **Flowtime** (counts up — stop when done) or **Timer** (counts down). For Timer, choose **Limited** (a fixed number of work-break reps) or **Infinite** (runs until you stop it). Hit Enter or click **Start**.
 
-The timer counts down in the menu bar. You can pause, resume, or stop it at any time. When a work session finishes, a break timer starts automatically.
+The timer runs in the menu bar. You can pause, resume, or stop it at any time. When a work session finishes, a break timer starts automatically.
+
+### Default mode and skipping the popup
+**Settings → Timer** has a **Default mode** picker (Flowtime / Timer) so the popup opens pre-selected to your preferred mode. Inside Timer, **Default duration** picks Limited or Infinite by default. If you always want the same configuration and prefer one-click start, turn on **Skip start dialog** under Behavior — pressing play will start instantly with your defaults.
 
 ### Sessions and repetitions
-Configure repetition mode to automatically chain work + break cycles. After a set number of work sessions, a long break kicks in. Timer activity is logged and appears in the Productivity Stats dashboard.
+With Timer + Limited, you set the number of work-break reps. After a configurable number of work sessions, a long break kicks in. Timer activity is logged and appears in the Productivity Stats dashboard.
 
 ### Timer settings
-Go to **Settings → Timer** to configure work duration, short break, long break, sessions before long break, and auto-start behavior.
+Go to **Settings → Timer** to configure presets, work duration, short break, long break, default mode, default duration, and auto-start behavior. Flowtime users can also configure the cookie-break minutes per hour earned and whether unused cookie time transfers across same-day sessions.
 
 ---
 

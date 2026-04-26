@@ -222,10 +222,11 @@ const HELP_SECTIONS: HelpSectionData[] = [
   {
     title: 'Pomodoro Timer',
     items: [
-      { label: 'Starting a timer', description: 'Hover over any task and click the play button that appears. The countdown appears in the macOS menu bar.' },
-      { label: 'Timer controls', description: 'Click the menu bar timer to pause, resume, or stop from anywhere on your Mac. When the work timer finishes, a break timer starts automatically.' },
-      { label: 'Sessions and repetitions', description: 'Configure repetition mode to automatically chain work + break cycles. After a set number of work sessions, a long break kicks in.' },
-      { label: 'Timer settings', description: 'Go to Settings → Timer to configure work duration, short break, long break, sessions before long break, and auto-start behavior. Timer activity is logged and appears in Productivity Stats.' }
+      { label: 'Starting a timer', description: 'Hover over any task and click the play button. A small picker opens — pick Flowtime (counts up, stop when done) or Timer (counts down). For Timer, pick Limited (fixed reps) or Infinite. Hit Enter or click Start.' },
+      { label: 'Timer controls', description: 'Click the menu bar timer to pause, resume, or stop from anywhere on your Mac. When a work timer finishes, a break timer starts automatically.' },
+      { label: 'Default mode and skipping the popup', description: 'Settings → Timer has a Default mode picker (Flowtime / Timer) and a Default duration picker (Limited / Infinite) so the popup opens pre-selected. Turn on Skip start dialog under Behavior to start instantly with your defaults instead of opening the popup.' },
+      { label: 'Sessions and repetitions', description: 'With Timer + Limited, set the number of work-break reps. After a configurable number of work sessions, a long break kicks in.' },
+      { label: 'Timer settings', description: 'Go to Settings → Timer to configure presets, work duration, short break, long break, default mode, default duration, and auto-start behavior. Flowtime users can also set cookie-break minutes per hour. Timer activity is logged in Productivity Stats.' }
     ]
   },
   {
