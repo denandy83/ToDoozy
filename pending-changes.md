@@ -245,4 +245,4 @@ Working file — entries written here during a session are processed into perman
 **User-facing impact:** Pressing play with Flowtime as your default starts in Flowtime — the perpetual setting no longer overrides it. The popup is always the same size, both options are always reachable, and power users can disable the popup entirely with one toggle.
 **Affected area:** Timer play button, Timer settings, right-click "Start timer with…" submenu.
 **Files changed:** src/renderer/src/shared/components/TimerPlayButton.tsx, src/renderer/src/shared/components/TimerPlayButton.test.ts (new — regression for Gabriel's bug), src/renderer/src/shared/hooks/useTimerSettings.ts, src/renderer/src/features/settings/TimerSettingsContent.tsx, src/renderer/src/shared/components/ContextMenuSubmenus.tsx
-**Commit:** <fill in after squash merge to main>
+**Commit:** aa5d8c4
