@@ -1074,9 +1074,18 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     window.api.syncMeta.getHighWater(userId, scopeId, desc.name)
   ])
 
+  // ISO timestamps are NOT lexically equivalent across formats — local writes
+  // use `…Z` form (new Date().toISOString()) while Postgres/PostgREST returns
+  // `…+00:00`. ASCII-wise 'Z' (0x5A) > '+' (0x2B), so a string compare always
+  // flags `…Z` as "newer", causing every reconcile to re-push every row.
+  // Compare numerically via Date.parse to make format-equivalent timestamps
+  // compare equal.
+  const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
+
   if (storedHigh) {
-    const localStale = !localMax || localMax <= storedHigh
-    const remoteStale = !remoteMax || remoteMax <= storedHigh
+    const highMs = tsMs(storedHigh)
+    const localStale = !localMax || tsMs(localMax) <= highMs
+    const remoteStale = !remoteMax || tsMs(remoteMax) <= highMs
     if (localStale && remoteStale) {
       stats.skipped = true
       // Touch last_reconciled_at so the UI/debug surface knows we ran.
@@ -1136,17 +1145,20 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     }
   }
 
-  // Both sides — LWW
+  // Both sides — LWW. Numeric compare via Date.parse so `…Z` and `…+00:00`
+  // for the same instant are treated as equal (see tsMs comment above).
   for (const id of localById.keys()) {
     if (!remoteById.has(id)) continue
     const local = localById.get(id)!
     const remote = remoteById.get(id)!
     const localUpdatedAt = desc.toRemote(local).updated_at
-    if (localUpdatedAt === remote.updated_at) {
+    const localMs = tsMs(localUpdatedAt)
+    const remoteMs = tsMs(remote.updated_at)
+    if (localMs === remoteMs) {
       stats.inSync++
       continue
     }
-    if (localUpdatedAt > remote.updated_at) {
+    if (localMs > remoteMs) {
       try {
         await desc.remoteUpsert(local)
         stats.pushed++
@@ -1165,15 +1177,17 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   }
 
   // Step 3 — advance the high-water only on a clean pass. With failures we
-  // leave it alone so the next reconcile re-checks the same rows.
+  // leave it alone so the next reconcile re-checks the same rows. Compare
+  // numerically (see tsMs comment above) so format-equivalent timestamps
+  // don't endlessly bounce the high-water back and forth.
   const nowIso = new Date().toISOString()
   if (stats.failed === 0) {
     const candidates = [localMax, remoteMax, storedHigh].filter(
       (v): v is string => typeof v === 'string'
     )
     if (candidates.length > 0) {
-      const newHigh = candidates.reduce((a, b) => (a > b ? a : b))
-      if (!storedHigh || newHigh > storedHigh) {
+      const newHigh = candidates.reduce((a, b) => (tsMs(a) > tsMs(b) ? a : b))
+      if (!storedHigh || tsMs(newHigh) > tsMs(storedHigh)) {
         await window.api.syncMeta.setHighWater(userId, scopeId, desc.name, newHigh)
       }
     }
