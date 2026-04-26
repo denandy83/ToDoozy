@@ -357,31 +357,18 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
   },
 
   toRemote(local) {
-    // Strip columns that exist only on the local SQLite `projects` table
-    // (`is_default`, `is_shared`, `sidebar_order`, `area_id`). Supabase
-    // rejects an upsert that names a column it doesn't have, which used to
-    // produce `Reconcile: projects — failed=N` for every personal project.
-    return {
-      id: local.id,
-      name: local.name,
-      description: local.description,
-      color: local.color,
-      icon: local.icon,
-      owner_id: local.owner_id,
-      auto_archive_enabled: local.auto_archive_enabled,
-      auto_archive_value: local.auto_archive_value,
-      auto_archive_unit: local.auto_archive_unit,
-      created_at: local.created_at,
-      updated_at: local.updated_at,
-      deleted_at: local.deleted_at
-    } as Project
+    // `is_shared` is a local-derived cache of "do we have project_members
+    // beyond the owner?" — `project_members` is the source of truth and it
+    // syncs on its own, so we deliberately don't ship the cache. Every
+    // other field is part of the synced project state.
+    const { is_shared, ...remote } = local
+    void is_shared
+    return remote as Project
   },
 
   fromRemote(remote) {
-    // Local-only fields (is_default/is_shared/sidebar_order/area_id) are
-    // absent from the remote row. ProjectRepository.applyRemote is the
-    // authoritative point that fills defaults for new rows and preserves
-    // existing local values for rows we already have.
+    // Remote rows don't carry `is_shared` — ProjectRepository.applyRemote
+    // preserves the local-computed value (or defaults to 0 for new rows).
     return remote
   }
 }

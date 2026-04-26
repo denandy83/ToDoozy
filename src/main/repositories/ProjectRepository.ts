@@ -146,14 +146,11 @@ export class ProjectRepository {
     ) {
       return existing
     }
-    // is_default/is_shared/sidebar_order/area_id are local-only columns
-    // (Supabase `projects` doesn't have them). For brand-new rows we apply
-    // sensible defaults; for existing rows we keep the local values intact
-    // (the ON CONFLICT branch deliberately omits these from the SET list).
-    const isDefault = existing?.is_default ?? 0
+    // `is_shared` is a local-only derived cache (computed from
+    // project_members membership). Preserve the existing local value, or
+    // default to 0 for brand-new rows — sync down for shared projects
+    // sets it to 1 explicitly elsewhere.
     const isShared = existing?.is_shared ?? 0
-    const sidebarOrder = existing?.sidebar_order ?? 0
-    const areaId = existing?.area_id ?? null
     this.db
       .prepare(
         `INSERT INTO projects (
@@ -168,6 +165,9 @@ export class ProjectRepository {
            color = excluded.color,
            icon = excluded.icon,
            owner_id = excluded.owner_id,
+           is_default = excluded.is_default,
+           sidebar_order = excluded.sidebar_order,
+           area_id = excluded.area_id,
            auto_archive_enabled = excluded.auto_archive_enabled,
            auto_archive_value = excluded.auto_archive_value,
            auto_archive_unit = excluded.auto_archive_unit,
@@ -182,10 +182,10 @@ export class ProjectRepository {
         remote.color,
         remote.icon,
         remote.owner_id,
-        isDefault,
+        remote.is_default ?? 0,
         isShared,
-        sidebarOrder,
-        areaId,
+        remote.sidebar_order ?? 0,
+        remote.area_id ?? null,
         remote.auto_archive_enabled,
         remote.auto_archive_value,
         remote.auto_archive_unit,
