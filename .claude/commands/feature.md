@@ -15,13 +15,13 @@ Stories implemented through this skill must walk this status lifecycle in real t
 |---|---|---|
 | User confirms the story (Phase 5 "no more features") and ralph is about to launch | **In Progress** | Phase 6, after `git checkout -b ralph/...` |
 | Ralph (or you) starts running `npm run typecheck` / `npm run test` for the story | **Testing** | Inside ralph's loop, or Phase 7 manual reruns |
-| All typecheck + Vitest tests pass cleanly (`passes: true` + `tested: true` in prd.json) | **Verified** | Inside ralph's loop after the green run |
+| All typecheck + Vitest tests pass cleanly (`passes: true` + `tested: true` in prd.json) | **Verifying** | Inside ralph's loop after the green run |
 | User confirms ALL acceptance criteria pass during Phase 7 walkthrough | **Done** | Phase 7 step 5 |
 
 Status IDs (Personal project):
 - In Progress: `b85b1973-ebc9-469b-b44c-52c3b91d4197`
 - Testing: `26686d55-1cfb-4fcd-ad19-674436b2392f`
-- Verified: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
+- Verifying: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
 - Done: `6c3b0144-8629-486f-8b10-d9fc4e5c35f5`
 
 A "corresponding ToDoozy task" for a story is one whose title matches the story title or contains `(#NN)` matching the story id. Search via `mcp__ToDoozy__search_tasks` if the link isn't obvious.
@@ -180,13 +180,13 @@ Now that all stories are defined:
    ./ralph.sh --tool claude 3
    ```
 
-Wait for ralph to complete. Ralph follows the lifecycle table at the top of this skill — it moves the task to **Testing** when it starts running typecheck/tests, then to **Verified** the moment `passes: true` + `tested: true` is committed. By the time ralph exits, every successful story should already be in Verified.
+Wait for ralph to complete. Ralph follows the lifecycle table at the top of this skill — it moves the task to **Testing** when it starts running typecheck/tests, then to **Verifying** the moment `passes: true` + `tested: true` is committed. By the time ralph exits, every successful story should already be in Verifying.
 
 ---
 
 ## Phase 7: User Verification
 
-After ralph finishes, every successful story should have `passes: true` and `tested: true` in prd.json, and its corresponding ToDoozy task should already be in **Verified** (ralph moved it through In Progress → Testing → Verified per the lifecycle table). If a task is still stuck in In Progress or Testing because ralph crashed or skipped a transition, fix it now: confirm the story passes locally (`npm run typecheck` + relevant tests) and move the task to **Verified** via MCP before continuing.
+After ralph finishes, every successful story should have `passes: true` and `tested: true` in prd.json, and its corresponding ToDoozy task should already be in **Verifying** (ralph moved it through In Progress → Testing → Verifying per the lifecycle table). If a task is still stuck in In Progress or Testing because ralph crashed or skipped a transition, fix it now: confirm the story passes locally (`npm run typecheck` + relevant tests) and move the task to **Verifying** via MCP before continuing.
 
 Acceptance-criteria walkthrough is done with the user:
 

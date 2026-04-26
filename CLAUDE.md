@@ -172,18 +172,18 @@ Task title should be clear and actionable. Description should include enough con
 - Not Started: `869ebe82-f249-4a81-b53a-ca23480b6e8c`
 - In Progress: `b85b1973-ebc9-469b-b44c-52c3b91d4197`
 - Testing: `26686d55-1cfb-4fcd-ad19-674436b2392f`
-- Verified: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
+- Verifying: `a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`
 - Done: `6c3b0144-8629-486f-8b10-d9fc4e5c35f5`
 
 When tackling a bug/improvement/feature from the ToDoozy task list, follow this lifecycle exactly:
 - **Starting work** (the moment the user says "let's fix X" / "add feature Y"): Move to **In Progress** (`b85b1973-ebc9-469b-b44c-52c3b91d4197`)
 - **Implementation done, starting to run tests/typecheck**: Move to **Testing** (`26686d55-1cfb-4fcd-ad19-674436b2392f`)
-- **All automated tests pass** (`npm run typecheck` + relevant Vitest tests green): Move to **Verified** (`a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`)
+- **All automated tests pass** (`npm run typecheck` + relevant Vitest tests green): Move to **Verifying** (`a4f8e2d1-9b3c-4e7f-8a1d-5c6b7e8f9a0b`)
 - **User confirms it works** ("yup that works", "confirmed", "ship it", etc.): Move to **Done** (`6c3b0144-8629-486f-8b10-d9fc4e5c35f5`)
 
-The status must reflect reality at every transition — never leave a task in Testing once tests have passed, and never leave a task in Verified once the user has confirmed. Move it the moment the trigger fires.
+The status must reflect reality at every transition — never leave a task in Testing once tests have passed, and never leave a task in Verifying once the user has confirmed. Move it the moment the trigger fires.
 
-For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — In Progress when starting, Testing while running tests, Verified when tests pass, Done when the user confirms.
+For **ralph stories** specifically: if a corresponding ToDoozy task exists (search by story title or `(#NN)` in the title), follow the same lifecycle — In Progress when starting, Testing while running tests, Verifying when tests pass, Done when the user confirms.
 
 ## "Show me ToDoozy bugs"
 
