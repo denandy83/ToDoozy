@@ -12,6 +12,7 @@ import { useSyncStore } from './shared/stores/syncStore'
 import { logEvent } from './shared/stores/logStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
+import { SessionBanner } from './shared/components/SessionBanner'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
 import { useViewStore } from './shared/stores/viewStore'
@@ -527,6 +528,7 @@ function App(): React.JSX.Element {
 
   return (
     <>
+      <SessionBanner />
       <AppLayout />
       {inviteState && (
         <InviteDialog

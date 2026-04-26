@@ -12,6 +12,23 @@ import { logEvent } from '../shared/stores/logStore'
 import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable } from './syncTables'
+import { requireSession } from './sessionRecovery'
+
+/**
+ * Returns true if a live Supabase session exists. All push/delete functions
+ * call this before issuing a write — without it, the request would go out
+ * unauthenticated and Supabase would reject it with RLS 42501. Skipping
+ * cleanly is preferable to spamming error logs; the change stays in local
+ * SQLite and the post-recovery reconcile picks it up.
+ */
+async function hasLiveSession(context: string, idDescriptor: string): Promise<boolean> {
+  const session = await requireSession()
+  if (!session) {
+    logEvent('warn', 'sync', `${context} skipped — no session`, idDescriptor)
+    return false
+  }
+  return true
+}
 
 /** Mark a successful push in the sync store */
 function markSynced(): void {
@@ -162,13 +179,9 @@ async function ensureProjectInSupabase(projectId: string): Promise<void> {
  * Push a single task to Supabase (upsert).
  */
 export async function pushTask(task: Task): Promise<void> {
+  if (!(await hasLiveSession('pushTask', `task=${task.id}`))) return
   try {
     const supabase = await getSupabase()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      logEvent('warn', 'sync', 'pushTask skipped — no session', `task=${task.id}`)
-      return
-    }
 
     // Ensure the project exists in Supabase (RLS requires project_members entry)
     await ensureProjectInSupabase(task.project_id)
@@ -262,6 +275,7 @@ export async function pushTask(task: Task): Promise<void> {
  */
 export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
   recentlyDeletedIds.add(taskId)
+  if (!(await hasLiveSession('deleteTask', `task=${taskId}`))) return
   try {
     const supabase = await getSupabase()
     const now = new Date().toISOString()
@@ -296,6 +310,7 @@ export async function pushStatus(status: Status): Promise<void> {
     created_at: status.created_at,
     updated_at: status.updated_at
   }
+  if (!(await hasLiveSession('pushStatus', `status=${status.id}`))) return
   try {
     await ensureProjectInSupabase(status.project_id)
     const supabase = await getSupabase()
@@ -324,6 +339,7 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
     updated_at: label.updated_at,
     deleted_at: label.deleted_at ?? null
   }
+  if (!(await hasLiveSession('pushLabel', `label=${label.id}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
@@ -343,6 +359,7 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
  * other devices learn the label is gone (Realtime UPDATE event).
  */
 export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
+  if (!(await hasLiveSession('deleteLabel', `label=${labelId}`))) return
   try {
     const supabase = await getSupabase()
     const now = new Date().toISOString()
@@ -373,6 +390,7 @@ async function pushSettingImmediate(key: string, value: string, userId: string):
     value,
     updated_at: new Date().toISOString()
   }
+  if (!(await hasLiveSession('pushSetting', `id=${id}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_settings').upsert(payload)
@@ -413,6 +431,7 @@ export async function pushSavedView(view: {
     deleted_at: view.deleted_at ?? null,
     updated_at: new Date().toISOString()
   }
+  if (!(await hasLiveSession('pushSavedView', `id=${view.id}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_saved_views').upsert(payload)
@@ -444,6 +463,7 @@ export async function pushProjectArea(area: {
     deleted_at: area.deleted_at ?? null,
     updated_at: new Date().toISOString()
   }
+  if (!(await hasLiveSession('pushProjectArea', `id=${area.id}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_project_areas').upsert(payload)
@@ -463,6 +483,7 @@ export async function pushProjectArea(area: {
 export async function deleteSavedViewFromSupabase(viewId: string): Promise<void> {
   const now = new Date().toISOString()
   const payload = { deleted_at: now, updated_at: now }
+  if (!(await hasLiveSession('deleteSavedView', `id=${viewId}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_saved_views').update(payload).eq('id', viewId)
@@ -483,6 +504,7 @@ export async function deleteSavedViewFromSupabase(viewId: string): Promise<void>
 export async function deleteProjectAreaFromSupabase(areaId: string): Promise<void> {
   const now = new Date().toISOString()
   const payload = { deleted_at: now, updated_at: now }
+  if (!(await hasLiveSession('deleteProjectArea', `id=${areaId}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_project_areas').update(payload).eq('id', areaId)
@@ -534,6 +556,7 @@ export async function pushTheme(theme: {
     updated_at: theme.updated_at ?? new Date().toISOString(),
     deleted_at: theme.deleted_at ?? null
   }
+  if (!(await hasLiveSession('pushTheme', `id=${theme.id}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_themes').upsert(payload)
@@ -553,6 +576,7 @@ export async function pushTheme(theme: {
  * via Realtime UPDATE so other devices can drop the row.
  */
 export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
+  if (!(await hasLiveSession('deleteTheme', `id=${themeId}`))) return
   try {
     const supabase = await getSupabase()
     const now = new Date().toISOString()
@@ -577,6 +601,7 @@ export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
  */
 export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
   const id = `${userId}:${key}`
+  if (!(await hasLiveSession('deleteSetting', `id=${id}`))) return
   try {
     const supabase = await getSupabase()
     const now = new Date().toISOString()
@@ -601,6 +626,7 @@ export async function deleteSettingFromSupabase(key: string, userId: string): Pr
  */
 export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
   const now = new Date().toISOString()
+  if (!(await hasLiveSession('deleteStatus', `id=${statusId}`))) return
   try {
     const supabase = await getSupabase()
     const { error } = await supabase
@@ -629,6 +655,7 @@ export async function deleteStatusFromSupabase(statusId: string): Promise<void> 
  */
 export async function deleteProjectFromSupabase(projectId: string): Promise<void> {
   const now = new Date().toISOString()
+  if (!(await hasLiveSession('deleteProject', `id=${projectId}`))) return
   try {
     const supabase = await getSupabase()
 
@@ -703,6 +730,7 @@ export async function pushProject(project: {
   created_at: string
   updated_at: string
 }): Promise<void> {
+  if (!(await hasLiveSession('pushProject', `id=${project.id}`))) return
   try {
     const supabase = await getSupabase()
     // Use the share_project RPC (SECURITY DEFINER) which atomically inserts
@@ -1841,6 +1869,15 @@ export async function subscribeToPersonalProject(
   onChange: (event: string, data: Record<string, unknown>) => void
 ): Promise<void> {
   if (personalChannelStates.has(projectId)) return
+  // Don't pile up zombie channels when running in offline-fallback mode —
+  // an unauthenticated channel still joins the WebSocket, but Postgres-side
+  // RLS filters every event so we'd be sitting on a dead listener that
+  // confuses the sync state. The recovery timer's onRecovered handler
+  // re-runs the subscription effect once the session is back.
+  if (!(await requireSession())) {
+    logEvent('warn', 'sync', 'subscribeToPersonalProject skipped — no session', `project=${projectId}`)
+    return
+  }
 
   const state: PersonalChannelState = {
     channel: null,

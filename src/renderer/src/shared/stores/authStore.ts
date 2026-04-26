@@ -4,6 +4,8 @@ import type { User, CreateUserInput, UpdateUserInput } from '../../../../shared/
 import { getSupabase, parseAuthTokensFromUrl } from '../../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 import { useSyncStore } from './syncStore'
+import { tryRestoreSession, startRecoveryTimer, stopRecoveryTimer } from '../../services/sessionRecovery'
+import { logEvent } from './logStore'
 
 interface AuthState {
   currentUser: User | null
@@ -118,6 +120,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   },
 
   async logout(): Promise<void> {
+    stopRecoveryTimer()
     try {
       const supabase = await getSupabase()
       await supabase.auth.signOut()
@@ -186,7 +189,8 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         data.user.user_metadata?.avatar_url ?? null
       )
       await get().ensureDefaultProject(localUser.id)
-      set({ currentUser: localUser, isAuthenticated: true, loading: false })
+      stopRecoveryTimer()
+      set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed'
       set({ error: message, loading: false })
@@ -334,18 +338,41 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         refresh_token: string
       }
 
+      // Three attempts with backoff before falling back — kills false positives
+      // from a single transient network blip during cold start.
+      const restored = await tryRestoreSession(3)
       const supabase = await getSupabase()
-      const { data, error } = await supabase.auth.setSession({
-        access_token: parsed.access_token,
-        refresh_token: parsed.refresh_token
-      })
+      const { data: { session } } = await supabase.auth.getSession()
+      const { data: userData } = await supabase.auth.getUser()
 
-      if (error || !data.session || !data.user) {
-        // Could be network failure or truly expired token — try offline fallback
-        console.warn('Session restore failed:', error?.message)
+      if (!restored || !session || !userData.user) {
+        logEvent('warn', 'sync', 'Session restore failed after 3 attempts — entering offline mode')
         const offlineUser = await offlineFallback(parsed)
         if (offlineUser) {
           set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
+          // Start the auto-retry timer so we recover the moment the network
+          // (or a fresh refresh) lets `setSession` succeed again.
+          startRecoveryTimer({
+            onRecovered: async () => {
+              const sb = await getSupabase()
+              const { data: { user } } = await sb.auth.getUser()
+              if (!user) return
+              await window.api.auth.switchDatabase(user.id, user.email ?? undefined)
+              const localUser = await ensureLocalUser(
+                user.id,
+                user.email ?? '',
+                user.user_metadata?.full_name ?? null,
+                user.user_metadata?.avatar_url ?? null
+              )
+              set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
+              try {
+                const { processSyncQueue } = await import('../../services/SyncService')
+                await processSyncQueue()
+              } catch (e) {
+                console.warn('[Auth] Queue drain after recovery failed:', e)
+              }
+            }
+          })
         } else {
           await window.api.auth.clearSession()
           set({ loading: false, error: 'Session expired — please log in again' })
@@ -353,18 +380,17 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         return
       }
 
-      // Session restored — update stored tokens (may have been refreshed)
-      await persistSession(data.session)
-      await window.api.auth.switchDatabase(data.user.id, data.user.email ?? undefined)
+      // Session restored — tryRestoreSession already persisted refreshed tokens
+      await window.api.auth.switchDatabase(userData.user.id, userData.user.email ?? undefined)
 
       const localUser = await ensureLocalUser(
-        data.user.id,
-        data.user.email ?? '',
-        data.user.user_metadata?.full_name ?? null,
-        data.user.user_metadata?.avatar_url ?? null
+        userData.user.id,
+        userData.user.email ?? '',
+        userData.user.user_metadata?.full_name ?? null,
+        userData.user.user_metadata?.avatar_url ?? null
       )
       await get().ensureDefaultProject(localUser.id)
-      set({ currentUser: localUser, isAuthenticated: true, loading: false })
+      set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
     } catch (err) {
       // Network error during session restore — try offline fallback
       console.warn('Auth init failed (possibly offline):', err)
@@ -374,6 +400,27 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       const offlineUser = await offlineFallback(parsed)
       if (offlineUser) {
         set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
+        startRecoveryTimer({
+          onRecovered: async () => {
+            const sb = await getSupabase()
+            const { data: { user } } = await sb.auth.getUser()
+            if (!user) return
+            await window.api.auth.switchDatabase(user.id, user.email ?? undefined)
+            const localUser = await ensureLocalUser(
+              user.id,
+              user.email ?? '',
+              user.user_metadata?.full_name ?? null,
+              user.user_metadata?.avatar_url ?? null
+            )
+            set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
+            try {
+              const { processSyncQueue } = await import('../../services/SyncService')
+              await processSyncQueue()
+            } catch (e) {
+              console.warn('[Auth] Queue drain after recovery failed:', e)
+            }
+          }
+        })
         return
       }
       set({ loading: false })

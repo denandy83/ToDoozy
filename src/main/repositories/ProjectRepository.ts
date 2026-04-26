@@ -138,9 +138,22 @@ export class ProjectRepository {
    */
   applyRemote(remote: Project): Project {
     const existing = this.findById(remote.id)
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch — local SQLite stores ISO `Z` form, Supabase
+    // returns `+00:00` form; lexical compare flags equal instants as drift.
+    if (
+      existing &&
+      Date.parse(existing.updated_at) >= Date.parse(remote.updated_at)
+    ) {
       return existing
     }
+    // is_default/is_shared/sidebar_order/area_id are local-only columns
+    // (Supabase `projects` doesn't have them). For brand-new rows we apply
+    // sensible defaults; for existing rows we keep the local values intact
+    // (the ON CONFLICT branch deliberately omits these from the SET list).
+    const isDefault = existing?.is_default ?? 0
+    const isShared = existing?.is_shared ?? 0
+    const sidebarOrder = existing?.sidebar_order ?? 0
+    const areaId = existing?.area_id ?? null
     this.db
       .prepare(
         `INSERT INTO projects (
@@ -155,10 +168,6 @@ export class ProjectRepository {
            color = excluded.color,
            icon = excluded.icon,
            owner_id = excluded.owner_id,
-           is_default = excluded.is_default,
-           is_shared = excluded.is_shared,
-           sidebar_order = excluded.sidebar_order,
-           area_id = excluded.area_id,
            auto_archive_enabled = excluded.auto_archive_enabled,
            auto_archive_value = excluded.auto_archive_value,
            auto_archive_unit = excluded.auto_archive_unit,
@@ -173,10 +182,10 @@ export class ProjectRepository {
         remote.color,
         remote.icon,
         remote.owner_id,
-        remote.is_default,
-        remote.is_shared,
-        remote.sidebar_order,
-        remote.area_id,
+        isDefault,
+        isShared,
+        sidebarOrder,
+        areaId,
         remote.auto_archive_enabled,
         remote.auto_archive_value,
         remote.auto_archive_unit,

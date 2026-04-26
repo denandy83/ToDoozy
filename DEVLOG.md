@@ -4,6 +4,29 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## v1.5.1 — Auto-recover dead Supabase sessions (2026-04-26)
+
+**Session type:** Bug fix on `fix/session-recovery` (off v1.5.0)
+
+**Symptom:** Renderer logs from a clean cold start showed `auth: SIGNED_OUT` events at boot, then every `pushSetting`/`pushTask` failed with `42501 — new row violates row-level security policy`. Tasks the user changed locally never reached Supabase. The 523-row reconcile push that fired on the previous boot turned out to be the v1.5.0 LWW pipeline correctly identifying drift accumulated during this very zombie state.
+
+**Root cause:** `persistSession: false` (we manage tokens through Electron `safeStorage`) means a single failed `setSession` call leaves the supabase-js client without a session. `initAuth` only attempted that call once. On failure it set `isOffline: true` and seeded `currentUser` from local SQLite, so the rest of the app ran as if logged in — but every push went out anonymously and got 42501'd by RLS, and Realtime channels joined the WebSocket as anonymous listeners. There was no recovery loop, no UI signal, no session guard on the writes.
+
+**Fix:**
+- New module `src/renderer/src/services/sessionRecovery.ts` centralizes session handling: `requireSession()`, `tryRestoreSession(attempts)` with `[1s, 2s, 4s]` backoff, `startRecoveryTimer({onRecovered})` ticking every 30s, `stopRecoveryTimer()`.
+- `authStore.initAuth` now retries `setSession` 3× before falling back; on fallback, the recovery timer runs and on success clears `isOffline`, switches DB, refreshes the local user, and drains `sync_queue` via `processSyncQueue()`.
+- `PersonalSyncService.ts`: every push (8 functions) and every soft-delete (8 functions) gets a `hasLiveSession` guard at the top — no session, log a warn, skip. `subscribeToPersonalProject` is gated on `requireSession()` so we never join Realtime as anonymous.
+- New `SessionBanner` component shown at the top of `App.tsx` when `isOffline === true`, with explicit "Retry now" / "Sign in again" actions. Amber styling matches the warn-log convention used elsewhere.
+- `logout()` + `signInWithEmail()` call `stopRecoveryTimer()` to prevent stale timers post-logout; successful sign-in explicitly clears `isOffline`.
+
+**Tests:** `npm run typecheck` clean. `npm run test` — only pre-existing date-dependent failures in `recurrenceUtils.test.ts` (5 tests, present before this change too); 725 passing. No tests added — the change is on the IPC/auth-IO boundary and is exercised by manual cold-start verification.
+
+**Strategic context:** Aligns with the long-term goal of byte-equal local/cloud parity for the upcoming iOS app and multi-thousand-user scale. A silent-zombie session was a class of bug that would have produced silent data loss at scale.
+
+**Follow-up in same release — Projects reconcile column mismatch + LWW format drift:** A second bug surfaced via `Reconcile: projects — failed=11`. `projectsDescriptor.toRemote` was returning the local row as-is, which included the local-only columns `is_default`, `is_shared`, `sidebar_order`, and `area_id`. Supabase's `projects` table doesn't have those columns and PostgREST rejected the upsert. Fix: `toRemote` now constructs an explicit remote payload with just the remote-existent columns. `ProjectRepository.applyRemote` was updated to preserve local-only fields on existing rows (omitted from the `ON CONFLICT DO UPDATE SET` list) and seed defaults for new ones. While in there, the LWW guard switched from string comparison to `Date.parse()` numeric comparison — Supabase returns timestamptz as `…+00:00` while local writes use `…Z`, and `'Z' > '+'` lexically, which would otherwise flag identical instants as drift. The user separately reported 523 then 181 redundant pushes across two sessions; with the session-recovery fix in place the queued backlog drained and current reconcile shows "skipped (no drift)" for tasks/statuses across all 10 personal projects.
+
+---
+
 ## v1.5.0 — Uniform sync architecture (2026-04-25)
 
 **Session type:** Architectural rebuild — 17-task workstream on `fix/realtime-wake-storm`

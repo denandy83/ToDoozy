@@ -161,3 +161,30 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Sync, schema, all repositories, Realtime, Electron main process startup.
 **Files changed:** src/main/database/migrations.ts, src/main/repositories/{Task,Label,Project,Status,Theme,Settings,SavedView,ProjectArea,SyncMeta}Repository.ts (+ tests), src/main/services/PurgeService.ts (new + tests), src/main/index.ts, src/main/ipc-handlers.ts, src/preload/index.ts, src/preload/index.d.ts, src/renderer/src/services/syncTables.ts (new + tests), src/renderer/src/services/PersonalSyncService.ts, src/renderer/src/services/SyncService.ts, src/renderer/src/lib/supabase.ts, src/renderer/src/App.tsx. Supabase migrations: deleted_at columns, indexes, purge_tombstones() function + pg_cron schedule.
 **Commit:** <fill in after squash merge to main>
+
+## 2026-04-26 — Fix: Auto-recover dead Supabase sessions (v1.5.1)
+**What was broken:** On cold start with a flaky network or expired refresh token, `setSession` would fail once and the app would silently fall back to "offline mode" — `currentUser` got set from local SQLite, Realtime channels joined the WebSocket without auth, and every push hit RLS 42501 because `auth.uid()` was null. The user had no indication anything was wrong, but every change they made was rejected and never reached the cloud. Logging out and logging back in was the only fix.
+**Root cause:** `initAuth()` only called `setSession` once with no retry, and there was no recovery loop — if the single attempt failed (transient network blip, slow DNS, refresh-token race), the app permanently stayed in zombie mode. Worse, every push function blindly called `supabase.from(...).upsert(...)` without verifying a session existed first, so the requests went out as anonymous and were rejected by RLS. Realtime subscriptions also joined the WebSocket without checking, producing dead listeners.
+**What was fixed:**
+- Created `src/renderer/src/services/sessionRecovery.ts` exporting `requireSession()`, `tryRestoreSession(attempts)`, `startRecoveryTimer({onRecovered})`, and `stopRecoveryTimer()`.
+- `initAuth()` now calls `tryRestoreSession(3)` (1s/2s/4s exponential backoff) before falling back to offline mode.
+- When offline-fallback is the final state, `startRecoveryTimer()` starts a 30s background loop. On successful restore it clears `isOffline`, switches the DB, refreshes the local user, and calls `processSyncQueue()` to drain pending changes.
+- Every push function in `PersonalSyncService.ts` (pushTask, pushStatus, pushLabel, pushSetting, pushSavedView, pushProjectArea, pushTheme, pushProject) and every soft-delete (deleteTaskFromSupabase + 7 siblings) now calls `requireSession()` first and skips cleanly with a warn-level log if there's no session.
+- `subscribeToPersonalProject()` is gated on `requireSession()` — no more dead Realtime listeners.
+- Added `SessionBanner` component (top of app) shown while `isOffline === true`, with "Retry now" and "Sign in again" actions.
+- `logout()` and `signInWithEmail()` call `stopRecoveryTimer()` to prevent stale timers from firing post-logout. Successful sign-in also explicitly clears `isOffline`.
+**User-facing impact:** When the network blips or a refresh token momentarily fails, the app now retries, recovers automatically within 30 seconds, and pushes any queued changes. If recovery fails for an extended period, an amber banner appears with explicit retry/sign-in actions. No more silent data loss to RLS 42501.
+**Affected area:** Auth, sync, Realtime, root layout.
+**Files changed:** src/renderer/src/services/sessionRecovery.ts (new), src/renderer/src/services/PersonalSyncService.ts, src/renderer/src/shared/stores/authStore.ts, src/renderer/src/shared/components/SessionBanner.tsx (new), src/renderer/src/App.tsx, package.json (1.5.0 → 1.5.1).
+**Commit:** <fill in after squash merge to main>
+
+## 2026-04-26 — Fix: Projects reconcile failed=N + LWW timestamp format drift (v1.5.1 follow-up)
+**What was broken:** Every reconcile cycle logged `Reconcile: projects — pushed=0 pulled=0 inSync=0 failed=N` for personal-project rows. None propagated, so any project edit (rename, color change, area assignment, etc.) made on one device never reached the cloud or other devices.
+**Root cause:** Two distinct issues in the projects sync path: (1) `projectsDescriptor.toRemote` returned `local` as-is, which includes the local-only columns `is_default`, `is_shared`, `sidebar_order`, and `area_id`. Supabase's `projects` table doesn't have those columns, so PostgREST rejected the upsert with "column does not exist" — silently caught and counted as `failed`. (2) `ProjectRepository.applyRemote` then bound `undefined` for those same fields when applying remote rows back, and it compared `existing.updated_at >= remote.updated_at` as plain strings — but local writes use `…Z` form and Supabase returns `…+00:00` form for the same instant, so the lexical comparison flagged equal moments as drift.
+**What was fixed:**
+- `projectsDescriptor.toRemote` now constructs an explicit object with only the remote-existent columns. Local-only metadata stays local.
+- `ProjectRepository.applyRemote` now reads `existing` once and either keeps its local-only values (UPSERT branch omits them from the `SET` list) or seeds defaults for brand-new rows. The LWW guard uses `Date.parse()` numeric comparison so format-equivalent timestamps compare equal.
+**User-facing impact:** Project changes (rename, color, area, default flag) now sync cross-device on the same cycle. The `Reconcile: projects — failed=N` warning disappears.
+**Affected area:** Sync (projects table only — task/status/label/etc. paths unchanged here).
+**Files changed:** src/renderer/src/services/syncTables.ts, src/main/repositories/ProjectRepository.ts.
+**Commit:** <fill in after squash merge to main>

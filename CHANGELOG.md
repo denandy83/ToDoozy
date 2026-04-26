@@ -4,6 +4,15 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.5.1
+
+- **Projects reconcile no longer fails on every cycle** — `Reconcile: projects — pushed=0 pulled=0 inSync=0 failed=N` was firing once per reconcile because `toRemote` shipped the local-only columns `is_default`, `is_shared`, `sidebar_order`, `area_id` to Supabase, which doesn't have those columns and rejected the upsert. The descriptor now strips them before the push, and `ProjectRepository.applyRemote` preserves existing local values (and seeds defaults for brand-new rows) instead of binding the remote row's `undefined` for those fields.
+- **`applyRemote` LWW uses numeric epoch comparison** — `Date.parse()` for both sides, so a local row written as `…Z` and a remote row returned as `…+00:00` for the same instant no longer compare unequal (they used to, because `'Z' > '+'` lexically — the silent cause of redundant pushes).
+- **Auto-recover dead Supabase sessions** — When `setSession` fails on cold start (network blip, expired refresh token), the app used to enter a silent "zombie" state: `currentUser` was set from local SQLite, Realtime channels joined the WebSocket without auth, and every push hit RLS 42501 because `auth.uid()` was null. Now `initAuth` retries `setSession` 3× with exponential backoff (1s/2s/4s) before falling back, and every 30 seconds while offline a recovery timer re-attempts restore. On success, the queue is drained and sync resumes — no logout/login required.
+- **Session guards on every push and delete** — Every Supabase write (tasks, statuses, projects, labels, themes, settings, saved views, project areas, and their soft-deletes) now calls `requireSession()` first and skips cleanly with a warn-level log when there's no session, instead of issuing an anonymous request that gets rejected by RLS.
+- **Realtime subscriptions gated on a live session** — `subscribeToPersonalProject` no longer joins the WebSocket when there's no session, so we don't end up with dead listeners that never receive events.
+- **"Sync paused" banner when offline** — A persistent amber banner appears at the top of the app whenever the auth store is in offline-fallback mode, with "Retry now" and "Sign in again" actions. Users see the state immediately instead of silently losing changes to RLS.
+
 ## v1.5.0
 
 - **Uniform sync architecture** — Every syncable table (tasks, statuses, projects, labels, themes, settings, saved views, project areas) now uses the same soft-delete + reconcile pipeline. Deletes set `deleted_at` and propagate via Supabase Realtime UPDATE events instead of hard DELETE so peers can converge after offline gaps.
