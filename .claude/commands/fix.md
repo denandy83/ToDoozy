@@ -308,6 +308,39 @@ After the fix is merged, update `scope.md`:
 
 ---
 
+## Phase 7: Hand Off — Signal Ready for Fresh Context
+
+**Precondition:** ONLY run this phase after the user has explicitly confirmed the fix works (i.e. you've completed Phase 6 squash-merge already). Do NOT prompt for `/clear` or `/buildit` while the fix is still being verified, while you're mid-iteration in Phase 5, or before the merge has happened. If the user hasn't confirmed yet, stay paused and wait for their verdict — Phase 7 is strictly post-confirmation.
+
+Once confirmation has landed and the merge is done: this is the final step. Do NOT skip it. The user wants an explicit checkpoint before starting fresh.
+
+Before signing off, verify every persistent artifact is written and committed. Walk this checklist out loud (one short bullet each — confirm done or note N/A):
+
+- [ ] Diagnostic logs removed (grep your changes, not the whole repo)
+- [ ] Fix branch squash-merged into the original branch
+- [ ] `npm run typecheck` passes
+- [ ] Existing tests still pass (`npm run test` if any tests touch the area)
+- [ ] `pending-changes.md` entry appended (full format)
+- [ ] `CHANGELOG.md` bullet appended under the current version
+- [ ] `RELEASE_NOTES.md` bullet appended (if user-facing)
+- [ ] `HELP.md` + `HelpSettingsContent.tsx` updated (if user-facing behavior changed)
+- [ ] `debug-learnings.md` / `ui-learnings.md` updated (if a reusable pattern emerged)
+- [ ] `ui-reference.md` updated (only if design spec changed)
+- [ ] `scope.md` updated or cleared
+- [ ] `.last-documented-commit` written with the new HEAD
+- [ ] ToDoozy task moved to Testing (if a task ID was in scope)
+- [ ] Final `git status` is clean (or only intentional remaining changes)
+
+Run `git status` one last time to confirm the tree is clean.
+
+Then end your reply with this exact line so the user knows it's safe to context-switch:
+
+> **Ready for `/clear` or `/buildit` — context can be reset.**
+
+If anything in the checklist is intentionally skipped, call it out briefly above that line so the user can decide whether to push back.
+
+---
+
 ## Rules
 
 - **Never guess.** If you're not sure, ask the user or read more code. Reading 5 files is cheaper than 3 failed attempts.
