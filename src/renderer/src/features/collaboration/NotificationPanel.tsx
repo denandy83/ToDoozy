@@ -3,10 +3,11 @@
  * to the relevant task/project and mark as read.
  */
 import { useEffect, useRef } from 'react'
-import { X, CheckCheck } from 'lucide-react'
+import { Trash2, CheckCheck } from 'lucide-react'
 import { useNotificationStore } from '../../shared/stores/notificationStore'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useTaskStore } from '../../shared/stores/taskStore'
+import { useToast } from '../../shared/components/Toast'
 
 export function NotificationPanel(): React.JSX.Element | null {
   const panelOpen = useNotificationStore((s) => s.panelOpen)
@@ -14,6 +15,8 @@ export function NotificationPanel(): React.JSX.Element | null {
   const notifications = useNotificationStore((s) => s.notifications)
   const markAsRead = useNotificationStore((s) => s.markAsRead)
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead)
+  const deleteAllNotifications = useNotificationStore((s) => s.deleteAllNotifications)
+  const { addToast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Close on Escape
@@ -29,15 +32,17 @@ export function NotificationPanel(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', handleKey, true)
   }, [panelOpen, closePanel])
 
-  // Close on click outside
+  // Close on click outside (bell button shares the same `relative` parent
+  // as the panel — treating it as "inside" lets the bell click toggle closed
+  // instead of being closed here and then re-opened by the bell's onClick).
   useEffect(() => {
     if (!panelOpen) return
     const handler = (e: MouseEvent): void => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      const wrapper = panelRef.current?.parentElement
+      if (wrapper && !wrapper.contains(e.target as Node)) {
         closePanel()
       }
     }
-    // Delay to avoid closing immediately on bell click
     setTimeout(() => document.addEventListener('mousedown', handler), 0)
     return () => document.removeEventListener('mousedown', handler)
   }, [panelOpen, closePanel])
@@ -67,6 +72,30 @@ export function NotificationPanel(): React.JSX.Element | null {
     return `${days}d ago`
   }
 
+  const handleClearAll = (): void => {
+    if (notifications.length === 0) return
+    addToast({
+      message: `Delete all ${notifications.length} notification${notifications.length === 1 ? '' : 's'}?`,
+      persistent: true,
+      actions: [
+        {
+          label: 'Delete',
+          variant: 'danger',
+          onClick: () => {
+            void deleteAllNotifications()
+          }
+        },
+        {
+          label: 'Cancel',
+          variant: 'muted',
+          onClick: () => {
+            // no-op — toast closes automatically
+          }
+        }
+      ]
+    })
+  }
+
   return (
     <div
       ref={panelRef}
@@ -85,10 +114,13 @@ export function NotificationPanel(): React.JSX.Element | null {
             <CheckCheck size={14} />
           </button>
           <button
-            onClick={closePanel}
-            className="rounded p-1 text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
+            onClick={handleClearAll}
+            disabled={notifications.length === 0}
+            className="rounded p-1 text-muted transition-colors hover:bg-foreground/6 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
+            title="Delete all notifications"
+            aria-label="Delete all notifications"
           >
-            <X size={14} />
+            <Trash2 size={14} />
           </button>
         </div>
       </div>

@@ -318,6 +318,7 @@ export interface NotificationsAPI {
   markAsRead(id: string): Promise<boolean>
   markAllAsRead(): Promise<number>
   deleteNotification(id: string): Promise<boolean>
+  deleteAll(): Promise<number>
 }
 
 export interface SyncAPI {

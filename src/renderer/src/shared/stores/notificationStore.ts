@@ -14,6 +14,7 @@ interface NotificationActions {
   markAsRead(id: string): Promise<void>
   markAllAsRead(): Promise<void>
   deleteNotification(id: string): Promise<void>
+  deleteAllNotifications(): Promise<void>
   togglePanel(): void
   closePanel(): void
 }
@@ -68,6 +69,11 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
           unreadCount: removed?.read === 0 ? state.unreadCount - 1 : state.unreadCount
         }
       })
+    },
+
+    deleteAllNotifications: async () => {
+      await window.api.notifications.deleteAll()
+      set({ notifications: [], unreadCount: 0 })
     },
 
     togglePanel: () => set((state) => ({ panelOpen: !state.panelOpen })),

@@ -267,7 +267,8 @@ const api: TodoozyAPI = {
     create: (input) => ipcRenderer.invoke('notifications:create', input),
     markAsRead: (id) => ipcRenderer.invoke('notifications:markAsRead', id),
     markAllAsRead: () => ipcRenderer.invoke('notifications:markAllAsRead'),
-    deleteNotification: (id) => ipcRenderer.invoke('notifications:deleteNotification', id)
+    deleteNotification: (id) => ipcRenderer.invoke('notifications:deleteNotification', id),
+    deleteAll: () => ipcRenderer.invoke('notifications:deleteAll')
   },
 
   sync: {

@@ -116,6 +116,22 @@ describe('NotificationRepository', () => {
     expect(notification.project_id).toBeNull()
   })
 
+  it('deletes all notifications', () => {
+    repo.create({ id: randomUUID(), type: 'a', message: 'One' })
+    repo.create({ id: randomUUID(), type: 'b', message: 'Two' })
+    repo.create({ id: randomUUID(), type: 'c', message: 'Three' })
+    expect(repo.findAll()).toHaveLength(3)
+
+    const count = repo.deleteAll()
+    expect(count).toBe(3)
+    expect(repo.findAll()).toHaveLength(0)
+    expect(repo.getUnreadCount()).toBe(0)
+  })
+
+  it('deleteAll returns 0 on empty table', () => {
+    expect(repo.deleteAll()).toBe(0)
+  })
+
   it('respects limit in findAll', () => {
     for (let i = 0; i < 10; i++) {
       repo.create({ id: randomUUID(), type: 'a', message: `Notification ${i}` })

@@ -927,6 +927,10 @@ export function registerIpcHandlers(): void {
     return getRepos().notifications.delete(id)
   })
 
+  ipcMain.handle('notifications:deleteAll', () => {
+    return getRepos().notifications.deleteAll()
+  })
+
   // ── Sync Queue ────────────────────────────────────────────────────
   ipcMain.handle('sync:getQueue', () => {
     return getRepos().syncQueue.findAll()

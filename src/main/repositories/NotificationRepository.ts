@@ -65,4 +65,9 @@ export class NotificationRepository {
     const result = this.db.prepare('DELETE FROM notifications WHERE project_id = ?').run(projectId)
     return Number(result.changes)
   }
+
+  deleteAll(): number {
+    const result = this.db.prepare('DELETE FROM notifications').run()
+    return Number(result.changes)
+  }
 }
