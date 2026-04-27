@@ -1808,6 +1808,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
           const sample = missingInRemote.slice(0, 5).map((p) => `${p.task_id}::${p.label_id}`).join(',')
           logEvent('info', 'sync', `Reconcile: task_labels diff — local=${localPairs.length} remote=${remotePairs.length} missingInRemote=${missingInRemote.length}`, `sample=${sample}`)
         }
+        let tlPushed = 0
         for (let i = 0; i < missingInRemote.length; i += chunkSize) {
           const chunk = missingInRemote.slice(i, i + chunkSize)
           // Use .select() to get back the rows that were actually upserted —
@@ -1826,19 +1827,26 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
           if (actuallyInserted < chunk.length) {
             logEvent('warn', 'sync', `Reconcile: task_labels partial push — sent=${chunk.length} accepted=${actuallyInserted}`, 'rows silently dropped (likely RLS or FK)')
           }
-          totalPushed += actuallyInserted
+          tlPushed += actuallyInserted
         }
+        totalPushed += tlPushed
 
         const missingInLocal = remotePairs.filter((p) => !localKeySet.has(pairKey(p.task_id, p.label_id)))
+        let tlPulled = 0
         for (const p of missingInLocal) {
           const localLabel = await window.api.labels.findById(p.label_id)
           if (!localLabel) continue
           try {
             await window.api.tasks.addLabel(p.task_id, p.label_id)
-            totalPulled++
+            tlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.
           }
+        }
+        totalPulled += tlPulled
+
+        if (tlPushed > 0 || tlPulled > 0) {
+          logEvent('info', 'sync', `Reconcile: task_labels`, `pushed=${tlPushed} pulled=${tlPulled}`)
         }
       }
     } catch (e) {
@@ -1925,6 +1933,19 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             }
           }
         }
+        // Diagnostic: surface project_labels drift before pushing — recurring
+        // counts here usually mean a filter mismatch between local and remote
+        // reads (the bug fixed by getProjectLabelsForOwner's is_shared filter).
+        if (toPush.length > 0) {
+          const sample = toPush.slice(0, 5).map((p) => `${p.project_id}::${p.label_id}`).join(',')
+          logEvent(
+            'info',
+            'sync',
+            `Reconcile: project_labels diff — local=${localProjectLabels.length} remote=${remotePairs.length} toPush=${toPush.length}`,
+            `sample=${sample}`
+          )
+        }
+        let plPushed = 0
         for (let i = 0; i < toPush.length; i += chunkSize) {
           const chunk = toPush.slice(i, i + chunkSize)
           const { error: upsertErr } = await supabase
@@ -1934,13 +1955,15 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             logEvent('error', 'sync', 'Reconcile: push project_labels failed', `err=${upsertErr.message}`)
             break
           }
-          totalPushed += chunk.length
+          plPushed += chunk.length
         }
+        totalPushed += plPushed
 
         // Pull: rows on remote that aren't local, or that have a newer
         // tombstone than local. Skip if the label_id isn't on this device
         // yet (the labels reconcile in step 3 will pull the label first;
         // the next reconcile pass picks up the link).
+        let plPulled = 0
         for (const remote of remotePairs) {
           const key = pairKey(remote.project_id, remote.label_id)
           const local = localByKey.get(key)
@@ -1957,12 +1980,358 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             created_at: remote.created_at,
             deleted_at: remote.deleted_at
           })
-          totalPulled++
+          plPulled++
+        }
+        totalPulled += plPulled
+
+        if (plPushed > 0 || plPulled > 0) {
+          logEvent('info', 'sync', `Reconcile: project_labels`, `pushed=${plPushed} pulled=${plPulled}`)
         }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       logEvent('error', 'sync', 'Reconcile: project_labels diff failed', msg)
+    }
+
+    // 6. Shared-project label propagation. The shared Realtime channel only
+    // subscribes to tasks/statuses/project_members/activity_log, so label
+    // changes by collaborators don't reach this client via Realtime. This
+    // stage closes the gap with eventual consistency by diffing task_labels
+    // and project_labels for shared projects, then pulling any referenced
+    // labels that don't yet exist locally. RLS on user_labels must allow
+    // reading rows referenced by accessible task_labels/project_labels for
+    // pulls to materialize; if it doesn't, the fetch returns empty and we
+    // log without breaking the rest of reconcile.
+    try {
+      const sharedProjects = allProjects.filter((p) => p.is_shared === 1)
+      if (sharedProjects.length > 0) {
+        const sharedProjectIds = sharedProjects.map((p) => p.id)
+        const tlPairKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
+        const plPairKey = (projectId: string, labelId: string): string =>
+          `${projectId}::${labelId}`
+        const chunkSize = 500
+
+        // Collect all task IDs across all shared projects (active + archived + templates).
+        const sharedTaskIds: string[] = []
+        for (const project of sharedProjects) {
+          const tasks = await window.api.tasks.findByProjectId(project.id)
+          const archived = await window.api.tasks.findArchived(project.id)
+          const templates = await window.api.tasks.findTemplates(project.id)
+          for (const t of [...tasks, ...archived, ...templates]) sharedTaskIds.push(t.id)
+        }
+
+        // ── task_labels (shared) ──────────────────────────────────────────
+        const localSharedTl = await window.api.tasks.getTaskLabelsForSharedProjects()
+        const localSharedTlSet = new Set<string>(
+          localSharedTl.map((p) => tlPairKey(p.task_id, p.label_id))
+        )
+
+        const remoteSharedTl: Array<{ task_id: string; label_id: string }> = []
+        let tlFetchOk = true
+        for (let i = 0; i < sharedTaskIds.length; i += chunkSize) {
+          const chunk = sharedTaskIds.slice(i, i + chunkSize)
+          if (chunk.length === 0) break
+          const { data, error: tlErr } = await supabase
+            .from('task_labels')
+            .select('task_id, label_id')
+            .in('task_id', chunk)
+          if (tlErr) {
+            logEvent(
+              'error',
+              'sync',
+              'Reconcile: list shared task_labels failed',
+              `err=${tlErr.message}`
+            )
+            tlFetchOk = false
+            break
+          }
+          if (data) remoteSharedTl.push(...data)
+        }
+
+        let shTlPushed = 0
+        let shTlPulled = 0
+        const tlMissingLocal: Array<{ task_id: string; label_id: string }> = []
+        if (tlFetchOk) {
+          const remoteSharedTlSet = new Set<string>(
+            remoteSharedTl.map((p) => tlPairKey(p.task_id, p.label_id))
+          )
+
+          const tlToPush = localSharedTl.filter(
+            (p) => !remoteSharedTlSet.has(tlPairKey(p.task_id, p.label_id))
+          )
+          if (tlToPush.length > 0) {
+            const sample = tlToPush
+              .slice(0, 5)
+              .map((p) => `${p.task_id}::${p.label_id}`)
+              .join(',')
+            logEvent(
+              'info',
+              'sync',
+              `Reconcile: shared task_labels diff — local=${localSharedTl.length} remote=${remoteSharedTl.length} toPush=${tlToPush.length}`,
+              `sample=${sample}`
+            )
+            for (let i = 0; i < tlToPush.length; i += chunkSize) {
+              const chunk = tlToPush.slice(i, i + chunkSize)
+              const { data: returned, error: upsertErr } = await supabase
+                .from('task_labels')
+                .upsert(
+                  chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })),
+                  { onConflict: 'task_id,label_id' }
+                )
+                .select()
+              if (upsertErr) {
+                logEvent(
+                  'error',
+                  'sync',
+                  'Reconcile: push shared task_labels failed',
+                  `err=${upsertErr.message}`
+                )
+                break
+              }
+              const accepted = returned?.length ?? 0
+              if (accepted < chunk.length) {
+                logEvent(
+                  'warn',
+                  'sync',
+                  `Reconcile: shared task_labels partial push — sent=${chunk.length} accepted=${accepted}`,
+                  'rows silently dropped (likely RLS or FK)'
+                )
+              }
+              shTlPushed += accepted
+            }
+          }
+
+          for (const r of remoteSharedTl) {
+            if (!localSharedTlSet.has(tlPairKey(r.task_id, r.label_id))) tlMissingLocal.push(r)
+          }
+        }
+
+        // ── project_labels (shared) ───────────────────────────────────────
+        const localSharedPl = await window.api.labels.getProjectLabelsForSharedProjects()
+        const localSharedPlByKey = new Map(
+          localSharedPl.map((p) => [plPairKey(p.project_id, p.label_id), p])
+        )
+
+        const remoteSharedPl: Array<{
+          project_id: string
+          label_id: string
+          created_at: string | null
+          deleted_at: string | null
+        }> = []
+        let plFetchOk = true
+        for (let i = 0; i < sharedProjectIds.length; i += chunkSize) {
+          const chunk = sharedProjectIds.slice(i, i + chunkSize)
+          const { data, error: plErr } = await supabase
+            .from('project_labels')
+            .select('project_id, label_id, created_at, deleted_at')
+            .in('project_id', chunk)
+          if (plErr) {
+            logEvent(
+              'error',
+              'sync',
+              'Reconcile: list shared project_labels failed',
+              `err=${plErr.message}`
+            )
+            plFetchOk = false
+            break
+          }
+          if (data) {
+            remoteSharedPl.push(
+              ...(data as Array<{
+                project_id: string
+                label_id: string
+                created_at: string | null
+                deleted_at: string | null
+              }>)
+            )
+          }
+        }
+
+        let shPlPushed = 0
+        let shPlPulled = 0
+        const plToApply: typeof remoteSharedPl = []
+        if (plFetchOk) {
+          const remoteSharedPlByKey = new Map(
+            remoteSharedPl.map((p) => [plPairKey(p.project_id, p.label_id), p])
+          )
+
+          const plToPush: Array<{
+            project_id: string
+            label_id: string
+            created_at: string
+            deleted_at: string | null
+          }> = []
+          for (const local of localSharedPl) {
+            const key = plPairKey(local.project_id, local.label_id)
+            const remote = remoteSharedPlByKey.get(key)
+            if (!remote) {
+              plToPush.push({
+                project_id: local.project_id,
+                label_id: local.label_id,
+                created_at: local.created_at,
+                deleted_at: local.deleted_at
+              })
+            } else if ((local.deleted_at ?? null) !== (remote.deleted_at ?? null)) {
+              const localDel = local.deleted_at ? Date.parse(local.deleted_at) : 0
+              const remoteDel = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+              if (localDel > remoteDel) {
+                plToPush.push({
+                  project_id: local.project_id,
+                  label_id: local.label_id,
+                  created_at: local.created_at,
+                  deleted_at: local.deleted_at
+                })
+              }
+            }
+          }
+          if (plToPush.length > 0) {
+            const sample = plToPush
+              .slice(0, 5)
+              .map((p) => `${p.project_id}::${p.label_id}`)
+              .join(',')
+            logEvent(
+              'info',
+              'sync',
+              `Reconcile: shared project_labels diff — local=${localSharedPl.length} remote=${remoteSharedPl.length} toPush=${plToPush.length}`,
+              `sample=${sample}`
+            )
+            for (let i = 0; i < plToPush.length; i += chunkSize) {
+              const chunk = plToPush.slice(i, i + chunkSize)
+              const { error: upsertErr } = await supabase
+                .from('project_labels')
+                .upsert(chunk, { onConflict: 'project_id,label_id' })
+              if (upsertErr) {
+                logEvent(
+                  'error',
+                  'sync',
+                  'Reconcile: push shared project_labels failed',
+                  `err=${upsertErr.message}`
+                )
+                break
+              }
+              shPlPushed += chunk.length
+            }
+          }
+
+          for (const remote of remoteSharedPl) {
+            const local = localSharedPlByKey.get(plPairKey(remote.project_id, remote.label_id))
+            if (!local) {
+              plToApply.push(remote)
+            } else {
+              const localDel = local.deleted_at ? Date.parse(local.deleted_at) : 0
+              const remoteDel = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+              if (remoteDel > localDel) plToApply.push(remote)
+            }
+          }
+        }
+
+        // ── Resolve missing labels referenced by pulls ────────────────────
+        // Both junction tables can reference labels owned by collaborators.
+        // Collect label_ids from pull candidates and fetch any rows that
+        // aren't on this device yet from `user_labels`. RLS may filter; the
+        // shTlPulled / shPlPulled counts below will reflect what actually
+        // landed.
+        const referencedLabelIds = new Set<string>()
+        for (const r of tlMissingLocal) referencedLabelIds.add(r.label_id)
+        for (const r of plToApply) referencedLabelIds.add(r.label_id)
+
+        let shLabelsPulled = 0
+        if (referencedLabelIds.size > 0) {
+          const missingLabelIds: string[] = []
+          for (const lid of referencedLabelIds) {
+            const exists = await window.api.labels.findById(lid)
+            if (!exists) missingLabelIds.push(lid)
+          }
+          if (missingLabelIds.length > 0) {
+            const fetched: Array<Record<string, unknown>> = []
+            for (let i = 0; i < missingLabelIds.length; i += chunkSize) {
+              const chunk = missingLabelIds.slice(i, i + chunkSize)
+              const { data, error: lblErr } = await supabase
+                .from('user_labels')
+                .select('*')
+                .in('id', chunk)
+              if (lblErr) {
+                logEvent(
+                  'error',
+                  'sync',
+                  'Reconcile: fetch shared labels failed',
+                  `err=${lblErr.message}`
+                )
+                break
+              }
+              if (data) fetched.push(...(data as Array<Record<string, unknown>>))
+            }
+            if (fetched.length < missingLabelIds.length) {
+              const fetchedIds = new Set(fetched.map((r) => String(r.id)))
+              const unreadable = missingLabelIds.filter((id) => !fetchedIds.has(id))
+              const sample = unreadable.slice(0, 5).join(',')
+              logEvent(
+                'warn',
+                'sync',
+                `Reconcile: shared labels — ${unreadable.length} of ${missingLabelIds.length} not readable (RLS or deleted)`,
+                `ids=${sample} — collaborator-owned labels may need an RLS policy`
+              )
+            }
+            for (const remote of fetched) {
+              try {
+                await window.api.labels.applyRemote(remote as unknown as Label)
+                shLabelsPulled++
+              } catch (e) {
+                logEvent(
+                  'warn',
+                  'sync',
+                  'Reconcile: shared label apply failed',
+                  `id=${String(remote.id)} err=${e instanceof Error ? e.message : String(e)}`
+                )
+              }
+            }
+          }
+        }
+
+        // ── Apply pulls now that referenced labels exist locally ──────────
+        for (const remote of tlMissingLocal) {
+          const labelExists = await window.api.labels.findById(remote.label_id)
+          if (!labelExists) continue
+          try {
+            await window.api.tasks.addLabel(remote.task_id, remote.label_id)
+            shTlPulled++
+          } catch {
+            // addLabel is idempotent (UNIQUE constraint); ignore races.
+          }
+        }
+        for (const remote of plToApply) {
+          const labelExists = await window.api.labels.findById(remote.label_id)
+          if (!labelExists) continue
+          await window.api.labels.applyRemoteProjectLabel({
+            project_id: remote.project_id,
+            label_id: remote.label_id,
+            created_at: remote.created_at,
+            deleted_at: remote.deleted_at
+          })
+          shPlPulled++
+        }
+
+        totalPushed += shTlPushed + shPlPushed
+        totalPulled += shTlPulled + shPlPulled + shLabelsPulled
+
+        if (
+          shTlPushed > 0 ||
+          shTlPulled > 0 ||
+          shPlPushed > 0 ||
+          shPlPulled > 0 ||
+          shLabelsPulled > 0
+        ) {
+          logEvent(
+            'info',
+            'sync',
+            'Reconcile: shared-project labels',
+            `task_labels=${shTlPushed}/${shTlPulled} project_labels=${shPlPushed}/${shPlPulled} labels=0/${shLabelsPulled} (push/pull)`
+          )
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      logEvent('error', 'sync', 'Reconcile: shared-project labels failed', msg)
     }
 
     if (totalPushed > 0 || totalPulled > 0) {

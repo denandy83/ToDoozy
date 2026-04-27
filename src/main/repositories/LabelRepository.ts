@@ -324,7 +324,12 @@ export class LabelRepository {
 
   /**
    * Sync-layer list. Returns every project_labels row (including tombstones)
-   * for projects owned by `userId`. Used by reconcile to diff local vs remote.
+   * for personal projects owned by `userId`. Shared projects are excluded
+   * because reconcile diffs personal-scoped and shared-scoped tables in
+   * separate stages (see getProjectLabelsForSharedProjects). Without this
+   * filter, project_labels on shared projects would appear "missing" on the
+   * remote side of the personal diff (which only SELECTs personal project
+   * IDs) and get re-pushed every reconcile cycle.
    */
   getProjectLabelsForOwner(
     userId: string
@@ -334,9 +339,36 @@ export class LabelRepository {
         `SELECT pl.project_id, pl.label_id, pl.created_at, pl.deleted_at
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
-         WHERE p.owner_id = ?`
+         WHERE p.owner_id = ?
+           AND COALESCE(p.is_shared, 0) = 0`
       )
       .all(userId) as unknown as Array<{
+      project_id: string
+      label_id: string
+      created_at: string
+      deleted_at: string | null
+    }>
+  }
+
+  /**
+   * Sync-layer list for shared-project project_labels reconcile. Returns rows
+   * on any project marked is_shared=1. The user has local access to these
+   * projects (they're a member or owner), so all rows here are reconcilable.
+   */
+  getProjectLabelsForSharedProjects(): Array<{
+    project_id: string
+    label_id: string
+    created_at: string
+    deleted_at: string | null
+  }> {
+    return this.db
+      .prepare(
+        `SELECT pl.project_id, pl.label_id, pl.created_at, pl.deleted_at
+         FROM project_labels pl
+         INNER JOIN projects p ON p.id = pl.project_id
+         WHERE COALESCE(p.is_shared, 0) = 1`
+      )
+      .all() as unknown as Array<{
       project_id: string
       label_id: string
       created_at: string

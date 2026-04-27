@@ -67,6 +67,7 @@ export interface TasksAPI {
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   getLabels(taskId: string): Promise<TaskLabel[]>
   getTaskLabelsForUser(userId: string): Promise<TaskLabel[]>
+  getTaskLabelsForSharedProjects(): Promise<TaskLabel[]>
   duplicate(id: string, newId: string): Promise<Task | null>
   findAllTemplates(userId: string): Promise<Task[]>
   saveAsTemplate(id: string, newId: string): Promise<Task | null>
@@ -92,6 +93,14 @@ export interface LabelsAPI {
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
   getProjectLabelsForOwner(userId: string): Promise<
+    Array<{
+      project_id: string
+      label_id: string
+      created_at: string
+      deleted_at: string | null
+    }>
+  >
+  getProjectLabelsForSharedProjects(): Promise<
     Array<{
       project_id: string
       label_id: string

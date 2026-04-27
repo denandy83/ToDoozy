@@ -141,16 +141,15 @@ The `SessionEnd` hook runs `.claude/hooks/docs-session-end.sh` automatically. It
 - `implemented-stories.md` — permanent log of all implemented stories. NEVER delete entries from this file.
 
 ### In-App "What's New" (Settings → What's New)
-The "What's New" tab displays release notes from GitHub releases. The data flow:
+The "What's New" tab displays release notes sourced from the `release_notes` table on Supabase. The data flow:
 
-1. **Build time**: `scripts/bundle-release-notes.sh` fetches all releases via `gh` CLI and writes `resources/release-notes.md`. This file is bundled into the app as an extra resource.
-2. **App launch**: If the DB cache (`whats_new` setting) doesn't contain the current version (`## vX.Y.Z`), it's seeded from the bundled file immediately (no network needed).
-3. **Background sync**: `syncReleaseNotes()` fetches from the GitHub API and updates the DB cache. If the API is unavailable (rate-limited, offline), the bundled/cached data is used.
-4. **Tab open**: The renderer triggers a fresh sync and re-reads the cache, so new releases appear even if the background sync hasn't completed yet.
+1. **App launch**: `syncReleaseNotes()` (in `src/main/services/ReleaseNotesService.ts`) fetches every row from the `release_notes` table on Supabase, concatenates them as versioned markdown, and writes the result to the local `whats_new` setting (stored under `user_id = ''` so it stays device-local and never participates in personal sync). Logs `Release notes synced (N versions)` per launch.
+2. **Tab open**: The renderer re-runs the sync and re-reads the cache, so any release published since the last cold start appears without needing a restart.
+3. **Offline / Supabase unavailable**: The previously cached `whats_new` markdown is rendered as-is — no bundled fallback file exists.
 
-**No manual action needed** — release notes appear in the app automatically when a GitHub release is created. The `/fix` and `/feature` skills do NOT need to update What's New. Just ensure the GitHub release notes are complete when creating a release.
+**Authoring releases**: write directly to the Supabase `release_notes` table (via the `set_whats_new` MCP tool, the `/buildit` pipeline, or the SQL editor). GitHub releases are unrelated to in-app What's New now — they're for distribution only.
 
-A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` stays in local SQLite per-user.
+A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` is per-user (stored under the real user_id) and syncs across devices.
 
 ### Version Format
 All documentation (CHANGELOG.md, RELEASE_NOTES.md, in-app What's New) uses **version headers** (`## vX.Y.Z`) instead of date headers. The version comes from `package.json`. Bump the version when cutting a release:

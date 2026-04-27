@@ -26,6 +26,8 @@ const api: TodoozyAPI = {
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     getTaskLabelsForUser: (userId) => ipcRenderer.invoke('tasks:getTaskLabelsForUser', userId),
+    getTaskLabelsForSharedProjects: () =>
+      ipcRenderer.invoke('tasks:getTaskLabelsForSharedProjects'),
     duplicate: (id, newId) => ipcRenderer.invoke('tasks:duplicate', id, newId),
     findAllTemplates: (userId) => ipcRenderer.invoke('tasks:findAllTemplates', userId),
     saveAsTemplate: (id, newId) => ipcRenderer.invoke('tasks:saveAsTemplate', id, newId),
@@ -52,6 +54,8 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:addToProject', projectId, labelId),
     getProjectLabelsForOwner: (userId) =>
       ipcRenderer.invoke('labels:getProjectLabelsForOwner', userId),
+    getProjectLabelsForSharedProjects: () =>
+      ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects'),
     applyRemoteProjectLabel: (remote) =>
       ipcRenderer.invoke('labels:applyRemoteProjectLabel', remote),
     findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId),

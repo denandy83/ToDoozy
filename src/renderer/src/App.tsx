@@ -79,13 +79,15 @@ function App(): React.JSX.Element {
         }
 
         // Discover projects we're a member of in Supabase but don't have locally
-        // Skip if last check was less than 5 minutes ago
-        const lastMemberCheck = await window.api.settings.get(uid, 'last_member_discovery')
+        // Skip if last check was less than 5 minutes ago. Stored under the
+        // empty-user_id slot so it stays device-local — this is a heartbeat
+        // for throttling, not data that needs to sync across devices.
+        const lastMemberCheck = await window.api.settings.get('', 'last_member_discovery')
         const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString()
         const shouldDiscover = !lastMemberCheck || lastMemberCheck < fiveMinAgo
         const missingIds = shouldDiscover ? await discoverRemoteMemberships(uid) : []
         if (shouldDiscover) {
-          await window.api.settings.set(uid, 'last_member_discovery', new Date().toISOString())
+          await window.api.settings.set('', 'last_member_discovery', new Date().toISOString())
         }
         if (missingIds.length > 0) {
           for (const pid of missingIds) {

@@ -865,9 +865,13 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     // Add current user as member locally
     await window.api.projects.addMember(projectId, userId, 'member')
   }
-  // Mark as shared
-  await window.api.projects.update(projectId, { is_shared: 1 })
-  logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
+  // Mark as shared — but only if it isn't already, otherwise we bump
+  // updated_at every startup and trigger a phantom 2-row push on the next
+  // reconcile (`projects (pushed=2)` feedback loop).
+  if (localProject?.is_shared !== 1) {
+    await window.api.projects.update(projectId, { is_shared: 1 })
+    logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
+  }
 
   // Sync all project labels (create locally if missing, associate with project)
   if (project.label_data) {

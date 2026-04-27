@@ -236,6 +236,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.getTaskLabelsForUser(userId)
   })
 
+  ipcMain.handle('tasks:getTaskLabelsForSharedProjects', () => {
+    return getRepos().tasks.getTaskLabelsForSharedProjects()
+  })
+
   ipcMain.handle('tasks:duplicate', (_e, id: string, newId: string) => {
     return getRepos().tasks.duplicate(id, newId) ?? null
   })
@@ -323,6 +327,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('labels:getProjectLabelsForOwner', (_e, userId: string) => {
     return getRepos().labels.getProjectLabelsForOwner(userId)
+  })
+
+  ipcMain.handle('labels:getProjectLabelsForSharedProjects', () => {
+    return getRepos().labels.getProjectLabelsForSharedProjects()
   })
 
   ipcMain.handle(

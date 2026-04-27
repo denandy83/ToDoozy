@@ -345,6 +345,24 @@ export class TaskRepository {
       .all(userId) as unknown as TaskLabel[]
   }
 
+  /**
+   * Sync-layer list for shared-project task_labels reconcile. Returns rows on
+   * any project marked is_shared=1. The user has local access to these
+   * projects (they're a member or owner), so all rows here are reconcilable.
+   */
+  getTaskLabelsForSharedProjects(): TaskLabel[] {
+    return this.db
+      .prepare(
+        `SELECT tl.task_id, tl.label_id
+         FROM task_labels tl
+         JOIN tasks t ON t.id = tl.task_id
+         JOIN projects p ON p.id = t.project_id
+         WHERE COALESCE(p.is_shared, 0) = 1
+           AND t.deleted_at IS NULL`
+      )
+      .all() as unknown as TaskLabel[]
+  }
+
   findAllTemplates(userId: string): Task[] {
     return this.db
       .prepare(
