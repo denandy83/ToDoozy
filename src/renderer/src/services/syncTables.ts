@@ -394,6 +394,35 @@ SYNC_TABLES.projects = projectsDescriptor as SyncTableDescriptor<unknown, unknow
 // table names but same shape). Each label belongs to a single user; the project
 // linkage lives in `project_labels` (local-only) and `task_labels` (synced).
 
+/**
+ * Resolve a (user_id, lower(name)) collision against Supabase by fetching the
+ * canonical remote label by name and remapping local junction tables onto its
+ * UUID. Returns true on success. Used by both the singular pushLabel path and
+ * the bulk reconcile path.
+ */
+async function consolidateLocalLabel(
+  localId: string,
+  userId: string,
+  name: string
+): Promise<boolean> {
+  try {
+    const supabase = await getSupabase()
+    const { data: remote } = await supabase
+      .from('user_labels')
+      .select('id')
+      .eq('user_id', userId)
+      .ilike('name', name)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle()
+    if (!remote || (remote.id as string) === localId) return false
+    await window.api.labels.consolidate(localId, remote.id as string)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
   name: 'labels',
   remoteName: 'user_labels',
@@ -430,7 +459,18 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
   async remoteUpsert(local) {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(labelsDescriptor.toRemote(local))
-    if (error) throw error
+    if (error) {
+      // 23505 unique_violation on (user_id, lower(name)) — same-named label
+      // already exists remotely under a different UUID (typically MCP-created).
+      // Resolve by remapping local junctions to the canonical remote ID.
+      const code = (error as { code?: string }).code
+      const msg = (error as { message?: string }).message ?? ''
+      if (code === '23505' && msg.includes('user_name_unique') && local.user_id) {
+        const consolidated = await consolidateLocalLabel(local.id, local.user_id, local.name)
+        if (consolidated) return
+      }
+      throw error
+    }
   },
 
   async remoteSoftDelete(id, deletedAt) {
