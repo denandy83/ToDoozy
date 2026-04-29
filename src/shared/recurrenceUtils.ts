@@ -147,6 +147,16 @@ export function describeRecurrence(rule: string | null): string {
 }
 
 /**
+ * Parse a YYYY-MM-DD string as local midnight.
+ * Using new Date('2026-04-13') produces UTC midnight, which in timezones behind
+ * UTC resolves to the previous local day — breaking weekday-based recurrence.
+ */
+export function parseDateLocal(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+/**
  * Compute the next occurrence date from a given reference date.
  * For Fixed mode: fromDate is the task's current due date.
  * For After-completion mode: fromDate is the completion date (now).
@@ -233,9 +243,10 @@ export function getNextOccurrence(rule: string, fromDate: Date): Date | null {
     }
   }
 
-  // Check until date
+  // Check until date — parse as local end-of-day so timezone doesn't shift the cutoff
   if (config.untilDate) {
-    const until = new Date(config.untilDate + 'T23:59:59')
+    const [uy, um, ud] = config.untilDate.split('-').map(Number)
+    const until = new Date(uy, um - 1, ud, 23, 59, 59)
     if (next > until) return null
   }
 

@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import type { TaskSearchFilters } from '../repositories/TaskRepository'
-import { getNextOccurrence } from '../../shared/recurrenceUtils'
+import { getNextOccurrence, parseDateLocal } from '../../shared/recurrenceUtils'
 import type { AsyncTaskRepository } from './index'
 
 export class SupabaseTaskRepository implements AsyncTaskRepository {
@@ -365,10 +365,10 @@ export class SupabaseTaskRepository implements AsyncTaskRepository {
     const task = await this.findById(taskId)
     if (!task || !task.recurrence_rule || !task.due_date) return null
 
-    const baseDate = new Date(task.due_date)
+    const baseDate = parseDateLocal(task.due_date)
     const nextDateObj = getNextOccurrence(task.recurrence_rule, baseDate)
     if (!nextDateObj) return null
-    const nextDate = nextDateObj.toISOString().slice(0, 10)
+    const nextDate = `${nextDateObj.getFullYear()}-${String(nextDateObj.getMonth() + 1).padStart(2, '0')}-${String(nextDateObj.getDate()).padStart(2, '0')}`
 
     // Create next occurrence
     const nextId = randomUUID()

@@ -4,6 +4,7 @@ import {
   serializeRecurrence,
   describeRecurrence,
   getNextOccurrence,
+  parseDateLocal,
   isValidRecurrence
 } from './recurrenceUtils'
 import type { RecurrenceConfig } from './types'
@@ -225,7 +226,7 @@ describe('describeRecurrence', () => {
 
 describe('getNextOccurrence', () => {
   it('adds days', () => {
-    const from = new Date('2026-03-15')
+    const from = parseDateLocal('2026-03-15')
     const next = getNextOccurrence('every:3:days', from)
     expect(next).not.toBeNull()
     expect(next!.getFullYear()).toBe(2026)
@@ -234,7 +235,7 @@ describe('getNextOccurrence', () => {
   })
 
   it('adds weeks', () => {
-    const from = new Date('2026-03-15') // Sunday
+    const from = parseDateLocal('2026-03-15') // Sunday
     const next = getNextOccurrence('every:2:weeks:mon', from)
     expect(next).not.toBeNull()
     // Should be 2 weeks ahead starting from Monday
@@ -242,7 +243,7 @@ describe('getNextOccurrence', () => {
   })
 
   it('adds months with day', () => {
-    const from = new Date('2026-03-15')
+    const from = parseDateLocal('2026-03-15')
     const next = getNextOccurrence('every:1:months:20', from)
     expect(next).not.toBeNull()
     expect(next!.getMonth()).toBe(3) // April
@@ -250,7 +251,7 @@ describe('getNextOccurrence', () => {
   })
 
   it('clamps month day to last day', () => {
-    const from = new Date('2026-01-31')
+    const from = parseDateLocal('2026-01-31')
     const next = getNextOccurrence('every:1:months:31', from)
     expect(next).not.toBeNull()
     // Feb 2026 has 28 days
@@ -259,7 +260,7 @@ describe('getNextOccurrence', () => {
   })
 
   it('adds years', () => {
-    const from = new Date('2026-03-15')
+    const from = parseDateLocal('2026-03-15')
     const next = getNextOccurrence('every:1:years:3:15', from)
     expect(next).not.toBeNull()
     expect(next!.getFullYear()).toBe(2027)
@@ -268,14 +269,14 @@ describe('getNextOccurrence', () => {
   })
 
   it('returns null when past until date', () => {
-    const from = new Date('2026-05-30')
+    const from = parseDateLocal('2026-05-30')
     const next = getNextOccurrence('every:1:days|until:2026-05-30', from)
     // Next would be May 31, which is past May 30
     expect(next).toBeNull()
   })
 
   it('returns date when within until date', () => {
-    const from = new Date('2026-05-28')
+    const from = parseDateLocal('2026-05-28')
     const next = getNextOccurrence('every:1:days|until:2026-05-30', from)
     expect(next).not.toBeNull()
     expect(next!.getDate()).toBe(29)
@@ -286,7 +287,7 @@ describe('getNextOccurrence', () => {
   })
 
   it('handles monthly ordinal - 1st Monday', () => {
-    const from = new Date('2026-03-01')
+    const from = parseDateLocal('2026-03-01')
     const next = getNextOccurrence('every:1:months:1st:mon', from)
     expect(next).not.toBeNull()
     // April 2026: first Monday is April 6
@@ -295,11 +296,22 @@ describe('getNextOccurrence', () => {
   })
 
   it('handles monthly ordinal - last Friday', () => {
-    const from = new Date('2026-03-01')
+    const from = parseDateLocal('2026-03-01')
     const next = getNextOccurrence('every:1:months:last:fri', from)
     expect(next).not.toBeNull()
     expect(next!.getMonth()).toBe(3) // April
     expect(next!.getDay()).toBe(5) // Friday
+  })
+
+  it('advances weekly-on-Monday from a Monday due date', () => {
+    // Regression: new Date('2026-04-13') in UTC-offset timezones lands on
+    // Sunday April 12 local, making "next Monday" = same day (April 13).
+    const from = parseDateLocal('2026-04-13') // Monday
+    const next = getNextOccurrence('every:1:weeks:mon', from)
+    expect(next).not.toBeNull()
+    expect(next!.getMonth()).toBe(3) // April
+    expect(next!.getDate()).toBe(20) // one week later
+    expect(next!.getDay()).toBe(1) // still Monday
   })
 })
 

@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
-import { parseRecurrence, getNextOccurrence } from '../../shared/recurrenceUtils'
+import { parseRecurrence, getNextOccurrence, parseDateLocal } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {
   project_id?: string
@@ -671,11 +671,13 @@ export class TaskRepository {
     const config = parseRecurrence(task.recurrence_rule)
     if (!config) return null
 
-    // Compute next due date
+    // Compute next due date — parse YYYY-MM-DD as local midnight, not UTC
+    // (new Date('2026-04-13') is UTC midnight, which in negative-offset timezones
+    // is the previous local day, breaking weekday-based recurrence rules)
     const fromDate = config.afterCompletion
       ? new Date()
       : task.due_date
-        ? new Date(task.due_date)
+        ? parseDateLocal(task.due_date)
         : new Date()
 
     const nextDate = getNextOccurrence(task.recurrence_rule, fromDate)
