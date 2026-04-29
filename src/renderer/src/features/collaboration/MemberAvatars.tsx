@@ -6,6 +6,18 @@
 import { useState } from 'react'
 import { useMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import { useLabelStore, selectAssigneeFilters } from '../../shared/stores/labelStore'
+import { getAvatarInitials } from '../../../../shared/avatarUtils'
+import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
+
+function resolvedDisplayName(displayName: string | null): string | null {
+  if (!displayName || displayName === 'Shared User') return null
+  return displayName
+}
+
+function resolvedEmail(email: string): string | null {
+  if (!email || isPlaceholderEmail(email) || email === 'unknown') return null
+  return email
+}
 
 interface MemberInfo {
   user_id: string
@@ -29,6 +41,17 @@ function MemberCircle({
 }): React.JSX.Element {
   const [hovered, setHovered] = useState(false)
   const display = useMemberDisplay(projectId, member.user_id)
+
+  const name = resolvedDisplayName(member.display_name)
+  const email = resolvedEmail(member.email)
+  // Use cache initials only when the cache has loaded real data; fall back to props
+  const initials = display.email === 'unknown'
+    ? getAvatarInitials(name, email ?? member.user_id.slice(0, 8))
+    : display.initials
+  const label = name
+    ? email ? `${name} (${email})` : name
+    : (email ?? 'Unknown')
+
   return (
     <div
       className="relative"
@@ -45,13 +68,13 @@ function MemberCircle({
           transform: hovered ? 'scale(1.15)' : 'scale(1)'
         }}
         onClick={onClick}
-        aria-label={`Filter by ${member.display_name || member.email}`}
+        aria-label={`Filter by ${label}`}
       >
-        {display.initials}
+        {initials}
       </button>
       {hovered && (
         <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted shadow-md ring-1 ring-border">
-          {member.display_name || member.email}
+          {label}
         </div>
       )}
     </div>

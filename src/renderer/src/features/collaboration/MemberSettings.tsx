@@ -9,6 +9,16 @@ import { useProjectStore } from '../../shared/stores/projectStore'
 import type { Project } from '../../../../shared/types'
 import { getAvatarColor, getAvatarInitials, AVATAR_PALETTE } from '../../../../shared/avatarUtils'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
+import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
+
+function memberDisplayName(displayName: string | null): string | null {
+  if (!displayName || displayName === 'Shared User') return null
+  return displayName
+}
+function memberDisplayEmail(email: string): string | null {
+  if (!email || isPlaceholderEmail(email) || email === 'unknown') return null
+  return email
+}
 import {
   generateInviteLink,
   removeSharedMember,
@@ -329,14 +339,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
                 style={{ backgroundColor: getAvatarColor(member.user_id, member.display_color) }}
                 title="Click to customize"
               >
-                {getAvatarInitials(member.display_name, member.email, member.display_initials)}
+                {getAvatarInitials(memberDisplayName(member.display_name), memberDisplayEmail(member.email) ?? member.user_id.slice(0, 8), member.display_initials)}
               </button>
               <div className="flex-1 min-w-0">
                 <p className="truncate text-[13px] font-light text-foreground">
-                  {member.display_name ?? member.email}
+                  {memberDisplayName(member.display_name) ?? memberDisplayEmail(member.email) ?? 'Unknown'}
                 </p>
-                {member.display_name && (
-                  <p className="truncate text-[10px] text-muted">{member.email}</p>
+                {memberDisplayName(member.display_name) && memberDisplayEmail(member.email) && (
+                  <p className="truncate text-[10px] text-muted">{memberDisplayEmail(member.email)}</p>
                 )}
               </div>
               <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
@@ -387,7 +397,7 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
                       value={editInitials}
                       onChange={(e) => setEditInitials(e.target.value.slice(0, 3))}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleSaveMemberDisplay(member.user_id) }}
-                      placeholder={getAvatarInitials(member.display_name, member.email)}
+                      placeholder={getAvatarInitials(memberDisplayName(member.display_name), memberDisplayEmail(member.email) ?? member.user_id.slice(0, 8))}
                       maxLength={3}
                       className="w-16 rounded border border-border bg-surface px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
                     />
@@ -395,7 +405,7 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
                       className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold uppercase text-white"
                       style={{ backgroundColor: editColor || getAvatarColor(member.user_id) }}
                     >
-                      {editInitials || getAvatarInitials(member.display_name, member.email)}
+                      {editInitials || getAvatarInitials(memberDisplayName(member.display_name), memberDisplayEmail(member.email) ?? member.user_id.slice(0, 8))}
                     </div>
                   </div>
                 </div>
