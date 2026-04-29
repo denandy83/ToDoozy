@@ -332,7 +332,16 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
   async remoteUpsert(local) {
     const supabase = await getSupabase()
     const { error } = await supabase.from('projects').upsert(projectsDescriptor.toRemote(local))
-    if (error) throw error
+    if (error) {
+      // 42501 = RLS denial. Happens when local has a project whose remote
+      // counterpart was renamed/owner-transferred — INSERT with our owner_id
+      // hits the existing row and the UPDATE policy refuses because we no
+      // longer own it remotely. Reconcile will pick it up correctly on the
+      // next pull; surfacing it as a hard error just adds noise.
+      const code = (error as { code?: string }).code
+      if (code === '42501') return
+      throw error
+    }
   },
 
   async remoteSoftDelete(id, deletedAt) {
@@ -341,7 +350,11 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
       .from('projects')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
       .eq('id', id)
-    if (error) throw error
+    if (error) {
+      const code = (error as { code?: string }).code
+      if (code === '42501') return
+      throw error
+    }
   },
 
   async remoteMaxUpdatedAt(ownerId) {

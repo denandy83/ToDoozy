@@ -48,6 +48,8 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:findAllByUser', userId, options),
     findMaxUpdatedAt: (userId) => ipcRenderer.invoke('labels:findMaxUpdatedAt', userId),
     applyRemote: (label) => ipcRenderer.invoke('labels:applyRemote', label),
+    consolidate: (fromId: string, toId: string) =>
+      ipcRenderer.invoke('labels:consolidate', fromId, toId),
     removeFromProject: (projectId, labelId) =>
       ipcRenderer.invoke('labels:removeFromProject', projectId, labelId),
     addToProject: (projectId, labelId) =>

@@ -201,6 +201,55 @@ export class LabelRepository {
   }
 
   /**
+   * Replace all references to `fromId` with `toId` across junction tables, then
+   * hard-delete `fromId`. Used by sync when a local label collides with a
+   * canonical remote label of the same name (typically created by MCP with a
+   * different UUID before local pushed). Idempotent — safe if `fromId` is
+   * already gone.
+   */
+  consolidate(fromId: string, toId: string): { taskRemaps: number; projectRemaps: number } {
+    return withTransaction(this.db, () => {
+      let taskRemaps = 0
+      let projectRemaps = 0
+
+      // task_labels: if a (task_id, toId) row already exists, just drop the
+      // fromId row; otherwise repoint it. Same logic for project_labels.
+      const taskRows = this.db
+        .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
+        .all(fromId) as Array<{ task_id: string }>
+      for (const row of taskRows) {
+        const exists = this.db
+          .prepare('SELECT 1 FROM task_labels WHERE task_id = ? AND label_id = ?')
+          .get(row.task_id, toId)
+        if (exists) {
+          this.db.prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?').run(row.task_id, fromId)
+        } else {
+          this.db.prepare('UPDATE task_labels SET label_id = ? WHERE task_id = ? AND label_id = ?').run(toId, row.task_id, fromId)
+          taskRemaps++
+        }
+      }
+
+      const projectRows = this.db
+        .prepare('SELECT project_id FROM project_labels WHERE label_id = ?')
+        .all(fromId) as Array<{ project_id: string }>
+      for (const row of projectRows) {
+        const exists = this.db
+          .prepare('SELECT 1 FROM project_labels WHERE project_id = ? AND label_id = ?')
+          .get(row.project_id, toId)
+        if (exists) {
+          this.db.prepare('DELETE FROM project_labels WHERE project_id = ? AND label_id = ?').run(row.project_id, fromId)
+        } else {
+          this.db.prepare('UPDATE project_labels SET label_id = ? WHERE project_id = ? AND label_id = ?').run(toId, row.project_id, fromId)
+          projectRemaps++
+        }
+      }
+
+      this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
+      return { taskRemaps, projectRemaps }
+    })
+  }
+
+  /**
    * Soft-delete: tombstone the label AND cascade tombstones to junction rows.
    * task_labels is synced (has deleted_at on prod), project_labels is local-only.
    * Both get soft-deleted locally for uniformity. Sync push handles task_labels.

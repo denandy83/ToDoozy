@@ -286,3 +286,78 @@ describe('LabelRepository — applyRemote', () => {
     expect(local.updated_at).toBe(fresh.updated_at)
   })
 })
+
+describe('LabelRepository — consolidate', () => {
+  let db: DatabaseSync
+  let repo: LabelRepository
+  let userId: string
+  let projectId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    userId = fx.userId
+    projectId = fx.projectId
+    repo = new LabelRepository(db)
+  })
+
+  it('remaps task_labels to the canonical label and drops the duplicate', () => {
+    seedTask(db, 't1', projectId, userId)
+    const local = repo.create({ id: 'L_local', user_id: userId, name: 'bug' })
+    // simulate "remote" canonical label co-existing under a different ID
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES ('L_remote', ?, 'bug-remote-placeholder', '#000000', 0, ?, ?)`
+    ).run(userId, new Date().toISOString(), new Date().toISOString())
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t1', local.id)
+
+    const result = repo.consolidate('L_local', 'L_remote')
+    expect(result.taskRemaps).toBe(1)
+    expect(repo.findById('L_local')).toBeUndefined()
+    const tl = db.prepare('SELECT label_id FROM task_labels WHERE task_id = ?').get('t1') as { label_id: string }
+    expect(tl.label_id).toBe('L_remote')
+  })
+
+  it('drops the duplicate task_labels row when both fromId and toId are already linked', () => {
+    seedTask(db, 't1', projectId, userId)
+    repo.create({ id: 'L_local', user_id: userId, name: 'bug' })
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES ('L_remote', ?, 'bug-remote-placeholder', '#000000', 0, ?, ?)`
+    ).run(userId, new Date().toISOString(), new Date().toISOString())
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t1', 'L_local')
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t1', 'L_remote')
+
+    repo.consolidate('L_local', 'L_remote')
+    const rows = db.prepare('SELECT label_id FROM task_labels WHERE task_id = ?').all('t1') as Array<{ label_id: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].label_id).toBe('L_remote')
+  })
+
+  it('remaps project_labels and removes the source label row', () => {
+    repo.create({ id: 'L_local', user_id: userId, name: 'bug' })
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES ('L_remote', ?, 'bug-remote-placeholder', '#000000', 0, ?, ?)`
+    ).run(userId, new Date().toISOString(), new Date().toISOString())
+    db.prepare(
+      `INSERT INTO project_labels (project_id, label_id, created_at) VALUES (?, ?, ?)`
+    ).run(projectId, 'L_local', new Date().toISOString())
+
+    const result = repo.consolidate('L_local', 'L_remote')
+    expect(result.projectRemaps).toBe(1)
+    const pl = db.prepare('SELECT label_id FROM project_labels WHERE project_id = ?').get(projectId) as { label_id: string }
+    expect(pl.label_id).toBe('L_remote')
+  })
+
+  it('is a no-op when fromId does not exist', () => {
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES ('L_remote', ?, 'bug', '#000000', 0, ?, ?)`
+    ).run(userId, new Date().toISOString(), new Date().toISOString())
+    const result = repo.consolidate('L_missing', 'L_remote')
+    expect(result.taskRemaps).toBe(0)
+    expect(result.projectRemaps).toBe(0)
+    expect(repo.findById('L_remote')).toBeDefined()
+  })
+})

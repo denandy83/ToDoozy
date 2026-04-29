@@ -317,6 +317,10 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle('labels:consolidate', (_e, fromId: string, toId: string) => {
+    return getRepos().labels.consolidate(fromId, toId)
+  })
+
   ipcMain.handle('labels:removeFromProject', (_e, projectId: string, labelId: string) => {
     return getRepos().labels.removeFromProject(projectId, labelId)
   })

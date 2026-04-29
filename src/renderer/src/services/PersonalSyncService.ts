@@ -344,13 +344,57 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
-    if (error) await reportPushFailure('pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
-    else {
+    if (error) {
+      // 23505 unique_violation on (user_id, lower(name)) — a label with this
+      // name already exists in Supabase under a different UUID (typically
+      // created via MCP). Consolidate locally onto the canonical remote ID
+      // so junction tables match and re-push is unnecessary.
+      const code = (error as { code?: string }).code
+      const msg = (error as { message?: string }).message ?? ''
+      if (code === '23505' && msg.includes('user_name_unique')) {
+        const consolidated = await consolidateLabelOnRemote(label, userId)
+        if (consolidated) return
+      }
+      await reportPushFailure('pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
+    } else {
       markSynced()
       logEvent('info', 'sync', `Pushed label "${label.name}"`, `id=${label.id}`)
     }
   } catch (err) {
     await reportPushFailure('pushLabel', err, 'user_labels', label.id, JSON.stringify(payload))
+  }
+}
+
+/**
+ * Resolve a (user_id, lower(name)) collision: fetch the canonical remote
+ * label by name and remap local junction tables to use its ID, then drop
+ * the local label. Returns true if consolidation succeeded.
+ */
+async function consolidateLabelOnRemote(localLabel: Label, userId: string): Promise<boolean> {
+  try {
+    const supabase = await getSupabase()
+    const { data: remote } = await supabase
+      .from('user_labels')
+      .select('id')
+      .eq('user_id', userId)
+      .ilike('name', localLabel.name)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle()
+    if (!remote || (remote.id as string) === localLabel.id) return false
+    const remoteId = remote.id as string
+    const result = await window.api.labels.consolidate(localLabel.id, remoteId)
+    logEvent(
+      'info',
+      'sync',
+      `Consolidated local label "${localLabel.name}" onto remote ID`,
+      `local=${localLabel.id} → remote=${remoteId} taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps}`
+    )
+    markSynced()
+    return true
+  } catch (err) {
+    console.warn('[PersonalSync] Failed to consolidate label on remote:', err)
+    return false
   }
 }
 
