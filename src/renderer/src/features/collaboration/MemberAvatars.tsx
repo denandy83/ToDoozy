@@ -71,7 +71,7 @@ export function MemberAvatars({
   projectId,
   maxVisible = 5
 }: MemberAvatarsProps): React.JSX.Element | null {
-  if (members.length === 0) return null
+  if (members.length <= 1) return null
 
   const assigneeFilters = useLabelStore(selectAssigneeFilters)
   const toggleAssigneeFilter = useLabelStore((s) => s.toggleAssigneeFilter)

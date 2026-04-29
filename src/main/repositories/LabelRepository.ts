@@ -163,30 +163,41 @@ export class LabelRepository {
     if (existing && existing.updated_at >= remote.updated_at) {
       return existing
     }
-    this.db
-      .prepare(
-        `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           user_id = excluded.user_id,
-           name = excluded.name,
-           color = excluded.color,
-           order_index = excluded.order_index,
-           created_at = excluded.created_at,
-           updated_at = excluded.updated_at,
-           deleted_at = excluded.deleted_at`
-      )
-      .run(
-        remote.id,
-        remote.user_id,
-        remote.name,
-        remote.color,
-        remote.order_index,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
-      )
-    return this.findById(remote.id)!
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             user_id = excluded.user_id,
+             name = excluded.name,
+             color = excluded.color,
+             order_index = excluded.order_index,
+             created_at = excluded.created_at,
+             updated_at = excluded.updated_at,
+             deleted_at = excluded.deleted_at`
+        )
+        .run(
+          remote.id,
+          remote.user_id,
+          remote.name,
+          remote.color,
+          remote.order_index,
+          remote.created_at,
+          remote.updated_at,
+          remote.deleted_at ?? null
+        )
+      return this.findById(remote.id)!
+    } catch (err: unknown) {
+      // A label with this name already exists locally under a different ID (e.g. created
+      // by the MCP server in Supabase while the user had the same name locally). Return
+      // the local canonical label so callers can remap task_labels if needed.
+      if (err instanceof Error && err.message.includes('labels_user_name_unique') && remote.user_id) {
+        const local = this.findByName(remote.user_id, remote.name)
+        if (local) return local
+      }
+      throw err
+    }
   }
 
   /**

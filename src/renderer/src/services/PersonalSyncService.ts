@@ -1834,10 +1834,29 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         const missingInLocal = remotePairs.filter((p) => !localKeySet.has(pairKey(p.task_id, p.label_id)))
         let tlPulled = 0
         for (const p of missingInLocal) {
+          let resolvedLabelId = p.label_id
           const localLabel = await window.api.labels.findById(p.label_id)
-          if (!localLabel) continue
+          if (!localLabel) {
+            // Label ID not found locally — may have been created by MCP with a different UUID
+            // than the local canonical. Try to remap by name.
+            const { data: remoteLabel } = await supabase
+              .from('user_labels')
+              .select('name')
+              .eq('id', p.label_id)
+              .maybeSingle()
+            if (remoteLabel?.name) {
+              const canonical = await window.api.labels.findByName(userId, remoteLabel.name)
+              if (canonical) {
+                resolvedLabelId = canonical.id
+              } else {
+                continue
+              }
+            } else {
+              continue
+            }
+          }
           try {
-            await window.api.tasks.addLabel(p.task_id, p.label_id)
+            await window.api.tasks.addLabel(p.task_id, resolvedLabelId)
             tlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.

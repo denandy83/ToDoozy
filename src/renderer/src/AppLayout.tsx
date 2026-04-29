@@ -181,6 +181,7 @@ export function AppLayout(): React.JSX.Element {
 
   // Load shared project members when project changes
   const loadMembers = useCallback(async (projectId: string) => {
+    setProjectMembers([])
     try {
       const members = await getSharedProjectMembers(projectId)
       setProjectMembers(members.map((m) => ({

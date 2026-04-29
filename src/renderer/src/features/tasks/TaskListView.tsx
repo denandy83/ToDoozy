@@ -138,14 +138,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   // Persist sort config when user changes it
   useEffect(() => {
     if (!projectId || loadedProjectRef.current !== projectId) return
-    const json = JSON.stringify(sortRules)
-    const current = useLabelStore.getState().sortRules
-    if (current.length > 0) {
-      setSetting(`sort_config_${projectId}`, json)
-    } else {
-      setSetting(`sort_config_${projectId}`, '')
-    }
-  }, [sortRules, projectId, setSetting])
+    const json = sortRules.length > 0 ? JSON.stringify(sortRules) : ''
+    const stored = projectSortSetting ?? ''
+    if (json === stored) return
+    setSetting(`sort_config_${projectId}`, json)
+  }, [sortRules, projectId, setSetting, projectSortSetting])
 
   // Auto-select first task (without opening detail panel) when navigating to project
   // or when selection is cleared (e.g. clicking same project in sidebar)
