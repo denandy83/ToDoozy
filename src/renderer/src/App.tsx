@@ -66,12 +66,26 @@ function App(): React.JSX.Element {
         const projects = useProjectStore.getState().projects
         for (const p of Object.values(projects)) {
           if (p.is_shared === 1) {
-            await syncDown(p.id, uid).catch((err) => {
+            const synced = await syncDown(p.id, uid).then(() => true).catch((err) => {
               console.warn(`[Startup] Failed to sync shared project ${p.name}:`, err)
               if (String(err).includes('not found')) {
                 window.api.projects.update(p.id, { is_shared: 0 })
               }
+              return false
             })
+            if (!synced) continue
+
+            // After sync, verify the project still has collaborators. If only the
+            // owner remains (everyone left or the project was never actually
+            // shared end-to-end), demote is_shared so we don't waste a Realtime
+            // subscription on a solo project.
+            const members = await window.api.projects.getMembers(p.id).catch(() => [])
+            const others = members.filter((m) => m.user_id !== p.owner_id)
+            if (others.length === 0) {
+              await window.api.projects.update(p.id, { is_shared: 0 }).catch(() => {})
+              console.log(`[Startup] Demoted "${p.name}" — no other members, treating as personal`)
+              continue
+            }
           }
           // Subscribe to Realtime for shared projects only
           // (personal projects use the WAL polling + fullUpload/Pull flow)

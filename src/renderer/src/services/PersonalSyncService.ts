@@ -162,6 +162,11 @@ export function cacheProjectNames(projects: Array<{ id: string; name: string }>)
   for (const p of projects) projectNameCache.set(p.id, p.name)
 }
 
+/** Lookup a cached project name; returns the id back unchanged when unknown. */
+export function getCachedProjectName(id: string): string | null {
+  return projectNameCache.get(id) ?? null
+}
+
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
 async function ensureProjectInSupabase(projectId: string): Promise<void> {
   if (confirmedProjects.has(projectId)) return
@@ -1780,6 +1785,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     ): Promise<void> => {
       const desc = SYNC_TABLES[tableName as keyof typeof SYNC_TABLES]
       if (!desc) return
+      // Append a readable project name when the scope is a project. Owner-
+      // and user-scoped tables get scope=<userId> with no name.
+      const pName = projectNameCache.get(scopeId)
+      const scopeStr = pName ? `scope=${scopeId} project="${pName}"` : `scope=${scopeId}`
       try {
         const stats = await reconcileTable(
           desc as Parameters<typeof reconcileTable>[0],
@@ -1793,19 +1802,19 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             'info',
             'sync',
             `Reconcile: ${tableName} skipped (no drift)`,
-            `scope=${scopeId}`
+            scopeStr
           )
         } else if (stats.pushed || stats.pulled || stats.failed) {
           logEvent(
             stats.failed ? 'warn' : 'info',
             'sync',
             `Reconcile: ${tableName}`,
-            `pushed=${stats.pushed} pulled=${stats.pulled} inSync=${stats.inSync} failed=${stats.failed} scope=${scopeId}`
+            `pushed=${stats.pushed} pulled=${stats.pulled} inSync=${stats.inSync} failed=${stats.failed} ${scopeStr}`
           )
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        logEvent('error', 'sync', `Reconcile: ${tableName} failed`, `scope=${scopeId} err=${msg}`)
+        logEvent('error', 'sync', `Reconcile: ${tableName} failed`, `${scopeStr} err=${msg}`)
       }
     }
 

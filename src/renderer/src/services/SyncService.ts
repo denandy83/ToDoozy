@@ -9,6 +9,7 @@ import type { Task, Status, SyncOperation } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
+import { getCachedProjectName } from './PersonalSyncService'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
@@ -97,16 +98,18 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
-        console.log(`[Realtime] Subscribed to project ${projectId}`)
-        logEvent('info', 'realtime', `Subscribed to shared project`, `${projectId} topic=${subTopic} chState=${chState}`)
+        const pName = getCachedProjectName(projectId) ?? projectId
+        console.log(`[Realtime] Subscribed to shared project "${pName}"`)
+        logEvent('info', 'realtime', `Subscribed to shared project`, `${pName} (${projectId}) topic=${subTopic} chState=${chState}`)
         const currentStatus = useSyncStore.getState().status
         if (currentStatus === 'offline') {
           useSyncStore.getState().setStatus('synced')
         }
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        console.warn(`[Realtime] Project subscription ${status} for ${projectId}`, err ?? '')
+        const pName = getCachedProjectName(projectId) ?? projectId
+        console.warn(`[Realtime] Project subscription ${status} for "${pName}"`, err ?? '')
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
-        logEvent(level, 'realtime', `Channel ${status} on shared project`, `${projectId} topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
+        logEvent(level, 'realtime', `Channel ${status} on shared project`, `${pName} (${projectId}) topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         useSyncStore.getState().setStatus('offline')
         scheduleSharedReconnect(projectId)
       }
