@@ -213,10 +213,21 @@ export class LabelRepository {
    * insert. Idempotent — safe if `fromId` is already gone.
    */
   consolidate(fromId: string, canonical: Label): { taskRemaps: number; projectRemaps: number } {
+    // Coerce every field to a primitive node:sqlite accepts (string, number,
+    // null). Crossing IPC can leave fields as undefined or non-primitive
+    // shapes; node:sqlite throws "Provided value cannot be bound" for those.
+    const toId = String(canonical.id)
+    const userIdParam = canonical.user_id ? String(canonical.user_id) : null
+    const nameParam = String(canonical.name ?? '')
+    const colorParam = String(canonical.color ?? '#888888')
+    const orderIndexParam = Number(canonical.order_index ?? 0)
+    const createdAtParam = String(canonical.created_at ?? new Date().toISOString())
+    const updatedAtParam = String(canonical.updated_at ?? new Date().toISOString())
+    const deletedAtParam = canonical.deleted_at ? String(canonical.deleted_at) : null
+
     return withTransaction(this.db, () => {
       let taskRemaps = 0
       let projectRemaps = 0
-      const toId = canonical.id
 
       const fromExists = this.db.prepare('SELECT 1 FROM labels WHERE id = ?').get(fromId)
       if (fromExists) {
@@ -243,14 +254,14 @@ export class LabelRepository {
              deleted_at = excluded.deleted_at`
         )
         .run(
-          canonical.id,
-          canonical.user_id,
-          canonical.name,
-          canonical.color,
-          canonical.order_index,
-          canonical.created_at,
-          canonical.updated_at,
-          canonical.deleted_at ?? null
+          toId,
+          userIdParam,
+          nameParam,
+          colorParam,
+          orderIndexParam,
+          createdAtParam,
+          updatedAtParam,
+          deletedAtParam
         )
 
       // task_labels: if a (task_id, toId) row already exists, drop the

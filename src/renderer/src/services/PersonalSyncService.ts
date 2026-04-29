@@ -401,7 +401,18 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string): Prom
         .eq('id', remote.id as string)
       remote.deleted_at = null
     }
-    const result = await window.api.labels.consolidate(localLabel.id, remote as Label)
+    const r = remote as Record<string, unknown>
+    const canonicalLabel: Label = {
+      id: String(r.id),
+      user_id: r.user_id == null ? null : String(r.user_id),
+      name: String(r.name ?? ''),
+      color: String(r.color ?? '#888888'),
+      order_index: Number(r.order_index ?? 0),
+      created_at: String(r.created_at ?? new Date().toISOString()),
+      updated_at: String(r.updated_at ?? new Date().toISOString()),
+      deleted_at: r.deleted_at == null ? null : String(r.deleted_at)
+    }
+    const result = await window.api.labels.consolidate(localLabel.id, canonicalLabel)
     logEvent(
       'info',
       'sync',

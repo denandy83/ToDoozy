@@ -441,8 +441,24 @@ async function consolidateLocalLabel(
       }
       remote.deleted_at = null
     }
-    const result = await window.api.labels.consolidate(localId, remote as Label)
-    console.info(`[consolidateLocalLabel] consolidated "${name}" ${localId} → ${remote.id} (taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps})`)
+    // Plain-object clone — supabase-js results can carry non-cloneable
+    // handlers/getters that confuse Electron's structured clone or leave
+    // properties as undefined on the receiving side. JSON-roundtrip
+    // guarantees a vanilla object with primitive values.
+    const r = remote as Record<string, unknown>
+    const canonicalLabel: Label = {
+      id: String(r.id),
+      user_id: r.user_id == null ? null : String(r.user_id),
+      name: String(r.name ?? ''),
+      color: String(r.color ?? '#888888'),
+      order_index: Number(r.order_index ?? 0),
+      created_at: String(r.created_at ?? new Date().toISOString()),
+      updated_at: String(r.updated_at ?? new Date().toISOString()),
+      deleted_at: r.deleted_at == null ? null : String(r.deleted_at)
+    }
+    console.info('[consolidateLocalLabel] sending canonical:', JSON.stringify(canonicalLabel))
+    const result = await window.api.labels.consolidate(localId, canonicalLabel)
+    console.info(`[consolidateLocalLabel] consolidated "${name}" ${localId} → ${canonicalLabel.id} (taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps})`)
     return true
   } catch (err) {
     console.warn('[consolidateLocalLabel] threw:', err)
