@@ -405,7 +405,8 @@ class ProjectRepo {
     const { error } = await this.client.rpc('share_project', {
       p_id: input.id, p_name: input.name,
       p_description: input.description ?? null,
-      p_color: input.color ?? '#888888', p_icon: input.icon ?? 'folder'
+      p_color: input.color ?? '#888888', p_icon: input.icon ?? 'folder',
+      p_owner_id: input.owner_id ?? this.userId
     })
     if (error) throw new Error(`Failed to create project: ${error.message}`)
     const updates: Record<string, unknown> = {}
