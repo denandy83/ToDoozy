@@ -45,7 +45,8 @@ function MemberCircle({
   const name = resolvedDisplayName(member.display_name)
   const email = resolvedEmail(member.email)
   // Use cache initials only when the cache has loaded real data; fall back to props
-  const initials = display.email === 'unknown'
+  const isCacheStale = display.email === 'unknown' || isPlaceholderEmail(display.email)
+  const initials = isCacheStale
     ? getAvatarInitials(name, email ?? member.user_id.slice(0, 8))
     : display.initials
   const label = name
