@@ -1177,16 +1177,28 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
 
   if (error || !data) return []
 
-  // Batch-fetch all user profiles in one query instead of N+1
-  const userIds = data.map((m) => m.user_id)
-  const { data: profiles } = await supabase
-    .from('user_profiles')
-    .select('id, email, display_name')
-    .in('id', userIds)
+  // Use SECURITY DEFINER RPC to read auth.users directly — bypasses user_profiles
+  // view which only surfaces Google OAuth users (email/password users have no row).
+  // Falls back to user_profiles batch query if the RPC isn't deployed yet.
+  const { data: rpcProfiles, error: rpcError } = await supabase
+    .rpc('get_project_member_profiles', { p_project_id: projectId })
 
   const profileMap = new Map<string, { email: string; display_name: string | null }>()
-  if (profiles) {
-    for (const p of profiles) profileMap.set(p.id, p)
+
+  if (!rpcError && rpcProfiles) {
+    for (const p of rpcProfiles as Array<{ user_id: string; email: string; display_name: string | null }>) {
+      profileMap.set(p.user_id, { email: p.email, display_name: p.display_name })
+    }
+  } else {
+    // Fallback: user_profiles view (only returns OAuth users)
+    const userIds = data.map((m) => m.user_id)
+    const { data: profiles } = await supabase
+      .from('user_profiles')
+      .select('id, email, display_name')
+      .in('id', userIds)
+    if (profiles) {
+      for (const p of profiles) profileMap.set(p.id, { email: p.email, display_name: p.display_name })
+    }
   }
 
   const members: Array<{
