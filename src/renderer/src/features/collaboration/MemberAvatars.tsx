@@ -42,7 +42,8 @@ function MemberCircle({
   const [hovered, setHovered] = useState(false)
   const display = useMemberDisplay(projectId, member.user_id)
 
-  const name = resolvedDisplayName(member.display_name)
+  // Prefer props data; fall back to cache for display_name in case local DB has newer info
+  const name = resolvedDisplayName(member.display_name) ?? resolvedDisplayName(display.display_name)
   const email = resolvedEmail(member.email)
   // Use cache initials only when the cache has loaded real data; fall back to props
   const isCacheStale = display.email === 'unknown' || isPlaceholderEmail(display.email)
@@ -51,7 +52,7 @@ function MemberCircle({
     : display.initials
   const label = name
     ? email ? `${name} (${email})` : name
-    : (email ?? 'Unknown')
+    : (email ?? `Member (${member.user_id.slice(0, 8)})`)
 
   return (
     <div
