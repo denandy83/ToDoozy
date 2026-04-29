@@ -90,7 +90,7 @@ export interface LabelsAPI {
   ): Promise<Label[]>
   findMaxUpdatedAt(userId: string): Promise<string | null>
   applyRemote(label: Label): Promise<Label>
-  consolidate(fromId: string, toId: string): Promise<{ taskRemaps: number; projectRemaps: number }>
+  consolidate(fromId: string, canonical: Label): Promise<{ taskRemaps: number; projectRemaps: number }>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
   getProjectLabelsForOwner(userId: string): Promise<

@@ -317,8 +317,8 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('labels:consolidate', (_e, fromId: string, toId: string) => {
-    return getRepos().labels.consolidate(fromId, toId)
+  ipcMain.handle('labels:consolidate', (_e, fromId: string, canonical: Parameters<Repositories['labels']['consolidate']>[1]) => {
+    return getRepos().labels.consolidate(fromId, canonical)
   })
 
   ipcMain.handle('labels:removeFromProject', (_e, projectId: string, labelId: string) => {

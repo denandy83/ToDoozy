@@ -201,18 +201,59 @@ export class LabelRepository {
   }
 
   /**
-   * Replace all references to `fromId` with `toId` across junction tables, then
-   * hard-delete `fromId`. Used by sync when a local label collides with a
-   * canonical remote label of the same name (typically created by MCP with a
-   * different UUID before local pushed). Idempotent — safe if `fromId` is
-   * already gone.
+   * Replace all references to `fromId` with `canonical.id` across junction
+   * tables, then hard-delete `fromId`. Used by sync when a local label
+   * collides with a canonical remote label of the same name (typically
+   * created by MCP with a different UUID before local pushed).
+   *
+   * The canonical row must be inserted into `labels` BEFORE the junction
+   * remap, otherwise the junction FK to labels(id) blocks the UPDATE and
+   * the transaction rolls back. Local rename of `fromId` is needed first
+   * to free the (user_id, lower(name)) unique slot before the canonical
+   * insert. Idempotent — safe if `fromId` is already gone.
    */
-  consolidate(fromId: string, toId: string): { taskRemaps: number; projectRemaps: number } {
+  consolidate(fromId: string, canonical: Label): { taskRemaps: number; projectRemaps: number } {
     return withTransaction(this.db, () => {
       let taskRemaps = 0
       let projectRemaps = 0
+      const toId = canonical.id
 
-      // task_labels: if a (task_id, toId) row already exists, just drop the
+      const fromExists = this.db.prepare('SELECT 1 FROM labels WHERE id = ?').get(fromId)
+      if (fromExists) {
+        // Free up the (user_id, lower(name)) unique slot so the canonical row
+        // can land. Use a placeholder name unique-by-id; we delete this row
+        // at the end of the transaction.
+        this.db
+          .prepare('UPDATE labels SET name = ? WHERE id = ?')
+          .run(`__consolidate_tomb_${fromId}`, fromId)
+      }
+
+      // Upsert the canonical row so junction-table FKs validate when we
+      // remap. ON CONFLICT(id) refreshes data on existing rows.
+      this.db
+        .prepare(
+          `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             user_id = excluded.user_id,
+             name = excluded.name,
+             color = excluded.color,
+             order_index = excluded.order_index,
+             updated_at = excluded.updated_at,
+             deleted_at = excluded.deleted_at`
+        )
+        .run(
+          canonical.id,
+          canonical.user_id,
+          canonical.name,
+          canonical.color,
+          canonical.order_index,
+          canonical.created_at,
+          canonical.updated_at,
+          canonical.deleted_at ?? null
+        )
+
+      // task_labels: if a (task_id, toId) row already exists, drop the
       // fromId row; otherwise repoint it. Same logic for project_labels.
       const taskRows = this.db
         .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
@@ -244,7 +285,9 @@ export class LabelRepository {
         }
       }
 
-      this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
+      if (fromExists) {
+        this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
+      }
       return { taskRemaps, projectRemaps }
     })
   }

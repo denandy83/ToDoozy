@@ -345,13 +345,24 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
     if (error) {
-      // 23505 unique_violation on (user_id, lower(name)) — a label with this
-      // name already exists in Supabase under a different UUID (typically
-      // created via MCP). Consolidate locally onto the canonical remote ID
-      // so junction tables match and re-push is unnecessary.
-      const code = (error as { code?: string }).code
-      const msg = (error as { message?: string }).message ?? ''
-      if (code === '23505' && msg.includes('user_name_unique')) {
+      // Detect (user_id, lower(name)) collision permissively — supabase-js
+      // surfaces the same Postgres error across `code`, `details`, and
+      // `message` in different versions; match any of them.
+      const e = error as { code?: string; message?: string; details?: string }
+      const code = e.code ?? ''
+      const msg = e.message ?? ''
+      const details = e.details ?? ''
+      const looksLikeUniqueViolation =
+        code === '23505' ||
+        msg.includes('user_name_unique') ||
+        msg.includes('duplicate key') ||
+        details.includes('user_name_unique') ||
+        details.includes('already exists')
+      console.warn(
+        '[pushLabel] error',
+        JSON.stringify({ code, msg, details, looksLikeUniqueViolation, label: { id: label.id, name: label.name } })
+      )
+      if (looksLikeUniqueViolation) {
         const consolidated = await consolidateLabelOnRemote(label, userId)
         if (consolidated) return
       }
@@ -373,22 +384,29 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
 async function consolidateLabelOnRemote(localLabel: Label, userId: string): Promise<boolean> {
   try {
     const supabase = await getSupabase()
+    // Need the full row — consolidate has to insert it locally before the
+    // junction remap can run (FK to labels.id).
     const { data: remote } = await supabase
       .from('user_labels')
-      .select('id')
+      .select('*')
       .eq('user_id', userId)
       .ilike('name', localLabel.name)
-      .is('deleted_at', null)
       .limit(1)
       .maybeSingle()
     if (!remote || (remote.id as string) === localLabel.id) return false
-    const remoteId = remote.id as string
-    const result = await window.api.labels.consolidate(localLabel.id, remoteId)
+    if (remote.deleted_at) {
+      await supabase
+        .from('user_labels')
+        .update({ deleted_at: null, updated_at: new Date().toISOString() })
+        .eq('id', remote.id as string)
+      remote.deleted_at = null
+    }
+    const result = await window.api.labels.consolidate(localLabel.id, remote as Label)
     logEvent(
       'info',
       'sync',
       `Consolidated local label "${localLabel.name}" onto remote ID`,
-      `local=${localLabel.id} → remote=${remoteId} taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps}`
+      `local=${localLabel.id} → remote=${remote.id} taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps}`
     )
     markSynced()
     return true
