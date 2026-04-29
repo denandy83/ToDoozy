@@ -758,9 +758,7 @@ async function syncMembersDown(projectId: string): Promise<void> {
   const profilesById = new Map<string, { email: string; display_name: string | null; avatar_url: string | null }>()
   if (memberIdsNeedingProfile.length > 0) {
     const { data: profiles } = await supabase
-      .from('user_profiles')
-      .select('id, email, display_name, avatar_url')
-      .in('id', memberIdsNeedingProfile)
+      .rpc('get_user_profiles', { p_user_ids: memberIdsNeedingProfile })
     for (const p of profiles ?? []) {
       profilesById.set(p.id as string, {
         email: (p.email as string | null) ?? '',
@@ -829,11 +827,9 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   // Ensure the project owner's user record exists locally with real profile data
   const localOwner = await window.api.users.findById(project.owner_id)
-  const { data: ownerProfile } = await supabase
-    .from('user_profiles')
-    .select('email, display_name, avatar_url')
-    .eq('id', project.owner_id)
-    .single()
+  const { data: ownerProfileRows } = await supabase
+    .rpc('get_user_profiles', { p_user_ids: [project.owner_id] })
+  const ownerProfile = (ownerProfileRows as Array<{ email: string; display_name: string | null; avatar_url: string | null }> | null)?.[0] ?? null
 
   if (!localOwner) {
     await window.api.users.create({
@@ -946,9 +942,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
     if (missingUserIds.length > 0) {
       const { data: profiles } = await supabase
-        .from('user_profiles')
-        .select('id, email, display_name, avatar_url')
-        .in('id', missingUserIds)
+        .rpc('get_user_profiles', { p_user_ids: missingUserIds })
       const profilesById = new Map<string, { email: string | null; display_name: string | null; avatar_url: string | null }>()
       for (const p of profiles ?? []) {
         profilesById.set(p.id as string, {
@@ -1067,9 +1061,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     const memberProfilesById = new Map<string, { email: string; display_name: string | null; avatar_url: string | null }>()
     if (memberIdsNeedingProfile.length > 0) {
       const { data: profiles } = await supabase
-        .from('user_profiles')
-        .select('id, email, display_name, avatar_url')
-        .in('id', memberIdsNeedingProfile)
+        .rpc('get_user_profiles', { p_user_ids: memberIdsNeedingProfile })
       for (const p of profiles ?? []) {
         memberProfilesById.set(p.id as string, {
           email: (p.email as string | null) ?? '',
@@ -1190,14 +1182,14 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
       profileMap.set(p.user_id, { email: p.email, display_name: p.display_name })
     }
   } else {
-    // Fallback: user_profiles view (only returns OAuth users)
+    // Fallback: use general profile lookup (also reads auth.users via SECURITY DEFINER)
     const userIds = data.map((m) => m.user_id)
     const { data: profiles } = await supabase
-      .from('user_profiles')
-      .select('id, email, display_name')
-      .in('id', userIds)
+      .rpc('get_user_profiles', { p_user_ids: userIds })
     if (profiles) {
-      for (const p of profiles) profileMap.set(p.id, { email: p.email, display_name: p.display_name })
+      for (const p of (profiles as Array<{ id: string; email: string; display_name: string | null }>) ) {
+        profileMap.set(p.id, { email: p.email, display_name: p.display_name })
+      }
     }
   }
 
