@@ -416,18 +416,8 @@ async function consolidateLocalLabel(
       .ilike('name', name)
       .limit(1)
       .maybeSingle()
-    if (lookupErr) {
-      console.warn('[consolidateLocalLabel] lookup failed:', lookupErr.message, `name="${name}"`)
-      return false
-    }
-    if (!remote) {
-      console.warn('[consolidateLocalLabel] no remote canonical label found:', `name="${name}" userId=${userId}`)
-      return false
-    }
-    if ((remote.id as string) === localId) {
-      console.warn('[consolidateLocalLabel] remote ID matches local — nothing to consolidate:', localId)
-      return false
-    }
+    if (lookupErr || !remote) return false
+    if ((remote.id as string) === localId) return false
     // If the canonical remote is tombstoned, revive it before remapping —
     // otherwise our local junctions would point at a deleted row.
     if (remote.deleted_at) {
@@ -435,10 +425,7 @@ async function consolidateLocalLabel(
         .from('user_labels')
         .update({ deleted_at: null, updated_at: new Date().toISOString() })
         .eq('id', remote.id as string)
-      if (reviveErr) {
-        console.warn('[consolidateLocalLabel] revive failed:', reviveErr.message)
-        return false
-      }
+      if (reviveErr) return false
       remote.deleted_at = null
     }
     // Plain-object clone — supabase-js results can carry non-cloneable
@@ -456,12 +443,11 @@ async function consolidateLocalLabel(
       updated_at: String(r.updated_at ?? new Date().toISOString()),
       deleted_at: r.deleted_at == null ? null : String(r.deleted_at)
     }
-    console.info('[consolidateLocalLabel] sending canonical:', JSON.stringify(canonicalLabel))
     const result = await window.api.labels.consolidate(localId, canonicalLabel)
-    console.info(`[consolidateLocalLabel] consolidated "${name}" ${localId} → ${canonicalLabel.id} (taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps})`)
+    console.info(`[sync] Consolidated label "${name}" ${localId} → ${canonicalLabel.id} (taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps})`)
     return true
   } catch (err) {
-    console.warn('[consolidateLocalLabel] threw:', err)
+    console.warn('[sync] consolidateLocalLabel threw:', err)
     return false
   }
 }
@@ -504,10 +490,9 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     const { error } = await supabase.from('user_labels').upsert(labelsDescriptor.toRemote(local))
     if (error) {
       // Detect (user_id, lower(name)) collision with a same-named label
-      // (typically MCP-created). Postgres returns 23505; depending on the
-      // version of supabase-js the error object may surface as `code`,
-      // `details`, or just inside `message`. Match permissively.
-      const e = error as { code?: string; message?: string; details?: string; status?: number }
+      // (typically MCP-created with a new UUID). Match permissively across
+      // the fields supabase-js exposes for Postgres 23505.
+      const e = error as { code?: string; message?: string; details?: string }
       const code = e.code ?? ''
       const msg = e.message ?? ''
       const details = e.details ?? ''
@@ -517,10 +502,6 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
         msg.includes('duplicate key') ||
         details.includes('user_name_unique') ||
         details.includes('already exists')
-      console.warn(
-        '[labels.remoteUpsert] error',
-        JSON.stringify({ code, msg, details, status: e.status, looksLikeUniqueViolation, label: { id: local.id, name: local.name } })
-      )
       if (looksLikeUniqueViolation && local.user_id) {
         const consolidated = await consolidateLocalLabel(local.id, local.user_id, local.name)
         if (consolidated) return

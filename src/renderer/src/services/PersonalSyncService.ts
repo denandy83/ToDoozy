@@ -358,10 +358,6 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
         msg.includes('duplicate key') ||
         details.includes('user_name_unique') ||
         details.includes('already exists')
-      console.warn(
-        '[pushLabel] error',
-        JSON.stringify({ code, msg, details, looksLikeUniqueViolation, label: { id: label.id, name: label.name } })
-      )
       if (looksLikeUniqueViolation) {
         const consolidated = await consolidateLabelOnRemote(label, userId)
         if (consolidated) return
