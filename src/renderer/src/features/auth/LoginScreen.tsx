@@ -1,4 +1,4 @@
-import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react'
+import { useState, useCallback, useEffect, type FormEvent, type KeyboardEvent } from 'react'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { getSupabase } from '../../lib/supabase'
 
@@ -16,6 +16,20 @@ export function LoginScreen(): React.JSX.Element {
 
   const { loading, error, clearError, signInWithEmail, signUpWithEmail, signInWithGoogle } =
     useAuthStore()
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      const savedEmail = await window.api.auth.getSavedEmail()
+      if (!savedEmail || cancelled) return
+      setEmail(savedEmail)
+      const savedPassword = await window.api.auth.getSavedPassword(savedEmail)
+      if (!savedPassword || cancelled) return
+      setPassword(savedPassword)
+    }
+    load().catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const handleForgotPassword = useCallback(async (): Promise<void> => {
     if (!resetEmail.trim()) return

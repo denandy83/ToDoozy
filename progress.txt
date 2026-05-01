@@ -18,3 +18,24 @@ Started: Fri May  1 07:48:09 CDT 2026
 - Removed unused `useEffect` import in `LoginScreen.tsx` (that's for story #66's credential pre-fill).
 - `verify_jwt: false` on the Edge Function — it's intentionally unauthenticated (same as Supabase's password reset workflow).
 - No new repository methods → no new Vitest tests needed. All 741 existing tests pass.
+
+---
+
+## Story #66 — Save Login Credentials (2026-05-01)
+
+**Implemented:**
+- Installed `keytar` + `@types/keytar` (native OS Keychain / Credential Manager wrapper)
+- Added `getSavedEmailPath()` helper and `KEYTAR_SERVICE = 'ToDoozy'` constant in `ipc-handlers.ts`
+- Added 5 IPC handlers: `auth:saveEmail`, `auth:getSavedEmail`, `auth:savePassword`, `auth:getSavedPassword`, `auth:clearCredentials`
+- Added 5 preload bridge methods and updated `AuthAPI` interface in `index.d.ts`
+- `authStore.signInWithEmail` now returns `Promise<boolean>`, saves email + sets `pendingPasswordSave` on success
+- `authStore.signUpWithEmail` saves email on success (no password prompt)
+- `authStore.signInWithGoogle` saves email (both implicit + PKCE branches) on success
+- `authStore.logout` calls `clearCredentials` to delete both saved-email JSON and Keychain entry
+- Exported `takePendingPasswordSave()` module-level function from authStore
+- `AppLayout.tsx` calls `takePendingPasswordSave()` on mount; if pending, shows "Save password to Keychain?" persistent toast with Save/No thanks actions
+- `LoginScreen.tsx` `useEffect` pre-fills email and password from saved JSON/Keychain on mount (cancelled on cleanup)
+
+**Decisions:**
+- `signInWithEmail` return type changed from `Promise<void>` to `Promise<boolean>` — updated interface too
+- No changes to tests (no new repository methods)

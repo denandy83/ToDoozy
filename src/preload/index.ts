@@ -193,7 +193,12 @@ const api: TodoozyAPI = {
     clearSession: () => ipcRenderer.invoke('auth:clearSession'),
     getSupabaseConfig: () => ipcRenderer.invoke('auth:getSupabaseConfig'),
     openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url),
-    switchDatabase: (userId, email) => ipcRenderer.invoke('auth:switchDatabase', userId, email)
+    switchDatabase: (userId, email) => ipcRenderer.invoke('auth:switchDatabase', userId, email),
+    saveEmail: (email) => ipcRenderer.invoke('auth:saveEmail', email),
+    getSavedEmail: () => ipcRenderer.invoke('auth:getSavedEmail'),
+    savePassword: (email, password) => ipcRenderer.invoke('auth:savePassword', email, password),
+    getSavedPassword: (email) => ipcRenderer.invoke('auth:getSavedPassword', email),
+    clearCredentials: () => ipcRenderer.invoke('auth:clearCredentials')
   },
 
   quickadd: {

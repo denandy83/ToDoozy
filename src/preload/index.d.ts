@@ -263,6 +263,11 @@ export interface AuthAPI {
   getSupabaseConfig(): Promise<SupabaseConfig>
   openOAuthWindow(url: string): Promise<string | null>
   switchDatabase(userId: string, email?: string): Promise<void>
+  saveEmail(email: string): Promise<void>
+  getSavedEmail(): Promise<string | null>
+  savePassword(email: string, password: string): Promise<void>
+  getSavedPassword(email: string): Promise<string | null>
+  clearCredentials(): Promise<void>
 }
 
 export interface ShortcutUpdateResult {

@@ -34,7 +34,7 @@ import { useSettingsStore } from './shared/stores/settingsStore'
 import { useLabelStore } from './shared/stores/labelStore'
 import { useSavedViewStore } from './shared/stores/savedViewStore'
 import type { ViewId } from './shared/stores/viewStore'
-import { useAuthStore } from './shared/stores/authStore'
+import { useAuthStore, takePendingPasswordSave } from './shared/stores/authStore'
 import { useToast } from './shared/components/Toast'
 import { ToastContainer } from './shared/components/Toast'
 import { ContextMenu } from './shared/components/ContextMenu'
@@ -172,6 +172,26 @@ export function AppLayout(): React.JSX.Element {
 
   // Sidebar is always expanded (collapse removed in Story #52)
   const { addToast } = useToast()
+
+  useEffect(() => {
+    const pending = takePendingPasswordSave()
+    if (!pending) return
+    addToast({
+      message: 'Save password to Keychain?',
+      persistent: true,
+      actions: [
+        {
+          label: 'Save',
+          variant: 'accent' as const,
+          onClick: async () => {
+            await window.api.auth.savePassword(pending.email, pending.password).catch(() => {})
+          }
+        },
+        { label: 'No thanks', variant: 'muted' as const, onClick: () => {} }
+      ]
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const lastRecurringClone = useTaskStore((s) => s.lastRecurringClone)
 
   // Hydrate notifications on mount
