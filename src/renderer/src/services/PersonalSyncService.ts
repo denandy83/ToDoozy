@@ -734,6 +734,7 @@ export async function pushTheme(theme: {
   accent: string
   accent_fg: string
   border: string
+  sidebar?: string
   created_at?: string
   updated_at?: string
   deleted_at?: string | null
@@ -754,6 +755,7 @@ export async function pushTheme(theme: {
     // Legacy column, still NOT NULL — kept in sync with fg_secondary.
     surface: theme.fg_secondary,
     border: theme.border,
+    sidebar: theme.sidebar ?? null,
     created_at: theme.created_at ?? now,
     updated_at: theme.updated_at ?? now,
     deleted_at: theme.deleted_at ?? null
@@ -1109,6 +1111,7 @@ export async function fullUpload(userId: string): Promise<void> {
             accent: config.accent ?? '',
             accent_fg: config.accentFg ?? '',
             border: config.border ?? '',
+            sidebar: config.sidebar,
             created_at: theme.created_at,
             updated_at: theme.updated_at
           })

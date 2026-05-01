@@ -566,6 +566,7 @@ interface RemoteTheme {
   accent_fg: string | null
   surface: string
   border: string
+  sidebar: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -681,6 +682,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
       // Legacy NOT NULL column on the remote schema — keep in sync with fgSecondary.
       surface: cfg.fgSecondary,
       border: cfg.border,
+      sidebar: cfg.sidebar,
       created_at: local.created_at,
       updated_at: local.updated_at,
       deleted_at: local.deleted_at ?? null
@@ -698,7 +700,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
       accent: remote.accent,
       accentFg: remote.accent_fg ?? remote.fg,
       border: remote.border,
-      sidebar: deriveSidebar(bg)
+      sidebar: remote.sidebar ?? deriveSidebar(bg)
     }
     return {
       id: remote.id,
