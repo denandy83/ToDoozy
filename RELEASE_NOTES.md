@@ -6,6 +6,7 @@ User-facing changes by date. Most recent first.
 
 ## v1.5.5
 
+- **Fix: Duplicate labels from shared projects no longer appear in the picker** — If a member of a shared project had a same-named label (e.g. "Bug"), it would show up as a second "Bug" in your label picker and filter bar. Selecting it would link the wrong label to your personal project. The picker now only shows your own labels.
 - **Fix: Session expired banner now tells you to sign in again** — If your session becomes permanently invalid (e.g., due to a connectivity issue at startup), the app now shows a red "Session expired" banner with a single "Sign in again" button. Previously it showed a generic "Sync paused / Retry now" prompt which was misleading since retrying wouldn't help.
 
 ## v1.5.3
