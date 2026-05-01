@@ -105,6 +105,12 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 
 ---
 
+## Pattern: findAllForUser leaks foreign-user labels from shared projects
+- **Symptoms**: A label appears twice in the sidebar or label picker — same name, different color/ID. The duplicate is owned by another user (e.g. a shared-project member). Each time you assign that label to a task it attaches the wrong row.
+- **Root cause**: `findAllForUser` and `findAllWithUsage` in `LabelRepository` join through `project_members → project_labels → labels` to find accessible labels. Without a filter on `labels.user_id`, they return labels owned by ANY member of any shared project, not just the current user's labels. Picking one in a label picker then associates the foreign-user label with the current user's personal project via `project_labels`.
+- **Fix**: Add `AND (l.user_id = ? OR l.user_id IS NULL)` to the WHERE clause of both queries (the `IS NULL` arm preserves legacy rows from before the `user_id` migration). To clean up existing duplicates: remap `task_labels` from the foreign ID to the canonical ID, remove the foreign row from `project_labels`, and delete it from `labels`.
+- **Check first**: When a label duplicate appears, `SELECT id, name, user_id FROM labels WHERE lower(name) = 'X'` — if there are two rows with different `user_id`s, this is the cause.
+
 ## Pattern: isPermanentlyDead flag not surfaced to React state
 - **Symptoms**: App shows generic "Sync paused" banner even when the session is permanently dead (`refresh_token_already_used`). Retry button does nothing.
 - **Root cause**: `isPermanentlyDead` was a module-level variable in `sessionRecovery.ts` — never written to the Zustand authStore, so React components couldn't read it.

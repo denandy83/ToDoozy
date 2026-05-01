@@ -6,6 +6,7 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ## v1.5.5
 
+- **Duplicate labels from shared projects** — Labels owned by other members of a shared project no longer appear in the label picker or filter bar. Previously, selecting such a label linked the foreign-user label to your personal project, producing a duplicate. The queries that power all label pickers now filter to the current user's own labels only.
 - **Session-expired banner** — When a refresh token is permanently dead, the app now shows a red "Session expired — Sign in again" banner instead of the generic amber "Sync paused / Retry now" prompt. The retry button is hidden because retrying is pointless for a dead token.
 - **Shared project names in reconnect logs** — "Reconnect in Xs" and "Reconnect skipped" log entries for shared projects now show the project name instead of a raw UUID.
 

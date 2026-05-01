@@ -32,6 +32,15 @@ Working file — entries written here during a session are processed into perman
 **Commit:** <hash>
 ```
 
+## 2026-04-30 — Fix: Duplicate labels from shared-project members no longer appear in label pickers
+**What was broken:** Labels owned by other members of a shared project (e.g. Danial's "bug" label in Todoozy Bugs) appeared in the quick-add label picker and the label filter bar. Picking one linked the foreign-user label to a personal project, creating a visually duplicate label with a different ID, color, and owner.
+**Root cause:** `findAllForUser` and `findAllWithUsage` in `LabelRepository` joined through `project_members → project_labels → labels` without filtering on `labels.user_id`, so any label associated with a shared project showed up regardless of who owned it.
+**What was fixed:** Added `AND (l.user_id = ? OR l.user_id IS NULL)` to both queries so only the current user's own labels (and legacy NULL-owner rows) are returned. Also manually cleaned up the existing duplicate "bug" label in the live DB (remapped 6 task_labels references from `b1ad197e` → `8a67ae36` and deleted the orphaned row).
+**User-facing impact:** The label picker and filter bar now only show the user's own labels; other project members' same-named labels no longer appear as duplicates.
+**Affected area:** Label picker, label filter bar, quick add, settings labels list
+**Files changed:** `src/main/repositories/LabelRepository.ts`
+**Commit:** 7ac248a
+
 **Entry format — Session-end fallback (hook):**
 ```
 ## YYYY-MM-DD — Session end (git fallback)
@@ -349,3 +358,7 @@ Working file — entries written here during a session are processed into perman
 **Technical summary:** Added ThemeConfig.sidebar field mapped to --color-sidebar CSS var. Updated all 12 built-in themes with sidebar values. Sidebar.tsx uses bg-sidebar instead of bg-surface; structural borders switched to border-foreground/10. SessionBanner upgraded to absolute inset-0 overlay with solid red/amber background and white text. All sync paths (syncTables.ts toRemote/fromRemote, PersonalSyncService pushTheme) updated to carry the sidebar field. Supabase migration 20260501000000 adds sidebar column to user_themes and back-fills existing rows.
 **Affected views/components:** Sidebar, AppLayout header, SessionBanner, ThemeSettingsContent, ThemePreview, useThemeApplicator, syncTables, PersonalSyncService
 **Commit:** 081ba15, 691210b
+
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 8ba804a docs: document sidebar color + border + SessionBanner changes (2026-04-30) — files: 2
