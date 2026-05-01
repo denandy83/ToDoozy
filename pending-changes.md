@@ -334,3 +334,18 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Settings → offline banner; realtime reconnect logs
 **Files changed:** src/renderer/src/shared/stores/authStore.ts, src/renderer/src/shared/components/SessionBanner.tsx, src/renderer/src/services/SyncService.ts
 **Commit:** c0ad3869722e7970c2fd801a8c522a0d99f7aa48
+
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 70949b8 chore: document session-expired banner fix and log name improvements (2026-04-30) — files: 5
+
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 912bac8 feat: add story #65 — profile settings, password management, forgot password (2026-04-30) — files: 2
+
+## 2026-04-30 — Feature: Sidebar color + visible structural borders + SessionBanner overlay
+**What it does:** Three visual improvements: (1) A new "Sidebar" color field in Settings → Theme gives independent control over the left panel background (previously auto-derived, now customizable). (2) Structural dividers (header line, sidebar top/bottom, sidebar right border) now use `border-foreground/10` — always visible in every theme regardless of the Border color setting. (3) The session-expired and sync-paused banners now overlay the header as a solid banner instead of sitting below it.
+**Why it was built:** In dark themes, the border color was nearly identical to the background color making the structural header line invisible. The sidebar had no independent color control. The session banner was positioned in the layout flow rather than as an overlay.
+**Technical summary:** Added ThemeConfig.sidebar field mapped to --color-sidebar CSS var. Updated all 12 built-in themes with sidebar values. Sidebar.tsx uses bg-sidebar instead of bg-surface; structural borders switched to border-foreground/10. SessionBanner upgraded to absolute inset-0 overlay with solid red/amber background and white text. All sync paths (syncTables.ts toRemote/fromRemote, PersonalSyncService pushTheme) updated to carry the sidebar field. Supabase migration 20260501000000 adds sidebar column to user_themes and back-fills existing rows.
+**Affected views/components:** Sidebar, AppLayout header, SessionBanner, ThemeSettingsContent, ThemePreview, useThemeApplicator, syncTables, PersonalSyncService
+**Commit:** 081ba15, 691210b
