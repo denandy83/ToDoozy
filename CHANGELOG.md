@@ -4,6 +4,11 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.5.5
+
+- **Session-expired banner** — When a refresh token is permanently dead, the app now shows a red "Session expired — Sign in again" banner instead of the generic amber "Sync paused / Retry now" prompt. The retry button is hidden because retrying is pointless for a dead token.
+- **Shared project names in reconnect logs** — "Reconnect in Xs" and "Reconnect skipped" log entries for shared projects now show the project name instead of a raw UUID.
+
 ## v1.5.3
 
 - **Bell icon now toggles the notification panel** — Clicking the bell while the panel was open used to do nothing visible. The document-level outside-click handler closed the panel before the bell's `onClick` re-opened it, so it flipped twice and stayed open. The handler now treats the bell+panel's shared `relative` wrapper as "inside," so the bell click reaches `togglePanel` and the panel actually closes.

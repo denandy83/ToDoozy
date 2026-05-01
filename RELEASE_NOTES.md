@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.5.5
+
+- **Fix: Session expired banner now tells you to sign in again** — If your session becomes permanently invalid (e.g., due to a connectivity issue at startup), the app now shows a red "Session expired" banner with a single "Sign in again" button. Previously it showed a generic "Sync paused / Retry now" prompt which was misleading since retrying wouldn't help.
+
 ## v1.5.3
 
 - **Fix: Bell icon now closes the notification panel** — Clicking the bell while the notification panel is open now closes it (it used to silently stay open). The panel still closes on Escape, on clicking outside it, or on opening a notification.

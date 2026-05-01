@@ -102,3 +102,11 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
   3. **Invite channel used `Date.now()` in name** — `subscribeToInvites()` created channels named `invites:email:${Date.now()}`, always unique, so Supabase never reused the channel.
 - **Fix**: Added `personalChannels: Map<string, RealtimeChannel>` with has-check in PersonalSyncService. Split App.tsx effect: hydration depends on `currentProjectId`, RT subscriptions depend only on `currentUser` (run once at login). Removed `Date.now()` from invite channel name.
 - **Check first**: When adding a Realtime subscription, verify: (1) Is there a Map/Set guarding against duplicates? (2) Is the useEffect dependency array minimal — does it include anything that changes frequently? (3) Is the channel name stable (no timestamps, no random suffixes)?
+
+---
+
+## Pattern: isPermanentlyDead flag not surfaced to React state
+- **Symptoms**: App shows generic "Sync paused" banner even when the session is permanently dead (`refresh_token_already_used`). Retry button does nothing.
+- **Root cause**: `isPermanentlyDead` was a module-level variable in `sessionRecovery.ts` — never written to the Zustand authStore, so React components couldn't read it.
+- **Fix**: Add `isTokenPermanentlyDead: boolean` to `AuthState`, set it after `tryRestoreSession` detects a permanent error, add selector, use it in `SessionBanner` to render a different (red, no-retry) variant.
+- **Check first**: Whenever you add error state to a service module, check whether React components need to observe it. If so, add it to the relevant Zustand store, don't leave it as a bare module variable.

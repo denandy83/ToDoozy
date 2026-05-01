@@ -325,3 +325,12 @@ Working file — entries written here during a session are processed into perman
 - bf6fcf3 fix(recurrence): parse due dates as local midnight to prevent same-day re-clone (2026-04-28) — files: 4
 - 6f91d17 fix(collab): consistent member display — filter Shared User, placeholder emails, UUID initials (2026-04-28) — files: 2
 - edd2d9c fix: member privacy leak, phantom sort pushes, and MCP label ID collision (2026-04-28) — files: 5
+
+## 2026-04-30 — Fix: Session-expired banner + shared project names in reconnect logs
+**What was broken:** When a user's session was permanently invalidated (e.g., due to the setAuth storm consuming the refresh token), the app showed the generic amber "Sync paused / Retry now" banner — which was misleading because retrying is pointless for a dead token. Also, shared project channels showed raw UUIDs in "Reconnect in" and "Reconnect skipped" log entries instead of project names.
+**Root cause:** (1) `isPermanentlyDead` was a module-level variable in sessionRecovery.ts never written to React state, so the banner couldn't distinguish a permanently dead session from a temporary offline state. (2) `scheduleSharedReconnect` in SyncService.ts used `projectId` directly in reconnect log calls even though `getCachedProjectName` was already available.
+**What was fixed:** Added `isTokenPermanentlyDead: boolean` to authStore state, set it when `tryRestoreSession` detects a permanent auth error, and updated SessionBanner to render a red "Session expired — Sign in again" variant when the flag is true. Fixed the three reconnect log calls in SyncService.ts to use the cached project name.
+**User-facing impact:** Users with a dead session now see a clear red banner with a single "Sign in again" button instead of an unhelpful amber retry prompt. Log entries for shared project reconnects now show names like "Crewlounge" instead of raw UUIDs.
+**Affected area:** Settings → offline banner; realtime reconnect logs
+**Files changed:** src/renderer/src/shared/stores/authStore.ts, src/renderer/src/shared/components/SessionBanner.tsx, src/renderer/src/services/SyncService.ts
+**Commit:** c0ad3869722e7970c2fd801a8c522a0d99f7aa48
