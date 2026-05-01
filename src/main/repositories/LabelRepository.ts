@@ -25,8 +25,9 @@ export class LabelRepository {
        INNER JOIN project_labels pl ON pl.label_id = l.id AND pl.deleted_at IS NULL
        INNER JOIN project_members pm ON pm.project_id = pl.project_id
        WHERE pm.user_id = ? AND l.deleted_at IS NULL
+         AND (l.user_id = ? OR l.user_id IS NULL)
        ORDER BY l.order_index ASC`
-    ).all(userId) as unknown as Label[]
+    ).all(userId, userId) as unknown as Label[]
   }
 
   /** Get labels linked to a specific project via project_labels junction */
@@ -413,10 +414,11 @@ export class LabelRepository {
            GROUP BY tl.label_id
          ) tc ON tc.label_id = l.id
          WHERE pm.user_id = ? AND l.deleted_at IS NULL
+           AND (l.user_id = ? OR l.user_id IS NULL)
          GROUP BY l.id
          ORDER BY l.order_index ASC`
       )
-      .all(userId, userId, userId) as unknown as LabelUsageInfo[]
+      .all(userId, userId, userId, userId) as unknown as LabelUsageInfo[]
   }
 
   /** Get projects (that the user has access to) that use a specific label, with task count per project */
