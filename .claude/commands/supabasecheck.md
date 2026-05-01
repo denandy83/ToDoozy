@@ -7,6 +7,8 @@ description: Check Supabase Disk IO stats and compare against the pre-optimizati
 
 Compare current Supabase stats against the pre-optimization baseline captured on 2026-04-14 to verify that IO optimizations are working.
 
+**pg_stat_statements was reset on 2026-05-01 04:07:34 UTC** — query call rates are measured from that point. Table stats (pg_stat_user_tables) cannot be reset on the free tier; use the snapshot below to compute deltas.
+
 ## Baseline — Average Hourly Rates (pre-optimization)
 
 Calculated from 1,449 hours of cumulative stats (2026-02-12 to 2026-04-14) with 1-2 active users.
@@ -31,23 +33,23 @@ WRITE RATES (avg/hour):
 - statuses updates:            5.3/hr
 - user_settings updates:       0.58/hr
 
-Index count: 29 (now 37 after optimization)
+Index count: 29 pre-opt → 37 post-opt → 63 as of 2026-05-01
 ```
 
-## Post-Optimization Table Stats Snapshot (2026-04-14 10:48 UTC)
+## Table Stats Snapshot (2026-05-01 04:07:31 UTC)
 
-Use this to calculate post-optimization deltas for table stats (subtract these from current values).
+Use this to calculate deltas for table stats (subtract these from current values).
 
 ```
-project_members: seq_scan=2,006,711 / idx_scan=37,396 / updates=11
-projects: seq_scan=53,824 / idx_scan=12,032 / updates=21,507
-tasks: seq_scan=576 / idx_scan=232,860 / updates=81,810
-statuses: seq_scan=954 / idx_scan=50,440 / updates=8,120
-user_settings: seq_scan=275 / idx_scan=964 / updates=851
-api_keys: seq_scan=1,737 / idx_scan=103 / updates=910
+project_members: seq_scan=4,382,826 / idx_scan=737,347 / updates=14
+projects: seq_scan=1,138,600 / idx_scan=28,840 / updates=22,779
+tasks: seq_scan=1,034 / idx_scan=1,495,200 / updates=108,722
+statuses: seq_scan=1,465 / idx_scan=1,153,298 / updates=9,696
+user_settings: seq_scan=461 / idx_scan=1,547 / updates=1,320
+api_keys: seq_scan=11,858 / idx_scan=105 / updates=5,955
 ```
 
-**pg_stat_statements was reset on 2026-04-14 08:48 UTC** — so query stats start fresh from that point. Table stats (pg_stat_user_tables) could NOT be reset (permission denied on free tier) and are cumulative since 2026-02-12.
+Table stats are cumulative since 2026-02-12 (free tier cannot reset them).
 
 ## Steps
 
@@ -78,9 +80,9 @@ SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size, n_l
 FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(relid) DESC;
 ```
 
-2. Calculate hours since `pg_stat_statements` reset (2026-04-14 08:48 UTC):
+2. Calculate hours since `pg_stat_statements` reset (2026-05-01 04:07:34 UTC):
 ```sql
-SELECT EXTRACT(EPOCH FROM (NOW() - '2026-04-14 08:48:47.191683+00'::timestamptz)) / 3600 AS hours_since_reset;
+SELECT EXTRACT(EPOCH FROM (NOW() - '2026-05-01 04:07:34.683681+00'::timestamptz)) / 3600 AS hours_since_reset;
 ```
 
 3. Divide current totals by hours to get **current rate/hour**.
@@ -96,7 +98,7 @@ SELECT EXTRACT(EPOCH FROM (NOW() - '2026-04-14 08:48:47.191683+00'::timestamptz)
 | project_members seq_scans | 1,380 | X | ? |
 | projects updates | 14 | X | ? |
 | tasks updates | 54 | X | ? |
-| Index count | 29 | 37 | +8 |
+| Index count | 29 | X | ? |
 ```
 
 5. Flag any metric where the current rate **exceeds** the pre-optimization rate — that means something got worse.
@@ -110,4 +112,4 @@ SELECT EXTRACT(EPOCH FROM (NOW() - '2026-04-14 08:48:47.191683+00'::timestamptz)
    - **Improved but watch** — most rates down, one or two elevated
    - **Needs attention** — rates exceeding baseline or dead tuples accumulating
 
-**Note:** Table stats (pg_stat_user_tables) are cumulative since 2026-02-12 and could NOT be reset (free tier restriction). Only `pg_stat_statements` (query stats) was reset on 2026-04-14 08:48 UTC. For table scan/update rates, subtract the baseline snapshot totals and divide by hours since baseline to get the post-optimization rate.
+**Note:** Table stats (pg_stat_user_tables) are cumulative since 2026-02-12 and cannot be reset (free tier restriction). `pg_stat_statements` was last reset on 2026-05-01 04:07:34 UTC. For table scan/update rates, subtract the snapshot totals above and divide by hours since snapshot to get the current rate.
