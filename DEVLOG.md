@@ -4,6 +4,60 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## v1.5.5 — Sidebar color, profile settings, session-expired banner, label dedup (2026-04-29 – 2026-05-01)
+
+**Session type:** Feature + bug fixes
+
+**What was built/fixed:**
+
+- **Sidebar color (visual)** — Added `ThemeConfig.sidebar` field mapped to `--color-sidebar` CSS variable. Sidebar.tsx switches to `bg-sidebar`. All 12 built-in themes updated. Supabase migration adds `sidebar` column to `user_themes` and back-fills existing rows. Sync paths (syncTables descriptors, PersonalSyncService pushTheme) updated to carry the new field.
+- **Structural borders always visible** — Header line and sidebar borders switched to `border-foreground/10` so they're visible in every theme regardless of the border color setting.
+- **SessionBanner overlay** — Session-expired and sync-paused banners now render as `absolute inset-0` overlays with solid red/amber backgrounds rather than sitting in layout flow.
+- **Session-expired vs sync-paused distinction** — Added `isTokenPermanentlyDead` to authStore; `tryRestoreSession` sets it on permanent auth errors. SessionBanner renders a red "Session expired — Sign in again" variant when true, instead of the misleading amber retry prompt.
+- **Profile settings (#65)** — New Profile tab in Settings: password management, display name, account info.
+- **Duplicate label fix (LabelRepository)** — `findAllForUser` and `findAllWithUsage` now filter `labels.user_id = current_user OR user_id IS NULL`, so foreign members' labels never appear in the user's pickers.
+- **Label collision consolidation** — Reconcile path and sync queue now handle MCP-induced duplicate label IDs: canonical label inserted first, junction table remapped, duplicate deleted.
+- **Shared-project reconnect log names** — `scheduleSharedReconnect` now uses `getCachedProjectName` in all three reconnect log calls instead of raw project UUIDs.
+- **Recurrence due-date parsing** — Due dates parsed as local midnight (not UTC) to prevent same-day re-clones in non-UTC timezones.
+- **Member avatar reliability** — Profiles fetched via SECURITY DEFINER RPC to include email/password users; stale placeholder cache emails overridden by live props; `Unknown` replaced by `Member (uuid)` for profileless members.
+
+**Key commits:** a118c5d (v1.5.5 bump), 2342ccf, 143dd2a, d0f0f34, ba0c2fb, 96fea43, 630e951, 8821ac2, e57dde3, fe829fd, 5daced3, fdd1abf, bf6fcf3, 6f91d17, edd2d9c, c0ad386, 081ba15, 691210b, 7ac248a, 90a5486
+
+---
+
+## v1.5.4 — Phantom reconcile pushes + shared-project label gap (2026-04-27)
+
+**Session type:** Bug fix
+
+**What was fixed:**
+
+- **Phantom reconcile pushes** — `reconcileTable` was classifying already-synced rows as local-only and pushing them every cycle. The diff correctness condition was inverted; fixed so in-sync rows are skipped.
+- **Shared-project label gap** — `task_labels` rows were not included in the reconcile scope for shared projects. Label assignments are now covered by the reconcile and propagate to all members.
+
+**Key commits:** 85e4ca2 (v1.5.4 bump), 1301605
+
+---
+
+## v1.5.2 – v1.5.3 — Forever auth + notification panel fixes (2026-04-26)
+
+**Session type:** Bug fixes
+
+**What was fixed (v1.5.2 — Forever auth):**
+
+- Supabase rotates `refresh_token` on every use. Our `onAuthStateChange` listener logged `TOKEN_REFRESHED` but never re-persisted the rotated token to safeStorage, so after one in-app rotation the next cold start hit "Refresh Token Not Found" — permanently dead. Fixed by attaching a `TOKEN_REFRESHED` / `SIGNED_IN` listener in `attachAuthInstrumentation` that persists the new session immediately (with `setTimeout(..., 0)` to avoid the auth-js `_acquireLock` deadlock: supabase/auth-js#762).
+- Concurrent rotation paths (cold-start `setSession`, autoRefreshToken loop, sleep/wake timers, recovery timer ticks) could race and trip Supabase's 10s reuse-detection window. Fixed with an `async-mutex` single-flight wrapper (`safeSetSession`, `safeRefresh`).
+- Recovery timer retried forever even on permanent errors (`refresh_token_not_found`, `session_not_found`, etc.). Now detects terminal errors, sets `permanentlyDead`, clears safeStorage, and stops.
+- Added `app.requestSingleInstanceLock()` in Electron main to prevent multi-instance auth-client races.
+
+**What was fixed (v1.5.3 — Notification panel):**
+
+- Bell toggle: document outside-click handler was closing the panel before `togglePanel()` ran, so clicking the bell while open netted zero change. Fixed by testing against `panelRef.current?.parentElement` (the shared wrapper containing both bell and panel) instead of the panel ref itself.
+- X → Trash2: replaced the redundant close button with a trash icon that triggers a persistent confirm toast before calling `notifications:deleteAll` (new IPC + `NotificationRepository.deleteAll()` + store action). Trash disabled when list is empty.
+
+**Key commits:** e2c6ac7, f8b7569, e7fd413, 7f2ab11, 29eae22, 3b129e6, 8593936, 07fd262, 0c788a3
+
+---
+
 ## v1.5.1 — Auto-recover dead Supabase sessions (2026-04-26)
 
 **Session type:** Bug fix on `fix/session-recovery` (off v1.5.0)
@@ -52,6 +106,43 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 **Manual drift verification runbook:** documented in `scope.md` for the user to execute Scenarios A-D against a dev DB before tagging.
 
 **Key commits:** TBD after squash merge to `main`.
+
+---
+
+## v1.4.0 – v1.4.5 — Theme import/export, Realtime auto-reconnect, sync hardening (2026-04-21 – 2026-04-25)
+
+**Session type:** Feature implementation + bug fixes (multiple patch releases)
+
+**What was built/fixed:**
+
+- **Theme import / export (#62, v1.4.0)** — New Export and Import buttons in Settings → Themes. Exports current theme as JSON; imports any JSON theme file. Enables sharing custom color palettes between devices and users.
+- **Theme save icon polish (#63, v1.4.0)** — Save icon in theme editor now only appears when color values differ from the persisted state, eliminating the "always unsaved" false positive.
+- **Cmd+K UUID search (#64, v1.4.0)** — Command palette now matches against task UUIDs in addition to titles/labels/metadata. Direct navigation by pasting a task ID.
+- **Timer mode picker (#62-adjacent, v1.4.0)** — The three competing timer toggles (Perpetual, Flowtime, Repetition) are replaced by a single "Default mode" segmented picker. Pressing play opens a fixed-size popup; a "Skip start dialog" toggle restores one-click behavior.
+- **Notification panel bell toggle + trash-confirm (#v1.4.0)** — Bell now correctly toggles the panel closed. X replaced by Trash2 with persistent confirm toast before bulk-delete.
+- **Update modal skipped-versions fix (#v1.4.1)** — Modal now concatenates notes from every intermediate version, not just the latest.
+- **Auto-reconnect Realtime channels (v1.4.2)** — On channel drop (sleep/wake, network switch), a backoff reconnect is scheduled automatically. Previously channels stayed dead until app restart. In-app connection log added to Settings for diagnosing sync issues.
+- **Shared-project sync bugs (v1.4.3)** — Batch pre-fetch of all referenced user IDs before task insert (fixes FK failures); placeholder rows for unknown members; high-water mark fix for incremental pull; auto-archive scoped to the originating device.
+- **Offline debounce + label default (v1.4.4)** — High-frequency writes debounced before entering sync queue; new labels default to least-used color; What's New sync now logs completion.
+- **Sync silent-failure paths + label dedup (v1.4.5)** — Error paths that swallowed exceptions now surface and retry; duplicate label rows (same name, different ID) consolidated; `task_labels` added to reconcile scope.
+
+**Key commits:** cd05968, 3c01c28, 9359cea (v1.4.0), a463fa6 (v1.4.1), c175248, f9b247b (v1.4.2), 47bc120, d118a56 (v1.4.3), 51dc0f6, ffdc1cf (v1.4.4), 4fe36d7, b3e2689 (v1.4.5)
+
+---
+
+## v1.3.3 — DatePicker fix, label picker, sync dot, invite FK (2026-04-19 – 2026-04-20)
+
+**Session type:** Bug fixes
+
+**What was fixed:**
+
+- **DatePicker keyboard-selected day** — `--keyboard-selected` CSS class was styled identically to `--selected`, causing today's day-of-month to appear highlighted in every navigated month. Fixed by splitting the CSS rules: only `--selected` gets the accent fill; `--keyboard-selected` is neutralized; today gets a subtle `box-shadow: inset` border.
+- **Quick-add label picker shows all labels** — Labels loaded via `labels.findAll(userId)` instead of `labels.findByProjectId(...)`, deduped by lowercase name for display. Cross-project labels now linked to the target project on submit.
+- **Sync dot false-positive red** — Staleness is now derived from `navigator.onLine`, `realtimeConnected`, and `pendingCount` with a 60s drain timer. Idle sessions stay green. A 30s interval re-evaluates the state independently of render cycles.
+- **Invite FK failure** — `syncProjectDown` now batch-fetches every unique `owner_id` and `assigned_to` across remote tasks and ensures local user rows exist before inserting, eliminating the "FOREIGN KEY constraint failed" error on first join.
+- **Email confirmation redirect** — `signUpWithEmail` now passes `emailRedirectTo` pointing to a GitHub Pages hosted confirmation page, replacing the localhost URL that browsers refused to connect to.
+
+**Key commits:** 35d7869, 1b6c538, a523dbf, 2c73a3a, c851ff7, 26ee6bf (v1.3.3 bump)
 
 ---
 

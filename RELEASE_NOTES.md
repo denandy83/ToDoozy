@@ -6,8 +6,16 @@ User-facing changes by date. Most recent first.
 
 ## v1.5.5
 
+- **Sidebar color** — Settings → Theme now has a dedicated "Sidebar" color field so you can set the left panel background independently from the rest of the app. All 12 built-in themes have been updated with sidebar values, and custom themes can set their own.
+- **Profile settings** — A new Profile tab in Settings lets you manage your account: change your password, update your display name, and view account info.
+- **Structural borders always visible** — The header line and sidebar borders now use a foreground-relative color so they're always visible regardless of which theme you're using.
 - **Fix: Duplicate labels from shared projects no longer appear in the picker** — If a member of a shared project had a same-named label (e.g. "Bug"), it would show up as a second "Bug" in your label picker and filter bar. Selecting it would link the wrong label to your personal project. The picker now only shows your own labels.
 - **Fix: Session expired banner now tells you to sign in again** — If your session becomes permanently invalid (e.g., due to a connectivity issue at startup), the app now shows a red "Session expired" banner with a single "Sign in again" button. Previously it showed a generic "Sync paused / Retry now" prompt which was misleading since retrying wouldn't help.
+
+## v1.5.4
+
+- **Fix: Sync no longer pushes already-synced rows on every cycle** — A logic gap in the reconcile diff meant rows that were already in sync were classified as "local only" and pushed repeatedly. This produced redundant Supabase writes every reconcile cycle. The diff now correctly identifies in-sync rows and skips them.
+- **Fix: Label assignments now sync to all devices in shared projects** — Labels added to tasks in a shared project were missing from the reconcile scope, so they'd appear on the device that created them but not on others. Labels are now included in the cross-device reconcile.
 
 ## v1.5.3
 
@@ -35,6 +43,38 @@ User-facing changes by date. Most recent first.
 - **No more wake-from-sleep storm** — Closing the laptop lid no longer makes the app spend the next minute reconnecting Realtime channels in a loop.
 - **Faster, quieter idle sync** — When nothing has changed, reconcile finishes near-instantly instead of scanning every table. Boots are quicker and the sync log is much less noisy.
 - **Storage stays bounded** — Soft-deleted rows are now hard-deleted automatically after 30 days, both in the cloud and locally.
+
+## v1.4.5
+
+- **Fix: Several sync failures that were silently swallowed** — Sync paths that hit errors were completing without logging or retrying. These now surface errors and re-queue failed writes for retry.
+- **Fix: Duplicate labels created during sync are now consolidated** — If a sync produced two label rows with the same name but different IDs, all task references are remapped to the canonical label and the duplicate is removed.
+
+## v1.4.4
+
+- **Fix: New labels no longer always start with the same color** — New labels now default to the least-used color in your palette. Previously they always started as the first color regardless of what colors you already had.
+- **What's New syncs on app launch** — The What's New tab now silently refreshes release notes on launch and logs a confirmation when sync completes, so you don't have to open Settings to get the latest notes.
+
+## v1.4.3
+
+- **Fix: Shared projects now sync fully when you join** — Several edge cases in the initial shared-project sync (missing tasks from other members, assigned-to FK failures, incorrect auto-archive on your device) have been resolved. Joining a shared project and seeing all its tasks the first time should now work reliably.
+
+## v1.4.2
+
+- **Fix: Supabase connection recovers automatically after a network drop** — Previously, if Realtime disconnected (e.g., laptop lid closed, network switch), the channel would stay dead until you restarted the app. The app now automatically reconnects with a backoff schedule.
+- **In-app connection log** — Settings now has a connection log showing Realtime connect/disconnect/reconnect events — useful for diagnosing intermittent sync issues without digging into terminal logs.
+
+## v1.4.1
+
+- **Fix: Update modal shows notes for every version you skipped** — If you skipped multiple versions, the update modal used to only show release notes for the latest. It now shows notes for every version between your current version and the update.
+
+## v1.4.0
+
+- **Theme import and export** — Export any theme as a JSON file and import it on another device or share it with others. Custom color palettes are no longer device-local.
+- **Command palette searches by task ID** — Paste a task UUID into Cmd+K and the palette will find it directly. Useful for navigating to tasks from external links or logs.
+- **Fix: Pressing play with Flowtime mode active now actually starts Flowtime** — When Flowtime and Perpetual were both enabled in settings, Perpetual silently won and pressing play started a non-Flowtime countdown regardless of the Flowtime setting. The timer settings have been redesigned with a single "Default mode" picker (Flowtime / Timer) replacing the three competing toggles. Pressing play opens a small mode picker pre-selected to your default, and a "Skip start dialog" toggle in Settings → Behavior turns the picker off for one-click starts.
+- **Fix: Save icon in theme settings only shows when there are unsaved changes** — The save icon was appearing even when no color values had been changed from the saved state.
+- **Fix: Notification panel bell now toggles closed** — Clicking the bell while the panel was open did nothing (it opened and closed in the same click). The panel now correctly closes when you click the bell again.
+- **Notification panel: trash icon replaces redundant close button** — The X in the notification panel header has been replaced with a trash icon. Click it to bulk-delete all notifications after a confirmation prompt.
 
 ## v1.3.3
 
