@@ -28,7 +28,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
       {/* Mock sidebar */}
       <div
         className="flex w-32 flex-col gap-0.5 p-3"
-        style={{ backgroundColor: surface, borderRight: `1px solid ${config.border}` }}
+        style={{ backgroundColor: config.sidebar, borderRight: `1px solid rgba(255,255,255,0.1)` }}
       >
         {/* Logo */}
         <div className="flex items-center gap-1.5 px-1.5 py-1 mb-1">

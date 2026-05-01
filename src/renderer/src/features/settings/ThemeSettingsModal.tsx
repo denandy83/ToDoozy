@@ -20,7 +20,8 @@ const DEFAULT_CONFIG: ThemeConfig = {
   muted: '#888888',
   accent: '#6366f1',
   accentFg: '#ffffff',
-  border: '#2a2a4a'
+  border: '#2a2a4a',
+  sidebar: '#26263a'
 }
 
 const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
@@ -31,12 +32,24 @@ const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   muted: 'Muted',
   accent: 'Accent',
   accentFg: 'Accent FG',
-  border: 'Border'
+  border: 'Border',
+  sidebar: 'Sidebar'
 }
 
 function parseConfig(theme: Theme): ThemeConfig {
   try {
-    return JSON.parse(theme.config) as ThemeConfig
+    const c = JSON.parse(theme.config) as Partial<ThemeConfig>
+    const bg = c.bg ?? DEFAULT_CONFIG.bg
+    if (!c.sidebar) {
+      const num = parseInt(bg.replace('#', ''), 16)
+      const brightness = ((num >> 16) & 0xff) + ((num >> 8) & 0xff) + (num & 0xff)
+      const amount = brightness < 384 ? 12 : -8
+      const r = Math.min(255, Math.max(0, ((num >> 16) & 0xff) + amount))
+      const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amount))
+      const b = Math.min(255, Math.max(0, (num & 0xff) + amount))
+      c.sidebar = `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+    }
+    return c as ThemeConfig
   } catch {
     return DEFAULT_CONFIG
   }

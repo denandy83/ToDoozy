@@ -9,6 +9,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
+import { useLabelStore } from '../shared/stores/labelStore'
 import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable } from './syncTables'
@@ -1405,15 +1406,23 @@ export async function fullPull(userId: string): Promise<void> {
       for (const theme of remoteThemes) {
         const existing = await window.api.themes.findById(theme.id)
         if (existing) continue
+        const themeBg = theme.bg ?? ''
+        const themeNum = parseInt(themeBg.replace('#', ''), 16)
+        const themeBrightness = ((themeNum >> 16) & 0xff) + ((themeNum >> 8) & 0xff) + (themeNum & 0xff)
+        const themeAmt = themeBrightness < 384 ? 12 : -8
+        const sidebarR = Math.min(255, Math.max(0, ((themeNum >> 16) & 0xff) + themeAmt))
+        const sidebarG = Math.min(255, Math.max(0, ((themeNum >> 8) & 0xff) + themeAmt))
+        const sidebarB = Math.min(255, Math.max(0, (themeNum & 0xff) + themeAmt))
         const config: ThemeConfig = {
-          bg: theme.bg ?? '',
+          bg: themeBg,
           fg: theme.fg ?? '',
           fgSecondary: theme.fg_secondary ?? theme.surface ?? '',
           fgMuted: theme.fg_muted ?? '',
           muted: theme.muted ?? '',
           accent: theme.accent ?? '',
           accentFg: theme.accent_fg ?? '',
-          border: theme.border ?? ''
+          border: theme.border ?? '',
+          sidebar: `#${((sidebarR << 16) | (sidebarG << 8) | sidebarB).toString(16).padStart(6, '0')}`
         }
         try {
           await window.api.themes.create({
@@ -2034,7 +2043,12 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         // counts here usually mean a filter mismatch between local and remote
         // reads (the bug fixed by getProjectLabelsForOwner's is_shared filter).
         if (toPush.length > 0) {
-          const sample = toPush.slice(0, 5).map((p) => `${p.project_id}::${p.label_id}`).join(',')
+          const labelMap = useLabelStore.getState().labels
+          const sample = toPush.slice(0, 5).map((p) => {
+            const proj = getCachedProjectName(p.project_id) ?? p.project_id
+            const lbl = labelMap[p.label_id]?.name ?? p.label_id
+            return `${proj}::${lbl}`
+          }).join(',')
           logEvent(
             'info',
             'sync',

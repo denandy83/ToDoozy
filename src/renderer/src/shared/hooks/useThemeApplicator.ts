@@ -10,7 +10,8 @@ const CSS_VAR_MAP: Record<keyof ThemeConfig, string> = {
   muted: '--color-muted',
   accent: '--color-accent',
   accentFg: '--color-accent-fg',
-  border: '--color-border'
+  border: '--color-border',
+  sidebar: '--color-sidebar'
 }
 
 /** Lighten or darken a hex color by a given amount (-255 to 255) */
@@ -22,30 +23,45 @@ function adjustColor(hex: string, amount: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
 }
 
-export function applyThemeConfig(config: ThemeConfig): void {
-  const root = document.documentElement
-  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
-    root.style.setProperty(cssVar, config[key as keyof ThemeConfig])
-  }
-  // Derive surface color (slightly lighter for dark themes, slightly darker for light)
-  const bgBrightness =
-    parseInt(config.bg.replace('#', '').slice(0, 2), 16) +
-    parseInt(config.bg.replace('#', '').slice(2, 4), 16) +
-    parseInt(config.bg.replace('#', '').slice(4, 6), 16)
-  const isDark = bgBrightness < 384 // 128 * 3
-  root.style.setProperty('--color-surface', adjustColor(config.bg, isDark ? 12 : -8))
-}
-
-export function applyThemeConfigToElement(el: HTMLElement, config: ThemeConfig): void {
-  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
-    el.style.setProperty(cssVar, config[key as keyof ThemeConfig])
-  }
+function resolveConfig(config: ThemeConfig): ThemeConfig {
   const bgBrightness =
     parseInt(config.bg.replace('#', '').slice(0, 2), 16) +
     parseInt(config.bg.replace('#', '').slice(2, 4), 16) +
     parseInt(config.bg.replace('#', '').slice(4, 6), 16)
   const isDark = bgBrightness < 384
-  el.style.setProperty('--color-surface', adjustColor(config.bg, isDark ? 12 : -8))
+  return {
+    ...config,
+    // Derive sidebar from bg if absent (themes saved before the sidebar field was added)
+    sidebar: config.sidebar ?? adjustColor(config.bg, isDark ? 12 : -8)
+  }
+}
+
+export function applyThemeConfig(config: ThemeConfig): void {
+  const resolved = resolveConfig(config)
+  const root = document.documentElement
+  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
+    root.style.setProperty(cssVar, resolved[key as keyof ThemeConfig])
+  }
+  // Derive surface color (slightly lighter for dark themes, slightly darker for light)
+  const bgBrightness =
+    parseInt(resolved.bg.replace('#', '').slice(0, 2), 16) +
+    parseInt(resolved.bg.replace('#', '').slice(2, 4), 16) +
+    parseInt(resolved.bg.replace('#', '').slice(4, 6), 16)
+  const isDark = bgBrightness < 384
+  root.style.setProperty('--color-surface', adjustColor(resolved.bg, isDark ? 12 : -8))
+}
+
+export function applyThemeConfigToElement(el: HTMLElement, config: ThemeConfig): void {
+  const resolved = resolveConfig(config)
+  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
+    el.style.setProperty(cssVar, resolved[key as keyof ThemeConfig])
+  }
+  const bgBrightness =
+    parseInt(resolved.bg.replace('#', '').slice(0, 2), 16) +
+    parseInt(resolved.bg.replace('#', '').slice(2, 4), 16) +
+    parseInt(resolved.bg.replace('#', '').slice(4, 6), 16)
+  const isDark = bgBrightness < 384
+  el.style.setProperty('--color-surface', adjustColor(resolved.bg, isDark ? 12 : -8))
 }
 
 export function useThemeApplicator(): void {

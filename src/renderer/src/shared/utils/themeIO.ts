@@ -36,8 +36,19 @@ const CONFIG_KEYS: (keyof ThemeConfig)[] = [
   'muted',
   'accent',
   'accentFg',
-  'border'
+  'border',
+  'sidebar'
 ]
+
+function deriveSidebarFromBg(bg: string): string {
+  const num = parseInt(bg.replace('#', ''), 16)
+  const brightness = ((num >> 16) & 0xff) + ((num >> 8) & 0xff) + (num & 0xff)
+  const amount = brightness < 384 ? 12 : -8
+  const r = Math.min(255, Math.max(0, ((num >> 16) & 0xff) + amount))
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amount))
+  const b = Math.min(255, Math.max(0, (num & 0xff) + amount))
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
 
 export function slugifyThemeName(name: string): string {
   const slug = name
@@ -74,12 +85,20 @@ export function serializeThemePair(
   return JSON.stringify(payload, null, 2)
 }
 
+const REQUIRED_CONFIG_KEYS: (keyof ThemeConfig)[] = [
+  'bg', 'fg', 'fgSecondary', 'fgMuted', 'muted', 'accent', 'accentFg', 'border'
+]
+
 function isValidConfig(value: unknown): value is ThemeConfig {
   if (!value || typeof value !== 'object') return false
   const obj = value as Record<string, unknown>
-  for (const key of CONFIG_KEYS) {
+  for (const key of REQUIRED_CONFIG_KEYS) {
     const v = obj[key]
     if (typeof v !== 'string' || !HEX_RE.test(v)) return false
+  }
+  // sidebar is optional for backwards compat with pre-1.5.6 exports
+  if ('sidebar' in obj) {
+    if (typeof obj.sidebar !== 'string' || !HEX_RE.test(obj.sidebar)) return false
   }
   return true
 }
@@ -94,7 +113,10 @@ function pickConfig(value: unknown): ThemeConfig {
     muted: obj.muted,
     accent: obj.accent,
     accentFg: obj.accentFg,
-    border: obj.border
+    border: obj.border,
+    sidebar: (typeof obj.sidebar === 'string' && HEX_RE.test(obj.sidebar))
+      ? obj.sidebar
+      : deriveSidebarFromBg(obj.bg)
   }
 }
 

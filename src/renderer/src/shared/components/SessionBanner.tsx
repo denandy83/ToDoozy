@@ -14,11 +14,11 @@ export function SessionBanner(): React.JSX.Element | null {
     return (
       <div
         role="alert"
-        className="flex items-center justify-between gap-3 border-b border-red-500/40 bg-red-500/10 px-4 py-2"
+        className="absolute inset-0 z-10 flex items-center justify-between gap-3 bg-red-500/95 px-4"
       >
-        <div className="flex items-center gap-2 text-red-500 dark:text-red-400">
+        <div className="flex items-center gap-2 text-white">
           <span
-            className="inline-block h-1.5 w-1.5 rounded-full bg-red-500"
+            className="inline-block h-1.5 w-1.5 rounded-full bg-white"
             aria-hidden
           />
           <span className="text-[11px] font-bold uppercase tracking-widest">Session expired</span>
@@ -29,7 +29,7 @@ export function SessionBanner(): React.JSX.Element | null {
         <button
           type="button"
           onClick={() => void logout()}
-          className="rounded-md border border-red-500/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 dark:text-red-400"
+          className="rounded-md border border-white/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white/10"
         >
           Sign in again
         </button>
@@ -51,11 +51,11 @@ export function SessionBanner(): React.JSX.Element | null {
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2"
+      className="absolute inset-0 z-10 flex items-center justify-between gap-3 bg-amber-500/90 px-4"
     >
-      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+      <div className="flex items-center gap-2 text-white">
         <span
-          className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 motion-safe:animate-pulse"
+          className="inline-block h-1.5 w-1.5 rounded-full bg-white motion-safe:animate-pulse"
           aria-hidden
         />
         <span className="text-[11px] font-bold uppercase tracking-widest">Sync paused</span>
@@ -68,14 +68,14 @@ export function SessionBanner(): React.JSX.Element | null {
           type="button"
           onClick={handleRetry}
           disabled={retrying}
-          className="rounded-md border border-amber-500/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-600 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+          className="rounded-md border border-white/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white/10 disabled:opacity-50"
         >
           {retrying ? 'Retrying…' : 'Retry now'}
         </button>
         <button
           type="button"
           onClick={() => void logout()}
-          className="rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-foreground/60 hover:bg-foreground/6 hover:text-foreground"
+          className="rounded-md border border-white/20 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-white/80 hover:bg-white/10 hover:text-white"
         >
           Sign in again
         </button>

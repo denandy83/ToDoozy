@@ -571,9 +571,21 @@ interface RemoteTheme {
   deleted_at: string | null
 }
 
+function deriveSidebar(bg: string): string {
+  const num = parseInt(bg.replace('#', ''), 16)
+  const brightness = ((num >> 16) & 0xff) + ((num >> 8) & 0xff) + (num & 0xff)
+  const amount = brightness < 384 ? 12 : -8
+  const r = Math.min(255, Math.max(0, ((num >> 16) & 0xff) + amount))
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amount))
+  const b = Math.min(255, Math.max(0, (num & 0xff) + amount))
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+
 function parseThemeConfig(json: string): ThemeConfig {
   try {
-    return JSON.parse(json) as ThemeConfig
+    const c = JSON.parse(json) as Partial<ThemeConfig>
+    const bg = c.bg ?? '#000000'
+    return { ...c, bg, sidebar: c.sidebar ?? deriveSidebar(bg) } as ThemeConfig
   } catch {
     // Defensive — shouldn't happen with our writers, but keep the descriptor
     // resilient against a corrupted local row so sync doesn't crash.
@@ -585,7 +597,8 @@ function parseThemeConfig(json: string): ThemeConfig {
       muted: '#222222',
       accent: '#ff6600',
       accentFg: '#ffffff',
-      border: '#333333'
+      border: '#333333',
+      sidebar: '#0c0c0c'
     }
   }
 }
@@ -675,15 +688,17 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   },
 
   fromRemote(remote) {
+    const bg = remote.bg
     const config: ThemeConfig = {
-      bg: remote.bg,
+      bg,
       fg: remote.fg,
       fgSecondary: remote.fg_secondary ?? remote.surface,
       fgMuted: remote.fg_muted ?? remote.fg,
       muted: remote.muted,
       accent: remote.accent,
       accentFg: remote.accent_fg ?? remote.fg,
-      border: remote.border
+      border: remote.border,
+      sidebar: deriveSidebar(bg)
     }
     return {
       id: remote.id,

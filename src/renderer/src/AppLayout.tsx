@@ -12,6 +12,7 @@ import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { UpdateAvailableModal } from './features/settings/UpdateAvailableModal'
 import { UpdateReadyBanner } from './features/settings/UpdateReadyBanner'
+import { SessionBanner } from './shared/components/SessionBanner'
 import { TaskListView, TaskDragOverlay } from './features/tasks'
 import { KanbanCard } from './features/tasks/KanbanCard'
 import { useDragAndDrop } from './features/tasks/useDragAndDrop'
@@ -1098,7 +1099,7 @@ export function AppLayout(): React.JSX.Element {
         {/* Main content area */}
         <main className="flex flex-1 flex-col overflow-hidden">
           <UpdateReadyBanner />
-          <header className="flex h-[57px] items-center gap-3 border-b border-border px-6">
+          <header className="relative flex h-[57px] items-center gap-3 border-b border-foreground/10 px-6">
             {currentView === 'project' && selectedProject && (
               <>
                 <LayoutGrid size={16} className="flex-shrink-0 text-muted" />
@@ -1353,6 +1354,7 @@ export function AppLayout(): React.JSX.Element {
                 <NotificationPanel />
               </div>
             )}
+          <SessionBanner />
           </header>
 
           {/* Content + Detail Panel layout */}

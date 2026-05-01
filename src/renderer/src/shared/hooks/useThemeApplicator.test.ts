@@ -40,7 +40,8 @@ describe('applyThemeConfigToElement', () => {
       muted: '#333333',
       accent: '#e94560',
       accentFg: '#ffffff',
-      border: '#2a2a4a'
+      border: '#2a2a4a',
+      sidebar: '#26263a'
     }
 
     applyThemeConfigToElement(el, config)
@@ -53,6 +54,7 @@ describe('applyThemeConfigToElement', () => {
     expect(el._styles['--color-accent']).toBe('#e94560')
     expect(el._styles['--color-accent-fg']).toBe('#ffffff')
     expect(el._styles['--color-border']).toBe('#2a2a4a')
+    expect(el._styles['--color-sidebar']).toBe('#26263a')
   })
 
   it('derives lighter surface color for dark themes', () => {
@@ -65,7 +67,8 @@ describe('applyThemeConfigToElement', () => {
       muted: '#444444',
       accent: '#ff0000',
       accentFg: '#ffffff',
-      border: '#333333'
+      border: '#333333',
+      sidebar: '#0c0c0c'
     }
 
     applyThemeConfigToElement(el, darkConfig)
@@ -84,7 +87,8 @@ describe('applyThemeConfigToElement', () => {
       muted: '#cccccc',
       accent: '#0000ff',
       accentFg: '#ffffff',
-      border: '#dddddd'
+      border: '#dddddd',
+      sidebar: '#f7f7f7'
     }
 
     applyThemeConfigToElement(el, lightConfig)
@@ -104,7 +108,8 @@ describe('applyThemeConfigToElement', () => {
       muted: '#aaaaaa',
       accent: '#ff0000',
       accentFg: '#ffffff',
-      border: '#999999'
+      border: '#999999',
+      sidebar: '#787878'
     }
 
     applyThemeConfigToElement(el, midConfig)
@@ -125,7 +130,8 @@ describe('applyThemeConfigToElement', () => {
       muted: '#555555',
       accent: '#00ff00',
       accentFg: '#000000',
-      border: '#666666'
+      border: '#666666',
+      sidebar: '#8b8b8b'
     }
 
     applyThemeConfigToElement(el, config)

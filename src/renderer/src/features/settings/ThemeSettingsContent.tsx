@@ -26,7 +26,8 @@ const DEFAULT_CONFIG: ThemeConfig = {
   muted: '#888888',
   accent: '#6366f1',
   accentFg: '#ffffff',
-  border: '#2a2a4a'
+  border: '#2a2a4a',
+  sidebar: '#26263a'
 }
 
 const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
@@ -37,27 +38,49 @@ const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   muted: 'Muted',
   accent: 'Accent',
   accentFg: 'Accent FG',
-  border: 'Border'
+  border: 'Border',
+  sidebar: 'Sidebar'
 }
 
 const BUILTIN_CONFIGS: Record<string, ThemeConfig> = {
-  'Standard Dark': { bg: '#1a1a2e', fg: '#e0e0e0', fgSecondary: '#b0b0b0', fgMuted: '#666666', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#2a2a4a' },
-  'Standard Light': { bg: '#f8f9fa', fg: '#1a1a2e', fgSecondary: '#4a4a6a', fgMuted: '#999999', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#e0e0e8' },
-  'Warm Earth Dark': { bg: '#1c1410', fg: '#e8ddd0', fgSecondary: '#b8a898', fgMuted: '#7a6a5a', muted: '#8a7a6a', accent: '#d4915e', accentFg: '#1c1410', border: '#3a2a1e' },
-  'Warm Earth Light': { bg: '#faf5ef', fg: '#3a2a1e', fgSecondary: '#6a5a4a', fgMuted: '#a09080', muted: '#8a7a6a', accent: '#c07830', accentFg: '#ffffff', border: '#e0d5c8' },
-  'Ocean Blue Dark': { bg: '#0d1b2a', fg: '#d0e0f0', fgSecondary: '#8ab0d0', fgMuted: '#4a6a8a', muted: '#5a7a9a', accent: '#2196f3', accentFg: '#ffffff', border: '#1b3a5a' },
-  'Ocean Blue Light': { bg: '#f0f6fc', fg: '#0d1b2a', fgSecondary: '#2a4a6a', fgMuted: '#7a9abc', muted: '#5a7a9a', accent: '#1976d2', accentFg: '#ffffff', border: '#c8daf0' },
-  'Amethyst Dark': { bg: '#1a1024', fg: '#e0d0f0', fgSecondary: '#b090d0', fgMuted: '#6a4a8a', muted: '#7a5a9a', accent: '#9c27b0', accentFg: '#ffffff', border: '#2a1a3e' },
-  'Amethyst Light': { bg: '#f8f0fc', fg: '#2a1a3e', fgSecondary: '#5a3a7a', fgMuted: '#9a7aba', muted: '#7a5a9a', accent: '#8e24aa', accentFg: '#ffffff', border: '#e0c8f0' },
-  'Forest Dark': { bg: '#0e1a10', fg: '#d0e8d0', fgSecondary: '#90b890', fgMuted: '#4a7a4a', muted: '#5a8a5a', accent: '#4caf50', accentFg: '#ffffff', border: '#1a3a1a' },
-  'Forest Light': { bg: '#f0faf0', fg: '#1a3a1a', fgSecondary: '#3a6a3a', fgMuted: '#7aaa7a', muted: '#5a8a5a', accent: '#388e3c', accentFg: '#ffffff', border: '#c0e0c0' },
-  'Rosewood Dark': { bg: '#1a0e10', fg: '#f0d0d8', fgSecondary: '#d090a0', fgMuted: '#8a4a5a', muted: '#9a5a6a', accent: '#e91e63', accentFg: '#ffffff', border: '#3a1a22' },
-  'Rosewood Light': { bg: '#fcf0f2', fg: '#3a1a22', fgSecondary: '#7a3a4a', fgMuted: '#ba7a8a', muted: '#9a5a6a', accent: '#c2185b', accentFg: '#ffffff', border: '#f0c8d0' }
+  'Standard Dark': { bg: '#1a1a2e', fg: '#e0e0e0', fgSecondary: '#b0b0b0', fgMuted: '#666666', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#2a2a4a', sidebar: '#26263a' },
+  'Standard Light': { bg: '#f8f9fa', fg: '#1a1a2e', fgSecondary: '#4a4a6a', fgMuted: '#999999', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#e0e0e8', sidebar: '#f0f1f2' },
+  'Warm Earth Dark': { bg: '#1c1410', fg: '#e8ddd0', fgSecondary: '#b8a898', fgMuted: '#7a6a5a', muted: '#8a7a6a', accent: '#d4915e', accentFg: '#1c1410', border: '#3a2a1e', sidebar: '#28201c' },
+  'Warm Earth Light': { bg: '#faf5ef', fg: '#3a2a1e', fgSecondary: '#6a5a4a', fgMuted: '#a09080', muted: '#8a7a6a', accent: '#c07830', accentFg: '#ffffff', border: '#e0d5c8', sidebar: '#f2ede7' },
+  'Ocean Blue Dark': { bg: '#0d1b2a', fg: '#d0e0f0', fgSecondary: '#8ab0d0', fgMuted: '#4a6a8a', muted: '#5a7a9a', accent: '#2196f3', accentFg: '#ffffff', border: '#1b3a5a', sidebar: '#192736' },
+  'Ocean Blue Light': { bg: '#f0f6fc', fg: '#0d1b2a', fgSecondary: '#2a4a6a', fgMuted: '#7a9abc', muted: '#5a7a9a', accent: '#1976d2', accentFg: '#ffffff', border: '#c8daf0', sidebar: '#e8eef4' },
+  'Amethyst Dark': { bg: '#1a1024', fg: '#e0d0f0', fgSecondary: '#b090d0', fgMuted: '#6a4a8a', muted: '#7a5a9a', accent: '#9c27b0', accentFg: '#ffffff', border: '#2a1a3e', sidebar: '#261c30' },
+  'Amethyst Light': { bg: '#f8f0fc', fg: '#2a1a3e', fgSecondary: '#5a3a7a', fgMuted: '#9a7aba', muted: '#7a5a9a', accent: '#8e24aa', accentFg: '#ffffff', border: '#e0c8f0', sidebar: '#f0e8f4' },
+  'Forest Dark': { bg: '#0e1a10', fg: '#d0e8d0', fgSecondary: '#90b890', fgMuted: '#4a7a4a', muted: '#5a8a5a', accent: '#4caf50', accentFg: '#ffffff', border: '#1a3a1a', sidebar: '#1a261c' },
+  'Forest Light': { bg: '#f0faf0', fg: '#1a3a1a', fgSecondary: '#3a6a3a', fgMuted: '#7aaa7a', muted: '#5a8a5a', accent: '#388e3c', accentFg: '#ffffff', border: '#c0e0c0', sidebar: '#e8f2e8' },
+  'Rosewood Dark': { bg: '#1a0e10', fg: '#f0d0d8', fgSecondary: '#d090a0', fgMuted: '#8a4a5a', muted: '#9a5a6a', accent: '#e91e63', accentFg: '#ffffff', border: '#3a1a22', sidebar: '#261a1c' },
+  'Rosewood Light': { bg: '#fcf0f2', fg: '#3a1a22', fgSecondary: '#7a3a4a', fgMuted: '#ba7a8a', muted: '#9a5a6a', accent: '#c2185b', accentFg: '#ffffff', border: '#f0c8d0', sidebar: '#f4e8ea' }
+}
+
+function deriveSidebar(bg: string): string {
+  const num = parseInt(bg.replace('#', ''), 16)
+  const brightness = ((num >> 16) & 0xff) + ((num >> 8) & 0xff) + (num & 0xff)
+  const amount = brightness < 384 ? 12 : -8
+  const r = Math.min(255, Math.max(0, ((num >> 16) & 0xff) + amount))
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amount))
+  const b = Math.min(255, Math.max(0, (num & 0xff) + amount))
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
 }
 
 function parseConfig(theme: Theme): ThemeConfig {
   try {
-    return JSON.parse(theme.config) as ThemeConfig
+    const c = JSON.parse(theme.config) as Partial<ThemeConfig>
+    return {
+      bg: c.bg ?? DEFAULT_CONFIG.bg,
+      fg: c.fg ?? DEFAULT_CONFIG.fg,
+      fgSecondary: c.fgSecondary ?? DEFAULT_CONFIG.fgSecondary,
+      fgMuted: c.fgMuted ?? DEFAULT_CONFIG.fgMuted,
+      muted: c.muted ?? DEFAULT_CONFIG.muted,
+      accent: c.accent ?? DEFAULT_CONFIG.accent,
+      accentFg: c.accentFg ?? DEFAULT_CONFIG.accentFg,
+      border: c.border ?? DEFAULT_CONFIG.border,
+      sidebar: c.sidebar ?? deriveSidebar(c.bg ?? DEFAULT_CONFIG.bg)
+    }
   } catch {
     return DEFAULT_CONFIG
   }
@@ -116,7 +139,8 @@ function generateCounterpartConfig(config: ThemeConfig): ThemeConfig {
     muted: config.muted, // muted stays similar in both modes
     accent: config.accent, // accent color stays the same
     accentFg: config.accentFg, // accent fg stays the same
-    border: invertLightness(config.border)
+    border: invertLightness(config.border),
+    sidebar: invertLightness(config.sidebar)
   }
 }
 

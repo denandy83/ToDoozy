@@ -19,7 +19,8 @@ const DARK: ThemeConfig = {
   muted: '#888888',
   accent: '#6366f1',
   accentFg: '#ffffff',
-  border: '#2a2a4a'
+  border: '#2a2a4a',
+  sidebar: '#26263a'
 }
 
 const LIGHT: ThemeConfig = {
@@ -30,7 +31,8 @@ const LIGHT: ThemeConfig = {
   muted: '#888888',
   accent: '#6366f1',
   accentFg: '#ffffff',
-  border: '#e0e0e8'
+  border: '#e0e0e8',
+  sidebar: '#f0f1f2'
 }
 
 describe('slugifyThemeName', () => {
@@ -227,7 +229,8 @@ describe('isThemeConfigEqual', () => {
       muted: DARK.muted.toUpperCase(),
       accent: DARK.accent.toUpperCase(),
       accentFg: DARK.accentFg.toUpperCase(),
-      border: DARK.border.toUpperCase()
+      border: DARK.border.toUpperCase(),
+      sidebar: DARK.sidebar.toUpperCase()
     }
     expect(isThemeConfigEqual(DARK, upper)).toBe(true)
   })

@@ -496,10 +496,10 @@ export function Sidebar({
     <aside
       ref={sidebarRef}
       tabIndex={-1}
-      className="flex w-56 flex-col border-r border-border bg-surface select-none"
+      className="flex w-56 flex-col border-r border-foreground/10 bg-sidebar select-none"
     >
       {/* Header */}
-      <div className="flex h-[57px] items-center gap-2 border-b border-border px-3">
+      <div className="flex h-[57px] items-center gap-2 border-b border-foreground/10 px-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
           <img src={appIcon} alt="ToDoozy" className="h-6 w-6" />
         </div>
@@ -546,7 +546,7 @@ export function Sidebar({
       </nav>
 
       {/* Footer — Stats, Help, Settings, MCP */}
-      <div className="flex flex-col gap-1 border-t border-border p-1.5">
+      <div className="flex flex-col gap-1 border-t border-foreground/10 p-1.5">
         <button
           onClick={() => handleViewClick('stats')}
           className={`flex items-center gap-2 rounded-lg p-2 text-muted transition-colors hover:bg-foreground/6 ${

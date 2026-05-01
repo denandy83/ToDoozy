@@ -126,6 +126,7 @@ export interface ThemeConfig {
   accent: string
   accentFg: string
   border: string
+  sidebar: string
 }
 
 export interface Setting {
