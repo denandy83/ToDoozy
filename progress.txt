@@ -39,3 +39,28 @@ Started: Fri May  1 07:48:09 CDT 2026
 **Decisions:**
 - `signInWithEmail` return type changed from `Promise<void>` to `Promise<boolean>` — updated interface too
 - No changes to tests (no new repository methods)
+
+---
+
+## Story #67 — Project Archive & Restore (2026-05-01)
+
+**What was built:**
+- SQLite migration_24: `ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0` (Supabase column already existed)
+- `ProjectRepository.archiveWithTasks(id)` and `unarchiveWithTasks(id)` using `withTransaction`
+- IPC handlers `projects:archiveWithTasks` and `projects:unarchiveWithTasks`
+- Preload bridge + `ProjectsAPI` type signatures
+- `projectStore`: `archiveProject`, `unarchiveProject` actions, `selectActiveProjects` selector exported from stores barrel
+- `PersonalSyncService`: `pushProjectArchive` batch sync function, `is_archived` in `pullProjectMetadata` and `pushProject`
+- `AppLayout`: Archive icon replaces Trash2, `handleArchiveCurrentProject` handler with shared-project ownership transfer, sidebar uses `selectActiveProjects`
+- `ArchiveView`: includes archived projects (even with no tasks) as group headers with inline Restore/Delete buttons
+- `ProjectGeneralSettings`: archive section with undo toast replaces inline delete confirm
+- `ProjectsSettingsContent`: `ProjectArchiveSection` replaces `ProjectDeleteSection`
+
+**Decisions:**
+- Used `withTransaction` wrapper instead of `this.db.transaction()` (DatabaseSync does not have `.transaction()` in Node.js 25 types)
+- `selectAllProjects` kept unchanged — ArchiveView uses it to see archived projects; sidebar uses new `selectActiveProjects`
+- `shouldForceDelete` import removed from AppLayout as it was only used in old delete handler
+- 5 new Vitest tests added for `archiveWithTasks`/`unarchiveWithTasks` in `ProjectRepository.test.ts`
+- All 746 tests pass, zero typecheck errors
+
+**Blockers:** None

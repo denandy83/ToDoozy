@@ -931,6 +931,7 @@ export async function pushProject(project: {
   auto_archive_enabled?: number
   auto_archive_value?: number
   auto_archive_unit?: string
+  is_archived?: number
   created_at: string
   updated_at: string
 }): Promise<void> {
@@ -966,12 +967,36 @@ export async function pushProject(project: {
           })
           .eq('id', project.id)
       }
+      if (project.is_archived !== undefined) {
+        await supabase.from('projects').update({ is_archived: project.is_archived }).eq('id', project.id)
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'pushProject threw'
     console.error('[PersonalSync] pushProject failed:', err)
     logEvent('error', 'sync', `pushProject threw: ${msg}`, `project=${project.id}`)
     useSyncStore.getState().setError(msg)
+  }
+}
+
+export async function pushProjectArchive(projectId: string, isArchived: number): Promise<void> {
+  if (!(await hasLiveSession('pushProjectArchive', `id=${projectId}`))) return
+  try {
+    const supabase = await getSupabase()
+    const now = new Date().toISOString()
+    const { error: projErr } = await supabase
+      .from('projects')
+      .update({ is_archived: isArchived, updated_at: now })
+      .eq('id', projectId)
+    if (projErr) logEvent('error', 'sync', `pushProjectArchive (project) failed: ${projErr.message}`, `project=${projectId}`)
+    const { error: taskErr } = await supabase
+      .from('tasks')
+      .update({ is_archived: isArchived, updated_at: now })
+      .eq('project_id', projectId)
+    if (taskErr) logEvent('error', 'sync', `pushProjectArchive (tasks) failed: ${taskErr.message}`, `project=${projectId}`)
+    markSynced()
+  } catch (err) {
+    logEvent('error', 'sync', `pushProjectArchive threw: ${err instanceof Error ? err.message : String(err)}`, `project=${projectId}`)
   }
 }
 
@@ -1466,7 +1491,7 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
     const supabase = await getSupabase()
     const { data: remote, error } = await supabase
       .from('projects')
-      .select('name, color, icon, description, updated_at')
+      .select('name, color, icon, description, updated_at, is_archived')
       .eq('id', projectId)
       .maybeSingle()
 
@@ -1484,7 +1509,8 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
         name: remote.name,
         color: remote.color,
         icon: remote.icon,
-        description: remote.description
+        description: remote.description,
+        is_archived: remote.is_archived ?? 0
       })
       return true
     }
@@ -1495,7 +1521,8 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
         local.name !== remote.name ||
         local.color !== remote.color ||
         local.icon !== remote.icon ||
-        (local.description ?? '') !== (remote.description ?? '')
+        (local.description ?? '') !== (remote.description ?? '') ||
+        (local.is_archived !== (remote.is_archived ?? 0))
       if (metadataChanged) {
         await pushProject(local)
       }

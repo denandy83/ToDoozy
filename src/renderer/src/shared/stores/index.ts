@@ -86,6 +86,7 @@ export { useProjectStore } from './projectStore'
 export type { ProjectStore } from './projectStore'
 export {
   selectAllProjects,
+  selectActiveProjects,
   selectCurrentProject,
   selectDefaultProject,
   selectProjectMembers

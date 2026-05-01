@@ -527,6 +527,13 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle('projects:archiveWithTasks', (_e, id: string) => {
+    return getRepos().projects.archiveWithTasks(id)
+  })
+  ipcMain.handle('projects:unarchiveWithTasks', (_e, id: string) => {
+    return getRepos().projects.unarchiveWithTasks(id)
+  })
+
   // ── Statuses ───────────────────────────────────────────────────────
   ipcMain.handle('statuses:findById', (_e, id: string) => {
     return getRepos().statuses.findById(id) ?? null

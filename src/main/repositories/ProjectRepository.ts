@@ -126,9 +126,31 @@ export class ProjectRepository {
       sets.push('auto_archive_unit = ?')
       values.push(input.auto_archive_unit)
     }
+    if (input.is_archived !== undefined) {
+      sets.push('is_archived = ?')
+      values.push(String(input.is_archived))
+    }
 
     values.push(id)
     this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+    return this.findById(id)
+  }
+
+  archiveWithTasks(id: string): Project | undefined {
+    const now = new Date().toISOString()
+    withTransaction(this.db, () => {
+      this.db.prepare(`UPDATE projects SET is_archived = 1, updated_at = ? WHERE id = ?`).run(now, id)
+      this.db.prepare(`UPDATE tasks SET is_archived = 1, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
+    })
+    return this.findById(id)
+  }
+
+  unarchiveWithTasks(id: string): Project | undefined {
+    const now = new Date().toISOString()
+    withTransaction(this.db, () => {
+      this.db.prepare(`UPDATE projects SET is_archived = 0, updated_at = ? WHERE id = ?`).run(now, id)
+      this.db.prepare(`UPDATE tasks SET is_archived = 0, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
+    })
     return this.findById(id)
   }
 

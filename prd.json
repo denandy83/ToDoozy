@@ -70,8 +70,8 @@
         "Archiving/restoring a project syncs is_archived to Supabase for both the project and all its tasks via pushProjectArchive.",
         "npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass."
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     }
   ]
 }

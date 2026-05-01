@@ -144,6 +144,8 @@ export interface ProjectsAPI {
   getMembers(projectId: string): Promise<ProjectMember[]>
   getProjectsForUser(userId: string): Promise<Project[]>
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>
+  archiveWithTasks(id: string): Promise<Project | undefined>
+  unarchiveWithTasks(id: string): Promise<Project | undefined>
 }
 
 export interface StatusesAPI {

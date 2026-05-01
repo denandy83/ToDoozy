@@ -256,7 +256,7 @@ export function ProjectsSettingsContent({
               {selectedProject.is_shared === 1 && (
                 <MemberSettings project={selectedProject} onToast={(msg) => addToast({ message: msg })} />
               )}
-              <ProjectDeleteSection project={selectedProject} isLastProject={sortedProjects.length <= 1} onClose={onClose} addToast={addToast} />
+              <ProjectArchiveSection project={selectedProject} isLastProject={sortedProjects.length <= 1} onClose={onClose} />
             </div>
           )}
         </>
@@ -723,44 +723,49 @@ function DraggableProjectRow({ project, isSelected, onClick, indented, dropIndic
 
 const PROJECT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6']
 
-interface ProjectDeleteSectionProps {
+interface ProjectArchiveSectionProps {
   project: Project
   isLastProject: boolean
   onClose: () => void
-  addToast: (toast: { message: string; variant?: 'default' | 'danger' }) => void
 }
 
-function ProjectDeleteSection({ project, isLastProject, onClose, addToast }: ProjectDeleteSectionProps): React.JSX.Element | null {
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const deleteProject = useProjectStore((s) => s.deleteProject)
+function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchiveSectionProps): React.JSX.Element | null {
+  const archiveProject = useProjectStore((s) => s.archiveProject)
+  const unarchiveProject = useProjectStore((s) => s.unarchiveProject)
+  const { addToast } = useToast()
 
-  const handleDelete = async (): Promise<void> => {
+  const handleArchive = async (): Promise<void> => {
+    if (project.is_default === 1 || isLastProject) return
     try {
-      await deleteProject(project.id)
-      addToast({ message: `Deleted "${project.name}"`, variant: 'danger' })
+      await archiveProject(project.id)
       onClose()
+      addToast({
+        message: `"${project.name}" archived`,
+        action: {
+          label: 'Undo',
+          onClick: async () => { await unarchiveProject(project.id) }
+        }
+      })
     } catch (err) {
-      addToast({ message: err instanceof Error ? err.message : 'Failed to delete project', variant: 'danger' })
+      addToast({ message: err instanceof Error ? err.message : 'Failed to archive project', variant: 'danger' })
     }
   }
 
+  const disabled = isLastProject || project.is_default === 1
+
   return (
     <div className="mt-4 border-t border-border pt-4">
-      {!confirmDelete ? (
-        <button
-          onClick={(e) => { if (!isLastProject) { e.shiftKey ? handleDelete() : setConfirmDelete(true) } }}
-          className={`rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors ${isLastProject ? 'opacity-30' : 'hover:bg-danger/10'}`}
-          title={isLastProject ? "Can't delete the last project" : 'Delete project (Shift+click to skip confirmation)'}
-        >
-          Delete Project
-        </button>
-      ) : (
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-light text-danger">Are you sure?</span>
-          <button onClick={handleDelete} className="rounded-lg bg-danger px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg">Confirm Delete</button>
-          <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted hover:bg-foreground/6">Cancel</button>
-        </div>
-      )}
+      <button
+        onClick={handleArchive}
+        disabled={disabled}
+        className={`rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors ${disabled ? 'opacity-30' : 'hover:bg-foreground/8 hover:text-foreground'}`}
+        title={isLastProject ? "Can't archive the last project" : project.is_default === 1 ? "Can't archive the default project" : 'Archive project and all its tasks'}
+      >
+        Archive Project
+      </button>
+      <p className="mt-2 text-[10px] font-light text-muted/60">
+        Archives this project and all its tasks. Restore it from the Archive view.
+      </p>
     </div>
   )
 }

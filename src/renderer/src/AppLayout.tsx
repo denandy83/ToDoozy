@@ -7,7 +7,7 @@ import {
   useSensors,
   type Modifier
 } from '@dnd-kit/core'
-import { LayoutList, LayoutGrid, Columns3, LayoutTemplate, Trash2, Share2, Link, UserPlus, Unlink, Copy, Filter } from 'lucide-react'
+import { LayoutList, LayoutGrid, Columns3, LayoutTemplate, Trash2, Archive, Share2, Link, UserPlus, Unlink, Copy, Filter } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
 import { UnifiedSettingsModal } from './features/settings/UnifiedSettingsModal'
 import { UpdateAvailableModal } from './features/settings/UpdateAvailableModal'
@@ -26,7 +26,7 @@ import { StatsView } from './features/views/StatsView'
 import { ArchiveView } from './features/views/ArchiveView'
 import { TemplatesView } from './features/views/TemplatesView'
 import { useThemeApplicator } from './shared/hooks/useThemeApplicator'
-import { useProjectStore, selectAllProjects } from './shared/stores'
+import { useProjectStore, selectActiveProjects } from './shared/stores'
 import { useStatusesByProject, useStatusStore } from './shared/stores'
 import { useTaskStore } from './shared/stores'
 import { useViewStore, selectLayoutMode, selectSelectedProjectId } from './shared/stores/viewStore'
@@ -47,7 +47,6 @@ import { KeyboardShortcutsModal } from './features/help/KeyboardShortcutsModal'
 import { useTemplateStore, selectAllProjectTemplates } from './shared/stores'
 import type { Task, Label, ProjectTemplate, ProjectTemplateData } from '../../shared/types'
 import { DeployProjectTemplateWizard } from './features/templates/DeployProjectTemplateWizard'
-import { shouldForceDelete } from './shared/utils/shiftDelete'
 import { closeTopPopup } from './shared/utils/popupStack'
 import { NotificationBell, NotificationPanel, MemberAvatars } from './features/collaboration'
 import { useNotificationStore } from './shared/stores/notificationStore'
@@ -72,7 +71,7 @@ export function AppLayout(): React.JSX.Element {
 
   // Apply current theme CSS variables
   useThemeApplicator()
-  const allProjects = useProjectStore(selectAllProjects)
+  const allProjects = useProjectStore(selectActiveProjects)
   const sortedProjects = useMemo(
     () => [...allProjects].sort((a, b) => a.sidebar_order - b.sidebar_order),
     [allProjects]
@@ -833,7 +832,7 @@ export function AppLayout(): React.JSX.Element {
   const [editingViewName, setEditingViewName] = useState(false)
   const [viewNameValue, setViewNameValue] = useState('')
   const viewNameRef = useRef<HTMLInputElement>(null)
-  const { updateProject, deleteProject } = useProjectStore()
+  const { updateProject, archiveProject: archiveProjectAction, unarchiveProject: unarchiveProjectAction } = useProjectStore()
   const currentUser = useAuthStore((s) => s.currentUser)
 
   const handleStartEditProjectName = useCallback(() => {
@@ -1034,51 +1033,85 @@ export function AppLayout(): React.JSX.Element {
     })
   }, [selectedProject, currentUser, statuses, allTasks])
 
-  const handleDeleteCurrentProject = useCallback(async (e: React.MouseEvent) => {
+  const handleArchiveCurrentProject = useCallback(async () => {
     if (!selectedProject) return
-    if (sortedProjects.length <= 1) return
-    const doDelete = async (): Promise<void> => {
-      try {
-        await deleteProject(selectedProject.id)
-        const remainingTasks: Record<string, Task> = {}
-        for (const [id, t] of Object.entries(useTaskStore.getState().tasks)) {
-          if ((t as Task).project_id !== selectedProject.id) remainingTasks[id] = t as Task
-        }
-        useTaskStore.setState({ tasks: remainingTasks })
-        const remaining = sortedProjects.filter((p) => p.id !== selectedProject.id)
-        if (remaining.length > 0) {
-          useViewStore.getState().setSelectedProject(remaining[0].id)
-        } else {
-          setView('my-day')
-        }
-        addToast({ message: `Deleted "${selectedProject.name}"`, variant: 'danger' })
-      } catch (err) {
-        addToast({ message: err instanceof Error ? err.message : 'Failed to delete project', variant: 'danger' })
-      }
-    }
-    if (shouldForceDelete(e)) {
-      await doDelete()
+    if (selectedProject.is_default === 1) {
+      addToast({ message: "Can't archive the default project", variant: 'danger' })
       return
     }
-    const allTaskValues = Object.values(useTaskStore.getState().tasks) as Task[]
-    const projectTasks = allTaskValues.filter((t) => t.project_id === selectedProject.id && t.is_archived === 0)
-    const archivedTasks = allTaskValues.filter((t) => t.project_id === selectedProject.id && t.is_archived === 1)
-    const parts = [`Delete "${selectedProject.name}"?`]
-    if (projectTasks.length > 0 || archivedTasks.length > 0) {
-      const counts: string[] = []
-      if (projectTasks.length > 0) counts.push(`${projectTasks.length} task${projectTasks.length !== 1 ? 's' : ''}`)
-      if (archivedTasks.length > 0) counts.push(`${archivedTasks.length} archived`)
-      parts.push(`This will delete ${counts.join(' and ')}.`)
+    const savedProject = selectedProject
+
+    const doArchive = async (): Promise<void> => {
+      try {
+        await archiveProjectAction(savedProject.id)
+        const updatedTasks: Record<string, Task> = {}
+        for (const [tid, t] of Object.entries(useTaskStore.getState().tasks)) {
+          updatedTasks[tid] = (t as Task).project_id === savedProject.id ? { ...(t as Task), is_archived: 1 } : (t as Task)
+        }
+        useTaskStore.setState({ tasks: updatedTasks })
+        const remaining = sortedProjects.filter((p) => p.id !== savedProject.id)
+        if (remaining.length > 0) setSelectedProject(remaining[0].id)
+        else setView('my-day')
+        addToast({
+          message: `"${savedProject.name}" archived`,
+          action: {
+            label: 'Undo',
+            onClick: async () => {
+              await unarchiveProjectAction(savedProject.id)
+              const tasks = { ...useTaskStore.getState().tasks }
+              for (const [tid, t] of Object.entries(tasks)) {
+                if ((t as Task).project_id === savedProject.id) tasks[tid] = { ...(t as Task), is_archived: 0 }
+              }
+              useTaskStore.setState({ tasks })
+              setSelectedProject(savedProject.id)
+              setView('project')
+            }
+          }
+        })
+      } catch (err) {
+        addToast({ message: err instanceof Error ? err.message : 'Failed to archive project', variant: 'danger' })
+      }
     }
-    addToast({
-      message: parts.join(' '),
-      persistent: true,
-      actions: [
-        { label: 'Delete', variant: 'danger' as const, onClick: async () => { await doDelete() } },
-        { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
-      ]
-    })
-  }, [selectedProject, sortedProjects, deleteProject, addToast, setView])
+
+    if (savedProject.is_shared === 1) {
+      const members = await window.api.projects.getMembers(savedProject.id)
+      const otherMembers = members.filter((m) => m.user_id !== currentUser?.id)
+      const isOwner = savedProject.owner_id === currentUser?.id
+      const message = `Archive "${savedProject.name}"? You will be removed from the shared project.${isOwner && otherMembers.length > 0 ? ' Ownership will be transferred to another member.' : ''}`
+      addToast({
+        message,
+        persistent: true,
+        actions: [
+          {
+            label: 'Archive',
+            variant: 'danger' as const,
+            onClick: async () => {
+              if (isOwner && otherMembers.length > 0) {
+                const firstMember = [...otherMembers].sort((a, b) => a.joined_at.localeCompare(b.joined_at))[0]
+                try {
+                  const { getSupabase } = await import('./lib/supabase')
+                  const supabase = await getSupabase()
+                  await supabase.from('projects').update({ owner_id: firstMember.user_id }).eq('id', savedProject.id)
+                } catch (err) { console.error('[Archive] Failed to transfer ownership:', err) }
+              }
+              if (currentUser) {
+                try {
+                  const { removeSharedMember, unsubscribeFromProject } = await import('./services/SyncService')
+                  await removeSharedMember(savedProject.id, currentUser.id)
+                  await unsubscribeFromProject(savedProject.id)
+                } catch (err) { console.error('[Archive] Failed to leave shared project:', err) }
+              }
+              await window.api.projects.update(savedProject.id, { is_shared: 0 })
+              await doArchive()
+            }
+          },
+          { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+        ]
+      })
+      return
+    }
+    await doArchive()
+  }, [selectedProject, sortedProjects, archiveProjectAction, unarchiveProjectAction, addToast, setView, setSelectedProject, currentUser])
 
   // Set grabbing cursor globally during drag (class overrides element cursors)
   useEffect(() => {
@@ -1289,14 +1322,15 @@ export function AppLayout(): React.JSX.Element {
                 </button>
                 <div className="group relative">
                   <button
-                    onClick={handleDeleteCurrentProject}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors ${sortedProjects.length <= 1 ? 'opacity-30' : 'hover:bg-danger/10 hover:text-danger'}`}
-                    aria-label="Delete project"
+                    onClick={handleArchiveCurrentProject}
+                    disabled={sortedProjects.length <= 1 || selectedProject?.is_default === 1}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors ${sortedProjects.length <= 1 || selectedProject?.is_default === 1 ? 'opacity-30' : 'hover:bg-foreground/10 hover:text-foreground'}`}
+                    aria-label="Archive project"
                   >
-                    <Trash2 size={16} />
+                    <Archive size={16} />
                   </button>
                   <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover:opacity-100">
-                    {sortedProjects.length <= 1 ? "Can't delete the last project" : 'Shift+click to skip confirmation'}
+                    {sortedProjects.length <= 1 ? "Can't archive the last project" : selectedProject?.is_default === 1 ? "Can't archive the default project" : 'Archive this project'}
                   </div>
                 </div>
               </>

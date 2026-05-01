@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { Task, Project } from '../../../../shared/types'
-import { ChevronRight, Trash2, CheckCircle2 } from 'lucide-react'
+import { ChevronRight, Trash2, CheckCircle2, RotateCcw } from 'lucide-react'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
@@ -14,6 +14,7 @@ export function ArchiveView(): React.JSX.Element {
   const allTasks = useTaskStore((s) => s.tasks)
   const allStatuses = useStatusStore((s) => s.statuses)
   const { updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, clearSelection } = useTaskStore()
+  const { unarchiveProject, deleteProject } = useProjectStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
   const { addToast } = useToast()
@@ -29,7 +30,7 @@ export function ArchiveView(): React.JSX.Element {
     })
   }, [])
 
-  // Group archived tasks by project, sorted by completed_date desc within each group
+  // Group archived tasks by project; also include archived projects even with no archived tasks
   const groupedByProject = useMemo(() => {
     const archived = Object.values(allTasks)
       .filter((t) => t.is_archived === 1)
@@ -46,8 +47,8 @@ export function ArchiveView(): React.JSX.Element {
       byProject[task.project_id].push(task)
     }
     for (const project of allProjects) {
-      if (byProject[project.id]?.length) {
-        groups.push({ project, tasks: byProject[project.id] })
+      if (byProject[project.id]?.length || project.is_archived === 1) {
+        groups.push({ project, tasks: byProject[project.id] ?? [] })
       }
     }
     return groups
@@ -94,6 +95,34 @@ export function ArchiveView(): React.JSX.Element {
       })
     },
     [updateTask, addToast]
+  )
+
+  const handleRestoreProject = useCallback(
+    async (project: Project) => {
+      await unarchiveProject(project.id)
+      addToast({ message: `"${project.name}" restored` })
+    },
+    [unarchiveProject, addToast]
+  )
+
+  const handleDeleteProject = useCallback(
+    (project: Project) => {
+      addToast({
+        message: `Permanently delete "${project.name}" and all its tasks?`,
+        persistent: true,
+        actions: [
+          {
+            label: 'Delete',
+            variant: 'danger',
+            onClick: async () => {
+              await deleteProject(project.id)
+            }
+          },
+          { label: 'Cancel', variant: 'muted', onClick: () => {} }
+        ]
+      })
+    },
+    [deleteProject, addToast]
   )
 
   const handleBulkRestore = useCallback(async () => {
@@ -206,6 +235,8 @@ export function ArchiveView(): React.JSX.Element {
     }
   }, [contextMenu])
 
+  const isEmpty = groupedByProject.length === 0
+
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       {/* Right-click context menu */}
@@ -237,6 +268,7 @@ export function ArchiveView(): React.JSX.Element {
         {groupedByProject.map(({ project, tasks }) => {
           const projectStatuses = Object.values(allStatuses).filter((s) => s.project_id === project.id)
           const isCollapsed = collapsedProjects.has(project.id)
+          const isArchivedProject = project.is_archived === 1
           return (
             <div key={project.id}>
               <div
@@ -254,7 +286,31 @@ export function ArchiveView(): React.JSX.Element {
                 <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
                   {project.name}
                 </span>
+                {isArchivedProject && (
+                  <span className="rounded bg-foreground/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted/60">
+                    Project Archived
+                  </span>
+                )}
                 <span className="text-[10px] text-muted/40">{tasks.length}</span>
+                {isArchivedProject && (
+                  <div className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleRestoreProject(project)}
+                      className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/10 hover:text-foreground"
+                      title="Restore project and all its tasks"
+                    >
+                      <RotateCcw size={10} />
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => handleDeleteProject(project)}
+                      className="rounded p-1 text-danger transition-colors hover:bg-danger/10"
+                      title="Delete project permanently"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
               </div>
               {!isCollapsed && tasks.map((task) => (
                 <div
@@ -322,7 +378,7 @@ export function ArchiveView(): React.JSX.Element {
           )
         })}
 
-        {archivedTasks.length === 0 && (
+        {isEmpty && (
           <div className="flex flex-1 items-center justify-center py-20">
             <div className="text-center">
               <p className="text-sm font-light text-muted/60">No archived tasks.</p>
