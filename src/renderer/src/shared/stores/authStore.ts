@@ -392,6 +392,20 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
               } catch (e) {
                 console.warn('[Auth] Queue drain after recovery failed:', e)
               }
+              try {
+                const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+                if (pending === 'true') {
+                  const localUser2 = await window.api.users.findById(user.id)
+                  if (localUser2 !== null) {
+                    const dn = localUser2.display_name ?? ''
+                    const parts = dn.split(' ')
+                    await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+                    await window.api.settings.set(user.id, 'profile_sync_pending', '')
+                  }
+                }
+              } catch (e) {
+                console.warn('[Auth] Profile sync retry failed:', e)
+              }
             }
           })
         } else {
@@ -439,6 +453,20 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
               await processSyncQueue()
             } catch (e) {
               console.warn('[Auth] Queue drain after recovery failed:', e)
+            }
+            try {
+              const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+              if (pending === 'true') {
+                const localUser2 = await window.api.users.findById(user.id)
+                if (localUser2 !== null) {
+                  const dn = localUser2.display_name ?? ''
+                  const parts = dn.split(' ')
+                  await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+                  await window.api.settings.set(user.id, 'profile_sync_pending', '')
+                }
+              }
+            } catch (e) {
+              console.warn('[Auth] Profile sync retry failed:', e)
             }
           }
         })

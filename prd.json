@@ -28,8 +28,8 @@
         "no-password.html is a static info page explaining the Google auth flow",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     },
     {
       "id": "66",

@@ -12,8 +12,9 @@ import { IntegrationsSettingsContent } from './IntegrationsSettingsContent'
 import { AboutSettingsContent } from './AboutSettingsContent'
 import { LogsSettingsContent } from './LogsSettingsContent'
 import { WhatsNewDot } from './WhatsNewSettingsContent'
+import { ProfileSettingsContent } from './ProfileSettingsContent'
 
-type Tab = 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'integrations' | 'logs' | 'about'
+type Tab = 'profile' | 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'integrations' | 'logs' | 'about'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -28,7 +29,7 @@ export function UnifiedSettingsModal({
   projectId,
   initialTab
 }: UnifiedSettingsModalProps): React.JSX.Element | null {
-  const [activeTab, setActiveTab] = useState<Tab>((initialTab as Tab) ?? 'general')
+  const [activeTab, setActiveTab] = useState<Tab>((initialTab as Tab) ?? 'profile')
   const projects = useProjectStore(selectAllProjects)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId)
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
@@ -73,11 +74,11 @@ export function UnifiedSettingsModal({
 
   const handleClose = useCallback((): void => {
     if (activeTab === 'appearance' && themeDirty) {
-      showUnsavedThemeToast(() => { setActiveTab('general'); onClose() })
+      showUnsavedThemeToast(() => { setActiveTab('profile'); onClose() })
       return
     }
     if (activeTab === 'appearance') appearanceRef.current?.themeRef.current?.revert()
-    setActiveTab('general')
+    setActiveTab('profile')
     onClose()
   }, [onClose, activeTab, themeDirty, showUnsavedThemeToast])
 
@@ -87,6 +88,7 @@ export function UnifiedSettingsModal({
   if (!open) return null
 
   const tabs: { key: Tab; label: string }[] = [
+    { key: 'profile', label: 'Profile' },
     { key: 'general', label: 'General' }, { key: 'projects', label: 'Projects' },
     { key: 'appearance', label: 'Appearance' }, { key: 'labels', label: 'Labels' },
     { key: 'timer', label: 'Timer' }, { key: 'integrations', label: 'Integrations' },
@@ -123,6 +125,7 @@ export function UnifiedSettingsModal({
           </div>
         </nav>
         <div className="flex-1 overflow-y-auto pr-3">
+          {activeTab === 'profile' && <ProfileSettingsContent />}
           {activeTab === 'general' && <GeneralSettingsContent />}
           {activeTab === 'projects' && (
             <ProjectsSettingsContent
