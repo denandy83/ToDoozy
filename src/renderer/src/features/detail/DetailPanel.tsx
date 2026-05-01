@@ -294,7 +294,7 @@ export function DetailPanel(): React.JSX.Element | null {
     <div
       ref={panelRef}
       data-detail-panel
-      className={`relative flex-shrink-0 border-border bg-background overflow-hidden ${
+      className={`relative flex-shrink-0 border-foreground/10 bg-background overflow-hidden ${
         isSide ? 'border-l' : 'border-t'
       }`}
       style={panelStyle}
