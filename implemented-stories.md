@@ -1556,3 +1556,30 @@ Before marking passes: true: read ui-reference.md and debug-learnings.md. Write 
 - **Passes:** true
 - **Tested:** true
 - **Implemented:** 2026-04-20
+
+---
+
+### #62 — Import and export themes as JSON
+- **Description:** Users can export any theme from Settings → Theme to a `.todoozy-theme.json` file and import theme files back. Both flows live as Download/Upload icon buttons next to the theme selector. Exports bundle both dark and light counterparts. Imports always create both counterparts. Name collisions auto-resolve with `(Imported)` suffix. New `themeIO.ts` utility with full Vitest coverage.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Download/Upload icon buttons, native Save/Open dialogs, valid JSON schema with both configs, collision resolution, error modal for validation failures, imported themes sync like custom themes, Vitest tests pass.
+- **Passes:** true
+- **Implemented:** 2026-04-30
+
+---
+
+### #63 — Theme save icon only appears when color values actually differ from saved theme
+- **Description:** Fixed `handlePresetChange` setting `configEdited = true` on any dropdown switch even without color edits. Now auto-persists dropdown selection and only shows the Save icon when colors have actually been edited via `colorsEdited`. Mode toggle also auto-persists.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Save icon not shown on dropdown switch, shown only after color edit, dropdown switch persists theme_id/theme_mode immediately, Apply Theme button still works.
+- **Passes:** true
+- **Implemented:** 2026-04-30
+
+---
+
+### #64 — Cmd+K command palette matches against task UUID
+- **Description:** Extended text-search in `useCommandPaletteSearch.ts` to also match against `task.id` (substring). Extracted `matchesTextTerms(task, textTerms)` pure helper for testability. Full Vitest coverage: full UUID, partial UUID, middle-substring, no false positives, title regression, multi-term AND.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Full/partial/middle UUID search works, no false positives, title search unchanged, AND semantics preserved, all tests pass.
+- **Passes:** true
+- **Implemented:** 2026-04-30
