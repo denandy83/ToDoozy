@@ -123,13 +123,14 @@ function scheduleSharedReconnect(projectId: string): void {
 
   const delay = getReconnectDelay(state.attempt)
   state.attempt += 1
-  logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, projectId)
+  const reconnPName = getCachedProjectName(projectId) ?? projectId
+  logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, reconnPName)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
     if (state.cancelled) return
     if (!navigator.onLine) {
-      logEvent('warn', 'realtime', `Reconnect deferred — offline`, projectId)
+      logEvent('warn', 'realtime', `Reconnect deferred — offline`, reconnPName)
       scheduleSharedReconnect(projectId)
       return
     }
@@ -144,7 +145,7 @@ function scheduleSharedReconnect(projectId: string): void {
           state.attempt = 0
           const currentStatus = useSyncStore.getState().status
           if (currentStatus === 'offline') useSyncStore.getState().setStatus('synced')
-          logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, projectId)
+          logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, reconnPName)
           return
         }
         await supabase.removeChannel(state.channel)

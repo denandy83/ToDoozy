@@ -1,13 +1,41 @@
 import { useState } from 'react'
-import { useAuthStore, selectIsOffline } from '../stores/authStore'
+import { useAuthStore, selectIsOffline, selectIsTokenPermanentlyDead } from '../stores/authStore'
 import { tryRestoreSession } from '../../services/sessionRecovery'
 
 export function SessionBanner(): React.JSX.Element | null {
   const isOffline = useAuthStore(selectIsOffline)
+  const isTokenPermanentlyDead = useAuthStore(selectIsTokenPermanentlyDead)
   const logout = useAuthStore((s) => s.logout)
   const [retrying, setRetrying] = useState(false)
 
   if (!isOffline) return null
+
+  if (isTokenPermanentlyDead) {
+    return (
+      <div
+        role="alert"
+        className="flex items-center justify-between gap-3 border-b border-red-500/40 bg-red-500/10 px-4 py-2"
+      >
+        <div className="flex items-center gap-2 text-red-500 dark:text-red-400">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full bg-red-500"
+            aria-hidden
+          />
+          <span className="text-[11px] font-bold uppercase tracking-widest">Session expired</span>
+          <span className="text-[11px] font-light tracking-wide opacity-80">
+            Your session is no longer valid. Sign in again to resume syncing.
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="rounded-md border border-red-500/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 dark:text-red-400"
+        >
+          Sign in again
+        </button>
+      </div>
+    )
+  }
 
   const handleRetry = async (): Promise<void> => {
     if (retrying) return

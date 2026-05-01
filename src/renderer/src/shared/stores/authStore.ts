@@ -8,7 +8,8 @@ import {
   tryRestoreSession,
   startRecoveryTimer,
   stopRecoveryTimer,
-  resetPermanentlyDeadFlag
+  resetPermanentlyDeadFlag,
+  isPermanentlyDead
 } from '../../services/sessionRecovery'
 import { logEvent } from './logStore'
 
@@ -18,6 +19,7 @@ interface AuthState {
   loading: boolean
   error: string | null
   isOffline: boolean
+  isTokenPermanentlyDead: boolean
 }
 
 interface AuthActions {
@@ -108,6 +110,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   loading: false,
   error: null,
   isOffline: false,
+  isTokenPermanentlyDead: false,
 
   setUser(user: User | null): void {
     set({
@@ -137,7 +140,8 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       currentUser: null,
       isAuthenticated: false,
       error: null,
-      isOffline: false
+      isOffline: false,
+      isTokenPermanentlyDead: false
     })
   },
 
@@ -365,7 +369,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         logEvent('warn', 'sync', 'Session restore failed after 3 attempts — entering offline mode')
         const offlineUser = await offlineFallback(parsed)
         if (offlineUser) {
-          set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
+          set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, isTokenPermanentlyDead: isPermanentlyDead(), loading: false })
           // Start the auto-retry timer so we recover the moment the network
           // (or a fresh refresh) lets `setSession` succeed again.
           startRecoveryTimer({
@@ -552,3 +556,4 @@ export const selectCurrentUser = (state: AuthState): User | null => state.curren
 export const selectIsAuthenticated = (state: AuthState): boolean => state.isAuthenticated
 export const selectUserId = (state: AuthState): string | null => state.currentUser?.id ?? null
 export const selectIsOffline = (state: AuthState): boolean => state.isOffline
+export const selectIsTokenPermanentlyDead = (state: AuthState): boolean => state.isTokenPermanentlyDead
