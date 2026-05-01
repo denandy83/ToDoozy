@@ -262,3 +262,66 @@ Working file — entries written here during a session are processed into perman
 **Affected area:** Notification panel (header + delete flow), notification store, NotificationRepository, IPC + preload bridge.
 **Files changed:** src/main/repositories/NotificationRepository.ts, src/main/repositories/NotificationRepository.test.ts, src/main/ipc-handlers.ts, src/preload/index.ts, src/preload/index.d.ts, src/renderer/src/shared/stores/notificationStore.ts, src/renderer/src/features/collaboration/NotificationPanel.tsx
 **Commit:** 0c788a3
+
+## 2026-04-26 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 3398fee docs: bump .last-documented-commit to HEAD post-v1.5.3 docs (2026-04-26) — files: 1
+
+## 2026-04-27 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 85e4ca2 chore: bump version to 1.5.4 (2026-04-27) — files: 2
+- 1301605 fix(sync): eliminate phantom reconcile pushes + close shared-project label gap (2026-04-27) — files: 9
+
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- a118c5d chore: bump version to 1.5.5 (2026-04-29) — files: 2
+- a118c5d chore: bump version to 1.5.5 (2026-04-29) — files: 2
+- 2342ccf chore(mcp): pass p_owner_id to share_project RPC + commit migration (2026-04-29) — files: 2
+- 2342ccf chore(mcp): pass p_owner_id to share_project RPC + commit migration (2026-04-29) — files: 2
+- 143dd2a feat(logs): include project name in subscription + reconcile logs; auto-demote solo shared projects (2026-04-29) — files: 3
+- 143dd2a feat(logs): include project name in subscription + reconcile logs; auto-demote solo shared projects (2026-04-29) — files: 3
+- d0f0f34 chore(sync): trim diagnostic logging in label consolidation (2026-04-29) — files: 2
+- d0f0f34 chore(sync): trim diagnostic logging in label consolidation (2026-04-29) — files: 2
+- ba0c2fb fix(sync): coerce consolidate params to primitives across IPC boundary (2026-04-29) — files: 3
+
+- ba0c2fb fix(sync): coerce consolidate params to primitives across IPC boundary (2026-04-29) — files: 3
+## 2026-04-30 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 96fea43 fix(sync): consolidate must insert canonical label before junction remap (2026-04-29) — files: 7
+- 96fea43 fix(sync): consolidate must insert canonical label before junction remap (2026-04-29) — files: 7
+- a118c5d chore: bump version to 1.5.5 (2026-04-29) — files: 2
+- 630e951 fix(sync): wire label collision consolidation into reconcile path too (2026-04-29) — files: 1
+- 630e951 fix(sync): wire label collision consolidation into reconcile path too (2026-04-29) — files: 1
+- 2342ccf chore(mcp): pass p_owner_id to share_project RPC + commit migration (2026-04-29) — files: 2
+- 143dd2a feat(logs): include project name in subscription + reconcile logs; auto-demote solo shared projects (2026-04-29) — files: 3
+- 8821ac2 fix(sync): silence label/project push noise from MCP-induced collisions (2026-04-29) — files: 7
+- 8821ac2 fix(sync): silence label/project push noise from MCP-induced collisions (2026-04-29) — files: 7
+- d0f0f34 chore(sync): trim diagnostic logging in label consolidation (2026-04-29) — files: 2
+- e57dde3 fix(sync): replace user_profiles view queries with get_user_profiles RPC (2026-04-29) — files: 2
+- e57dde3 fix(sync): replace user_profiles view queries with get_user_profiles RPC (2026-04-29) — files: 2
+- ba0c2fb fix(sync): coerce consolidate params to primitives across IPC boundary (2026-04-29) — files: 3
+- fe829fd fix(avatars): fetch member profiles via SECURITY DEFINER RPC to include email/password users (2026-04-29) — files: 2
+- fe829fd fix(avatars): fetch member profiles via SECURITY DEFINER RPC to include email/password users (2026-04-29) — files: 2
+- 96fea43 fix(sync): consolidate must insert canonical label before junction remap (2026-04-29) — files: 7
+- 5daced3 fix(avatars): show Member (uuid) instead of Unknown for profileless members (2026-04-29) — files: 1
+- 5daced3 fix(avatars): show Member (uuid) instead of Unknown for profileless members (2026-04-29) — files: 1
+- 630e951 fix(sync): wire label collision consolidation into reconcile path too (2026-04-29) — files: 1
+- fdd1abf fix(avatars): use props data for members with stale/placeholder cache emails (2026-04-28) — files: 1
+- fdd1abf fix(avatars): use props data for members with stale/placeholder cache emails (2026-04-28) — files: 1
+- 8821ac2 fix(sync): silence label/project push noise from MCP-induced collisions (2026-04-29) — files: 7
+- bf6fcf3 fix(recurrence): parse due dates as local midnight to prevent same-day re-clone (2026-04-28) — files: 4
+- bf6fcf3 fix(recurrence): parse due dates as local midnight to prevent same-day re-clone (2026-04-28) — files: 4
+- e57dde3 fix(sync): replace user_profiles view queries with get_user_profiles RPC (2026-04-29) — files: 2
+- 6f91d17 fix(collab): consistent member display — filter Shared User, placeholder emails, UUID initials (2026-04-28) — files: 2
+- 6f91d17 fix(collab): consistent member display — filter Shared User, placeholder emails, UUID initials (2026-04-28) — files: 2
+- fe829fd fix(avatars): fetch member profiles via SECURITY DEFINER RPC to include email/password users (2026-04-29) — files: 2
+- edd2d9c fix: member privacy leak, phantom sort pushes, and MCP label ID collision (2026-04-28) — files: 5
+- edd2d9c fix: member privacy leak, phantom sort pushes, and MCP label ID collision (2026-04-28) — files: 5
+- 5daced3 fix(avatars): show Member (uuid) instead of Unknown for profileless members (2026-04-29) — files: 1
+- fdd1abf fix(avatars): use props data for members with stale/placeholder cache emails (2026-04-28) — files: 1
+- bf6fcf3 fix(recurrence): parse due dates as local midnight to prevent same-day re-clone (2026-04-28) — files: 4
+- 6f91d17 fix(collab): consistent member display — filter Shared User, placeholder emails, UUID initials (2026-04-28) — files: 2
+- edd2d9c fix: member privacy leak, phantom sort pushes, and MCP label ID collision (2026-04-28) — files: 5
