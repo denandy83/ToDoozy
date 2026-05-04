@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Check, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores/authStore'
+import { useToast } from '../../shared/components/Toast'
 import { getSupabase } from '../../lib/supabase'
 
 function SectionLabel({ children, first }: { children: string; first?: boolean }): React.JSX.Element {
@@ -22,6 +23,7 @@ function validatePassword(pw: string): string | null {
 export function ProfileSettingsContent(): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateUser = useAuthStore((s) => s.updateUser)
+  const { addToast } = useToast()
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -38,6 +40,40 @@ export function ProfileSettingsContent(): React.JSX.Element {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSaved, setPasswordSaved] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
+
+  const [savedLoginEmail, setSavedLoginEmail] = useState<string | null>(null)
+  const [hasSavedPassword, setHasSavedPassword] = useState(false)
+
+  const refreshSavedLogin = useCallback(async (): Promise<void> => {
+    const e = await window.api.auth.getSavedEmail()
+    setSavedLoginEmail(e)
+    if (e) {
+      const pw = await window.api.auth.getSavedPassword(e)
+      setHasSavedPassword(!!pw)
+    } else {
+      setHasSavedPassword(false)
+    }
+  }, [])
+
+  useEffect(() => { void refreshSavedLogin() }, [refreshSavedLogin])
+
+  const handleForgetSavedLogin = useCallback((): void => {
+    addToast({
+      message: 'Forget saved login on this device?',
+      persistent: true,
+      actions: [
+        {
+          label: 'Forget',
+          variant: 'danger' as const,
+          onClick: async () => {
+            await window.api.auth.clearCredentials().catch(() => {})
+            await refreshSavedLogin()
+          }
+        },
+        { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+      ]
+    })
+  }, [addToast, refreshSavedLogin])
 
   const initializedForUserRef = useRef<string | null>(null)
   const userId = currentUser?.id ?? null
@@ -190,6 +226,23 @@ export function ProfileSettingsContent(): React.JSX.Element {
           {passwordSaved && <Check size={16} className="text-success" />}
         </div>
       </div>
+
+      {savedLoginEmail && (
+        <>
+          <SectionLabel>Saved Login on This Device</SectionLabel>
+          <p className="text-[10px] text-muted -mt-2">
+            {hasSavedPassword
+              ? `Email and password are saved for ${savedLoginEmail} so you can sign in with one click. Stored in the macOS Keychain.`
+              : `Email ${savedLoginEmail} is saved for pre-fill on the sign-in screen.`}
+          </p>
+          <div>
+            <button onClick={handleForgetSavedLogin}
+              className="rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10">
+              Forget Saved Login
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
