@@ -8,6 +8,7 @@ import { StatusButton } from '../../shared/components/StatusButton'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
 import { formatDate } from '../../shared/utils/dateFormat'
+import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 
 export function ArchiveView(): React.JSX.Element {
   const allProjects = useProjectStore(selectAllProjects)
@@ -106,18 +107,14 @@ export function ArchiveView(): React.JSX.Element {
   )
 
   const handleDeleteProject = useCallback(
-    (project: Project) => {
+    (e: React.MouseEvent, project: Project) => {
+      const doDelete = async (): Promise<void> => { await deleteProject(project.id) }
+      if (shouldForceDelete(e)) { void doDelete(); return }
       addToast({
         message: `Permanently delete "${project.name}" and all its tasks?`,
         persistent: true,
         actions: [
-          {
-            label: 'Delete',
-            variant: 'danger',
-            onClick: async () => {
-              await deleteProject(project.id)
-            }
-          },
+          { label: 'Delete', variant: 'danger', onClick: doDelete },
           { label: 'Cancel', variant: 'muted', onClick: () => {} }
         ]
       })
@@ -303,9 +300,9 @@ export function ArchiveView(): React.JSX.Element {
                       Restore
                     </button>
                     <button
-                      onClick={() => handleDeleteProject(project)}
+                      onClick={(e) => handleDeleteProject(e, project)}
                       className="rounded p-1 text-danger transition-colors hover:bg-danger/10"
-                      title="Delete project permanently"
+                      title="Delete project permanently (Shift+click to skip confirmation)"
                     >
                       <Trash2 size={12} />
                     </button>
