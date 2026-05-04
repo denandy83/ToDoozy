@@ -10,6 +10,7 @@ import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
 import { getCachedProjectName } from './PersonalSyncService'
+import { isSuspended } from './powerState'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
@@ -24,7 +25,8 @@ let channels: Map<string, SharedChannelState> = new Map()
 let onChangeCallback: RealtimeCallback | null = null
 let isOnline = true
 
-const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]
+const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 function getReconnectDelay(attempt: number): number {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
 }
@@ -98,6 +100,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
+        useSyncStore.getState().setConnectionLost(false)
         const pName = getCachedProjectName(projectId) ?? projectId
         console.log(`[Realtime] Subscribed to shared project "${pName}"`)
         logEvent('info', 'realtime', `Subscribed to shared project`, `${pName} (${projectId}) topic=${subTopic} chState=${chState}`)
@@ -120,18 +123,32 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
 function scheduleSharedReconnect(projectId: string): void {
   const state = channels.get(projectId)
   if (!state || state.cancelled || state.reconnectTimer) return
+  const reconnPName = getCachedProjectName(projectId) ?? projectId
+
+  if (isSuspended()) {
+    logEvent('info', 'realtime', `Reconnect deferred — system suspended`, reconnPName)
+    return
+  }
+  if (!navigator.onLine) {
+    logEvent('info', 'realtime', `Reconnect deferred — offline`, reconnPName)
+    return
+  }
+
+  if (state.attempt >= MAX_RECONNECT_ATTEMPTS) {
+    logEvent('warn', 'realtime', `Reconnect gave up after ${state.attempt} attempts`, reconnPName)
+    useSyncStore.getState().setConnectionLost(true)
+    return
+  }
 
   const delay = getReconnectDelay(state.attempt)
   state.attempt += 1
-  const reconnPName = getCachedProjectName(projectId) ?? projectId
   logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, reconnPName)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
     if (state.cancelled) return
-    if (!navigator.onLine) {
-      logEvent('warn', 'realtime', `Reconnect deferred — offline`, reconnPName)
-      scheduleSharedReconnect(projectId)
+    if (isSuspended() || !navigator.onLine) {
+      logEvent('info', 'realtime', `Reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`, reconnPName)
       return
     }
     try {
@@ -153,6 +170,41 @@ function scheduleSharedReconnect(projectId: string): void {
     } catch { /* channel may already be dead */ }
     await createSharedChannel(projectId, state)
   }, delay)
+}
+
+/**
+ * Cancel pending shared-channel reconnect timers. Called by powerMonitor
+ * 'suspend' and the offline listener — keep channel state, just stop firing.
+ */
+export function pauseSharedReconnectsForSuspend(): void {
+  for (const state of channels.values()) {
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+  }
+}
+
+/**
+ * Reset attempt counters and force a fresh subscribe for every shared channel.
+ */
+export async function forceReconnectAllShared(): Promise<void> {
+  useSyncStore.getState().setConnectionLost(false)
+  const supabase = await getSupabase()
+  for (const [projectId, state] of channels.entries()) {
+    if (state.cancelled) continue
+    state.attempt = 0
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+    if (state.channel) {
+      const ch = state.channel as unknown as { state?: string }
+      if (ch.state === 'joined') continue
+      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    }
+    await createSharedChannel(projectId, state)
+  }
 }
 
 /**

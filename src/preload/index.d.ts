@@ -389,6 +389,11 @@ export interface ShellAPI {
   openExternal(url: string): Promise<void>
 }
 
+export interface PowerAPI {
+  onSuspend(callback: () => void): () => void
+  onResume(callback: () => void): () => void
+}
+
 export interface AppAPI {
   getLoginItemSettings(): Promise<{ openAtLogin: boolean }>
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
@@ -501,6 +506,7 @@ export interface TodoozyAPI {
   savedViews: SavedViewsAPI
   releaseNotes: ReleaseNotesAPI
   updater: UpdaterAPI
+  power: PowerAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void
 }

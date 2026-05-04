@@ -15,6 +15,8 @@ interface SyncState {
   errorMessage: string | null
   /** Whether Supabase Realtime is connected (used to toggle polling) */
   realtimeConnected: boolean
+  /** True when reconnect attempts have given up after max retries — surfaces a banner so the user can manually retry. */
+  connectionLost: boolean
 }
 
 interface SyncActions {
@@ -31,6 +33,7 @@ interface SyncActions {
   setFirstSyncProgress(progress: number): void
   setError(message: string | null): void
   setRealtimeConnected(connected: boolean): void
+  setConnectionLost(lost: boolean): void
   hydrate(): Promise<void>
   /** Re-read sync_queue count from SQLite and update pendingCount. */
   refreshPendingCount(): Promise<void>
@@ -47,6 +50,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     firstSyncProgress: 0,
     errorMessage: null,
     realtimeConnected: false,
+    connectionLost: false,
 
     setStatus: (status) => set({ status, errorMessage: status !== 'error' ? null : undefined }),
     setPendingCount: (count) => set({ pendingCount: count }),
@@ -62,6 +66,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     setFirstSyncProgress: (progress) => set({ firstSyncProgress: progress }),
     setError: (message) => set({ errorMessage: message, status: message ? 'error' : 'synced' }),
     setRealtimeConnected: (connected) => set({ realtimeConnected: connected }),
+    setConnectionLost: (lost) => set({ connectionLost: lost }),
 
     hydrate: async () => {
       try {
@@ -93,3 +98,4 @@ export const selectLastSyncedAt = (state: SyncState): string | null => state.las
 export const selectIsFirstSync = (state: SyncState): boolean => state.isFirstSync
 export const selectFirstSyncProgress = (state: SyncState): number => state.firstSyncProgress
 export const selectRealtimeConnected = (state: SyncState): boolean => state.realtimeConnected
+export const selectConnectionLost = (state: SyncState): boolean => state.connectionLost

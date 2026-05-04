@@ -390,6 +390,23 @@ const api: TodoozyAPI = {
     }
   },
 
+  power: {
+    onSuspend: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('power:suspend', handler)
+      return () => {
+        ipcRenderer.removeListener('power:suspend', handler)
+      }
+    },
+    onResume: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('power:resume', handler)
+      return () => {
+        ipcRenderer.removeListener('power:resume', handler)
+      }
+    }
+  },
+
   onTasksChanged: (callback) => {
     ipcRenderer.on('tasks-changed', callback)
     return () => {

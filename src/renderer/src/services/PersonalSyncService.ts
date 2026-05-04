@@ -14,6 +14,7 @@ import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../s
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable } from './syncTables'
 import { requireSession } from './sessionRecovery'
+import { isSuspended } from './powerState'
 
 /**
  * Returns true if a live Supabase session exists. All push/delete functions
@@ -2581,7 +2582,11 @@ interface PersonalChannelState {
 /** Track active personal-project Realtime channel state (incl. reconnect). */
 const personalChannelStates: Map<string, PersonalChannelState> = new Map()
 
-const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+// Exponential backoff with give-up. After MAX_ATTEMPTS, surface a banner so the
+// user can manually retry instead of looping forever (which floods logs +
+// notifications during sleep / hotel-WiFi flake).
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]
+const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 function getReconnectDelay(attempt: number): number {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
 }
@@ -2614,6 +2619,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
         useSyncStore.getState().setRealtimeConnected(true)
+        useSyncStore.getState().setConnectionLost(false)
         logEvent('info', 'realtime', `Subscribed to personal project`, `${pName} topic=${subTopic} chState=${chState}`)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         useSyncStore.getState().setRealtimeConnected(false)
@@ -2628,18 +2634,34 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
 function schedulePersonalReconnect(projectId: string): void {
   const state = personalChannelStates.get(projectId)
   if (!state || state.cancelled || state.reconnectTimer) return
+  const pName = projectNameCache.get(projectId) ?? projectId
+
+  // Don't burn cycles while system is suspended or browser is offline.
+  // Resume / online handlers will call forceReconnectAllPersonal() when state changes.
+  if (isSuspended()) {
+    logEvent('info', 'realtime', `Reconnect deferred — system suspended`, pName)
+    return
+  }
+  if (!navigator.onLine) {
+    logEvent('info', 'realtime', `Reconnect deferred — offline`, pName)
+    return
+  }
+
+  if (state.attempt >= MAX_RECONNECT_ATTEMPTS) {
+    logEvent('warn', 'realtime', `Reconnect gave up after ${state.attempt} attempts`, pName)
+    useSyncStore.getState().setConnectionLost(true)
+    return
+  }
 
   const delay = getReconnectDelay(state.attempt)
   state.attempt += 1
-  const pName = projectNameCache.get(projectId) ?? projectId
   logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, pName)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
     if (state.cancelled) return
-    if (!navigator.onLine) {
-      logEvent('warn', 'realtime', `Reconnect deferred — offline`, pName)
-      schedulePersonalReconnect(projectId)
+    if (isSuspended() || !navigator.onLine) {
+      logEvent('info', 'realtime', `Reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`, pName)
       return
     }
     try {
@@ -2660,6 +2682,48 @@ function schedulePersonalReconnect(projectId: string): void {
     } catch { /* channel may already be dead */ }
     await createPersonalChannel(projectId, state)
   }, delay)
+}
+
+/**
+ * Cancel all pending personal reconnect timers without tearing down channels.
+ * Used by the powerMonitor 'suspend' handler — we want to stop firing retries
+ * during macOS Power Nap dark-wakes, but keep the channel state so resume can
+ * rebuild cleanly.
+ */
+export function pauseReconnectsForSuspend(): void {
+  for (const state of personalChannelStates.values()) {
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+  }
+}
+
+/**
+ * Reset attempt counters and force a fresh subscribe for every personal channel.
+ * Called by the powerMonitor 'resume' handler, by the online/offline listener
+ * when the browser comes back online, and by the SessionBanner manual retry.
+ */
+export async function forceReconnectAllPersonal(): Promise<void> {
+  useSyncStore.getState().setConnectionLost(false)
+  const supabase = await getSupabase()
+  for (const [projectId, state] of personalChannelStates.entries()) {
+    if (state.cancelled) continue
+    state.attempt = 0
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+    if (state.channel) {
+      const ch = state.channel as unknown as { state?: string }
+      if (ch.state === 'joined') {
+        useSyncStore.getState().setRealtimeConnected(true)
+        continue
+      }
+      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    }
+    await createPersonalChannel(projectId, state)
+  }
 }
 
 /**
@@ -2742,6 +2806,12 @@ export function startOnlineMonitoring(): () => void {
     committedOffline = false
     syncStore.setStatus('synced')
     logEvent('info', 'network', 'Browser reports online')
+    // Force-reconnect every Realtime channel — they were paused on 'offline' so
+    // they wouldn't burn retries while disconnected.
+    void forceReconnectAllPersonal().catch(() => {})
+    void import('./SyncService').then(({ forceReconnectAllShared }) =>
+      forceReconnectAllShared().catch(() => {})
+    )
     // Flush sync queue on reconnect, then run a reconcile pass to detect/repair drift
     import('./SyncService').then(({ processSyncQueue }) => {
       processSyncQueue().then((count) => {
@@ -2765,6 +2835,12 @@ export function startOnlineMonitoring(): () => void {
         committedOffline = true
         syncStore.setStatus('offline')
         logEvent('warn', 'network', `Browser offline for ${OFFLINE_DEBOUNCE_MS / 1000}s — marking offline`)
+        // Cancel any pending reconnect timers — they'll just fail and burn cycles.
+        // The 'online' listener calls forceReconnectAllPersonal() to rebuild.
+        pauseReconnectsForSuspend()
+        void import('./SyncService').then(({ pauseSharedReconnectsForSuspend }) => {
+          pauseSharedReconnectsForSuspend()
+        })
       }
     }, OFFLINE_DEBOUNCE_MS)
   }

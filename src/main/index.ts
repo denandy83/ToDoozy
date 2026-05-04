@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { app, shell, BrowserWindow, globalShortcut } from 'electron'
+import { app, shell, BrowserWindow, globalShortcut, powerMonitor } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase, getDatabasePath } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
@@ -261,6 +261,22 @@ app.whenReady().then(() => {
   loadAndRegisterAppToggleShortcut()
   startNotificationChecker()
   initUpdater()
+
+  // Forward macOS sleep/wake events to renderer so it can pause Realtime
+  // reconnect timers during system sleep (Power Nap dark-wakes flooded the
+  // logs and notification panel with CHANNEL_ERROR storms otherwise).
+  // 'suspend' fires on lid close + manual sleep; not on individual dark-wakes
+  // or screen lock — exactly the boundary we want.
+  powerMonitor.on('suspend', () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('power:suspend')
+    }
+  })
+  powerMonitor.on('resume', () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('power:resume')
+    }
+  })
 
 
   // Handle deep link from cold start
