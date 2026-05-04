@@ -179,7 +179,6 @@ export function ProfileSettingsContent(): React.JSX.Element {
 
       {subtab === 'account' && (
         <div className="flex flex-col gap-4">
-          <SectionLabel first>Account</SectionLabel>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Email</p>
             <p className="text-sm font-light text-foreground">{currentUser?.email ?? '—'}</p>
