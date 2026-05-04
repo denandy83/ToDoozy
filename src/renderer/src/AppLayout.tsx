@@ -1035,10 +1035,6 @@ export function AppLayout(): React.JSX.Element {
 
   const handleArchiveCurrentProject = useCallback(async () => {
     if (!selectedProject) return
-    if (selectedProject.is_default === 1) {
-      addToast({ message: "Can't archive the default project", variant: 'danger' })
-      return
-    }
     const savedProject = selectedProject
 
     const doArchive = async (): Promise<void> => {
@@ -1323,14 +1319,14 @@ export function AppLayout(): React.JSX.Element {
                 <div className="group relative">
                   <button
                     onClick={handleArchiveCurrentProject}
-                    disabled={sortedProjects.length <= 1 || selectedProject?.is_default === 1}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors ${sortedProjects.length <= 1 || selectedProject?.is_default === 1 ? 'opacity-30' : 'hover:bg-foreground/10 hover:text-foreground'}`}
+                    disabled={sortedProjects.length <= 1}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-muted transition-colors ${sortedProjects.length <= 1 ? 'opacity-30' : 'hover:bg-foreground/10 hover:text-foreground'}`}
                     aria-label="Archive project"
                   >
                     <Archive size={16} />
                   </button>
                   <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover:opacity-100">
-                    {sortedProjects.length <= 1 ? "Can't archive the last project" : selectedProject?.is_default === 1 ? "Can't archive the default project" : 'Archive this project'}
+                    {sortedProjects.length <= 1 ? "Can't archive the last project" : 'Archive this project'}
                   </div>
                 </div>
               </>

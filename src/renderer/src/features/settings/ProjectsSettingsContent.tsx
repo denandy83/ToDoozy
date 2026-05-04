@@ -735,7 +735,7 @@ function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchi
   const { addToast } = useToast()
 
   const handleArchive = async (): Promise<void> => {
-    if (project.is_default === 1 || isLastProject) return
+    if (isLastProject) return
     try {
       await archiveProject(project.id)
       onClose()
@@ -751,15 +751,13 @@ function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchi
     }
   }
 
-  const disabled = isLastProject || project.is_default === 1
-
   return (
     <div className="mt-4 border-t border-border pt-4">
       <button
         onClick={handleArchive}
-        disabled={disabled}
-        className={`rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors ${disabled ? 'opacity-30' : 'hover:bg-foreground/8 hover:text-foreground'}`}
-        title={isLastProject ? "Can't archive the last project" : project.is_default === 1 ? "Can't archive the default project" : 'Archive project and all its tasks'}
+        disabled={isLastProject}
+        className={`rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors ${isLastProject ? 'opacity-30' : 'hover:bg-foreground/8 hover:text-foreground'}`}
+        title={isLastProject ? "Can't archive the last project" : 'Archive project and all its tasks'}
       >
         Archive Project
       </button>
