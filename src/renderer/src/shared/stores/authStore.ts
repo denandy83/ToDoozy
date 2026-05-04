@@ -213,7 +213,12 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       useSyncStore.getState().setStatus('synced')
       set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
       window.api.auth.saveEmail(email).catch(() => {})
-      pendingPasswordSave = { email, password }
+      try {
+        const existing = await window.api.auth.getSavedPassword(email)
+        if (existing !== password) pendingPasswordSave = { email, password }
+      } catch {
+        pendingPasswordSave = { email, password }
+      }
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed'
