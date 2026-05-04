@@ -49,7 +49,8 @@
         "npm run typecheck passes with zero errors"
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     },
     {
       "id": "67",
@@ -62,7 +63,7 @@
         "If only one active (non-archived) project exists, the archive button is disabled.",
         "Archiving a shared project shows a persistent confirmation toast warning about removal from the shared project. On confirm: ownership is transferred to the earliest-joined other member (if current user is owner), the user is removed from project_members on Supabase, the local project is set to is_shared=0, is_archived=1, and tasks are archived.",
         "Archived projects do NOT appear in the sidebar project list.",
-        "The Archive view shows archived projects as groups, even if all their tasks are also archived. Each archived project group header shows 'Restore Project' and 'Delete Project' buttons on hover.",
+        "The Archive view shows archived projects as groups, even if all their tasks are also archived. Each archived project group header always shows 'Restore Project' and 'Delete Project' buttons (not hover-only). The trash icon supports Shift+click to skip the confirm toast per ui-reference.md.",
         "'Restore Project' in Archive view: sets project + all tasks to is_archived=0, navigates to the project, shows undo toast.",
         "'Delete Project' in Archive view: shows persistent 'Permanently delete?' confirmation toast. On confirm: project and all tasks are hard-deleted from local SQLite and the store.",
         "Project General Settings (right panel) has 'Archive Project' button replacing the old 'Delete Project' inline confirmation. Clicking it archives immediately with undo toast.",
