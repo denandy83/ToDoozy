@@ -143,7 +143,6 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       console.error('Supabase sign out error:', err)
     }
     await window.api.auth.clearSession()
-    await window.api.auth.clearCredentials().catch(() => {})
     set({
       currentUser: null,
       isAuthenticated: false,
