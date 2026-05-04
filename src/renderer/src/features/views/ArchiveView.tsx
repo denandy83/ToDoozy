@@ -269,7 +269,7 @@ export function ArchiveView(): React.JSX.Element {
           return (
             <div key={project.id}>
               <div
-                className="sticky top-0 z-10 flex cursor-pointer items-center gap-2 bg-background px-6 py-2 border-b border-border select-none hover:bg-foreground/6 transition-colors"
+                className="group sticky top-0 z-10 flex cursor-pointer items-center gap-2 bg-background px-6 py-2 border-b border-border select-none hover:bg-foreground/6 transition-colors"
                 onClick={() => toggleProjectCollapse(project.id)}
               >
                 <ChevronRight
@@ -290,7 +290,7 @@ export function ArchiveView(): React.JSX.Element {
                 )}
                 <span className="text-[10px] text-muted/40">{tasks.length}</span>
                 {isArchivedProject && (
-                  <div className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleRestoreProject(project)}
                       className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/10 hover:text-foreground"
