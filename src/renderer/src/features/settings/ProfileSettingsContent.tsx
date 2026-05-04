@@ -39,8 +39,14 @@ export function ProfileSettingsContent(): React.JSX.Element {
   const [passwordSaved, setPasswordSaved] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
 
+  const initializedForUserRef = useRef<string | null>(null)
+  const userId = currentUser?.id ?? null
+  const displayName = currentUser?.display_name ?? null
+
   useEffect(() => {
-    if (!currentUser) return
+    if (!userId) return
+    if (initializedForUserRef.current === userId) return
+    initializedForUserRef.current = userId
     const init = async (): Promise<void> => {
       try {
         const sb = await getSupabase()
@@ -53,14 +59,14 @@ export function ProfileSettingsContent(): React.JSX.Element {
           return
         }
       } catch { /* offline */ }
-      if (currentUser.display_name) {
-        const parts = currentUser.display_name.split(' ')
+      if (displayName) {
+        const parts = displayName.split(' ')
         setFirstName(parts[0] ?? '')
         setLastName(parts.slice(1).join(' '))
       }
     }
     void init()
-  }, [currentUser])
+  }, [userId, displayName])
 
   const doSaveName = useCallback(async (fn: string, ln: string): Promise<void> => {
     if (!currentUser) return
