@@ -73,7 +73,8 @@
         "npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass."
       ],
       "passes": true,
-      "tested": true
+      "tested": true,
+      "verified": true
     }
   ]
 }
