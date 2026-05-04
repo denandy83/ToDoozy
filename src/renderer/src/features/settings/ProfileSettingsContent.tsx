@@ -55,7 +55,9 @@ export function ProfileSettingsContent(): React.JSX.Element {
           const meta = user.user_metadata ?? {}
           setFirstName((meta.first_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ')[0] ?? '')
           setLastName((meta.last_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ').slice(1).join(' ') ?? '')
-          setHasEmailIdentity(user.identities?.some((i) => i.provider === 'email') ?? false)
+          const hasEmailProvider = user.identities?.some((i) => i.provider === 'email') ?? false
+          const hasPasswordFlag = (meta.has_password as boolean | undefined) ?? false
+          setHasEmailIdentity(hasEmailProvider || hasPasswordFlag)
           return
         }
       } catch { /* offline */ }
@@ -100,7 +102,7 @@ export function ProfileSettingsContent(): React.JSX.Element {
     setPasswordSaving(true)
     try {
       const sb = await getSupabase()
-      const { error } = await sb.auth.updateUser({ password: newPassword })
+      const { error } = await sb.auth.updateUser({ password: newPassword, data: { has_password: true } })
       if (error) { setPasswordError(error.message); return }
       setHasEmailIdentity(true)
       setNewPassword('')
