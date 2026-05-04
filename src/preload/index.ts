@@ -93,7 +93,9 @@ const api: TodoozyAPI = {
     getMembers: (projectId) => ipcRenderer.invoke('projects:getMembers', projectId),
     getProjectsForUser: (userId) => ipcRenderer.invoke('projects:getProjectsForUser', userId),
     updateSidebarOrder: (updates) =>
-      ipcRenderer.invoke('projects:updateSidebarOrder', updates)
+      ipcRenderer.invoke('projects:updateSidebarOrder', updates),
+    archiveWithTasks: (id) => ipcRenderer.invoke('projects:archiveWithTasks', id),
+    unarchiveWithTasks: (id) => ipcRenderer.invoke('projects:unarchiveWithTasks', id)
   },
 
   statuses: {
@@ -193,7 +195,12 @@ const api: TodoozyAPI = {
     clearSession: () => ipcRenderer.invoke('auth:clearSession'),
     getSupabaseConfig: () => ipcRenderer.invoke('auth:getSupabaseConfig'),
     openOAuthWindow: (url) => ipcRenderer.invoke('auth:openOAuthWindow', url),
-    switchDatabase: (userId, email) => ipcRenderer.invoke('auth:switchDatabase', userId, email)
+    switchDatabase: (userId, email) => ipcRenderer.invoke('auth:switchDatabase', userId, email),
+    saveEmail: (email) => ipcRenderer.invoke('auth:saveEmail', email),
+    getSavedEmail: () => ipcRenderer.invoke('auth:getSavedEmail'),
+    savePassword: (email, password) => ipcRenderer.invoke('auth:savePassword', email, password),
+    getSavedPassword: (email) => ipcRenderer.invoke('auth:getSavedPassword', email),
+    clearCredentials: () => ipcRenderer.invoke('auth:clearCredentials')
   },
 
   quickadd: {
@@ -379,6 +386,23 @@ const api: TodoozyAPI = {
       ipcRenderer.on('updater:status', handler)
       return () => {
         ipcRenderer.removeListener('updater:status', handler)
+      }
+    }
+  },
+
+  power: {
+    onSuspend: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('power:suspend', handler)
+      return () => {
+        ipcRenderer.removeListener('power:suspend', handler)
+      }
+    },
+    onResume: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('power:resume', handler)
+      return () => {
+        ipcRenderer.removeListener('power:resume', handler)
       }
     }
   },

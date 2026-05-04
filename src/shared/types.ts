@@ -24,6 +24,7 @@ export interface Project {
   auto_archive_enabled: number
   auto_archive_value: number
   auto_archive_unit: string
+  is_archived: number
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -184,6 +185,7 @@ export interface UpdateProjectInput {
   auto_archive_enabled?: number
   auto_archive_value?: number
   auto_archive_unit?: string
+  is_archived?: number
 }
 
 export interface CreateStatusInput {

@@ -1,15 +1,53 @@
-import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react'
+import { useState, useCallback, useEffect, type FormEvent, type KeyboardEvent } from 'react'
 import { useAuthStore } from '../../shared/stores/authStore'
+import { getSupabase } from '../../lib/supabase'
 
-type AuthMode = 'login' | 'signup'
+type AuthMode = 'login' | 'signup' | 'forgot'
 
 export function LoginScreen(): React.JSX.Element {
   const [mode, setMode] = useState<AuthMode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSent, setResetSent] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+
   const { loading, error, clearError, signInWithEmail, signUpWithEmail, signInWithGoogle } =
     useAuthStore()
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      const savedEmail = await window.api.auth.getSavedEmail()
+      if (!savedEmail || cancelled) return
+      setEmail(savedEmail)
+      const savedPassword = await window.api.auth.getSavedPassword(savedEmail)
+      if (!savedPassword || cancelled) return
+      setPassword(savedPassword)
+    }
+    load().catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const handleForgotPassword = useCallback(async (): Promise<void> => {
+    if (!resetEmail.trim()) return
+    setResetLoading(true)
+    setResetError(null)
+    try {
+      const sb = await getSupabase()
+      const { error: fnErr } = await sb.functions.invoke('send-password-reset', {
+        body: { email: resetEmail.trim() }
+      })
+      if (fnErr) { setResetError('Something went wrong. Please try again.'); return }
+      setResetSent(true)
+    } catch {
+      setResetError('Something went wrong. Please try again.')
+    } finally {
+      setResetLoading(false)
+    }
+  }, [resetEmail])
 
   const handleSubmit = useCallback(
     async (e: FormEvent): Promise<void> => {
@@ -62,101 +100,149 @@ export function LoginScreen(): React.JSX.Element {
             ToDoozy
           </h1>
           <p className="text-sm font-light text-muted">
-            {mode === 'login' ? 'Sign in to continue' : 'Create your account'}
+            {mode === 'login' ? 'Sign in to continue' : mode === 'signup' ? 'Create your account' : 'Reset your password'}
           </p>
         </div>
 
-        {/* Auth form */}
-        <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex w-full flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="email"
-              className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted"
-            >
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoFocus
-              disabled={loading}
-              className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none disabled:opacity-50"
-            />
-          </div>
+        {mode !== 'forgot' && (
+          <>
+            {/* Auth form */}
+            <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex w-full flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="email"
+                  className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted"
+                >
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoFocus
+                  disabled={loading}
+                  className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none disabled:opacity-50"
+                />
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="password"
-              className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted"
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'signup' ? 'Minimum 8 characters' : 'Your password'}
-              disabled={loading}
-              className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none disabled:opacity-50"
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="password"
+                  className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted"
+                >
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === 'signup' ? 'Minimum 8 characters' : 'Your password'}
+                  disabled={loading}
+                  className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none disabled:opacity-50"
+                />
+              </div>
 
-          {error && (
-            <div className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-[11px] font-light text-danger">
-              {error}
+              {mode === 'login' && (
+                <div className="flex justify-end -mt-2">
+                  <button type="button" onClick={() => { setMode('forgot'); clearError() }}
+                    className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent transition-colors">
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-[11px] font-light text-danger">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || !isFormValid}
+                className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+              >
+                {loading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <LoadingSpinner />
+                    {mode === 'login' ? 'Signing in...' : 'Creating account...'}
+                  </span>
+                ) : mode === 'login' ? (
+                  'Sign In'
+                ) : (
+                  'Create Account'
+                )}
+              </button>
+            </form>
+
+            {/* Divider */}
+            <div className="flex w-full items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted">or</span>
+              <div className="h-px flex-1 bg-border" />
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={loading || !isFormValid}
-            className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
-          >
-            {loading ? (
-              <span className="inline-flex items-center gap-2">
-                <LoadingSpinner />
-                {mode === 'login' ? 'Signing in...' : 'Creating account...'}
-              </span>
-            ) : mode === 'login' ? (
-              'Sign In'
+            {/* Google OAuth */}
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6 focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-40"
+            >
+              <GoogleIcon />
+              Continue with Google
+            </button>
+
+            {/* Toggle login/signup */}
+            <p className="text-sm font-light text-muted">
+              {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
+              <button
+                onClick={toggleMode}
+                disabled={loading}
+                className="font-medium text-accent hover:underline focus:outline-none disabled:opacity-50"
+              >
+                {mode === 'login' ? 'Sign up' : 'Sign in'}
+              </button>
+            </p>
+          </>
+        )}
+
+        {mode === 'forgot' && (
+          <div className="flex w-full flex-col gap-4">
+            {!resetSent ? (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Email</label>
+                  <input type="email" value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleForgotPassword() }}
+                    placeholder="you@example.com" autoFocus
+                    className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none" />
+                </div>
+                {resetError && (
+                  <div className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-[11px] font-light text-danger">{resetError}</div>
+                )}
+                <button onClick={() => void handleForgotPassword()}
+                  disabled={resetLoading || !resetEmail.trim()}
+                  className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40">
+                  {resetLoading ? 'Sending...' : 'Send Reset Email'}
+                </button>
+              </>
             ) : (
-              'Create Account'
+              <div className="rounded-lg border border-border bg-surface/50 px-4 py-4 text-sm font-light text-foreground">
+                If an account exists for <span className="font-medium">{resetEmail}</span>, you&apos;ll receive an email shortly with instructions.
+              </div>
             )}
-          </button>
-        </form>
-
-        {/* Divider */}
-        <div className="flex w-full items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-[9px] font-bold uppercase tracking-wider text-muted">or</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        {/* Google OAuth */}
-        <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
-          className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6 focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-40"
-        >
-          <GoogleIcon />
-          Continue with Google
-        </button>
-
-        {/* Toggle login/signup */}
-        <p className="text-sm font-light text-muted">
-          {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
-          <button
-            onClick={toggleMode}
-            disabled={loading}
-            className="font-medium text-accent hover:underline focus:outline-none disabled:opacity-50"
-          >
-            {mode === 'login' ? 'Sign up' : 'Sign in'}
-          </button>
-        </p>
+            <p className="text-sm font-light text-muted text-center">
+              <button onClick={() => { setMode('login'); setResetSent(false); setResetEmail(''); setResetError(null) }}
+                className="font-medium text-accent hover:underline">
+                Back to sign in
+              </button>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

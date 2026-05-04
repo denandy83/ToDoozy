@@ -1,5 +1,6 @@
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
+import keytar from 'keytar'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
 import { getDatabase, switchDatabase, getDatabasePath } from './database'
@@ -26,6 +27,12 @@ const getTokenPath = (): string => {
   const suffix = is.dev ? '.dev' : ''
   return join(app.getPath('userData'), `.auth-session${suffix}`)
 }
+
+const getSavedEmailPath = (): string => {
+  const suffix = is.dev ? '.dev' : ''
+  return join(app.getPath('userData'), `saved-email${suffix}.json`)
+}
+const KEYTAR_SERVICE = 'ToDoozy'
 
 function storeEncryptedSession(sessionJson: string): void {
   if (safeStorage.isEncryptionAvailable()) {
@@ -71,6 +78,63 @@ function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:clearSession', () => {
     clearEncryptedSession()
+  })
+
+  ipcMain.handle('auth:saveEmail', (_e, email: string) => {
+    try {
+      writeFileSync(getSavedEmailPath(), JSON.stringify({ email }), 'utf-8')
+    } catch (err) {
+      console.error('Failed to save email:', err)
+    }
+  })
+
+  ipcMain.handle('auth:getSavedEmail', () => {
+    const path = getSavedEmailPath()
+    if (!existsSync(path)) return null
+    try {
+      const raw = readFileSync(path, 'utf-8')
+      const parsed = JSON.parse(raw) as { email?: string }
+      return parsed.email ?? null
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('auth:savePassword', async (_e, email: string, password: string) => {
+    try {
+      await keytar.setPassword(KEYTAR_SERVICE, email, password)
+    } catch (err) {
+      console.error('Failed to save password to Keychain:', err)
+    }
+  })
+
+  ipcMain.handle('auth:getSavedPassword', async (_e, email: string) => {
+    try {
+      return await keytar.getPassword(KEYTAR_SERVICE, email)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('auth:clearCredentials', async () => {
+    const path = getSavedEmailPath()
+    let savedEmail: string | null = null
+    if (existsSync(path)) {
+      try {
+        const raw = readFileSync(path, 'utf-8')
+        savedEmail = (JSON.parse(raw) as { email?: string }).email ?? null
+        unlinkSync(path)
+      } catch {
+        // ignore
+      }
+    }
+    if (savedEmail) {
+      try {
+        await keytar.deletePassword(KEYTAR_SERVICE, savedEmail)
+      } catch {
+        // ignore
+      }
+    }
   })
 
   ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
@@ -462,6 +526,13 @@ export function registerIpcHandlers(): void {
       return getRepos().projects.updateSidebarOrder(updates)
     }
   )
+
+  ipcMain.handle('projects:archiveWithTasks', (_e, id: string) => {
+    return getRepos().projects.archiveWithTasks(id)
+  })
+  ipcMain.handle('projects:unarchiveWithTasks', (_e, id: string) => {
+    return getRepos().projects.unarchiveWithTasks(id)
+  })
 
   // ── Statuses ───────────────────────────────────────────────────────
   ipcMain.handle('statuses:findById', (_e, id: string) => {

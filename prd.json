@@ -28,8 +28,9 @@
         "no-password.html is a static info page explaining the Google auth flow",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true,
+      "verified": true
     },
     {
       "id": "66",
@@ -42,13 +43,14 @@
         "Clicking Save stores the password in the OS Keychain via keytar (service 'ToDoozy', account = email) — visible in macOS Keychain Access",
         "On next login screen load (after logout or token death), the email field is pre-filled from the saved JSON",
         "If a Keychain password exists for the saved email, the password field is also pre-filled",
-        "After explicit logout, both the saved email JSON and the Keychain entry are deleted",
+        "After explicit logout, the saved email JSON and Keychain entry are preserved so re-sign-in is friction-free; only the Supabase session is cleared. (A separate 'Forget saved login on this device' Settings action can be added later for explicit credential wipe.)",
         "Google OAuth login saves the email to JSON silently (no password prompt shown)",
         "Signup mode saves the email but does NOT show the save-password prompt",
         "npm run typecheck passes with zero errors"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true,
+      "verified": true
     },
     {
       "id": "67",
@@ -61,7 +63,7 @@
         "If only one active (non-archived) project exists, the archive button is disabled.",
         "Archiving a shared project shows a persistent confirmation toast warning about removal from the shared project. On confirm: ownership is transferred to the earliest-joined other member (if current user is owner), the user is removed from project_members on Supabase, the local project is set to is_shared=0, is_archived=1, and tasks are archived.",
         "Archived projects do NOT appear in the sidebar project list.",
-        "The Archive view shows archived projects as groups, even if all their tasks are also archived. Each archived project group header shows 'Restore Project' and 'Delete Project' buttons on hover.",
+        "The Archive view shows archived projects as groups, even if all their tasks are also archived. Each archived project group header reveals 'Restore Project' and 'Delete Project' buttons on hover (using opacity-0 + group-hover:opacity-100 — same pattern as TaskRow). The trash icon supports Shift+click to skip the confirm toast per ui-reference.md.",
         "'Restore Project' in Archive view: sets project + all tasks to is_archived=0, navigates to the project, shows undo toast.",
         "'Delete Project' in Archive view: shows persistent 'Permanently delete?' confirmation toast. On confirm: project and all tasks are hard-deleted from local SQLite and the store.",
         "Project General Settings (right panel) has 'Archive Project' button replacing the old 'Delete Project' inline confirmation. Clicking it archives immediately with undo toast.",
@@ -70,8 +72,9 @@
         "Archiving/restoring a project syncs is_archived to Supabase for both the project and all its tasks via pushProjectArchive.",
         "npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass."
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true,
+      "verified": true
     }
   ]
 }

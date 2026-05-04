@@ -13,6 +13,13 @@ import {
 } from '../../services/sessionRecovery'
 import { logEvent } from './logStore'
 
+let pendingPasswordSave: { email: string; password: string } | null = null
+export function takePendingPasswordSave(): { email: string; password: string } | null {
+  const p = pendingPasswordSave
+  pendingPasswordSave = null
+  return p
+}
+
 interface AuthState {
   currentUser: User | null
   isAuthenticated: boolean
@@ -29,7 +36,7 @@ interface AuthActions {
   createUser(input: CreateUserInput): Promise<User>
   updateUser(id: string, input: UpdateUserInput): Promise<User | null>
   clearError(): void
-  signInWithEmail(email: string, password: string): Promise<void>
+  signInWithEmail(email: string, password: string): Promise<boolean>
   signUpWithEmail(email: string, password: string): Promise<void>
   signInWithGoogle(): Promise<void>
   initAuth(): Promise<void>
@@ -175,18 +182,18 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     set({ error: null })
   },
 
-  async signInWithEmail(email: string, password: string): Promise<void> {
+  async signInWithEmail(email: string, password: string): Promise<boolean> {
     set({ loading: true, error: null })
     try {
       const supabase = await getSupabase()
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
         set({ error: error.message, loading: false })
-        return
+        return false
       }
       if (!data.session || !data.user) {
         set({ error: 'Sign in failed: no session returned', loading: false })
-        return
+        return false
       }
 
       await persistSession(data.session)
@@ -205,9 +212,18 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       // is a no-op (its guard bails when status === 'offline').
       useSyncStore.getState().setStatus('synced')
       set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
+      window.api.auth.saveEmail(email).catch(() => {})
+      try {
+        const existing = await window.api.auth.getSavedPassword(email)
+        if (existing !== password) pendingPasswordSave = { email, password }
+      } catch {
+        pendingPasswordSave = { email, password }
+      }
+      return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed'
       set({ error: message, loading: false })
+      return false
     }
   },
 
@@ -252,6 +268,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         data.user.user_metadata?.avatar_url ?? null
       )
       await get().ensureDefaultProject(localUser.id)
+      window.api.auth.saveEmail(email).catch(() => {})
       set({ currentUser: localUser, isAuthenticated: true, loading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign up failed'
@@ -307,6 +324,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         resetPermanentlyDeadFlag()
         useSyncStore.getState().setStatus('synced')
         set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
+        if (localUser.email) { window.api.auth.saveEmail(localUser.email).catch(() => {}) }
         return
       }
 
@@ -333,6 +351,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         resetPermanentlyDeadFlag()
         useSyncStore.getState().setStatus('synced')
         set({ currentUser: localUser, isAuthenticated: true, isOffline: false, loading: false })
+        if (localUser.email) { window.api.auth.saveEmail(localUser.email).catch(() => {}) }
         return
       }
 
@@ -392,6 +411,20 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
               } catch (e) {
                 console.warn('[Auth] Queue drain after recovery failed:', e)
               }
+              try {
+                const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+                if (pending === 'true') {
+                  const localUser2 = await window.api.users.findById(user.id)
+                  if (localUser2 !== null) {
+                    const dn = localUser2.display_name ?? ''
+                    const parts = dn.split(' ')
+                    await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+                    await window.api.settings.set(user.id, 'profile_sync_pending', '')
+                  }
+                }
+              } catch (e) {
+                console.warn('[Auth] Profile sync retry failed:', e)
+              }
             }
           })
         } else {
@@ -439,6 +472,20 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
               await processSyncQueue()
             } catch (e) {
               console.warn('[Auth] Queue drain after recovery failed:', e)
+            }
+            try {
+              const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+              if (pending === 'true') {
+                const localUser2 = await window.api.users.findById(user.id)
+                if (localUser2 !== null) {
+                  const dn = localUser2.display_name ?? ''
+                  const parts = dn.split(' ')
+                  await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+                  await window.api.settings.set(user.id, 'profile_sync_pending', '')
+                }
+              }
+            } catch (e) {
+              console.warn('[Auth] Profile sync retry failed:', e)
             }
           }
         })

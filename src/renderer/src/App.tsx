@@ -14,6 +14,7 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
+import { initPowerListener } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 
 function App(): React.JSX.Element {
@@ -27,6 +28,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     initAuth()
+    initPowerListener()
   }, [initAuth])
 
   // Initialize updater (app-level, not per-user)

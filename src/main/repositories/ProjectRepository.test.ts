@@ -174,6 +174,7 @@ describe('ProjectRepository — applyRemote', () => {
       owner_id: ownerId,
       is_default: 0,
       is_shared: 0,
+      is_archived: 0,
       sidebar_order: 0,
       area_id: null,
       auto_archive_enabled: 0,
@@ -201,6 +202,7 @@ describe('ProjectRepository — applyRemote', () => {
       owner_id: ownerId,
       is_default: 0,
       is_shared: 0,
+      is_archived: 0,
       sidebar_order: 0,
       area_id: null,
       auto_archive_enabled: 0,
@@ -239,5 +241,82 @@ describe('ProjectRepository — applyRemote', () => {
     const local = repo.findById('r4')!
     expect(local.name).toBe('Updated remote')
     expect(local.updated_at).toBe(fresh.updated_at)
+  })
+})
+
+describe('ProjectRepository — archive/unarchive', () => {
+  let db: DatabaseSync
+  let repo: ProjectRepository
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    ownerId = seedUser(db)
+    repo = new ProjectRepository(db)
+  })
+
+  function seedStatus(projectId: string, statusId = 's1'): string {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO statuses (id, project_id, name, color, icon, order_index, is_done, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(statusId, projectId, 'Todo', '#888888', 'circle', 0, 0, 1, now, now)
+    return statusId
+  }
+
+  function seedTask(projectId: string, taskId: string, statusId: string): void {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO tasks (id, project_id, owner_id, title, status_id, priority, order_index, is_template, is_archived, is_in_my_day, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(taskId, projectId, ownerId, 'Task', statusId, 0, 0, 0, 0, 0, now, now)
+  }
+
+  it('archiveWithTasks() sets is_archived = 1 on project', () => {
+    const p = makeProject(repo, ownerId, 'p1')
+    const result = repo.archiveWithTasks(p.id)
+    expect(result).toBeDefined()
+    expect(result!.is_archived).toBe(1)
+    expect(repo.findById(p.id)!.is_archived).toBe(1)
+  })
+
+  it('archiveWithTasks() cascades is_archived = 1 to all active tasks', () => {
+    const p = makeProject(repo, ownerId, 'p1')
+    const sId = seedStatus(p.id)
+    seedTask(p.id, 't1', sId)
+    seedTask(p.id, 't2', sId)
+    repo.archiveWithTasks(p.id)
+    const t1 = db.prepare('SELECT is_archived FROM tasks WHERE id = ?').get('t1') as { is_archived: number }
+    const t2 = db.prepare('SELECT is_archived FROM tasks WHERE id = ?').get('t2') as { is_archived: number }
+    expect(t1.is_archived).toBe(1)
+    expect(t2.is_archived).toBe(1)
+  })
+
+  it('archiveWithTasks() does not touch deleted tasks', () => {
+    const p = makeProject(repo, ownerId, 'p1')
+    const sId = seedStatus(p.id)
+    seedTask(p.id, 'tAlive', sId)
+    seedTask(p.id, 'tDeleted', sId)
+    const now = new Date().toISOString()
+    db.prepare('UPDATE tasks SET deleted_at = ? WHERE id = ?').run(now, 'tDeleted')
+    repo.archiveWithTasks(p.id)
+    const deleted = db.prepare('SELECT is_archived FROM tasks WHERE id = ?').get('tDeleted') as { is_archived: number }
+    expect(deleted.is_archived).toBe(0)
+  })
+
+  it('unarchiveWithTasks() sets is_archived = 0 on project and tasks', () => {
+    const p = makeProject(repo, ownerId, 'p1')
+    const sId = seedStatus(p.id)
+    seedTask(p.id, 't1', sId)
+    repo.archiveWithTasks(p.id)
+    const result = repo.unarchiveWithTasks(p.id)
+    expect(result).toBeDefined()
+    expect(result!.is_archived).toBe(0)
+    const t1 = db.prepare('SELECT is_archived FROM tasks WHERE id = ?').get('t1') as { is_archived: number }
+    expect(t1.is_archived).toBe(0)
+  })
+
+  it('archiveWithTasks() on nonexistent project returns undefined', () => {
+    expect(repo.archiveWithTasks('does-not-exist')).toBeUndefined()
   })
 })

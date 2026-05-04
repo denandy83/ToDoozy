@@ -1583,3 +1583,30 @@ Before marking passes: true: read ui-reference.md and debug-learnings.md. Write 
 - **Acceptance Criteria:** Full/partial/middle UUID search works, no false positives, title search unchanged, AND semantics preserved, all tests pass.
 - **Passes:** true
 - **Implemented:** 2026-04-30
+
+---
+
+### #65 — Profile Settings (Display Name + Password Change + Forgot Password)
+- **Description:** Added Profile tab as first tab in `UnifiedSettingsModal`. `ProfileSettingsContent` component with three sections: Account (email read-only), Display Name (first/last autosave 1s debounce, offline fallback via `profile_sync_pending` setting), Password (change password with validation, Eye/EyeOff toggles). Deployed `send-password-reset` edge function. Created `docs/reset-password.html` and `docs/no-password.html` for OAuth redirect flows. Added profile sync retry in both `onRecovered` callbacks in `authStore`.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Profile tab visible, display name autosaves, password can be changed, forgot password flow works.
+- **Passes:** true
+- **Implemented:** 2026-05-01
+
+---
+
+### #66 — Save Login Credentials (Email Pre-Fill + Keychain Password)
+- **Description:** Installed `keytar`. Added 5 IPC handlers (`auth:saveEmail`, `auth:getSavedEmail`, `auth:savePassword`, `auth:getSavedPassword`, `auth:clearCredentials`). `authStore.signInWithEmail` returns `Promise<boolean>` and saves credentials on success. `AppLayout` shows "Save password to Keychain?" persistent toast on first login. `LoginScreen` pre-fills saved email/password on mount.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Email pre-filled on re-open, password from Keychain, toast to save password shown after first login.
+- **Passes:** true
+- **Implemented:** 2026-05-01
+
+---
+
+### #67 — Project Archive & Restore
+- **Description:** Added `is_archived` column via SQLite migration_24 (Supabase column already existed). Added `archiveWithTasks`/`unarchiveWithTasks` repository methods using `withTransaction`. Added IPC handlers and preload bridge. Added `archiveProject`/`unarchiveProject` store actions + `selectActiveProjects` selector. Updated `PersonalSyncService` with `pushProjectArchive` function. Replaced trash icon with Archive icon in AppLayout header (disabled for default + last project). Sidebar now uses `selectActiveProjects` to hide archived projects. ArchiveView shows archived projects as group headers with Restore/Delete buttons. `ProjectGeneralSettings` and `ProjectsSettingsContent` archive section replace delete with archive + undo toast pattern.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** Archive icon replaces trash, archived projects hidden from sidebar, archive restores via undo toast, Archive view shows archived project groups with restore/delete, settings archive section with undo toast.
+- **Passes:** true
+- **Implemented:** 2026-05-01

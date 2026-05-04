@@ -144,6 +144,8 @@ export interface ProjectsAPI {
   getMembers(projectId: string): Promise<ProjectMember[]>
   getProjectsForUser(userId: string): Promise<Project[]>
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>
+  archiveWithTasks(id: string): Promise<Project | undefined>
+  unarchiveWithTasks(id: string): Promise<Project | undefined>
 }
 
 export interface StatusesAPI {
@@ -263,6 +265,11 @@ export interface AuthAPI {
   getSupabaseConfig(): Promise<SupabaseConfig>
   openOAuthWindow(url: string): Promise<string | null>
   switchDatabase(userId: string, email?: string): Promise<void>
+  saveEmail(email: string): Promise<void>
+  getSavedEmail(): Promise<string | null>
+  savePassword(email: string, password: string): Promise<void>
+  getSavedPassword(email: string): Promise<string | null>
+  clearCredentials(): Promise<void>
 }
 
 export interface ShortcutUpdateResult {
@@ -382,6 +389,11 @@ export interface ShellAPI {
   openExternal(url: string): Promise<void>
 }
 
+export interface PowerAPI {
+  onSuspend(callback: () => void): () => void
+  onResume(callback: () => void): () => void
+}
+
 export interface AppAPI {
   getLoginItemSettings(): Promise<{ openAtLogin: boolean }>
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
@@ -494,6 +506,7 @@ export interface TodoozyAPI {
   savedViews: SavedViewsAPI
   releaseNotes: ReleaseNotesAPI
   updater: UpdaterAPI
+  power: PowerAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void
 }

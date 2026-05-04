@@ -53,12 +53,25 @@ async function fireAnomalyNotification(count: number, windowSec: number): Promis
 // Only count messages that indicate something is genuinely wrong. Normal
 // startup chatter (subscribe confirmations, effect mount/unmount, WS open,
 // SIGNED_IN/OUT) clusters tightly during login/logout but isn't a storm.
+//
+// Reconnect-related messages (CHANNEL_ERROR, CLOSED, TIMED_OUT, Reconnect…)
+// are also excluded — wake-from-sleep and Wi-Fi flake naturally produce
+// dozens of these in seconds across all channels. The reconnect logic now
+// has its own give-up + banner (see SessionBanner connection-lost variant),
+// which is the user-facing signal. The anomaly detector is reserved for
+// genuine runaway loops (JWT-refresh storms, etc.).
 function isAnomalySignal(message: string): boolean {
   if (message.startsWith('ANOMALY')) return false // don't count meta-log
   if (message.startsWith('Subscribed to')) return false
   if (message.startsWith('effect run') || message.startsWith('effect cleanup')) return false
   if (message.startsWith('WS open')) return false
   if (message.startsWith('setAuth deduped')) return false
+  // Reconnect noise — handled by give-up banner, not anomaly notifications.
+  if (message.startsWith('Channel CHANNEL_ERROR')) return false
+  if (message.startsWith('Channel TIMED_OUT')) return false
+  if (message.startsWith('Channel CLOSED')) return false
+  if (message.startsWith('Reconnect ')) return false
+  if (message.startsWith('Power: ')) return false
   // SIGNED_IN/OUT/INITIAL_SESSION are user-driven; TOKEN_REFRESHED at high
   // frequency is a real signal so we DO count those.
   if (

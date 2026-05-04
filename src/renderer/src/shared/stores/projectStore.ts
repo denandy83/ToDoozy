@@ -21,6 +21,8 @@ interface ProjectActions {
   createProject(input: CreateProjectInput): Promise<Project>
   updateProject(id: string, input: UpdateProjectInput): Promise<Project | null>
   deleteProject(id: string): Promise<boolean>
+  archiveProject(id: string): Promise<Project | null>
+  unarchiveProject(id: string): Promise<Project | null>
   setCurrentProject(id: string | null): void
   addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
@@ -156,6 +158,38 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
     }
   },
 
+  async archiveProject(id: string): Promise<Project | null> {
+    try {
+      const project = await window.api.projects.archiveWithTasks(id)
+      if (project) {
+        set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
+        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
+          pushProjectArchive(id, 1).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
+        })
+      }
+      return project ?? null
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Failed to archive project' })
+      throw err
+    }
+  },
+
+  async unarchiveProject(id: string): Promise<Project | null> {
+    try {
+      const project = await window.api.projects.unarchiveWithTasks(id)
+      if (project) {
+        set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
+        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
+          pushProjectArchive(id, 0).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
+        })
+      }
+      return project ?? null
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Failed to unarchive project' })
+      throw err
+    }
+  },
+
   setCurrentProject(id: string | null): void {
     set({ currentProjectId: id })
   },
@@ -196,6 +230,9 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
 // Selectors
 export const selectAllProjects = (state: ProjectState): Project[] =>
   Object.values(state.projects)
+
+export const selectActiveProjects = (state: ProjectState): Project[] =>
+  Object.values(state.projects).filter((p) => p.is_archived !== 1)
 
 export const selectCurrentProject = (state: ProjectState): Project | null =>
   state.currentProjectId ? state.projects[state.currentProjectId] ?? null : null

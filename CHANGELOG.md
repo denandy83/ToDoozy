@@ -6,9 +6,25 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ## v1.5.5
 
+### Fixed
 - **Duplicate labels from shared projects** — Labels owned by other members of a shared project no longer appear in the label picker or filter bar. Previously, selecting such a label linked the foreign-user label to your personal project, producing a duplicate. The queries that power all label pickers now filter to the current user's own labels only.
 - **Session-expired banner** — When a refresh token is permanently dead, the app now shows a red "Session expired — Sign in again" banner instead of the generic amber "Sync paused / Retry now" prompt. The retry button is hidden because retrying is pointless for a dead token.
 - **Shared project names in reconnect logs** — "Reconnect in Xs" and "Reconnect skipped" log entries for shared projects now show the project name instead of a raw UUID.
+- **Label collision consolidation** — When MCP-induced label ID collisions produced duplicate label rows, the sync path now inserts the canonical label before remapping the junction table, preventing FK constraint failures during reconcile.
+- **Recurrence due-date parsing** — Due dates are now parsed as local midnight instead of UTC midnight, preventing same-day re-clones from firing prematurely in non-UTC timezones.
+- **Member avatars** — Members with stale or placeholder cache emails now correctly show their real profile data; members with no profile show `Member (uuid)` instead of `Unknown`.
+
+### Added
+- **Sidebar color** — A new "Sidebar" color field in Settings → Theme gives independent control over the left panel background. Previously the sidebar auto-derived its color from another theme token.
+- **Profile settings** — New Profile tab in Settings for password management and account info (Story #65).
+- **Structural borders always visible** — Header and sidebar borders now use `border-foreground/10` so they're always visible regardless of the active theme's border color.
+- **Session-expired overlay** — The session-expired and sync-paused banners now render as solid overlays on the header instead of sitting in the layout flow.
+
+## v1.5.4
+
+### Fixed
+- **Phantom reconcile pushes** — Reconcile was treating already-synced rows as locally-only and pushing them on every cycle, producing spurious push traffic. The diff logic now correctly identifies in-sync rows and skips them.
+- **Shared-project label gap** — Labels associated with shared projects were not included in the reconcile scope, causing label assignments to go missing on secondary devices after sync.
 
 ## v1.5.3
 
@@ -50,9 +66,64 @@ All bug fixes and changes to ToDoozy. Most recent first.
 - **`syncShared` effect deps fix** — `App.tsx` switched from object/function deps (`currentUser`, `hydrateProjects`) to a stable primitive (`startupUserId`). Stops the effect from re-firing on every auth-store mutation including token refresh.
 - **`pullNewTasks` / `pullStatuses` no longer push** — Removed the "local newer → push" branch from polling pulls. Recovery is owned by `sync_queue` (mutation retries) and `reconcile()` (ID-set diff). Polling is read-only.
 
+## v1.4.5
+
+### Fixed
+- **Sync silent-failure paths** — Several code paths in PersonalSyncService could fail silently (swallowing errors without logging or retrying). Added explicit error surfacing and retry via the sync queue for these paths.
+- **Label dedup on sync** — Duplicate label rows created during sync (same name, different ID) are now detected and consolidated: the junction table is remapped to the canonical ID and the duplicate row is deleted.
+- **`task_labels` gap** — Task↔label junction rows were not being included in the reconcile pass, so label assignments made on one device could go missing on others. The reconcile now covers `task_labels` as a separate scope.
+
+## v1.4.4
+
+### Fixed
+- **Offline debounce** — High-frequency settings writes (e.g., theme changes while offline) no longer queue an unbounded backlog. Writes are debounced before entering the sync queue, keeping queue depth bounded.
+- **Label color default** — New labels now always default to the least-used color from the palette; the previous behavior (always defaulting to the first color) resulted in every new label starting as the same color.
+
+### Added
+- **What's New observability** — `syncReleaseNotes()` now logs `Release notes synced (N versions)` on success so it's possible to confirm the fetch completed without opening the Settings tab.
+
+## v1.4.3
+
+### Fixed
+- **Shared-project sync: invite FK failure** — Accepting an invite failed with a FOREIGN KEY constraint if any task in the project was assigned to a user the new member's device had never seen. The sync pre-fetches all referenced user IDs via a batch `.in()` query before inserting tasks.
+- **Shared-project sync: unknown members** — Members not yet in the local `users` table caused insert failures. A placeholder row is now created for any unknown member ID before task rows reference it.
+- **Shared-project sync: missing tasks** — Tasks created by other members after the initial join were not appearing. Incremental pull now correctly detects the high-water mark from the perspective of the joining device.
+- **Shared-project sync: wrong-device auto-archive** — The auto-archive job was running on all devices including ones that hadn't changed the task, causing premature archival. Auto-archive now only runs on the device that set `completed_date`.
+
+### Added
+- **Sync event logging** — Key sync events that were previously invisible (subscription joins, reconcile triggers, queue flushes) are now emitted to the connection log panel for easier debugging.
+
+## v1.4.2
+
+### Added
+- **Auto-reconnect Realtime channels** — When a Supabase Realtime channel drops (network interruption, sleep/wake), the app now automatically schedules a reconnect with exponential backoff. Previously a dropped channel stayed dead until the app restarted.
+- **In-app connection log** — A scrollable log of Realtime connection events (connect, disconnect, reconnect attempts) is now available in Settings for diagnosing sync issues.
+
+## v1.4.1
+
+### Fixed
+- **Update modal renders notes for every skipped version** — When multiple versions were skipped, the update modal only showed notes for the latest version. It now concatenates notes from every intermediate version so users see the full history of what they missed.
+
+## v1.4.0
+
+### Fixed
+- **Timer mode picker replaces silent-perpetual bug** — With Flowtime and Perpetual both enabled, Perpetual silently won at the play button — pressing play with Flowtime active still started a non-Flowtime perpetual countdown. The three independent on/off toggles have been replaced by a single "Default mode" segmented control (Flowtime / Timer) plus a "Default duration" sub-control (Limited / Infinite). Pressing play now opens a fixed-size mode-picker popup pre-selected to your defaults; Enter starts, Escape closes. A "Skip start dialog" toggle in Settings → Behavior restores the one-click flow.
+- **Notification panel bell toggles closed** — Clicking the bell while the panel was open did nothing: the document outside-click handler closed it and the bell's onClick re-opened it, netting zero change. The handler now treats the bell and panel's shared wrapper as "inside," so the bell correctly toggles.
+- **Notification panel trash replaces X** — The X close button in the notification panel header (redundant with bell/Escape) is replaced by a Trash2 icon that requires a confirm-toast before clearing all notifications.
+
+### Added
+- **Theme import / export (#62)** — Themes can now be exported as JSON files and imported from JSON, enabling sharing and backup of custom color palettes.
+- **Cmd+K UUID search (#64)** — The command palette now matches against task UUIDs in addition to titles, labels, and metadata, enabling direct navigation by ID.
+- **Theme save icon polish (#63)** — The save icon in theme settings now only appears when color values actually differ from the saved state, eliminating false "unsaved" indicators.
+
 ## v1.3.3
 
-- **Fix: DatePicker only highlights the real due date** — Opening the calendar with no due date set used to show today filled across every month you navigated to, and with a date like April 18 set, navigating to May would also highlight May 18. Now only the actual selected date gets the accent fill, today shows a subtle accent-colored border when it isn't the selected date, and every other day renders neutrally
+### Fixed
+- **DatePicker only highlights the real due date** — Opening the calendar with no due date set used to show today filled across every month you navigated to, and with a date like April 18 set, navigating to May would also highlight May 18. Now only the actual selected date gets the accent fill, today shows a subtle accent-colored border when it isn't the selected date, and every other day renders neutrally.
+- **Quick-add label picker shows all labels** — The `@` picker in quick-add loaded only labels for the selected project. It now loads all the user's labels, deduped by name. Picking a label from another project links it to the selected project on submit instead of creating a duplicate.
+- **Sync dot no longer goes red on idle** — The sidebar sync indicator turned red after 5 minutes of inactivity. It's now driven by real signals: internet connection, Supabase Realtime channel state, and unflushed local writes. The tooltip names the specific failure mode.
+- **Accepting an invite no longer fails with a FOREIGN KEY error** — New collaborators joining a shared project could hit a FK constraint if any task was assigned to an unseen user. The sync pre-fetches all referenced users before inserting tasks.
+- **Email confirmation lands on a real page** — The signup confirmation link now goes to a hosted GitHub Pages page instead of a localhost URL the browser refused to connect to.
 
 ## v1.3.2
 

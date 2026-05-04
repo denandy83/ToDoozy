@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Project } from '../../../../shared/types'
 import { useProjectStore } from '../../shared/stores'
+import { useToast } from '../../shared/components/Toast'
 
 const PROJECT_COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
@@ -20,9 +21,10 @@ export function ProjectGeneralSettings({
 }: ProjectGeneralSettingsProps): React.JSX.Element {
   const [name, setName] = useState(project.name)
   const [color, setColor] = useState(project.color)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const deleteProject = useProjectStore((s) => s.deleteProject)
+  const archiveProject = useProjectStore((s) => s.archiveProject)
+  const unarchiveProject = useProjectStore((s) => s.unarchiveProject)
+  const { addToast: showToast } = useToast()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Sync state when project changes
@@ -50,18 +52,24 @@ export function ProjectGeneralSettings({
     updateProject(project.id, { color: c })
   }
 
-  const handleDelete = async (): Promise<void> => {
+  const handleArchive = async (): Promise<void> => {
     if (project.is_default === 1) {
-      addToast({ message: 'Cannot delete the default project', variant: 'danger' })
+      addToast({ message: "Can't archive the default project", variant: 'danger' })
       return
     }
     try {
-      await deleteProject(project.id)
-      addToast({ message: `Deleted "${project.name}"`, variant: 'danger' })
+      await archiveProject(project.id)
       onClose()
+      showToast({
+        message: `"${project.name}" archived`,
+        action: {
+          label: 'Undo',
+          onClick: async () => { await unarchiveProject(project.id) }
+        }
+      })
     } catch (err) {
       addToast({
-        message: err instanceof Error ? err.message : 'Failed to delete project',
+        message: err instanceof Error ? err.message : 'Failed to archive project',
         variant: 'danger'
       })
     }
@@ -104,30 +112,15 @@ export function ProjectGeneralSettings({
 
       {project.is_default !== 1 && (
         <div className="mt-4 border-t border-border pt-4">
-          {!confirmDelete ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10"
-            >
-              Delete Project
-            </button>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-light text-danger">Are you sure?</span>
-              <button
-                onClick={handleDelete}
-                className="rounded-lg bg-danger px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent-fg"
-              >
-                Confirm Delete
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted hover:bg-foreground/6"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
+          <button
+            onClick={handleArchive}
+            className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/8 hover:text-foreground"
+          >
+            Archive Project
+          </button>
+          <p className="mt-2 text-[10px] font-light text-muted/60">
+            Archives this project and all its tasks. You can restore it from the Archive view.
+          </p>
         </div>
       )}
     </div>

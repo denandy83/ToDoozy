@@ -318,11 +318,13 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ## Theme System
 
-- 8-color palette as CSS custom properties
-- 12 built-in themes: 6 dark (Midnight, Obsidian, Forest, Ocean, Crimson, Violet), 6 light variants
-- Settings > Themes: mode toggle, preset dropdown, color pickers (8 per theme), live UI preview
+- 9-color palette as CSS custom properties (accent, background, surface, foreground, border, muted, primary, secondary, **sidebar**)
+- **Sidebar color:** Independent color control for the left panel background via `--color-sidebar` CSS variable (`ThemeConfig.sidebar`). Sidebar.tsx uses `bg-sidebar`; the field syncs cross-device and is exported/imported with themes.
+- 12 built-in themes: 6 dark (Midnight, Obsidian, Forest, Ocean, Crimson, Violet), 6 light variants — all updated with sidebar values
+- Settings > Themes: mode toggle, preset dropdown, color pickers (9 per theme including Sidebar), live UI preview
 - Apply button required to persist; create and save custom themes
-- **Status:** Complete
+- **Theme import / export:** Export any theme as a JSON file and import it back. Enables sharing and cross-device backup of custom color palettes. Available via Export / Import buttons in the theme editor.
+- **Status:** Complete (updated v1.5.5)
 
 ---
 
@@ -404,24 +406,40 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Dock icon click reopens main window
 - **Status:** Complete
 
+### Profile Settings
+- New Profile tab in Settings for account management
+- Change password (for email/password accounts)
+- Update display name
+- View account info (email, login method)
+- **Status:** Complete (v1.5.5, Story #65)
+
 ### Supabase Authentication
 - Email/password and Google OAuth via Supabase Auth
 - Session stored encrypted via Electron safeStorage
 - Auto-login on launch if valid token exists
-- Graceful offline fallback
-- **Status:** Complete
+- Token rotation persisted: `TOKEN_REFRESHED` events write the rotated session back to safeStorage so refresh tokens stay valid indefinitely
+- Single-flight mutex on `setSession` and `refresh` prevents concurrent rotation from tripping Supabase's 10s reuse-detection window
+- Graceful offline fallback with recovery timer (30s poll, exponential backoff on session restore, auto-drains sync queue on recovery)
+- Permanent-error detection: `refresh_token_not_found`, `session_not_found`, etc. stop the recovery loop and show a red "Session expired" banner
+- **Status:** Complete (updated v1.5.2)
 
 ### Supabase Full Sync Engine
-- Write-through sync hooks on all Zustand stores (tasks, labels, projects, settings) push every local write to Supabase in background
+- Write-through sync hooks on all Zustand stores (tasks, labels, projects, settings, themes, saved views, project areas) push every local write to Supabase in background
+- **Generic two-way reconcile** (`reconcileTable`): diffs all eight syncable tables, pushes local-only rows, pulls remote-only rows, applies last-writer-wins per row. Replaces eight bespoke per-table pull functions.
+- **Soft-delete everywhere:** All deletes set `deleted_at`; reads filter tombstones; Realtime UPDATE events propagate soft-deletes cross-device. 30-day purge via `pg_cron` + local boot sweep.
+- **Per-(user, scope, table) high-water mark** (`sync_meta` table): idle reconcile skips table scans when neither side has new data since the stored high-water mark. Project-scoped tables use `project_id` as scope.
+- **Resurrect protection:** A locally tombstoned row stays tombstoned even when a newer remote update arrives — prevents zombie rows after Realtime gaps.
 - Sync status indicator shows connection state (synced, syncing, offline, error)
 - Offline detection with automatic queue-and-flush: changes made offline are queued and pushed when connectivity returns
-- Works for personal projects; shared projects use existing Realtime sync
 - **Force Full Sync** button in Settings > General triggers a complete Supabase re-sync on demand
-- Polls Supabase every 10s for externally created/updated tasks; `pullNewTasks` detects remote updates via `updated_at`
+- Project metadata (name, color, icon, is_default, sidebar_order, area_id) syncs cross-device
+- **Project templates sync**: templates created on one device propagate to all devices
+- **project_labels junction table on Supabase**: label↔project associations sync as individual rows (add/remove propagates immediately, with LWW on tombstones)
 - `syncProjectDown` and `discoverRemoteMemberships` skip gracefully when offline
-- Project metadata (name, color, icon) pulled from Supabase on sync
-- Project renames/edits push to Supabase immediately
-- **Status:** Complete (updated 2026-04-07)
+- **Auto-reconnect Realtime channels** with exponential backoff on drop (sleep/wake, network switch)
+- **setAuth deduplication**: token refresh fans out only once regardless of open channel count
+- In-app connection log for Realtime events (Settings)
+- **Status:** Complete (updated v1.5.5)
 
 ---
 
