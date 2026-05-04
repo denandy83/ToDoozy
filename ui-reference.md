@@ -107,6 +107,7 @@ Used on: all interactive elements. Visible keyboard focus indicator.
 - Always `text-danger` or `hover:bg-danger/10`
 - Always at bottom of menus/lists
 - Always with undo toast
+- **Shift+click skips the confirmation toast** when `shift_delete_enabled` is on. Every destructive button (trash icons, "Delete X" buttons, archive-then-delete actions) must accept the click event and call `shouldForceDelete(e)` from `src/renderer/src/shared/utils/shiftDelete.ts` — if it returns true, perform the action immediately without the confirm toast. Update the button's `title` to include "(Shift+click to skip confirmation)".
 
 ---
 
