@@ -12,6 +12,8 @@ function SectionLabel({ children, first }: { children: string; first?: boolean }
   )
 }
 
+type ProfileSubtab = 'account' | 'password'
+
 function validatePassword(pw: string): string | null {
   if (pw.length < 8) return 'At least 8 characters required'
   if (!/[A-Z]/.test(pw)) return 'Must contain at least one uppercase letter'
@@ -24,6 +26,8 @@ export function ProfileSettingsContent(): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateUser = useAuthStore((s) => s.updateUser)
   const { addToast } = useToast()
+
+  const [subtab, setSubtab] = useState<ProfileSubtab>('account')
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -153,95 +157,122 @@ export function ProfileSettingsContent(): React.JSX.Element {
   }, [newPassword, confirmPassword])
 
   return (
-    <div className="flex flex-col gap-4">
-      <SectionLabel first>Account</SectionLabel>
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Email</p>
-        <p className="text-sm font-light text-foreground">{currentUser?.email ?? '—'}</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex gap-4 border-b border-border">
+        <button
+          onClick={() => setSubtab('account')}
+          className={`px-1 pb-2 text-[11px] font-bold uppercase tracking-widest transition-colors border-b-2 -mb-px ${
+            subtab === 'account' ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground/80'
+          }`}
+        >
+          Account
+        </button>
+        <button
+          onClick={() => setSubtab('password')}
+          className={`px-1 pb-2 text-[11px] font-bold uppercase tracking-widest transition-colors border-b-2 -mb-px ${
+            subtab === 'password' ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground/80'
+          }`}
+        >
+          Password
+        </button>
       </div>
 
-      <SectionLabel>Display Name</SectionLabel>
-      <p className="text-[10px] text-muted -mt-2">Shown to other members in shared projects. Leave blank to use your email.</p>
-      <div className="flex items-end gap-3">
-        <div className="flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">First name</p>
-          <input type="text" value={firstName}
-            onChange={(e) => { setFirstName(e.target.value); scheduleSave(e.target.value, lastName) }}
-            placeholder="First"
-            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
-        </div>
-        <div className="flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Last name</p>
-          <input type="text" value={lastName}
-            onChange={(e) => { setLastName(e.target.value); scheduleSave(firstName, e.target.value) }}
-            placeholder="Last"
-            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
-        </div>
-        <div className="h-[38px] w-6 flex items-center justify-center flex-shrink-0">
-          {nameSaved && <Check size={16} className="text-success" />}
-          {nameOffline && <span className="text-[9px] text-muted">Local</span>}
-        </div>
-      </div>
-      {nameOffline && <p className="text-[10px] text-muted -mt-2">Saved locally — will sync when reconnected</p>}
-
-      <SectionLabel>{hasEmailIdentity ? 'Change Password' : 'Add Password Login'}</SectionLabel>
-      {!hasEmailIdentity && (
-        <p className="text-[10px] text-muted -mt-2">Set a password to also log in with your email, in addition to Google.</p>
-      )}
-      <p className="text-[10px] text-muted -mt-2">Requirements: 8+ characters, one uppercase, one lowercase, one number.</p>
-      <div className="flex flex-col gap-3">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">New password</p>
-          <div className="relative">
-            <input type={showNew ? 'text' : 'password'} value={newPassword}
-              onChange={(e) => { setNewPassword(e.target.value); setPasswordError(null) }}
-              placeholder="New password"
-              className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
-            <button type="button" onClick={() => setShowNew((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
-              {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-        </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Confirm password</p>
-          <div className="relative">
-            <input type={showConfirm ? 'text' : 'password'} value={confirmPassword}
-              onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(null) }}
-              placeholder="Confirm password"
-              className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
-            <button type="button" onClick={() => setShowConfirm((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
-              {showConfirm ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-        </div>
-        {passwordError && <p className="text-[10px] text-danger">{passwordError}</p>}
-        <div className="flex items-center gap-3">
-          <button onClick={() => { void handlePasswordSave() }}
-            disabled={passwordSaving || !newPassword || !confirmPassword}
-            className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-40">
-            {passwordSaving ? 'Saving...' : hasEmailIdentity ? 'Change Password' : 'Set Password'}
-          </button>
-          {passwordSaved && <Check size={16} className="text-success" />}
-        </div>
-      </div>
-
-      {savedLoginEmail && (
-        <>
-          <SectionLabel>Saved Login on This Device</SectionLabel>
-          <p className="text-[10px] text-muted -mt-2">
-            {hasSavedPassword
-              ? `Email and password are saved for ${savedLoginEmail} so you can sign in with one click. Stored in the macOS Keychain.`
-              : `Email ${savedLoginEmail} is saved for pre-fill on the sign-in screen.`}
-          </p>
+      {subtab === 'account' && (
+        <div className="flex flex-col gap-4">
+          <SectionLabel first>Account</SectionLabel>
           <div>
-            <button onClick={handleForgetSavedLogin}
-              className="rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10">
-              Forget Saved Login
-            </button>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Email</p>
+            <p className="text-sm font-light text-foreground">{currentUser?.email ?? '—'}</p>
           </div>
-        </>
+
+          <SectionLabel>Display Name</SectionLabel>
+          <p className="text-[10px] text-muted -mt-2">Shown to other members in shared projects. Leave blank to use your email.</p>
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">First name</p>
+              <input type="text" value={firstName}
+                onChange={(e) => { setFirstName(e.target.value); scheduleSave(e.target.value, lastName) }}
+                placeholder="First"
+                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Last name</p>
+              <input type="text" value={lastName}
+                onChange={(e) => { setLastName(e.target.value); scheduleSave(firstName, e.target.value) }}
+                placeholder="Last"
+                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+            </div>
+            <div className="h-[38px] w-6 flex items-center justify-center flex-shrink-0">
+              {nameSaved && <Check size={16} className="text-success" />}
+              {nameOffline && <span className="text-[9px] text-muted">Local</span>}
+            </div>
+          </div>
+          {nameOffline && <p className="text-[10px] text-muted -mt-2">Saved locally — will sync when reconnected</p>}
+
+          {savedLoginEmail && (
+            <>
+              <SectionLabel>Saved Login on This Device</SectionLabel>
+              <p className="text-[10px] text-muted -mt-2">
+                {hasSavedPassword
+                  ? `Email and password are saved for ${savedLoginEmail} so you can sign in with one click. Stored in the macOS Keychain.`
+                  : `Email ${savedLoginEmail} is saved for pre-fill on the sign-in screen.`}
+              </p>
+              <div>
+                <button onClick={handleForgetSavedLogin}
+                  className="rounded-lg border border-danger/30 px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:bg-danger/10">
+                  Forget Saved Login
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {subtab === 'password' && (
+        <div className="flex flex-col gap-4">
+          <SectionLabel first>{hasEmailIdentity ? 'Change Password' : 'Add Password Login'}</SectionLabel>
+          {!hasEmailIdentity && (
+            <p className="text-[10px] text-muted -mt-2">Set a password to also log in with your email, in addition to Google.</p>
+          )}
+          <p className="text-[10px] text-muted -mt-2">Requirements: 8+ characters, one uppercase, one lowercase, one number.</p>
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">New password</p>
+              <div className="relative">
+                <input type={showNew ? 'text' : 'password'} value={newPassword}
+                  onChange={(e) => { setNewPassword(e.target.value); setPasswordError(null) }}
+                  placeholder="New password"
+                  className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+                <button type="button" onClick={() => setShowNew((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
+                  {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Confirm password</p>
+              <div className="relative">
+                <input type={showConfirm ? 'text' : 'password'} value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(null) }}
+                  placeholder="Confirm password"
+                  className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+                <button type="button" onClick={() => setShowConfirm((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
+                  {showConfirm ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+            {passwordError && <p className="text-[10px] text-danger">{passwordError}</p>}
+            <div className="flex items-center gap-3">
+              <button onClick={() => { void handlePasswordSave() }}
+                disabled={passwordSaving || !newPassword || !confirmPassword}
+                className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-40">
+                {passwordSaving ? 'Saving...' : hasEmailIdentity ? 'Change Password' : 'Set Password'}
+              </button>
+              {passwordSaved && <Check size={16} className="text-success" />}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
