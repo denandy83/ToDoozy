@@ -129,11 +129,18 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   async hydrateAllLabels(): Promise<void> {
     try {
       const labels = await window.api.labels.findAll(getUserId())
-      const labelMap: Record<string, Label> = {}
-      for (const l of labels) {
-        labelMap[l.id] = l
-      }
-      set((state) => ({ ...state, labels: labelMap }))
+      // Merge into existing labels rather than replace. Other users' labels
+      // pulled by hydrateLabels(projectId) for shared projects must survive
+      // this call — replacing the map wipes them and breaks the chip remap
+      // (current user's same-name label disappears, chip falls back to the
+      // other user's color).
+      set((state) => {
+        const merged = { ...state.labels }
+        for (const l of labels) {
+          merged[l.id] = l
+        }
+        return { ...state, labels: merged }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load all labels'
       set({ error: message })
@@ -195,9 +202,15 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       const result = await window.api.labels.delete(id)
       if (result) {
         set((state) => {
+          const deletedLabel = state.labels[id]
+          const nameKey = deletedLabel?.name.toLowerCase()
           const { [id]: _, ...remaining } = state.labels
           const newFilters = new Set(state.activeLabelFilters)
-          newFilters.delete(id)
+          const newExclude = new Set(state.excludeLabelFilters)
+          if (nameKey) {
+            newFilters.delete(nameKey)
+            newExclude.delete(nameKey)
+          }
           // Remove from all projectLabels
           const updatedProjectLabels: Record<string, Set<string>> = {}
           for (const [projId, labelIds] of Object.entries(state.projectLabels)) {
@@ -205,7 +218,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
             updated.delete(id)
             updatedProjectLabels[projId] = updated
           }
-          return { labels: remaining, activeLabelFilters: newFilters, projectLabels: updatedProjectLabels }
+          return { labels: remaining, activeLabelFilters: newFilters, excludeLabelFilters: newExclude, projectLabels: updatedProjectLabels }
         })
         // Remove deleted label from task labels in the task store
         const { useTaskStore } = await import('./taskStore')
@@ -231,29 +244,67 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
 
   async removeFromProject(projectId: string, labelId: string): Promise<boolean> {
     try {
-      const result = await window.api.labels.removeFromProject(projectId, labelId)
-      if (result) {
-        set((state) => {
-          const updatedProjectLabels = { ...state.projectLabels }
+      // Resolve the name of the label being unlinked. In shared projects,
+      // the labelId may be the viewer's remapped label (their own
+      // user_labels row) which is NOT actually linked to this project —
+      // the linked labels in project_labels belong to other members. The
+      // DB-level removeFromProject filters by exact label_id and would
+      // no-op. Find every label linked to the project with the same
+      // (case-insensitive) name and remove each one.
+      const state = useLabelStore.getState()
+      let passedLabel: Label | undefined = state.labels[labelId]
+      if (!passedLabel) {
+        const fetched = await window.api.labels.findById(labelId).catch(() => null)
+        if (fetched) passedLabel = fetched
+      }
+      const targetName = passedLabel?.name.toLowerCase() ?? null
+
+      const linkedIds = state.projectLabels[projectId] ?? new Set<string>()
+      const sameNameIds: string[] = targetName
+        ? [...linkedIds]
+            .map((id) => state.labels[id])
+            .filter((l): l is Label => l !== undefined && l.name.toLowerCase() === targetName)
+            .map((l) => l.id)
+        : []
+      // If we couldn't resolve a name, fall back to the original id (may
+      // still match for personal-project removals).
+      const idsToUnlink = sameNameIds.length > 0 ? sameNameIds : [labelId]
+
+      let anyRemoved = false
+      for (const id of idsToUnlink) {
+        const result = await window.api.labels.removeFromProject(projectId, id)
+        if (result) anyRemoved = true
+      }
+      if (anyRemoved) {
+        set((s) => {
+          const updatedProjectLabels = { ...s.projectLabels }
           const existing = new Set(updatedProjectLabels[projectId] ?? [])
-          existing.delete(labelId)
+          for (const id of idsToUnlink) existing.delete(id)
           updatedProjectLabels[projectId] = existing
           return { projectLabels: updatedProjectLabels }
         })
-        // Remove label from task labels in the task store for this project
+        // Strip every same-name label from the task store immediately so
+        // chips disappear before the realtime/reconcile catches up.
         const { useTaskStore } = await import('./taskStore')
-        useTaskStore.setState((state) => {
+        useTaskStore.setState((s) => {
           const updated: Record<string, Label[]> = {}
-          for (const [taskId, labels] of Object.entries(state.taskLabels)) {
-            updated[taskId] = labels.filter((l) => l.id !== labelId)
+          for (const [taskId, labels] of Object.entries(s.taskLabels)) {
+            updated[taskId] = targetName
+              ? labels.filter((l) => l.name.toLowerCase() !== targetName)
+              : labels.filter((l) => !idsToUnlink.includes(l.id))
           }
           return { taskLabels: updated }
         })
-        // Tombstone the junction row on Supabase so other devices see the unlink.
-        const { pushProjectLabel } = await import('../../services/PersonalSyncService')
-        void pushProjectLabel(projectId, labelId, new Date().toISOString())
+        // Push tombstone + task_labels cascade for every same-name label
+        // we removed. Cross-user case: User B unlinks User A's label_id
+        // from the shared project; we need to push the tombstone for User
+        // A's labelId since that's what's in the remote junction.
+        const { pushRemoveLabelFromProject } = await import('../../services/PersonalSyncService')
+        for (const id of idsToUnlink) {
+          void pushRemoveLabelFromProject(projectId, id)
+        }
       }
-      return result
+      return anyRemoved
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label from project'
       set({ error: message })
@@ -311,29 +362,36 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
     }
   },
 
-  toggleLabelFilter(labelId: string): void {
+  toggleLabelFilter(input: string): void {
     set((state) => {
+      // Resolve UUID input → name key. Fall back to treating input as a name key
+      // (handles old saved views that stored UUIDs of now-deleted labels and
+      // future callers that pass name keys directly).
+      const label = Object.values(state.labels).find((l) => l.id === input)
+      const key = label ? label.name.toLowerCase() : input.toLowerCase()
       const newFilters = new Set(state.activeLabelFilters)
       const newExclude = new Set(state.excludeLabelFilters)
-      if (newFilters.has(labelId)) {
-        newFilters.delete(labelId)
+      if (newFilters.has(key)) {
+        newFilters.delete(key)
       } else {
-        newFilters.add(labelId)
-        newExclude.delete(labelId) // last-action-wins: remove from exclude
+        newFilters.add(key)
+        newExclude.delete(key) // last-action-wins: remove from exclude
       }
       return { activeLabelFilters: newFilters, excludeLabelFilters: newExclude }
     })
   },
 
-  toggleExcludeLabelFilter(labelId: string): void {
+  toggleExcludeLabelFilter(input: string): void {
     set((state) => {
+      const label = Object.values(state.labels).find((l) => l.id === input)
+      const key = label ? label.name.toLowerCase() : input.toLowerCase()
       const newExclude = new Set(state.excludeLabelFilters)
       const newInclude = new Set(state.activeLabelFilters)
-      if (newExclude.has(labelId)) {
-        newExclude.delete(labelId)
+      if (newExclude.has(key)) {
+        newExclude.delete(key)
       } else {
-        newExclude.add(labelId)
-        newInclude.delete(labelId) // last-action-wins: remove from include
+        newExclude.add(key)
+        newInclude.delete(key) // last-action-wins: remove from include
       }
       return { excludeLabelFilters: newExclude, activeLabelFilters: newInclude }
     })

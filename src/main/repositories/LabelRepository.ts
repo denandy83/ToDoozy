@@ -358,6 +358,22 @@ export class LabelRepository {
     })
   }
 
+  /**
+   * Soft-delete every active task_labels row for a label within a project's
+   * tasks. Used by the realtime project_labels-tombstone handler so a label
+   * removed from a shared project disappears from local tasks immediately
+   * (otherwise the UI keeps the label visible until the next reconcile).
+   */
+  softDeleteTaskLabelsForProjectLabel(projectId: string, labelId: string): void {
+    const now = new Date().toISOString()
+    this.db.prepare(
+      `UPDATE task_labels SET deleted_at = ?
+       WHERE label_id = ? AND deleted_at IS NULL AND task_id IN (
+         SELECT id FROM tasks WHERE project_id = ?
+       )`
+    ).run(now, labelId, projectId)
+  }
+
   /** Link an existing label to a project — revives a tombstoned link if present. */
   addToProject(projectId: string, labelId: string): void {
     this.db.prepare(
@@ -368,17 +384,34 @@ export class LabelRepository {
   }
 
   findByTaskId(taskId: string): Label[] {
+    // Same project_labels guard as findTaskLabelsByProject — a label
+    // unlinked from the project shouldn't render on its tasks even if
+    // task_labels still has a stale row.
     return this.db
       .prepare(
         `SELECT l.* FROM labels l
          INNER JOIN task_labels tl ON tl.label_id = l.id AND tl.deleted_at IS NULL
+         INNER JOIN tasks t ON t.id = tl.task_id
+         INNER JOIN project_labels pl
+           ON pl.project_id = t.project_id
+          AND pl.label_id = l.id
+          AND pl.deleted_at IS NULL
          WHERE tl.task_id = ? AND l.deleted_at IS NULL
          ORDER BY l.order_index ASC`
       )
       .all(taskId) as unknown as Label[]
   }
 
-  /** Get task-label mappings for tasks in a specific project */
+  /**
+   * Get task-label mappings for tasks in a specific project.
+   *
+   * Joins project_labels and filters pl.deleted_at IS NULL so labels that
+   * have been unlinked from the project don't appear on tasks even if the
+   * underlying task_labels row hasn't been soft-deleted yet (e.g. another
+   * member tombstoned the project_labels link on Supabase but our local
+   * task_labels cascade hasn't run yet — this happens at hydrate time
+   * before the reconcile cascade fires).
+   */
   findTaskLabelsByProject(projectId: string): TaskLabelMapping[] {
     return this.db
       .prepare(
@@ -386,6 +419,10 @@ export class LabelRepository {
          FROM task_labels tl
          INNER JOIN labels l ON l.id = tl.label_id
          INNER JOIN tasks t ON t.id = tl.task_id
+         INNER JOIN project_labels pl
+           ON pl.project_id = t.project_id
+          AND pl.label_id = l.id
+          AND pl.deleted_at IS NULL
          WHERE t.project_id = ? AND tl.deleted_at IS NULL AND l.deleted_at IS NULL AND t.deleted_at IS NULL
          ORDER BY l.order_index ASC`
       )

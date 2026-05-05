@@ -155,6 +155,12 @@ function App(): React.JSX.Element {
     if (!currentProjectId || !currentUser) return
     hydrateStatuses(currentProjectId)
     hydrateLabels(currentProjectId)
+    // Also load all of the current user's labels into the store. The
+    // chip-remap path needs to know about the viewer's same-name labels
+    // even when they aren't linked to the active project; without this,
+    // shared-project task chips fall back to other users' colors when the
+    // viewer hasn't tagged anything in the active project yet.
+    useLabelStore.getState().hydrateAllLabels()
     hydrateAllForProject(currentProjectId, currentUser.id)
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 

@@ -3,8 +3,10 @@ import { Plus } from 'lucide-react'
 import type { Label } from '../../../../shared/types'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useLabelStore } from '../stores/labelStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useAuthStore } from '../stores/authStore'
 import { leastUsedLabelColor } from '../utils/labelColors'
+import { remapLabelsToCurrentUser, deduplicateLabelsByName } from '../utils/labelUtils'
 import { useToast } from './Toast'
 
 interface LabelPickerProps {
@@ -19,8 +21,8 @@ interface LabelPickerProps {
 }
 
 export function LabelPicker({
-  allLabels,
-  assignedLabelIds,
+  allLabels: rawAllLabels,
+  assignedLabelIds: rawAssignedLabelIds,
   onToggleLabel,
   onCreateLabel,
   onClose,
@@ -30,6 +32,37 @@ export function LabelPicker({
 }: LabelPickerProps): React.JSX.Element {
   const { addToProject } = useLabelStore()
   const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
+  // Cross-user label dedup: shared projects pull every member's labels, so
+  // the picker would render "Bug" four times if four members tagged it.
+  // Remap to the viewer's same-name label (color/casing) and dedupe by
+  // name. Personal projects fall through to a cheap dedup-of-1.
+  const labelStoreLabels = useLabelStore((s) => s.labels)
+  const isShared = useProjectStore((s) =>
+    projectId ? s.projects[projectId]?.is_shared === 1 : false
+  )
+  const allLabels = useMemo(
+    () => isShared
+      ? remapLabelsToCurrentUser(rawAllLabels, labelStoreLabels, userId)
+      : deduplicateLabelsByName(rawAllLabels, userId),
+    [rawAllLabels, isShared, labelStoreLabels, userId]
+  )
+  // Translate the raw set of assigned label_ids into the deduped/remapped
+  // ids visible in the list. Without this, the checkmark would never
+  // appear next to the viewer's remapped chip (its id isn't in the
+  // assigned set; only the original tagger's id is).
+  const assignedLabelIds = useMemo(() => {
+    if (!isShared) return rawAssignedLabelIds
+    const assignedNames = new Set<string>()
+    for (const id of rawAssignedLabelIds) {
+      const l = labelStoreLabels[id]
+      if (l) assignedNames.add(l.name.toLowerCase())
+    }
+    const next = new Set<string>()
+    for (const l of allLabels) {
+      if (assignedNames.has(l.name.toLowerCase())) next.add(l.id)
+    }
+    return next
+  }, [rawAssignedLabelIds, isShared, labelStoreLabels, allLabels])
   const { addToast } = useToast()
   const [newLabelMode, setNewLabelMode] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')

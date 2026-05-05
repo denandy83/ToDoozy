@@ -115,6 +115,7 @@ export interface LabelsAPI {
     created_at: string | null
     deleted_at: string | null
   }): Promise<void>
+  softDeleteTaskLabelsForProjectLabel(projectId: string, labelId: string): Promise<void>
   findByTaskId(taskId: string): Promise<Label[]>
   findTaskLabelsByProject(projectId: string): Promise<TaskLabelMapping[]>
   reorder(labelIds: string[]): Promise<void>

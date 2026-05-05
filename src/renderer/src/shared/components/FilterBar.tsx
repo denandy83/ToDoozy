@@ -229,7 +229,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
         <div className="flex flex-wrap items-center gap-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mr-1">Labels</span>
           {labels.map((label) => {
-            const isActive = activeLabelFilters.has(label.id)
+            const isActive = activeLabelFilters.has(label.name.toLowerCase())
             return (
               <span
                 key={label.id}
@@ -641,7 +641,7 @@ function ActiveFilterChips({
       ? (logic === 'all' ? 'Label is all of' : 'Label is any of')
       : 'Label'
     const names = [...labelChips.activeIds]
-      .map((id) => labelChips.labels.find((l) => l.id === id)?.name)
+      .map((nameKey) => labelChips.labels.find((l) => l.name.toLowerCase() === nameKey)?.name ?? nameKey)
       .filter(Boolean)
       .join(', ')
     if (names) {
@@ -654,7 +654,7 @@ function ActiveFilterChips({
   // Exclude label chips — consolidated
   if (excludeLabelChips && excludeLabelChips.activeIds.size > 0) {
     const names = [...excludeLabelChips.activeIds]
-      .map((id) => excludeLabelChips.labels.find((l) => l.id === id)?.name)
+      .map((nameKey) => excludeLabelChips.labels.find((l) => l.name.toLowerCase() === nameKey)?.name ?? nameKey)
       .filter(Boolean)
       .join(', ')
     if (names) {
@@ -939,8 +939,8 @@ function LabelFilterPicker({ labels, active, excluded, onToggle, onExcludeToggle
     ? labels.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
     : labels
   ).slice().sort((a, b) => {
-    const aActive = currentActive.has(a.id) ? 0 : 1
-    const bActive = currentActive.has(b.id) ? 0 : 1
+    const aActive = currentActive.has(a.name.toLowerCase()) ? 0 : 1
+    const bActive = currentActive.has(b.name.toLowerCase()) ? 0 : 1
     return aActive - bActive
   })
   const currentToggle = operator === 'is_not' ? onExcludeToggle : onToggle
@@ -997,7 +997,7 @@ function LabelFilterPicker({ labels, active, excluded, onToggle, onExcludeToggle
           >
             <input
               type="checkbox"
-              checked={currentActive.has(label.id)}
+              checked={currentActive.has(label.name.toLowerCase())}
               onChange={() => currentToggle(label.id)}
               className="accent-accent h-3 w-3"
             />

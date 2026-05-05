@@ -70,7 +70,7 @@ export function LabelFilterBar({ labels, projectId }: LabelFilterBarProps): Reac
 
       <div className="flex flex-1 flex-wrap items-center gap-1">
         {labels.map((label) => {
-          const isActive = activeLabelFilters.has(label.id)
+          const isActive = activeLabelFilters.has(label.name.toLowerCase())
           return (
             <span
               key={label.id}

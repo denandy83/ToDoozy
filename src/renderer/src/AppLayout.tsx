@@ -403,6 +403,29 @@ export function AppLayout(): React.JSX.Element {
           // Full status re-sync is fine — statuses are few
           useStatusStore.getState().hydrateStatuses(selectedProject.id)
         }
+
+        if (table === 'project_label') {
+          // Remote tombstone or revival on the project↔label junction.
+          // Mirror the remote state locally and cascade to task_labels so
+          // the label disappears from tasks immediately. Without this,
+          // User A keeps seeing a label that User B removed until the
+          // next reconcile pass.
+          const projectId = (payload.project_id as string) ?? selectedProject.id
+          const labelId = payload.label_id as string | undefined
+          const remoteDeletedAt = (payload.deleted_at as string | null | undefined) ?? null
+          if (!labelId) return
+          await window.api.labels.applyRemoteProjectLabel({
+            project_id: projectId,
+            label_id: labelId,
+            created_at: (payload.created_at as string | null) ?? null,
+            deleted_at: remoteDeletedAt
+          }).catch(() => {})
+          if (remoteDeletedAt) {
+            await window.api.labels.softDeleteTaskLabelsForProjectLabel(projectId, labelId).catch(() => {})
+          }
+          await useTaskStore.getState().hydrateAllTaskLabels(projectId)
+          await useLabelStore.getState().hydrateLabels(projectId)
+        }
       })
     } else {
       setProjectMembers([])

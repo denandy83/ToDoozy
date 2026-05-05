@@ -34,6 +34,7 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
+import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
 import { createSortComparator } from '../../shared/utils/sortTasks'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
@@ -201,27 +202,28 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
         for (const l of labels) usedLabelIds.add(l.id)
       }
     }
-    return allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
-  }, [myDayTasks, taskLabels, allLabelsAcrossProjects])
+    const used = allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
+    return deduplicateLabelsByName(used, currentUser?.id ?? '')
+  }, [myDayTasks, taskLabels, allLabelsAcrossProjects, currentUser?.id])
 
   // Shared filter match for My Day
   const taskMatchesFilters = useCallback((task: Task): boolean => {
     if (!hasAnyFilterGlobal) return true
     const labels = taskLabels[task.id] ?? []
-    const labelIds = new Set(labels.map((l) => l.id))
+    const labelNames = new Set(labels.map((l) => l.name.toLowerCase()))
     // Include filters
     if (hasActiveFilters) {
       if (labelFilterLogic === 'all') {
-        if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+        if (![...activeLabelFilters].every((fid) => labelNames.has(fid))) return false
       } else {
-        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if (![...activeLabelFilters].some((fid) => labelNames.has(fid))) return false
       }
     }
     if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
     if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
     // Exclusion filters
     if (hasExcludeLabelFilters) {
-      if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      if ([...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
     }
     if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
     if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false

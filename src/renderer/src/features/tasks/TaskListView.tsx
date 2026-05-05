@@ -37,6 +37,7 @@ import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
+import { deduplicateLabelsByName, remapLabelsToCurrentUser } from '../../shared/utils/labelUtils'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
@@ -74,7 +75,16 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
 
   // Filter state
-  const allLabels = useLabelsByProject(projectId)
+  const rawLabels = useLabelsByProject(projectId)
+  const currentUserId = currentUser?.id ?? ''
+  const allStoredLabels = useLabelStore((s) => s.labels)
+  const isSharedProject = project?.is_shared === 1
+  const allLabels = useMemo(
+    () => isSharedProject
+      ? remapLabelsToCurrentUser(rawLabels, allStoredLabels, currentUserId)
+      : deduplicateLabelsByName(rawLabels, currentUserId),
+    [rawLabels, currentUserId, isSharedProject, allStoredLabels]
+  )
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
@@ -175,13 +185,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const taskMatchesFilters = useCallback((task: Task): boolean => {
     if (!hasAnyFilter) return true
     const labels = taskLabels[task.id] ?? []
-    const labelIds = new Set(labels.map((l) => l.id))
+    const labelNames = new Set(labels.map((l) => l.name.toLowerCase()))
     // Include filters
     if (hasActiveFilters) {
       if (labelFilterLogic === 'all') {
-        if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+        if (![...activeLabelFilters].every((fid) => labelNames.has(fid))) return false
       } else {
-        if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if (![...activeLabelFilters].some((fid) => labelNames.has(fid))) return false
       }
     }
     if (hasAssigneeFilters && !assigneeFilters.has(task.assigned_to ?? '')) return false
@@ -189,7 +199,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
     // Exclusion filters
     if (hasExcludeLabelFilters) {
-      if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
+      if ([...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
     }
     if (hasExcludeAssigneeFilters && excludeAssigneeFilters.has(task.assigned_to ?? '')) return false
     if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false

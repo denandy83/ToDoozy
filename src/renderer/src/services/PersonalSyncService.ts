@@ -443,6 +443,22 @@ export async function pushProjectLabel(
 ): Promise<void> {
   if (!(await hasLiveSession('pushProjectLabel', `${projectId}::${labelId}`))) return
   try {
+    // Pre-flight: ensure the label row exists in user_labels on Supabase
+    // before pushing the junction row. Without this, project_labels.label_id
+    // can FK-reject (23503) for labels that exist locally but were never
+    // pushed (silent pushLabel failure, or labels that pre-date sync). Only
+    // push labels owned by the current authed user — we can't write rows
+    // into another user's user_labels (RLS), and if the label belongs to
+    // another user it should already be on Supabase from their push.
+    const localLabel = await window.api.labels.findById(labelId)
+    if (localLabel) {
+      const { useAuthStore } = await import('../shared/stores/authStore')
+      const authedUserId = useAuthStore.getState().currentUser?.id ?? null
+      if (authedUserId && localLabel.user_id === authedUserId) {
+        await pushLabel(localLabel, authedUserId)
+      }
+    }
+
     const supabase = await getSupabase()
     const { error } = await supabase
       .from('project_labels')
@@ -456,6 +472,20 @@ export async function pushProjectLabel(
         { onConflict: 'project_id,label_id' }
       )
     if (error) {
+      // Treat FK violation as a soft failure — the referenced label simply
+      // isn't on Supabase. Log and skip queueing a retry that will keep
+      // failing forever; let the next reconcile pass surface it again with
+      // proper context (or skip it if the local label has been cleaned up).
+      const e = error as { code?: string; details?: string }
+      if (e.code === '23503') {
+        logEvent(
+          'warn',
+          'sync',
+          'pushProjectLabel skipped — label_id not in user_labels on Supabase',
+          `project=${projectId} label=${labelId} details=${e.details ?? ''}`
+        )
+        return
+      }
       await reportPushFailure(
         'pushProjectLabel',
         error,
@@ -473,6 +503,109 @@ export async function pushProjectLabel(
       'project_labels',
       `${projectId}::${labelId}`,
       JSON.stringify({ projectId, labelId, deletedAt })
+    )
+  }
+}
+
+/**
+ * Cascade a "remove label from project" to Supabase: tombstone the
+ * project_labels junction row AND hard-delete every task_labels row in
+ * the project that referenced the label. Without the task_labels cascade,
+ * other members' apps still see the label on tasks because their reconcile
+ * pulls live task_labels rows back, even though the project_labels link
+ * is tombstoned. (Remote task_labels has no `deleted_at`, so cleanup must
+ * be a hard DELETE rather than a tombstone.)
+ */
+export async function pushRemoveLabelFromProject(
+  projectId: string,
+  labelId: string
+): Promise<void> {
+  if (!(await hasLiveSession('pushRemoveLabelFromProject', `${projectId}::${labelId}`))) return
+  try {
+    const supabase = await getSupabase()
+
+    // Resolve the label's name. We tombstone EVERY same-name project_labels
+    // row in this project — across all members — so a label removed by one
+    // member disappears from every other member's view, even members
+    // whose label_ids weren't loaded into our local store at remove-time.
+    const localLabel = await window.api.labels.findById(labelId).catch(() => null)
+    let targetName: string | null = localLabel?.name?.toLowerCase() ?? null
+    if (!targetName) {
+      const { data: remoteLabel } = await supabase
+        .from('user_labels')
+        .select('name')
+        .eq('id', labelId)
+        .maybeSingle()
+      targetName = (remoteLabel?.name as string | undefined)?.toLowerCase() ?? null
+    }
+
+    // Collect all sibling label_ids in this project with the same name.
+    // Includes labels the local store hasn't hydrated yet (newly-created
+    // by another member, etc.) — without this, those rows survive the
+    // removal and resurrect via syncProjectDown on every other member's
+    // next login.
+    let siblingIds: string[] = [labelId]
+    if (targetName) {
+      const { data: siblings } = await supabase
+        .from('project_labels')
+        .select('label_id, user_labels!inner(name)')
+        .eq('project_id', projectId)
+        .is('deleted_at', null)
+      if (siblings) {
+        const matched = (siblings as Array<{ label_id: string; user_labels: { name: string } | { name: string }[] }>)
+          .filter((row) => {
+            const ul = Array.isArray(row.user_labels) ? row.user_labels[0] : row.user_labels
+            return ul?.name?.toLowerCase() === targetName
+          })
+          .map((row) => row.label_id)
+        if (matched.length > 0) {
+          // Always include the requested labelId so we tombstone it even if
+          // its row isn't currently alive (idempotent UPSERT).
+          siblingIds = Array.from(new Set([labelId, ...matched]))
+        }
+      }
+    }
+
+    // 1. Tombstone every sibling project_labels row.
+    for (const id of siblingIds) {
+      void pushProjectLabel(projectId, id, new Date().toISOString())
+    }
+
+    // 2. Hard-delete task_labels for every task in the project that had
+    // any of those labels. Chunked because task_labels has no project_id
+    // column — we can only filter by task_id.
+    const tasks = await window.api.tasks
+      .findByProjectId(projectId)
+      .catch(() => [] as Task[])
+    const taskIds = tasks.map((t) => t.id)
+    if (taskIds.length === 0) return
+    const chunkSize = 200
+    for (let i = 0; i < taskIds.length; i += chunkSize) {
+      const chunk = taskIds.slice(i, i + chunkSize)
+      const { error } = await supabase
+        .from('task_labels')
+        .delete()
+        .in('label_id', siblingIds)
+        .in('task_id', chunk)
+      if (error) {
+        await reportPushFailure(
+          'pushRemoveLabelFromProject',
+          error,
+          'task_labels',
+          `${projectId}::${labelId}`,
+          JSON.stringify({ projectId, labelId, siblingIds, chunkSize: chunk.length })
+        )
+        return
+      }
+    }
+    markSynced()
+  } catch (err) {
+    await reportPushFailure(
+      'pushRemoveLabelFromProject',
+      err,
+      'task_labels',
+      `${projectId}::${labelId}`,
+      JSON.stringify({ projectId, labelId })
     )
   }
 }
@@ -1349,15 +1482,60 @@ export async function fullPull(userId: string): Promise<void> {
               }
             }
 
-            // Sync labels for project
-            if (project.label_data) {
-              const labels: Array<{ name: string; color: string }> = JSON.parse(project.label_data)
-              for (const entry of labels) {
-                let label = await window.api.labels.findByName(userId, entry.name) ?? undefined
-                if (!label) {
-                  label = await window.api.labels.create({ id: crypto.randomUUID(), user_id: userId, name: entry.name, color: entry.color })
+            // Pull project↔label links from the project_labels junction
+            // (preserves tombstones). The legacy projects.label_data JSON
+            // is a stale snapshot and reading it here would revive
+            // tombstoned links via addToProject. See SyncService.ts for
+            // the same fix applied to syncProjectDown.
+            const { data: remoteProjectLabels } = await supabase
+              .from('project_labels')
+              .select('project_id, label_id, created_at, deleted_at')
+              .eq('project_id', project.id)
+            if (remoteProjectLabels && remoteProjectLabels.length > 0) {
+              const missingLabelIds = (
+                await Promise.all(
+                  remoteProjectLabels.map(async (pl) => {
+                    const local = await window.api.labels.findById(pl.label_id as string)
+                    return local ? null : (pl.label_id as string)
+                  })
+                )
+              ).filter((id): id is string => id !== null)
+              if (missingLabelIds.length > 0) {
+                const { data: remoteLabels } = await supabase
+                  .from('user_labels')
+                  .select('id, name, color')
+                  .in('id', missingLabelIds)
+                if (remoteLabels) {
+                  for (const rl of remoteLabels) {
+                    const name = rl.name as string
+                    const existingByName = await window.api.labels.findByName(userId, name).catch(() => null)
+                    if (!existingByName) {
+                      await window.api.labels.create({
+                        id: rl.id as string,
+                        user_id: userId,
+                        name,
+                        color: (rl.color as string) ?? '#888888'
+                      }).catch(() => {})
+                    }
+                  }
                 }
-                await window.api.labels.addToProject(project.id, label.id).catch(() => {})
+              }
+              for (const pl of remoteProjectLabels) {
+                const labelId = pl.label_id as string
+                const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
+                const exists = await window.api.labels.findById(labelId).catch(() => null)
+                if (!exists) continue
+                await window.api.labels.applyRemoteProjectLabel({
+                  project_id: project.id,
+                  label_id: labelId,
+                  created_at: (pl.created_at as string | null) ?? null,
+                  deleted_at: deletedAt
+                }).catch(() => {})
+                if (deletedAt) {
+                  await window.api.labels
+                    .softDeleteTaskLabelsForProjectLabel(project.id, labelId)
+                    .catch(() => {})
+                }
               }
             }
           }
@@ -2122,6 +2300,18 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             created_at: remote.created_at,
             deleted_at: remote.deleted_at
           })
+          // When a remote tombstone arrives, cascade-soft-delete the local
+          // task_labels rows for tasks in this project that reference the
+          // label. Without this, the local rows stay alive, the next
+          // task_labels reconcile sees them missing from remote (User B
+          // hard-deleted on remote) and re-pushes them — undoing the
+          // removal. The deleted_at filter on getTaskLabelsForSharedProjects
+          // depends on this cascade firing.
+          if (remote.deleted_at) {
+            await window.api.labels
+              .softDeleteTaskLabelsForProjectLabel(remote.project_id, remote.label_id)
+              .catch(() => {})
+          }
           plPulled++
         }
         totalPulled += plPulled
@@ -2450,6 +2640,14 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             created_at: remote.created_at,
             deleted_at: remote.deleted_at
           })
+          // Same cascade as the personal-reconcile path: when a tombstone
+          // arrives, kill the local task_labels rows so the next reconcile
+          // doesn't re-push them as "missing on remote".
+          if (remote.deleted_at) {
+            await window.api.labels
+              .softDeleteTaskLabelsForProjectLabel(remote.project_id, remote.label_id)
+              .catch(() => {})
+          }
           shPlPulled++
         }
 
@@ -2482,18 +2680,11 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
       logEvent('info', 'sync', 'Reconcile complete: in sync')
     }
 
-    if (totalPushed + totalPulled > 10) {
-      try {
-        const { useNotificationStore } = await import('../shared/stores/notificationStore')
-        await useNotificationStore.getState().createNotification({
-          id: crypto.randomUUID(),
-          type: 'sync_reconcile',
-          message: `Reconciled ${totalPushed + totalPulled} items between local and Supabase`
-        })
-      } catch {
-        // Notification store may not be ready; skip silently.
-      }
-    }
+    // Reconcile is a routine background event — it shouldn't push a
+    // user-visible notification. Status is already conveyed via the sync
+    // indicator (green dot / spinner) and the Logs panel; persisting one
+    // notification per app start spammed the inbox without conveying
+    // anything actionable.
 
     return { pushed: totalPushed, pulled: totalPulled }
   } catch (err) {

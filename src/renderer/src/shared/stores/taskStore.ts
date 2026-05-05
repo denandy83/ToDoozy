@@ -12,6 +12,9 @@ import { useSettingsStore } from './settingsStore'
 import { useAuthStore } from './authStore'
 import { logEvent } from './logStore'
 import { useSyncStore } from './syncStore'
+import { useLabelStore } from './labelStore'
+import { useProjectStore } from './projectStore'
+import { deduplicateLabelsByName, remapLabelsToCurrentUser } from '../utils/labelUtils'
 
 function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
@@ -567,16 +570,21 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async addLabel(taskId: string, labelId: string): Promise<void> {
     try {
+      console.log('[addLabel] start', { taskId, labelId })
       await window.api.tasks.addLabel(taskId, labelId)
+      console.log('[addLabel] sqlite insert done')
       await get().hydrateTaskLabels(taskId)
       const labels = get().taskLabels[taskId] ?? []
+      console.log('[addLabel] post-hydrate', {
+        labels: labels.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
+      })
       const added = labels.find((l) => l.id === labelId)
       logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
-      // Sync task to Supabase (label_names changed)
       const task = get().tasks[taskId]
       if (task) syncIfShared(task, 'UPDATE')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
+      console.error('[addLabel] threw', err)
       set({ error: message })
       throw err
     }
@@ -585,18 +593,57 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   async removeLabel(taskId: string, labelId: string): Promise<boolean> {
     try {
       const labels = get().taskLabels[taskId] ?? []
-      const removed = labels.find((l) => l.id === labelId)
-      const result = await window.api.tasks.removeLabel(taskId, labelId)
+      console.log('[removeLabel] start', {
+        taskId,
+        labelId,
+        currentTaskLabels: labels.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
+      })
+      let passedLabel: Label | undefined =
+        labels.find((l) => l.id === labelId)
+        ?? useLabelStore.getState().labels[labelId]
+      console.log('[removeLabel] store lookup', {
+        foundOnTask: !!labels.find((l) => l.id === labelId),
+        foundInLabelStore: !!useLabelStore.getState().labels[labelId]
+      })
+      if (!passedLabel) {
+        const fetched = await window.api.labels.findById(labelId).catch(() => null)
+        console.log('[removeLabel] IPC fallback', { fetched })
+        if (fetched) passedLabel = fetched
+      }
+      const targetName = passedLabel?.name.toLowerCase() ?? null
+      const toRemove = targetName
+        ? labels.filter((l) => l.name.toLowerCase() === targetName)
+        : labels.filter((l) => l.id === labelId)
+      console.log('[removeLabel] resolved', {
+        passedLabel,
+        targetName,
+        toRemove: toRemove.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
+      })
+
+      let anyRemoved = false
+      for (const l of toRemove) {
+        const result = await window.api.tasks.removeLabel(taskId, l.id)
+        console.log('[removeLabel] window.api.tasks.removeLabel result', {
+          taskId,
+          labelId: l.id,
+          result
+        })
+        if (result) anyRemoved = true
+      }
       await get().hydrateTaskLabels(taskId)
-      if (result) {
-        logTaskActivity(taskId, 'label_removed', removed?.name ?? labelId, null)
-        // Sync task to Supabase (label_names changed)
+      console.log('[removeLabel] post-hydrate', {
+        anyRemoved,
+        newTaskLabels: (get().taskLabels[taskId] ?? []).map((l) => ({ id: l.id, name: l.name }))
+      })
+      if (anyRemoved) {
+        logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null)
         const task = get().tasks[taskId]
         if (task) syncIfShared(task, 'UPDATE')
       }
-      return result
+      return anyRemoved
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label'
+      console.error('[removeLabel] threw', err)
       set({ error: message })
       throw err
     }
@@ -782,7 +829,22 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async bulkRemoveLabel(ids: string[], labelId: string): Promise<void> {
     try {
-      await Promise.all(ids.map((id) => window.api.tasks.removeLabel(id, labelId)))
+      // Same name-based-removal as the single-task path: in shared
+      // projects the labelId may be the viewer's remapped label, while
+      // the actual task_labels row belongs to another user.
+      const passed = useLabelStore.getState().labels[labelId]
+      const targetName = passed?.name.toLowerCase() ?? null
+      await Promise.all(
+        ids.map(async (id) => {
+          const taskLabels = get().taskLabels[id] ?? []
+          const toRemove = targetName
+            ? taskLabels.filter((l) => l.name.toLowerCase() === targetName)
+            : taskLabels.filter((l) => l.id === labelId)
+          for (const l of toRemove) {
+            await window.api.tasks.removeLabel(id, l.id)
+          }
+        })
+      )
       const labelResults: Record<string, Label[]> = {}
       for (const id of ids) {
         labelResults[id] = await window.api.labels.findByTaskId(id)
@@ -790,7 +852,6 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...labelResults }
       }))
-      // Sync affected tasks to Supabase (label_names changed)
       for (const id of ids) {
         const task = get().tasks[id]
         if (task) syncIfShared(task, 'UPDATE')
@@ -979,11 +1040,39 @@ export function useChildCount(parentId: string): { total: number; done: number }
 
 export function useTaskLabelsHook(taskId: string): Label[] {
   const taskLabels = useTaskStore((s) => s.taskLabels)
+  const task = useTaskStore((s) => s.tasks[taskId])
+  const currentUserId = useAuthStore((s) => s.currentUser?.id ?? '')
+  // Lazy-import to avoid a top-level cycle with labelStore and projectStore.
+  // The hook re-runs when stores change because we subscribe via the
+  // selectors below.
+  const allLabels = useLabelStoreLabels()
+  const isShared = useIsTaskInSharedProject(task?.project_id)
   const prevRef = useRef<Label[]>([])
   return useMemo(() => {
-    const next = taskLabels[taskId] ?? []
+    const raw = taskLabels[taskId] ?? []
+    let next: Label[]
+    if (isShared) {
+      // Shared project: each member has their own copy of every label.
+      // Remap each task label to the viewer's same-name version (so chip
+      // color/casing reflects the viewer's own labels) and dedupe by name
+      // so multi-member tagging collapses to one chip.
+      next = remapLabelsToCurrentUser(raw, allLabels, currentUserId)
+    } else {
+      // Personal project: at most one label per name per user, so no
+      // remap is needed. Keep dedup as cheap defense for any historical
+      // duplicate-name rows that pre-date the unique index.
+      next = raw.length > 1 ? deduplicateLabelsByName(raw, currentUserId) : raw
+    }
     if (labelsArrayEqual(prevRef.current, next)) return prevRef.current
     prevRef.current = next
     return next
-  }, [taskLabels, taskId])
+  }, [taskLabels, taskId, currentUserId, allLabels, isShared])
+}
+
+function useLabelStoreLabels(): Record<string, Label> {
+  return useLabelStore((s) => s.labels)
+}
+
+function useIsTaskInSharedProject(projectId: string | undefined): boolean {
+  return useProjectStore((s) => (projectId ? s.projects[projectId]?.is_shared === 1 : false))
 }

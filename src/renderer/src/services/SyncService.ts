@@ -89,6 +89,16 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'project_labels', filter: `project_id=eq.${projectId}` },
+      (payload) => {
+        const data = payload.eventType === 'DELETE'
+          ? payload.old as Record<string, unknown>
+          : payload.new as Record<string, unknown>
+        onChangeCallback?.('project_label', payload.eventType, data)
+      }
+    )
     .subscribe((status, err) => {
       if (state.cancelled) return
       // Instrumentation: capture channel internal state + server error payload to diagnose loop
@@ -925,27 +935,68 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
   }
 
-  // Sync all project labels (create locally if missing, associate with project)
-  if (project.label_data) {
-    const labels: Array<{ name: string; color: string }> = JSON.parse(project.label_data)
-    const existingProjectLabels = await window.api.labels.findByProjectId(projectId)
-    const existingByName = new Map(existingProjectLabels.map((l) => [l.name.toLowerCase(), l]))
-
-    for (const entry of labels) {
-      let label = existingByName.get(entry.name.toLowerCase())
-      if (!label) {
-        // Check globally by user before creating
-        label = await window.api.labels.findByName(userId, entry.name) ?? undefined
-      }
-      if (!label) {
-        label = await window.api.labels.create({
-          id: crypto.randomUUID(),
-          user_id: userId,
-          name: entry.name,
-          color: entry.color
+  // Sync project↔label links from the project_labels junction (the source
+  // of truth — preserves tombstones). Reading the legacy projects.label_data
+  // JSON would re-link labels that another member has since tombstoned,
+  // because it's a stale snapshot from the initial share.
+  //
+  // Step A: ensure label rows referenced by project_labels exist locally
+  // (create them by name if necessary). Step B: applyRemoteProjectLabel
+  // for every junction row, which preserves remote deleted_at, so a row
+  // tombstoned remotely stays tombstoned locally instead of being revived.
+  // Step C: cascade tombstones to local task_labels so the chip disappears
+  // immediately on this device.
+  const { data: remoteProjectLabels } = await supabase
+    .from('project_labels')
+    .select('project_id, label_id, created_at, deleted_at')
+    .eq('project_id', projectId)
+  if (remoteProjectLabels && remoteProjectLabels.length > 0) {
+    // Resolve label rows for any label_ids we don't have yet, by name.
+    const missingLabelIds = (
+      await Promise.all(
+        remoteProjectLabels.map(async (pl) => {
+          const local = await window.api.labels.findById(pl.label_id as string)
+          return local ? null : (pl.label_id as string)
         })
+      )
+    ).filter((id): id is string => id !== null)
+    if (missingLabelIds.length > 0) {
+      const { data: remoteLabels } = await supabase
+        .from('user_labels')
+        .select('id, name, color')
+        .in('id', missingLabelIds)
+      if (remoteLabels) {
+        for (const rl of remoteLabels) {
+          const name = rl.name as string
+          const existingByName = await window.api.labels.findByName(userId, name).catch(() => null)
+          if (!existingByName) {
+            await window.api.labels.create({
+              id: rl.id as string,
+              user_id: userId,
+              name,
+              color: (rl.color as string) ?? '#888888'
+            }).catch(() => {})
+          }
+        }
       }
-      await window.api.labels.addToProject(projectId, label.id).catch(() => {})
+    }
+
+    for (const pl of remoteProjectLabels) {
+      const labelId = pl.label_id as string
+      const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
+      const exists = await window.api.labels.findById(labelId).catch(() => null)
+      if (!exists) continue
+      await window.api.labels.applyRemoteProjectLabel({
+        project_id: projectId,
+        label_id: labelId,
+        created_at: (pl.created_at as string | null) ?? null,
+        deleted_at: deletedAt
+      }).catch(() => {})
+      if (deletedAt) {
+        await window.api.labels
+          .softDeleteTaskLabelsForProjectLabel(projectId, labelId)
+          .catch(() => {})
+      }
     }
   }
 
@@ -1063,25 +1114,36 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
         continue
       }
 
-      // Sync labels (check project labels first to avoid duplicates)
-      if (task.label_names) {
-        const projLabels = await window.api.labels.findByProjectId(projectId)
-        const projLabelsByName = new Map(projLabels.map((l) => [l.name.toLowerCase(), l]))
-        const parsed: Array<string | { name: string; color: string }> = JSON.parse(task.label_names)
-        for (const entry of parsed) {
-          const name = typeof entry === 'string' ? entry : entry.name
-          const color = typeof entry === 'string' ? '#888888' : entry.color
-          let label = projLabelsByName.get(name.toLowerCase())
-          if (!label) {
-            label = await window.api.labels.findByName(userId, name) ?? undefined
-          }
-          if (!label) {
-            label = await window.api.labels.create({ id: crypto.randomUUID(), user_id: userId, name, color })
-          }
-          await window.api.labels.addToProject(projectId, label.id).catch(() => {})
-          await window.api.tasks.addLabel(task.id, label.id).catch(() => {})
-        }
-      }
+      // Per-task label sync used to read `task.label_names` (a denormalized
+      // JSON snapshot) and call addToProject + addLabel for each name —
+      // which RESURRECTED tombstoned project_labels and task_labels links
+      // when another member had since removed the label from the project.
+      // The proper sync now happens after the task loop via a single
+      // task_labels junction pull, which preserves remote deletions.
+    }
+  }
+
+  // Pull task_labels rows for all the tasks we just synced. The remote
+  // task_labels table has no `deleted_at` column — a removal is a hard
+  // DELETE on Supabase — so a row missing here means it was deleted and
+  // we should not re-insert it. addLabel revives tombstoned local rows
+  // when a row IS present remotely, so the two halves balance out.
+  if (remoteTasks && remoteTasks.length > 0) {
+    const taskIdList = remoteTasks.map((t) => t.id as string)
+    const remoteTl: Array<{ task_id: string; label_id: string }> = []
+    const chunkSize = 500
+    for (let i = 0; i < taskIdList.length; i += chunkSize) {
+      const chunk = taskIdList.slice(i, i + chunkSize)
+      const { data } = await supabase
+        .from('task_labels')
+        .select('task_id, label_id')
+        .in('task_id', chunk)
+      if (data) remoteTl.push(...(data as Array<{ task_id: string; label_id: string }>))
+    }
+    for (const tl of remoteTl) {
+      const exists = await window.api.labels.findById(tl.label_id).catch(() => null)
+      if (!exists) continue
+      await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
     }
   }
 
@@ -1223,7 +1285,10 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
     .select('user_id, role, joined_at, display_color, display_initials')
     .eq('project_id', projectId)
 
-  if (error || !data) return []
+  // RLS on project_members only returns rows for projects the caller is a member of.
+  // Empty data ⇒ caller is not a member, so the SECURITY DEFINER RPC below would
+  // raise "Access denied" (HTTP 400). Skip the RPC and return empty.
+  if (error || !data || data.length === 0) return []
 
   // Use SECURITY DEFINER RPC to read auth.users directly — bypasses user_profiles
   // view which only surfaces Google OAuth users (email/password users have no row).

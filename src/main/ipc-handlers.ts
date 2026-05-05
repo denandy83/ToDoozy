@@ -416,6 +416,13 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle(
+    'labels:softDeleteTaskLabelsForProjectLabel',
+    (_e, projectId: string, labelId: string) => {
+      return getRepos().labels.softDeleteTaskLabelsForProjectLabel(projectId, labelId)
+    }
+  )
+
   ipcMain.handle('labels:findByTaskId', (_e, taskId: string) => {
     return getRepos().labels.findByTaskId(taskId)
   })

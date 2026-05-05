@@ -111,20 +111,20 @@ export function CalendarView(): React.JSX.Element {
     if (!hasAnyFilter || filterMode !== 'hide') return allCalendarTasks
     return allCalendarTasks.filter((task) => {
       const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
+      const labelNames = new Set(labels.map((l) => l.name.toLowerCase()))
       // Include filters
       if (hasActiveFilters) {
         if (labelFilterLogic === 'all') {
-          if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+          if (![...activeLabelFilters].every((fid) => labelNames.has(fid))) return false
         } else {
-          if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+          if (![...activeLabelFilters].some((fid) => labelNames.has(fid))) return false
         }
       }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
       // Exclusion filters
       if (hasExcludeLabelFilters) {
-        if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if ([...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
       }
       if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
       if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false

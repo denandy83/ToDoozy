@@ -19,6 +19,7 @@ import { useSetting } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
+import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
 import { TaskRow } from '../tasks/TaskRow'
 import type { Status } from '../../../../shared/types'
 import type { SortRule } from '../../shared/utils/sortTasks'
@@ -54,7 +55,11 @@ export function SavedViewListView(): React.JSX.Element {
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const hasAnyFilter = useLabelStore(selectHasAnyFilter)
-  const allLabels = useLabelStore(selectAllLabels)
+  const rawAllLabels = useLabelStore(selectAllLabels)
+  const allLabels = useMemo(
+    () => deduplicateLabelsByName(rawAllLabels, userId),
+    [rawAllLabels, userId]
+  )
   const sortRules = useLabelStore(selectSortRules)
   const { selectTask, toggleTaskInSelection, selectTaskRange, updateTask, setPendingDeleteTask, addLabel, removeLabel, toggleExpanded, selectAllTasks } = useTaskStore()
   const clickOpensDetail = useSetting('click_opens_detail') ?? 'true'
@@ -234,13 +239,13 @@ export function SavedViewListView(): React.JSX.Element {
     const all = Object.values(allTasks).filter((t) => !t.is_archived && !t.is_template && !t.parent_id && !doneStatusIds.has(t.status_id))
     const filtered = !hasAnyFilter ? all : all.filter((task) => {
       const labels = taskLabels[task.id] ?? []
-      const labelIds = new Set(labels.map((l) => l.id))
+      const labelNames = new Set(labels.map((l) => l.name.toLowerCase()))
       // Include filters
       if (hasActiveFilters) {
         if (labelFilterLogic === 'all') {
-          if (![...activeLabelFilters].every((fid) => labelIds.has(fid))) return false
+          if (![...activeLabelFilters].every((fid) => labelNames.has(fid))) return false
         } else {
-          if (![...activeLabelFilters].some((fid) => labelIds.has(fid))) return false
+          if (![...activeLabelFilters].some((fid) => labelNames.has(fid))) return false
         }
       }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
@@ -248,7 +253,7 @@ export function SavedViewListView(): React.JSX.Element {
       if (hasProjectFilters && !projectFilters.has(task.project_id)) return false
       // Exclusion filters
       if (hasExcludeLabelFilters) {
-        if ([...excludeLabelFilters].some((fid) => labelIds.has(fid))) return false
+        if ([...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
       }
       if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
       if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false

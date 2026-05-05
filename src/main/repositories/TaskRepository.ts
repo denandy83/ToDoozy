@@ -313,21 +313,38 @@ export class TaskRepository {
 
   // Label assignments
   addLabel(taskId: string, labelId: string): void {
+    // Upsert (not INSERT OR IGNORE) so that a previously tombstoned row
+    // gets revived. Without `deleted_at = NULL`, a label that was
+    // soft-deleted (e.g. via LabelRepository.removeFromProject's cascade
+    // when another member unlinked the label from a shared project)
+    // would remain hidden by every read path that filters
+    // `tl.deleted_at IS NULL`, even though the user just re-added it.
     this.db
-      .prepare('INSERT OR IGNORE INTO task_labels (task_id, label_id) VALUES (?, ?)')
+      .prepare(
+        `INSERT INTO task_labels (task_id, label_id, deleted_at)
+         VALUES (?, ?, NULL)
+         ON CONFLICT(task_id, label_id) DO UPDATE SET deleted_at = NULL`
+      )
       .run(taskId, labelId)
   }
 
   removeLabel(taskId: string, labelId: string): boolean {
+    // Soft-delete to match the read paths' `tl.deleted_at IS NULL` filter
+    // and to keep parity with LabelRepository.removeFromProject (which
+    // also soft-deletes via UPDATE). A hard DELETE would still hide the
+    // row from reads but couldn't be revived by a later addLabel.
+    const now = new Date().toISOString()
     const result = this.db
-      .prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?')
-      .run(taskId, labelId)
+      .prepare(
+        'UPDATE task_labels SET deleted_at = ? WHERE task_id = ? AND label_id = ? AND deleted_at IS NULL'
+      )
+      .run(now, taskId, labelId)
     return result.changes > 0
   }
 
   getLabels(taskId: string): TaskLabel[] {
     return this.db
-      .prepare('SELECT * FROM task_labels WHERE task_id = ?')
+      .prepare('SELECT * FROM task_labels WHERE task_id = ? AND deleted_at IS NULL')
       .all(taskId) as unknown as TaskLabel[]
   }
 
@@ -340,6 +357,7 @@ export class TaskRepository {
          JOIN projects p ON p.id = t.project_id
          WHERE t.owner_id = ?
            AND t.deleted_at IS NULL
+           AND tl.deleted_at IS NULL
            AND COALESCE(p.is_shared, 0) = 0`
       )
       .all(userId) as unknown as TaskLabel[]
@@ -349,6 +367,11 @@ export class TaskRepository {
    * Sync-layer list for shared-project task_labels reconcile. Returns rows on
    * any project marked is_shared=1. The user has local access to these
    * projects (they're a member or owner), so all rows here are reconcilable.
+   *
+   * Filters tl.deleted_at IS NULL so locally-tombstoned rows aren't re-pushed
+   * by reconcile (eternal resurrection bug — when another user removed a
+   * label from the project and we soft-deleted locally, an unfiltered read
+   * would put the row back into the missingInRemote bucket and re-upsert it).
    */
   getTaskLabelsForSharedProjects(): TaskLabel[] {
     return this.db
@@ -358,7 +381,8 @@ export class TaskRepository {
          JOIN tasks t ON t.id = tl.task_id
          JOIN projects p ON p.id = t.project_id
          WHERE COALESCE(p.is_shared, 0) = 1
-           AND t.deleted_at IS NULL`
+           AND t.deleted_at IS NULL
+           AND tl.deleted_at IS NULL`
       )
       .all() as unknown as TaskLabel[]
   }

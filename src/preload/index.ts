@@ -60,6 +60,8 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects'),
     applyRemoteProjectLabel: (remote) =>
       ipcRenderer.invoke('labels:applyRemoteProjectLabel', remote),
+    softDeleteTaskLabelsForProjectLabel: (projectId, labelId) =>
+      ipcRenderer.invoke('labels:softDeleteTaskLabelsForProjectLabel', projectId, labelId),
     findByTaskId: (taskId) => ipcRenderer.invoke('labels:findByTaskId', taskId),
     findTaskLabelsByProject: (projectId) =>
       ipcRenderer.invoke('labels:findTaskLabelsByProject', projectId),

@@ -1110,10 +1110,14 @@ describe('LabelRepository', () => {
   })
 
   it('finds labels by task id', () => {
-    const labelId = randomUUID()
-    repo.create({ id: labelId, user_id: userId, project_id: projectId, name: 'Feature' })
-
     const base = seedBase(db)
+    const labelId = randomUUID()
+    // Create the label in the SAME project the task lives in. findByTaskId
+    // requires an active project_labels link for the task's project — a
+    // label that isn't linked to a project shouldn't render on tasks in
+    // that project (the post-cross-user-label-removal correctness fix).
+    repo.create({ id: labelId, user_id: base.userId, project_id: base.projectId, name: 'Feature' })
+
     const taskId = randomUUID()
     const now = new Date().toISOString()
     db.prepare(
