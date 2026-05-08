@@ -566,6 +566,15 @@ function App(): React.JSX.Element {
 }
 
 function SplashScreen(): React.JSX.Element {
+  const cancelLoading = useAuthStore((s) => s.cancelLoading)
+  // Reveal the Cancel link only if loading runs longer than 5s. Stops it from
+  // flickering on a healthy fast sign-in while still giving an escape hatch
+  // when an auth call is hung.
+  const [showCancel, setShowCancel] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShowCancel(true), 5_000)
+    return () => clearTimeout(t)
+  }, [])
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/15">
@@ -574,6 +583,14 @@ function SplashScreen(): React.JSX.Element {
       <div className="h-1 w-16 overflow-hidden rounded-full bg-border">
         <div className="h-full w-1/3 animate-pulse rounded-full bg-accent" />
       </div>
+      {showCancel && (
+        <button
+          onClick={() => cancelLoading()}
+          className="mt-4 text-[10px] font-bold uppercase tracking-[0.3em] text-muted hover:text-foreground transition-colors"
+        >
+          Cancel
+        </button>
+      )}
     </div>
   )
 }

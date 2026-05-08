@@ -4,6 +4,10 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.7.1
+
+- **Sign-in no longer traps you on the splash screen** — If a Supabase auth call hung (e.g. during an upstream outage), the TD-logo splash had no Cancel button and would block the app forever, forcing a Force Quit. Sign-in now times out (30s for email/password, 15s for Google OAuth, 20s for cold-start session restore) and the splash shows a Cancel link after 5 seconds. Cold-start hangs now fall through to offline mode instead of freezing.
+
 ## v1.5.5
 
 ### Fixed

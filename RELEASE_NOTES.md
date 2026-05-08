@@ -4,6 +4,10 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.7.1
+
+- **Fix: Sign-in can no longer trap you on the splash screen** — If a Supabase auth call hung (which happened during a `us-east-1` AZ outage), the TD-logo splash had no escape and you had to Force Quit the app. Now: a "Cancel" link appears below the progress bar after 5 seconds; sign-in attempts time out automatically (30 seconds for email/password, 15 seconds for Google) with a clear "auth server may be unreachable" message; and a hung cold-start drops you into offline mode after 20 seconds instead of freezing.
+
 ## v1.5.5
 
 - **Sidebar color** — Settings → Theme now has a dedicated "Sidebar" color field so you can set the left panel background independently from the rest of the app. All 12 built-in themes have been updated with sidebar values, and custom themes can set their own.

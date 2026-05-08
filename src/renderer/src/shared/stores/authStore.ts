@@ -20,6 +20,25 @@ export function takePendingPasswordSave(): { email: string; password: string } |
   return p
 }
 
+// Generation counter — incremented on every sign-in attempt and on cancel.
+// In-flight auth flows compare their captured generation against this; if it
+// differs after an await, the user has cancelled or started a new attempt and
+// the flow exits without mutating state. Prevents the splash from being a
+// dead-end when a Supabase call hangs (e.g. AZ outage wedging GoTrue).
+let authGeneration = 0
+
+function authTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out — auth server may be unreachable. Try again in a moment.`)),
+        ms
+      )
+    )
+  ])
+}
+
 interface AuthState {
   currentUser: User | null
   isAuthenticated: boolean
@@ -41,6 +60,7 @@ interface AuthActions {
   signInWithGoogle(): Promise<void>
   initAuth(): Promise<void>
   ensureDefaultProject(userId: string): Promise<void>
+  cancelLoading(): void
 }
 
 export type AuthStore = AuthState & AuthActions
@@ -182,11 +202,25 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     set({ error: null })
   },
 
+  // Bumps the generation so any in-flight auth flow exits without mutating
+  // state, then drops loading back to false. Used by the SplashScreen Cancel
+  // button to escape a hung Supabase call (e.g. wedged AZ during sign-in).
+  cancelLoading(): void {
+    authGeneration++
+    set({ loading: false, error: null })
+  },
+
   async signInWithEmail(email: string, password: string): Promise<boolean> {
+    const myGen = ++authGeneration
     set({ loading: true, error: null })
     try {
       const supabase = await getSupabase()
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await authTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        30_000,
+        'Sign in'
+      )
+      if (myGen !== authGeneration) return false
       if (error) {
         set({ error: error.message, loading: false })
         return false
@@ -205,6 +239,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         data.user.user_metadata?.avatar_url ?? null
       )
       await get().ensureDefaultProject(localUser.id)
+      if (myGen !== authGeneration) return false
       stopRecoveryTimer()
       resetPermanentlyDeadFlag()
       // Clear any stuck 'offline' status from the cold-start offlineFallback path.
@@ -221,6 +256,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
       return true
     } catch (err) {
+      if (myGen !== authGeneration) return false
       const message = err instanceof Error ? err.message : 'Sign in failed'
       set({ error: message, loading: false })
       return false
@@ -277,16 +313,22 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   },
 
   async signInWithGoogle(): Promise<void> {
+    const myGen = ++authGeneration
     set({ loading: true, error: null })
     try {
       const supabase = await getSupabase()
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          skipBrowserRedirect: true,
-          redirectTo: (await window.api.auth.getSupabaseConfig()).url
-        }
-      })
+      const { data, error } = await authTimeout(
+        supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            skipBrowserRedirect: true,
+            redirectTo: (await window.api.auth.getSupabaseConfig()).url
+          }
+        }),
+        15_000,
+        'Google sign in'
+      )
+      if (myGen !== authGeneration) return
 
       if (error || !data.url) {
         set({ error: error?.message ?? 'Failed to start Google sign in', loading: false })
@@ -295,6 +337,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
 
       // Open OAuth window via main process
       const callbackUrl = await window.api.auth.openOAuthWindow(data.url)
+      if (myGen !== authGeneration) return
       if (!callbackUrl) {
         set({ error: null, loading: false }) // User closed the window
         return
@@ -303,10 +346,15 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       // Try to extract tokens from the callback URL (implicit flow)
       const tokens = parseAuthTokensFromUrl(callbackUrl)
       if (tokens) {
-        const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-          access_token: tokens.accessToken,
-          refresh_token: tokens.refreshToken
-        })
+        const { data: sessionData, error: sessionError } = await authTimeout(
+          supabase.auth.setSession({
+            access_token: tokens.accessToken,
+            refresh_token: tokens.refreshToken
+          }),
+          15_000,
+          'Google sign in'
+        )
+        if (myGen !== authGeneration) return
         if (sessionError || !sessionData.session || !sessionData.user) {
           set({ error: sessionError?.message ?? 'Failed to establish session', loading: false })
           return
@@ -332,8 +380,12 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       const urlObj = new URL(callbackUrl)
       const code = urlObj.searchParams.get('code')
       if (code) {
-        const { data: sessionData, error: sessionError } =
-          await supabase.auth.exchangeCodeForSession(code)
+        const { data: sessionData, error: sessionError } = await authTimeout(
+          supabase.auth.exchangeCodeForSession(code),
+          15_000,
+          'Google sign in'
+        )
+        if (myGen !== authGeneration) return
         if (sessionError || !sessionData.session || !sessionData.user) {
           set({ error: sessionError?.message ?? 'Failed to exchange code', loading: false })
           return
@@ -357,6 +409,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
 
       set({ error: 'OAuth callback did not contain valid credentials', loading: false })
     } catch (err) {
+      if (myGen !== authGeneration) return
       const message = err instanceof Error ? err.message : 'Google sign in failed'
       set({ error: message, loading: false })
     }
@@ -378,11 +431,22 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       }
 
       // Three attempts with backoff before falling back — kills false positives
-      // from a single transient network blip during cold start.
-      const restored = await tryRestoreSession(3)
+      // from a single transient network blip during cold start. Wrapped in an
+      // overall timeout so a wedged auth server (e.g. AZ outage) falls through
+      // to offline fallback instead of hanging the splash forever.
+      let restored = false
+      try {
+        restored = await authTimeout(tryRestoreSession(3), 20_000, 'Session restore')
+      } catch (err) {
+        logEvent('warn', 'sync', 'Session restore timed out — entering offline mode', err instanceof Error ? err.message : '')
+      }
       const supabase = await getSupabase()
-      const { data: { session } } = await supabase.auth.getSession()
-      const { data: userData } = await supabase.auth.getUser()
+      const { data: { session } } = restored
+        ? await supabase.auth.getSession()
+        : { data: { session: null } }
+      const { data: userData } = restored
+        ? await supabase.auth.getUser()
+        : { data: { user: null } }
 
       if (!restored || !session || !userData.user) {
         logEvent('warn', 'sync', 'Session restore failed after 3 attempts — entering offline mode')
