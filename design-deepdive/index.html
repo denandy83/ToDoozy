@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ToDoozy. Design Deepdive.</title>
+<style>
+  :root {
+    --bg: #0c0c10;
+    --panel: #15151c;
+    --border: rgba(255,255,255,0.07);
+    --border-strong: rgba(255,255,255,0.14);
+    --fg: #ededed;
+    --fg-2: #a5a5af;
+    --fg-3: #6d6d77;
+    --fg-4: #45454c;
+    --accent: #10b981;
+    --accent-2: #34d399;
+    --accent-soft: rgba(16,185,129,0.12);
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --ok: #10b981;
+    --serif: "Iowan Old Style", "Apple Garamond", "Garamond", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  body { font-size: 15px; line-height: 1.55; font-weight: 300; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 80px 32px 160px; }
+
+  h1, h2, h3, h4 { font-weight: 300; letter-spacing: -0.01em; margin: 0; }
+  h1.display {
+    font-size: clamp(48px, 7vw, 84px);
+    font-weight: 200;
+    letter-spacing: -0.03em;
+    line-height: 0.95;
+    margin-bottom: 24px;
+  }
+  h1.display em { font-family: var(--serif); font-style: italic; font-weight: 300; color: var(--accent-2); }
+  h2.section {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 24px;
+  }
+  h3.change-title {
+    font-size: 26px;
+    font-weight: 300;
+    letter-spacing: -0.015em;
+    margin: 0 0 6px;
+  }
+  h3.change-title em { font-family: var(--serif); font-style: italic; color: var(--accent-2); font-weight: 300; }
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .lead {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--fg-2);
+    font-weight: 300;
+    max-width: 720px;
+  }
+  .lead em { font-family: var(--serif); font-style: italic; color: var(--fg); }
+  p { color: var(--fg-2); max-width: 720px; }
+  p strong { color: var(--fg); font-weight: 500; }
+  code { font-family: var(--mono); font-size: 0.86em; color: var(--accent-2); background: rgba(16,185,129,0.08); padding: 1px 6px; border-radius: 4px; }
+
+  /* HERO */
+  .hero { padding: 40px 0 80px; border-bottom: 1px solid var(--border); margin-bottom: 80px; position: relative; }
+  .hero-meta {
+    display: flex;
+    gap: 28px;
+    color: var(--fg-3);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
+  .hero-meta span::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--fg-4); }
+
+  /* TOC */
+  .toc {
+    margin: 56px 0 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    border-top: 1px solid var(--border);
+  }
+  .toc a {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    padding: 18px 4px;
+    color: var(--fg);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 16px;
+    font-weight: 300;
+    transition: color 150ms var(--ease-out), transform 100ms var(--ease-out);
+  }
+  .toc a:hover { color: var(--accent-2); }
+  .toc a:active { transform: scale(0.99); }
+  .toc a .num { font-family: var(--mono); color: var(--fg-3); font-size: 11px; letter-spacing: 0.1em; min-width: 24px; }
+  .toc a .meta { margin-left: auto; color: var(--fg-3); font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; }
+
+  /* HERO STRIP */
+  .hero-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 64px;
+  }
+  .hero-strip figure { margin: 0; }
+  .hero-strip figure .frame {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    background: var(--panel);
+    box-shadow: 0 24px 64px -28px rgba(0,0,0,0.7);
+  }
+  .hero-strip figure img { display: block; width: 100%; height: auto; }
+  .hero-strip figure figcaption {
+    margin-top: 14px;
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+    display: flex;
+    justify-content: space-between;
+  }
+  .hero-strip figure figcaption .tag-before { color: var(--warn); }
+  .hero-strip figure figcaption .tag-after { color: var(--ok); }
+
+  /* SECTIONS */
+  section.change {
+    padding: 64px 0;
+    border-top: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 56px;
+  }
+  section.change .num-col {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-3);
+    letter-spacing: 0.18em;
+    position: sticky;
+    top: 24px;
+    align-self: start;
+  }
+  section.change .num-col .num {
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  section.change .num-col .tag {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 4px 8px;
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--fg-2);
+  }
+  section.change .num-col .tag.real { color: var(--ok); border-color: rgba(16,185,129,0.3); }
+  section.change .num-col .tag.proposed { color: var(--accent-2); border-color: rgba(52,211,153,0.3); }
+  section.change .num-col .tag.skill { color: var(--accent-2); border-color: rgba(52,211,153,0.3); background: rgba(16,185,129,0.04); }
+
+  section.change .body { min-width: 0; }
+  section.change .body > * + * { margin-top: 24px; }
+
+  /* COMPARE */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 28px;
+  }
+  .compare figure { margin: 0; }
+  .compare figure .frame {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    background: #0a0a0e;
+    transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+  }
+  .compare figure .frame:hover { transform: translateY(-2px); box-shadow: 0 20px 48px -24px rgba(0,0,0,0.8); }
+  .compare figure img { display: block; width: 100%; height: auto; }
+  .compare figure figcaption {
+    margin-top: 10px;
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .compare figure.before figcaption .tag::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); margin-right: 7px; }
+  .compare figure.after figcaption .tag::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); margin-right: 7px; }
+
+  /* MOCK */
+  .mock {
+    background: #0a0a0e;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 24px;
+    font-family: var(--sans);
+  }
+  .mock.before { background: #1a1a2e; }
+  .mock-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 28px;
+  }
+  .mock-grid > * { min-height: 200px; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+  .mock-grid .lbl { font-size: 9px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--fg-3); }
+  .mock-grid .before .lbl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); margin-right: 7px; vertical-align: middle; }
+  .mock-grid .after .lbl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); margin-right: 7px; vertical-align: middle; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip-old {
+    display: inline-flex; align-items: center; gap: 3px;
+    border-radius: 999px; padding: 2px 8px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .chip-new {
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: 999px; padding: 2px 8px;
+    font-size: 10px; font-weight: 500; letter-spacing: -0.01em;
+    background: rgba(237,237,237,0.06);
+    color: var(--fg-2);
+    border: 1px solid rgba(237,237,237,0.1);
+  }
+  .chip-new .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; opacity: 0.85; }
+
+  .row-mock {
+    padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .row-mock.selected { background: var(--accent-soft); }
+  .row-mock .status { width: 14px; height: 14px; border-radius: 50%; border: 1.25px solid var(--fg-4); flex-shrink: 0; }
+  .row-mock .status.in-progress { border-color: var(--warn); background: radial-gradient(circle, var(--warn) 30%, transparent 30%); opacity: 0.7; }
+  .row-mock .status.done { border-color: var(--ok); background: var(--ok); opacity: 0.7; }
+  .row-mock .title { flex: 1; font-weight: 300; color: var(--fg); }
+  .row-mock .chips { display: flex; gap: 6px; }
+  .row-mock.old { padding: 6px 16px; font-size: 13px; gap: 8px; border-left: 2px solid transparent; }
+  .row-mock.old .status.in-progress { background: var(--warn); opacity: 1; }
+  .row-mock.old .status.done { background: var(--ok); opacity: 1; }
+  .row-mock.old.selected-old { background: rgba(99,102,241,0.12); border-left-color: #6366f1; box-shadow: 0 0 0 1px rgba(99,102,241,0.3); }
+
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 14px; }
+  .swatch {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .swatch .preview { height: 64px; }
+  .swatch .meta { padding: 10px 12px; }
+  .swatch .meta .name { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-2); }
+  .swatch .meta .hex { font-family: var(--mono); font-size: 10px; color: var(--fg-3); margin-top: 2px; }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-top: 28px;
+  }
+  .detail {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .detail .k { font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--accent); }
+  .detail .v { margin-top: 6px; color: var(--fg-2); font-size: 14px; }
+
+  .diff {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 14px;
+    background: rgba(0,0,0,0.4);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+  }
+  .diff .line { padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
+  .diff .file { padding: 8px 16px; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-3); border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+  .diff .del { color: #fca5a5; background: rgba(239,68,68,0.06); }
+  .diff .add { color: #86efac; background: rgba(16,185,129,0.06); }
+  .diff .ctx { color: var(--fg-3); }
+
+  table.rules { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.rules thead tr { border-bottom: 1px solid var(--border-strong); }
+  table.rules th { text-align: left; padding: 12px 8px; font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  table.rules tbody { color: var(--fg-2); }
+  table.rules tbody tr { border-bottom: 1px solid var(--border); }
+  table.rules tbody td { padding: 14px 8px; }
+  table.rules tbody td:first-child { color: var(--fg); }
+
+  table.ba { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 13px; }
+  table.ba thead tr { border-bottom: 1px solid var(--border-strong); }
+  table.ba th { text-align: left; padding: 10px 16px 10px 0; font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  table.ba tbody { color: var(--fg-2); }
+  table.ba tbody tr { border-bottom: 1px solid var(--border); }
+  table.ba tbody td { padding: 12px 16px 12px 0; }
+
+  .outro {
+    margin-top: 96px;
+    padding: 48px;
+    background: linear-gradient(180deg, rgba(16,185,129,0.06), transparent);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+  .outro h3 { font-size: 28px; font-weight: 300; letter-spacing: -0.02em; }
+  .outro h3 em { font-family: var(--serif); font-style: italic; color: var(--accent-2); }
+  .outro ul { margin: 24px 0 0; padding: 0; list-style: none; }
+  .outro li { padding: 14px 0; border-top: 1px solid var(--border); color: var(--fg-2); display: flex; gap: 16px; align-items: baseline; }
+  .outro li::before { content: ""; flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); transform: translateY(-3px); }
+  .outro li strong { color: var(--fg); font-weight: 500; }
+
+  footer {
+    margin-top: 96px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-3);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toc a, .compare figure .frame { transition: none; }
+    .toc a:active, .compare figure .frame:hover { transform: none; }
+  }
+
+  /* CLICK-TO-FULLSCREEN LIGHTBOX */
+  .hero-strip figure img,
+  .compare figure img {
+    cursor: zoom-in;
+  }
+  #lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    cursor: zoom-out;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 8px;
+    box-shadow: 0 40px 100px -20px rgba(0,0,0,0.8);
+    transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+  }
+  #lightbox:not(.open) img { transform: scale(0.98); opacity: 0; }
+  #lightbox .lb-caption {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  #lightbox .lb-close {
+    position: absolute;
+    top: 24px;
+    right: 28px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--panel);
+    color: var(--fg);
+    font-size: 18px;
+    font-family: var(--sans);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 100ms var(--ease-out);
+  }
+  #lightbox .lb-close:active { transform: scale(0.93); }
+
+  @media (max-width: 880px) {
+    .wrap { padding: 56px 20px 120px; }
+    section.change { grid-template-columns: 1fr; gap: 24px; }
+    section.change .num-col { position: static; }
+    .toc { grid-template-columns: 1fr; }
+    .compare, .mock-grid, .hero-strip, .detail-grid { grid-template-columns: 1fr; }
+    .swatches { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <span class="eyebrow">Design Deepdive. ToDoozy v1.7.0.</span>
+    <h1 class="display">Confident <em>restraint</em>,<br>not loud color.</h1>
+    <p class="lead">ToDoozy has the bones of a premium task app: editorial title type, intentional tracking, a keyboard-first architecture. The interface is fighting itself, though. Every label is a saturated color, every project code is a fully filled disc, every row pulls visual weight equally. Sixteen changes follow. Six are visible in the live "after" screenshots below (label chips, palette, wordmark stand-in, row breathing, title accent, selection without stripe). Five are proposed at mockup detail (project pill, calendar, command palette, sync sentence, filter region). Five are skill-grounded code-only changes (transition discipline, tactile buttons, icon stroke, empty states, em dash purge). The full document also includes a compliance scorecard against six installed design skills and an interaction-inconsistencies audit (destructive actions, toast variants, hover tints, reordering patterns).</p>
+
+    <div class="hero-meta">
+      <span>18 May 2026</span>
+      <span>16 changes. 6 in screenshots, 5 mockup, 5 code-only.</span>
+      <span>Stack. Electron, React, Tailwind v4.</span>
+    </div>
+
+    <div class="hero-strip">
+      <figure>
+        <div class="frame"><img src="myday-before.png" alt="My Day before, production v1.7.0" /></div>
+        <figcaption><span class="tag-before">Before. Production v1.7.0.</span><span>My Day. Click to enlarge.</span></figcaption>
+      </figure>
+      <figure>
+        <div class="frame"><img src="myday-after.png" alt="My Day after, six visible changes" /></div>
+        <figcaption><span class="tag-after">After. Changes 01, 02, 03, 05, 06, 08 visible.</span><span>My Day. Click to enlarge.</span></figcaption>
+      </figure>
+    </div>
+
+    <nav class="toc">
+      <a href="#c1"><span class="num">01</span> Calm the label chips<span class="meta">Screenshot</span></a>
+      <a href="#c2"><span class="num">02</span> Default theme, not the token<span class="meta">Screenshot + reframed</span></a>
+      <a href="#c3"><span class="num">03</span> Sidebar wordmark<span class="meta">Superseded</span></a>
+      <a href="#c4"><span class="num">04</span> Calm the project code pill<span class="meta">Mockup (revised)</span></a>
+      <a href="#c5"><span class="num">05</span> Task row breathing<span class="meta">Screenshot</span></a>
+      <a href="#c6"><span class="num">06</span> Title accent mark<span class="meta">Screenshot</span></a>
+      <a href="#c7"><span class="num">07</span> Day numbers should be monumental<span class="meta">Mockup</span></a>
+      <a href="#c8"><span class="num">08</span> Selection without the stripe<span class="meta">Screenshot + reframed</span></a>
+      <a href="#c9"><span class="num">09</span> Command palette weight<span class="meta">Mockup</span></a>
+      <a href="#c10"><span class="num">10</span> Sync dot becomes a sentence<span class="meta">Mockup</span></a>
+      <a href="#c11"><span class="num">11</span> Tighten the filter region, do not remove it<span class="meta">Mockup (revised)</span></a>
+      <a href="#c12"><span class="num">12</span> Kill <code style="background:transparent;color:inherit;padding:0;">transition: all</code><span class="meta">Code</span></a>
+      <a href="#c13"><span class="num">13</span> Buttons that respond<span class="meta">Code</span></a>
+      <a href="#c14"><span class="num">14</span> Icon stroke discipline<span class="meta">Code</span></a>
+      <a href="#c15"><span class="num">15</span> Empty states with presence<span class="meta">Code + mockup</span></a>
+      <a href="#c16"><span class="num">16</span> Em dash purge in UX copy<span class="meta">Code</span></a>
+    </nav>
+  </header>
+
+  <!-- WHY -->
+  <section style="border-top: 1px solid var(--border); padding-top: 56px; margin-bottom: 56px;">
+    <h2 class="section">Where it stands today</h2>
+    <p>ToDoozy uses the language of premium in some places. View titles at <code>text-3xl font-light tracking-[0.15em]</code> uppercase, uppercase tracker labels at 10px, monochrome-first ambition stated in the spec. The body content does not honor it. The dominant visual layer is colored noise. Six chips per task, each painted in its label's full hue, full-color text on a tinted background. Each chip becomes a billboard for itself instead of metadata.</p>
+    <p>Three forces compound the problem.</p>
+    <div class="detail-grid">
+      <div class="detail"><div class="k">Label color</div><div class="v">Used as background tint, text color, and border. Each chip is three layers of the same hue, so it never disappears into the row.</div></div>
+      <div class="detail"><div class="k">Status indicator</div><div class="v">Fully saturated orange or red filled circle on every in-progress task. The exact same visual weight as an unread-email notification.</div></div>
+      <div class="detail"><div class="k">Two near-identical surfaces</div><div class="v">Background <code>#1a1a2e</code> and sidebar <code>#26263a</code> differ by about ten luminance points. Enough to feel panelled, not enough to be readable as separation. Both feel slightly off-blue.</div></div>
+      <div class="detail"><div class="k">No second-read moments</div><div class="v">Every row is the same height, same weight, same density. The eye has nothing to settle on after the first sweep. Premium apps reward the second look.</div></div>
+    </div>
+  </section>
+
+  <!-- SCORECARD -->
+  <section style="padding: 56px 0 48px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+    <h2 class="section" style="margin-bottom: 32px;">Compliance scorecard against the design skills</h2>
+    <p style="margin-bottom: 28px;">Sixteen rules sampled across the installed skills. The intuitive pass (changes 01 through 11) fixed one hard fail (label chip noise) and improved several partials. Skill-grounded changes 12 through 16 target the rest.</p>
+    <div style="overflow-x: auto;">
+    <table class="rules">
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th>Source</th>
+          <th>Current ToDoozy</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>No #000 or #fff. Tint neutrals toward brand hue.</td><td>impeccable</td><td>bg #1a1a2e is fine. Foreground #e0e0e0 is a true gray, no brand tint.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Side-stripe borders &gt; 1px banned as colored accent.</td><td>impeccable</td><td>TaskRow uses <code>border-l-2 border-accent</code> on selected, moving, and drop-inside states.</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>No <code>transition: all</code>. Specify properties.</td><td>emil</td><td>TaskRow uses <code>transition-all</code>. FilterBar chips use <code>transition-all</code>.</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>No animation on 100+ per day actions.</td><td>emil</td><td>Global <code>* { transition: background-color 300ms ... }</code> animates every selection.</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>LILA ban. No AI purple or AI blue glow aesthetic.</td><td>design-taste-frontend</td><td>Accent is indigo #6366f1, the textbook LLM-generated SaaS accent.</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>Serif banned for software or dashboard UI.</td><td>design-taste-frontend</td><td>No serif today. Restricted to empty states only in this proposal.</td><td><span style="color:var(--ok);">Pass</span></td></tr>
+        <tr><td>Inter or Roboto banned. Use Geist, Cabinet Grotesk, Satoshi.</td><td>design-taste-frontend, high-end-visual-design, minimalist-ui</td><td>System stack with Inter listed second. Non-Mac platforms resolve to Inter.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Lucide default-stroke icons read as generic.</td><td>high-end-visual-design, design-taste-frontend</td><td><code>lucide-react</code> everywhere with mixed strokeWidth (1, 1.5, 2, 2.5).</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Buttons must have tactile <code>:active</code> feedback.</td><td>emil, design-taste-frontend</td><td>No <code>:active</code> tactile state on any button in the codebase.</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>Popovers scale from trigger, not center.</td><td>emil</td><td>Context menus and tooltips appear without entry animation, or scale from center.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Beautifully composed empty states.</td><td>design-taste-frontend, impeccable</td><td><code>EmptyState</code> component exists, most views show only "No tasks" text.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Skeletal loaders, not circular spinners.</td><td>design-taste-frontend</td><td>First-sync state shows a progress bar. Other loading states use pulse on the sync dot.</td><td><span style="color:var(--ok);">Pass</span></td></tr>
+        <tr><td>No em dashes in copy.</td><td>impeccable</td><td>UX tooltips and toasts are clean. Some helper text and the README use em dashes.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Hardware-accelerated motion. <code>transform</code> and <code>opacity</code> only.</td><td>design-taste-frontend, emil, high-end-visual-design</td><td>Global transition animates background-color and border-color, which trigger paint.</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td><code>prefers-reduced-motion</code> fallback.</td><td>emil, web-design-guidelines</td><td><code>main.css</code> implements the standard reduced-motion override.</td><td><span style="color:var(--ok);">Pass</span></td></tr>
+        <tr><td>Hover gated by <code>(hover: hover) and (pointer: fine)</code>.</td><td>emil</td><td>All hover states use Tailwind's <code>hover:</code> which does not gate by pointer type.</td><td><span style="color:var(--warn);">Partial (desktop-only app)</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 28px; font-size: 13px; color: var(--fg-3);">Of sixteen rules, ToDoozy posts five hard fails and seven partials. Four of the original intuitive proposals (02 palette as token-swap, 04 status icon as the loud element, 08 selection with a left stripe, 11 filter row collapsed to a single line) had to be reworked once skills and product context were applied. Each rework is folded into the corresponding section below, with a flagged correction note where the change of direction matters.</p>
+  </section>
+
+  <!-- ============== INTERACTION INCONSISTENCIES AUDIT ============== -->
+  <section style="padding: 56px 0 48px; border-bottom: 1px solid var(--border);">
+    <h2 class="section" style="margin-bottom: 24px;">Interaction inconsistencies</h2>
+    <p style="margin-bottom: 28px;">The visual layer is one half of design. The other half is whether the same action behaves the same way across the app. ToDoozy has visible drift in four interaction families. Each row below was checked against the codebase, not assumed.</p>
+
+    <h3 style="font-size: 14px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin: 32px 0 12px;">Destructive actions</h3>
+    <p>CLAUDE.md's UX rule is explicit. "Destructive actions: always red, always at bottom of menus, always with undo toast." The actual codebase uses three different patterns for delete, with no obvious rule for which appears where.</p>
+    <div style="overflow-x: auto; margin-top: 14px;">
+    <table class="rules">
+      <thead><tr><th>Action</th><th>Confirm pattern</th><th>Undo</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Delete task (single)</td><td><code>ConfirmDeleteModal</code></td><td>No undo toast after delete</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Delete task (bulk)</td><td>Persistent toast with Delete + Cancel actions</td><td>No undo</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Delete label from project</td><td>Persistent toast: "X tasks will lose this label"</td><td>None</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Delete template</td><td><code>addToast({ message: 'Template deleted' })</code> after the fact</td><td>None</td><td><span style="color:var(--danger);">Fail (silent delete)</span></td></tr>
+        <tr><td>Delete project</td><td><code>ConfirmDeleteModal</code></td><td>No undo</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Delete area / folder</td><td>Hard-delete via context menu</td><td>None</td><td><span style="color:var(--danger);">Fail</span></td></tr>
+        <tr><td>Delete saved view</td><td><code>ConfirmDeleteModal</code></td><td>None</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Revoke API key</td><td>Persistent toast with Revoke + Cancel</td><td>None</td><td><span style="color:var(--warn);">Partial</span></td></tr>
+        <tr><td>Reset all settings</td><td>Browser <code>confirm()</code> in places, ConfirmDeleteModal in others</td><td>None</td><td><span style="color:var(--danger);">Fail (mixed)</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 14px;"><strong>Proposed rule.</strong> Two patterns only, each with a deterministic trigger.</p>
+    <table class="ba">
+      <thead><tr><th>Trigger</th><th>Pattern</th><th>Reasoning</th></tr></thead>
+      <tbody>
+        <tr><td>Reversible action (delete task, delete label-from-task, archive)</td><td>Action runs immediately. Toast appears with <strong>Undo</strong> button, 6 second timeout.</td><td>The CLAUDE.md rule. Users prefer reversibility over a modal interruption for cheap-to-redo work.</td></tr>
+        <tr><td>Irreversible or expensive (delete project, delete area, revoke key, reset settings)</td><td><code>ConfirmDeleteModal</code> with typed confirmation for project/area ("type the name to delete").</td><td>Modal interrupts so users cannot misclick. Typed confirmation prevents muscle-memory accidents on the most expensive actions.</td></tr>
+      </tbody>
+    </table>
+    <p>Drop the persistent-toast-as-confirmation pattern entirely. It conflates "this is happening" with "are you sure". Drop the silent <code>"X deleted"</code> toast for template deletion. The current pattern of mixing four approaches across the app is the inconsistency.</p>
+
+    <h3 style="font-size: 14px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin: 40px 0 12px;">Toasts and variants</h3>
+    <p>Three variants exist in the codebase: <code>accent</code>, <code>danger</code>, <code>muted</code>. They are used inconsistently.</p>
+    <div style="overflow-x: auto; margin-top: 14px;">
+    <table class="rules">
+      <thead><tr><th>Variant</th><th>Used for</th><th>Issue</th></tr></thead>
+      <tbody>
+        <tr><td><code>danger</code></td><td>"Cannot delete the last status", revoke API key, theme save errors, name validation, persistent confirm-delete actions</td><td>Conflates "you tried something invalid" (red is over-the-top) with "you are about to do something destructive" (red is correct).</td></tr>
+        <tr><td><code>accent</code></td><td>Save action in "unsaved filter changes" prompt</td><td>Only used in one place. Other primary actions (Save view, Save settings) don't use it.</td></tr>
+        <tr><td><code>muted</code></td><td>Cancel actions in persistent toasts</td><td>Used inconsistently. Some cancels are plain default text, some are <code>muted</code>.</td></tr>
+        <tr><td>No variant</td><td>"Template deleted", "Settings saved", success notifications</td><td>Success has no dedicated variant. Reads identical to neutral info.</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 14px;"><strong>Proposed rule.</strong> Five toast variants with a clear semantic. <code>success</code> (emerald, used after irreversible commits like project create), <code>info</code> (neutral, default), <code>warn</code> (amber, validation failures and reversible blocks), <code>danger</code> (red, destructive-confirm and post-failure), <code>primary</code> (accent, prompts that need the user's choice). Drop the <code>accent</code> and <code>muted</code> variant names in favor of the semantic five.</p>
+
+    <h3 style="font-size: 14px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin: 40px 0 12px;">Hover states</h3>
+    <p>The codebase mixes multiple hover-tint values across components that should look the same.</p>
+    <div style="overflow-x: auto; margin-top: 14px;">
+    <table class="rules">
+      <thead><tr><th>Surface</th><th>Hover background</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Task row</td><td><code>hover:bg-foreground/6</code></td><td>Was 6%, change 05 takes it to 4%</td></tr>
+        <tr><td>Sidebar nav item</td><td><code>hover:bg-foreground/6</code></td><td>Same as task row, consistent</td></tr>
+        <tr><td>Sidebar project item</td><td><code>hover:bg-foreground/6</code></td><td>Consistent</td></tr>
+        <tr><td>Settings tab</td><td><code>hover:bg-foreground/6</code></td><td>Consistent</td></tr>
+        <tr><td>Context menu item</td><td><code>hover:bg-foreground/10</code></td><td>Heavier than rows. No clear reason.</td></tr>
+        <tr><td>Command palette result</td><td><code>hover:bg-accent/8</code> (selected)</td><td>Different baseline. Selected vs hover collapsed.</td></tr>
+        <tr><td>Toolbar button (filter, sort)</td><td><code>hover:bg-foreground/6</code></td><td>Consistent</td></tr>
+        <tr><td>Datepicker day</td><td><code>hover:bg-accent</code> (full accent fill)</td><td>Drastically different. Overrides the calm rule.</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 14px;"><strong>Proposed rule.</strong> One token, <code>--color-hover: color-mix(in srgb, var(--color-foreground) 4%, transparent)</code>. Every hoverable surface uses it. Context menu items become <code>foreground/4</code> (currently 10%). Datepicker day-hover swaps from full accent fill to <code>foreground/8</code> plus an underline of the day number. Selected (not hover) keeps the accent tint, so there is a real visual distinction between "the cursor is here" and "this is chosen".</p>
+
+    <h3 style="font-size: 14px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin: 40px 0 12px;">Reordering and drag</h3>
+    <p>Nine separate files in the renderer each implement their own <code>DndContext</code> / <code>useSortable</code> configuration. Slight differences across them are inevitable when each is configured per call site.</p>
+    <div style="overflow-x: auto; margin-top: 14px;">
+    <table class="rules">
+      <thead><tr><th>Surface</th><th>Activation</th><th>Ghost / Indicator</th><th>Keyboard reorder</th></tr></thead>
+      <tbody>
+        <tr><td>Task list (TaskRow)</td><td><code>PointerSensor</code> distance 5</td><td>Custom <code>TaskDragOverlay</code> + drop indicator line</td><td>None</td></tr>
+        <tr><td>Sidebar saved views</td><td><code>PointerSensor</code> distance 5</td><td>Opacity 0.5 on dragged item</td><td>None</td></tr>
+        <tr><td>Sidebar projects</td><td><code>PointerSensor</code> (inherited from parent DndContext)</td><td>Visual hover-target highlight</td><td>None</td></tr>
+        <tr><td>Project areas (folders)</td><td>Native drag via parent context</td><td>Same as projects</td><td>None</td></tr>
+        <tr><td>Project statuses (StatusList)</td><td><code>PointerSensor</code> default</td><td>Opacity 0.5</td><td>None</td></tr>
+        <tr><td>Subtasks (DetailSubtasks)</td><td><code>PointerSensor</code> default</td><td>Different drop-line color</td><td>None</td></tr>
+        <tr><td>Timer presets</td><td><code>PointerSensor</code> default</td><td>Plain ghost</td><td>None</td></tr>
+        <tr><td>Sidebar nav order (settings)</td><td><code>PointerSensor</code> default</td><td>Plain ghost</td><td>None</td></tr>
+        <tr><td>Labels (LabelSettingsContent)</td><td><code>PointerSensor</code> default</td><td>Plain ghost</td><td>None</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="margin-top: 14px;"><strong>Proposed rule.</strong> One shared <code>useSortableList</code> hook in <code>shared/hooks/</code> that returns a configured <code>DndContext</code>, <code>SortableContext</code>, sensors, and drop indicator. Every sortable surface in the app uses it. Activation: <code>PointerSensor</code> with distance 5. Ghost: opacity 0.5 plus the row reduces to <code>scale(0.998)</code> while dragging. Drop indicator: single 1px <code>--color-accent</code> line, full row width, between rows. Add <code>KeyboardSensor</code> for accessibility (Space to pick up, arrows to move, Enter to drop, Escape to cancel) which currently no surface supports.</p>
+
+    <h3 style="font-size: 14px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin: 40px 0 12px;">Where this leaves us</h3>
+    <p>Four families, twenty-six concrete inconsistencies. The fix in each case is the same shape. Pick the one true pattern, factor it into a shared hook or token, then sweep the call sites. None of these are visual changes per se. They are why the app feels like it was shipped by four different people on four different sprints, which is exactly the impression the typography pass is trying to overcome.</p>
+  </section>
+
+  <!-- ============== 01 LABEL CHIPS ============== -->
+  <section class="change" id="c1">
+    <div class="num-col">
+      <div class="num">01 / 16</div>
+      Calm the label chips
+      <span class="tag real">Real</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Labels are <em>metadata</em>, not headlines.</h3>
+      <p>A chip's job is to tell you what the label is. Right now, each chip shouts. Six chips next to a 14px task title and the title becomes background. Fix it by inverting which element carries the color. The chip becomes a uniform neutral container, with a 6px color dot as the chromatic carrier. Result: row reads title-first, labels-second, and the eye can still scan for a specific color when needed.</p>
+
+      <div class="mock-grid">
+        <div class="before mock" style="padding: 18px;">
+          <div class="lbl">Before</div>
+          <div class="chip-row">
+            <span class="chip-old" style="background:#22c55e20;color:#22c55e;border:1px solid #22c55e30;">Track-MasterCS</span>
+            <span class="chip-old" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;">Checked</span>
+            <span class="chip-old" style="background:#6366f120;color:#6366f1;border:1px solid #6366f130;">Phase Re/dev</span>
+            <span class="chip-old" style="background:#f59e0b20;color:#f59e0b;border:1px solid #f59e0b30;">Notified Now</span>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 18px;">
+          <div class="lbl">After</div>
+          <div class="chip-row">
+            <span class="chip-new"><span class="dot" style="background:#10b981"></span>Track-MasterCS</span>
+            <span class="chip-new"><span class="dot" style="background:#ef4444"></span>Checked</span>
+            <span class="chip-new"><span class="dot" style="background:#6366f1"></span>Phase Re/dev</span>
+            <span class="chip-new"><span class="dot" style="background:#f59e0b"></span>Notified Now</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="compare">
+        <figure class="before"><div class="frame"><img src="project-before.png" alt=""/></div><figcaption><span class="tag">Before. Project view.</span></figcaption></figure>
+        <figure class="after"><div class="frame"><img src="project-after.png" alt=""/></div><figcaption><span class="tag">After. Project view.</span></figcaption></figure>
+      </div>
+
+      <div class="diff">
+        <div class="file">src/renderer/src/shared/components/LabelChip.tsx</div>
+        <div class="line del">- backgroundColor: `${color}20`,</div>
+        <div class="line del">- color: color,</div>
+        <div class="line del">- border: `1px solid ${color}30`</div>
+        <div class="line add">+ backgroundColor: 'color-mix(in srgb, var(--color-foreground) 6%, transparent)',</div>
+        <div class="line add">+ color: 'var(--color-fg-secondary)',</div>
+        <div class="line add">+ border: '1px solid color-mix(in srgb, var(--color-foreground) 10%, transparent)'</div>
+        <div class="line ctx">  // + leading dot: &lt;span style={{ backgroundColor: color }} /&gt;</div>
+      </div>
+
+      <p>Same change applied to <code>FilterBar.tsx</code> and <code>LabelFilterBar.tsx</code>. The LABELS row at the top of every view was using its own chip rendering, so the calming has to happen in three places. In the after screenshot, the top filter row of the project view went from a circus of colored pills to a single legible line of metadata.</p>
+    </div>
+  </section>
+
+  <!-- ============== 02 PALETTE (THEME REFRAME) ============== -->
+  <section class="change" id="c2">
+    <div class="num-col">
+      <div class="num">02 / 16</div>
+      Default theme, not the token
+      <span class="tag real">Real + Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">The accent is not <em>broken</em>. The default is.</h3>
+      <p>I framed the first version of this change as "the accent token is the wrong color". That was wrong. The accent is user-configurable through the theme system, stored in the <code>themes</code> table, applied at runtime via <code>useThemeApplicator</code>. The values in <code>main.css</code> are Tailwind v4 fallback tokens. A real user almost never sees them.</p>
+      <p>The actual issue is which theme ToDoozy ships <strong>as the default for new users</strong>. There are twelve built-in themes seeded in <code>src/main/database/seed.ts</code>. The default is <code>DEFAULT_THEMES[0]</code>, which is "Standard Dark", which uses indigo <code>#6366f1</code>. That is the LILA cliché. Forest, Warm Earth, and Amethyst already exist as alternatives.</p>
+
+      <div class="swatches" style="grid-template-columns: repeat(6, 1fr); margin-top: 28px;">
+        <div class="swatch"><div class="preview" style="background:#6366f1"></div><div class="meta"><div class="name">Standard</div><div class="hex">#6366f1 (default)</div></div></div>
+        <div class="swatch"><div class="preview" style="background:#d4915e"></div><div class="meta"><div class="name">Warm Earth</div><div class="hex">#d4915e</div></div></div>
+        <div class="swatch"><div class="preview" style="background:#2196f3"></div><div class="meta"><div class="name">Ocean Blue</div><div class="hex">#2196f3</div></div></div>
+        <div class="swatch"><div class="preview" style="background:#a855f7"></div><div class="meta"><div class="name">Amethyst</div><div class="hex">#a855f7</div></div></div>
+        <div class="swatch"><div class="preview" style="background:#10b981"></div><div class="meta"><div class="name">Forest</div><div class="hex">#10b981</div></div></div>
+        <div class="swatch"><div class="preview" style="background:#e11d48"></div><div class="meta"><div class="name">Rosewood</div><div class="hex">#e11d48</div></div></div>
+      </div>
+
+      <p>Real proposal, in priority order.</p>
+      <div class="detail-grid">
+        <div class="detail"><div class="k">A. Promote Forest as default</div><div class="v">Zero-risk. Swap <code>DEFAULT_SETTINGS.theme_id</code> from Standard to Forest. Existing users keep what they had; new accounts open in a category-distinct palette out of the box.</div></div>
+        <div class="detail"><div class="k">B. Add "Calm" as a new theme</div><div class="v">Editorial near-black canvas (<code>#0c0c10</code>), single hairline separator, no sidebar surface tint, emerald accent. Ship it, make it the new default, keep all twelve existing themes available.</div></div>
+        <div class="detail"><div class="k">C. Tune the Standard theme</div><div class="v">Pull Standard out of the LILA lane while keeping its name. Shift the canvas from <code>#1a1a2e</code> (off-blue) toward true near-black, swap the accent for something less generic. Higher risk because it changes existing users' visual identity silently.</div></div>
+      </div>
+
+      <div class="diff" style="margin-top: 24px;">
+        <div class="file">src/main/database/seed.ts (option A)</div>
+        <div class="line ctx">  export const DEFAULT_SETTINGS = [</div>
+        <div class="line del">-   { key: 'theme_id', value: DEFAULT_THEMES[0].id },  // Standard Dark</div>
+        <div class="line add">+   { key: 'theme_id', value: DEFAULT_THEMES[8].id },  // Forest Dark</div>
+        <div class="line ctx">    // ...</div>
+        <div class="line ctx">  ]</div>
+      </div>
+
+      <p style="margin-top: 24px;"><strong>Captured live.</strong> The hero "after" image was captured against a build where main.css was set to the emerald token, which is what new users will see if option A or B ships. Existing-user themes are not affected.</p>
+    </div>
+  </section>
+
+  <!-- ============== 03 WORDMARK (SUPERSEDED) ============== -->
+  <section class="change" id="c3" style="opacity: 0.7;">
+    <div class="num-col">
+      <div class="num">03 / 16</div>
+      Sidebar wordmark
+      <span class="tag" style="color: var(--fg-3); border-color: var(--border-strong);">Superseded</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">A real logo is <em>in progress</em>.</h3>
+      <p>This change proposed replacing the indigo-tinted square plus "ToDoozy" sans wordmark with a typographic mark (accent dot plus uppercase tracked TODOOZY). The change shipped to the screenshots above.</p>
+      <p><strong>Status.</strong> Owner is finishing a real logo. Once that lands, the mark in the sidebar header should be it, not a stand-in typographic treatment. Keep this section as a record of the temporary state used for the screenshot pass. When the real logo arrives, drop this change and use the actual mark at a fixed footprint (recommend 24 to 28px tall, no tile background, no rounded card around it).</p>
+      <p>The reasoning still applies in reverse. Whatever the new logo is, do not wrap it in a tinted tile. Let it sit on the canvas, hairline separator below, breathing room around it.</p>
+    </div>
+  </section>
+
+  <!-- ============== 04 PROJECT PILL (REFRAMED) ============== -->
+  <section class="change" id="c4">
+    <div class="num-col">
+      <div class="num">04 / 16</div>
+      Calm the project code pill
+      <span class="tag proposed">Proposed (revised)</span>
+    </div>
+    <div class="body">
+      <p style="background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25); padding: 14px 18px; border-radius: 8px; color: var(--fg-2); font-size: 13px; margin-bottom: 28px;"><strong style="color: var(--warn);">Correction.</strong> First version of this change targeted the status icon (the small <code>CircleDot</code> from Lucide). That was a misread. The status icon is already an outline with an inner dot, not a filled disk. What I was actually reacting to as "loud column of orange" is the <em>project code pill</em> immediately to the left of the status icon, a 20×20 saturated circle with 7px white initials. Rewriting the change to target the actual offender.</p>
+
+      <h3 class="change-title">The pill is screaming the <em>project</em>, not the task.</h3>
+      <p>Every task row carries a fully filled 20×20 disc tinted in the task's project color, with the two-letter project abbreviation in 7px bold white inside it (<code>WO</code>, <code>PE</code>, <code>HO</code>, <code>2O</code> in My Day). When My Day pulls tasks from five projects, that produces five columns of fully saturated color stripes running down the row gutter. The pill reads as primary content. It is metadata.</p>
+      <p>Source: <code>ProjectIndicator</code> in <code>src/renderer/src/features/tasks/TaskRow.tsx</code>, line 894. The current style: <code>backgroundColor: project.color</code> at 100% saturation, <code>text-white</code> 7px bold uppercase, <code>rounded-full h-5 w-5</code>.</p>
+
+      <div class="mock-grid">
+        <div class="before mock" style="padding: 14px;">
+          <div class="lbl">Before. Filled disc per row.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#e0e0e0;">
+              <span style="background:#f59e0b;color:white;font-size:8px;font-weight:700;letter-spacing:0;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">WO</span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #f59e0b;background:radial-gradient(circle,#f59e0b 30%,transparent 30%);"></span>
+              <span style="flex:1;">swa prio low should still have a SLA</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#e0e0e0;">
+              <span style="background:#8b5cf6;color:white;font-size:8px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">PE</span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #888;"></span>
+              <span style="flex:1;">why does adding '121s' set a date?</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#e0e0e0;">
+              <span style="background:#06b6d4;color:white;font-size:8px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">HO</span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #888;"></span>
+              <span style="flex:1;">Establish structured monthly 1:1 cadence</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#e0e0e0;">
+              <span style="background:#14b8a6;color:white;font-size:8px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">2O</span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #f59e0b;background:radial-gradient(circle,#f59e0b 30%,transparent 30%);"></span>
+              <span style="flex:1;">Define Plan for Transitioning 24/7 Support</span>
+            </div>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 14px;">
+          <div class="lbl">After. Dot + initials, calm row.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#ededed;">
+              <span style="display:inline-flex;align-items:center;gap:5px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;"></span>
+                <span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#a5a5af;">WO</span>
+              </span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #f59e0b;background:radial-gradient(circle,#f59e0b 30%,transparent 30%);"></span>
+              <span style="flex:1;">swa prio low should still have a SLA</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#ededed;">
+              <span style="display:inline-flex;align-items:center;gap:5px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:#8b5cf6;"></span>
+                <span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#a5a5af;">PE</span>
+              </span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #888;"></span>
+              <span style="flex:1;">why does adding '121s' set a date?</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#ededed;">
+              <span style="display:inline-flex;align-items:center;gap:5px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:#06b6d4;"></span>
+                <span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#a5a5af;">HO</span>
+              </span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #888;"></span>
+              <span style="flex:1;">Establish structured monthly 1:1 cadence</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#ededed;">
+              <span style="display:inline-flex;align-items:center;gap:5px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:#14b8a6;"></span>
+                <span style="font-size:9px;font-weight:600;letter-spacing:0.08em;color:#a5a5af;">2O</span>
+              </span>
+              <span style="width:14px;height:14px;border-radius:50%;border:1.25px solid #f59e0b;background:radial-gradient(circle,#f59e0b 30%,transparent 30%);"></span>
+              <span style="flex:1;">Define Plan for Transitioning 24/7 Support</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="diff" style="margin-top: 24px;">
+        <div class="file">src/renderer/src/features/tasks/TaskRow.tsx (ProjectIndicator)</div>
+        <div class="line del">- &lt;div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full"</div>
+        <div class="line del">-      style={{ backgroundColor: project.color }} title={project.name}&gt;</div>
+        <div class="line del">-   &lt;span className="text-[7px] font-bold leading-none text-white"&gt;</div>
+        <div class="line del">-     {getProjectInitials(project.name)}</div>
+        <div class="line del">-   &lt;/span&gt;</div>
+        <div class="line del">- &lt;/div&gt;</div>
+        <div class="line add">+ &lt;div className="flex flex-shrink-0 items-center gap-1.5" title={project.name}&gt;</div>
+        <div class="line add">+   &lt;span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: project.color }} /&gt;</div>
+        <div class="line add">+   &lt;span className="text-[9px] font-semibold tracking-wide text-fg-secondary leading-none"&gt;</div>
+        <div class="line add">+     {getProjectInitials(project.name)}</div>
+        <div class="line add">+   &lt;/span&gt;</div>
+        <div class="line add">+ &lt;/div&gt;</div>
+      </div>
+
+      <p>Color goes from a 314 px² filled disc to a 28 px² dot (about 91% reduction in tinted area per pill). Initials remain readable because they move to <code>--color-fg-secondary</code> at 9px on neutral background, which is the same treatment the new label chips use. The eye still scans by column, just for the dot rather than for a saturated fill.</p>
+
+      <p><strong>Tradeoff.</strong> The current pill is recognizable by color alone from across the room, useful when you have ten projects open. The new treatment requires reading the two letters. For users with many cross-project tasks per day, that is a real cost. Two ways to mitigate:</p>
+      <div class="detail-grid">
+        <div class="detail"><div class="k">A. Hover expands</div><div class="v">On hover the dot grows to 10px and the project name (full) appears inline. Costs zero space, recovers the read-from-distance scan for the row the user is investigating.</div></div>
+        <div class="detail"><div class="k">B. Setting</div><div class="v">"Compact project indicator" toggle in Settings, default on. Power users who relied on the filled disc can flip it back. Maintains the loud option for those who actually want it.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 05 ROW BREATHING ============== -->
+  <section class="change" id="c5">
+    <div class="num-col">
+      <div class="num">05 / 16</div>
+      Row breathing
+      <span class="tag real">Real</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Density without <em>compression</em>.</h3>
+      <p>The current row is <code>py-2 gap-2</code>. Fine for a spreadsheet, tight for a tool used eight hours a day. Two vertical pixels and one horizontal gap step give the eye somewhere to rest. The fix is <code>py-3 gap-3</code>, hover background reduced from <code>foreground/6</code> to <code>foreground/4</code> so the hover state stays a whisper.</p>
+
+      <div class="diff">
+        <div class="file">src/renderer/src/features/tasks/TaskRow.tsx</div>
+        <div class="line del">- className=&quot;... gap-2 py-2 pr-6 ...&quot;</div>
+        <div class="line add">+ className=&quot;... gap-3 py-3 pr-6 ...&quot;</div>
+        <div class="line ctx"> // selection treatment fully reworked in change 08</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 06 TITLE ACCENT ============== -->
+  <section class="change" id="c6">
+    <div class="num-col">
+      <div class="num">06 / 16</div>
+      Title accent mark
+      <span class="tag real">Real</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">A title that <em>announces itself</em>, quietly.</h3>
+      <p>The view title is already the best piece of typography in the app. <code>text-3xl font-light tracking-[0.15em] uppercase</code>. It just floats untethered. A single 4px accent dot before it locks it to the design system and gives it a small piece of brand color in a place the user looks first. Tracking goes 0.15em to 0.18em (more editorial), weight drops light to extralight, size drops 30px to 28px so the dot can be the visual anchor instead of sheer mass.</p>
+
+      <div class="mock-grid">
+        <div class="before mock" style="padding: 24px;">
+          <div class="lbl">Before</div>
+          <div style="font-size:30px;font-weight:300;letter-spacing:0.15em;text-transform:uppercase;color:#e0e0e0;">MY DAY</div>
+        </div>
+        <div class="after mock" style="padding: 24px;">
+          <div class="lbl">After</div>
+          <div style="font-size:28px;font-weight:200;letter-spacing:0.18em;text-transform:uppercase;color:#ededed;display:flex;align-items:baseline;gap:14px;">
+            <span style="width:4px;height:4px;border-radius:50%;background:#10b981;transform:translateY(-6px);"></span>
+            MY DAY
+          </div>
+        </div>
+      </div>
+
+      <p>The dot is at <code>translate-y-[-6px]</code>, sitting at the optical center of the uppercase letters, not the baseline. Small move, the difference between "design system" and "the title and a bullet point happen to be next to each other."</p>
+    </div>
+  </section>
+
+  <!-- ============== 07 CALENDAR ============== -->
+  <section class="change" id="c7">
+    <div class="num-col">
+      <div class="num">07 / 16</div>
+      Calendar that is a calendar
+      <span class="tag proposed">Proposed</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Day numbers should be <em>monumental</em>.</h3>
+      <p>The current Calendar view is the weakest screen. Day numbers are 11px in the top-right of each cell, swallowed by stacks of 10px task pills. The calendar reads as a database of dated tasks, not as a calendar.</p>
+
+      <p>This proposal was not implemented in the screenshot pass (the cell layout was not modified). The full-view photo comparisons would look almost identical because the change lives at the cell level. The focused mockups below show the actual proposal.</p>
+
+      <p>Real fix. Invert the hierarchy. Day number becomes 32px <code>font-extralight</code> with 0.04em tracking, positioned top-left, weight 200. Today's date gets a hairline accent ring. Task chips inside cells stay neutral (already fixed by change 01) but drop their leading dot at this scale. Cap visible tasks per cell at three, with a "+N more" affordance. Currently every task shows, so dense days become unreadable walls.</p>
+
+      <div class="mock-grid" style="margin-top: 28px;">
+        <div class="before mock" style="padding: 16px; min-height: 240px;">
+          <div class="lbl">Before. Day cell.</div>
+          <div style="border:1px solid rgba(255,255,255,0.08); padding:8px; border-radius:6px; height:180px; position:relative;">
+            <div style="position:absolute; top:6px; right:8px; font-size:11px; color:#888;">15</div>
+            <div style="display:flex;flex-direction:column;gap:3px;margin-top:24px;">
+              <span style="font-size:9px;background:#6366f120;color:#6366f1;border:1px solid #6366f130;padding:2px 6px;border-radius:999px;font-weight:700;">Establish structur...</span>
+              <span style="font-size:9px;background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:2px 6px;border-radius:999px;font-weight:700;">Buy bread</span>
+              <span style="font-size:9px;background:#22c55e20;color:#22c55e;border:1px solid #22c55e30;padding:2px 6px;border-radius:999px;font-weight:700;">Refresh AI P1...</span>
+              <span style="font-size:9px;background:#f59e0b20;color:#f59e0b;border:1px solid #f59e0b30;padding:2px 6px;border-radius:999px;font-weight:700;">Cross-domain...</span>
+            </div>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 16px; min-height: 240px;">
+          <div class="lbl">After. Day cell.</div>
+          <div style="border:1px solid rgba(255,255,255,0.06); padding:14px 12px; border-radius:8px; height:180px; position:relative;">
+            <div style="display:flex;align-items:baseline;gap:8px;">
+              <span style="font-size:32px;font-weight:200;letter-spacing:0.02em;color:#ededed;line-height:1;">15</span>
+              <span style="font-size:9px;letter-spacing:0.28em;text-transform:uppercase;color:#6d6d77;">Thu</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;font-size:11px;color:#a5a5af;">
+              <div style="display:flex;align-items:center;gap:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Establish structured monthly</span></div>
+              <div style="display:flex;align-items:center;gap:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span><span>Buy bread</span></div>
+              <div style="display:flex;align-items:center;gap:8px;"><span style="width:5px;height:5px;border-radius:50%;background:#22c55e;flex-shrink:0;"></span><span>Refresh AI P1...</span></div>
+              <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:#6d6d77;margin-top:4px;">+5 more</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 08 SELECTION (REWRITTEN) ============== -->
+  <section class="change" id="c8">
+    <div class="num-col">
+      <div class="num">08 / 16</div>
+      Selection without the stripe
+      <span class="tag skill">Proposed + Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">A row selects with <em>weight</em>, not a wall.</h3>
+      <p>The current selected row layers four signals. Accent background tint, 2px left border, 1px ring at 30% opacity, and a faint border on the entire row. That is loud but unclear. A competent reviewer would assume four states are encoded, not one. <code>impeccable</code> bans colored side-stripe borders &gt; 1px on list items by name as an absolute pattern. Selection should be one signal, amplified.</p>
+
+      <table class="ba">
+        <thead><tr><th>Before</th><th>After</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><code>border-l-2 border-accent</code></td><td><code>bg-accent/8</code>, no border</td><td>Side-stripe borders &gt; 1px banned. Background tint is the spec-compliant signal.</td></tr>
+          <tr><td>Selected row + <code>ring-1 ring-accent/30</code></td><td>Drop the ring</td><td>One signal per state. The ring layered on the bar was four signals for one event.</td></tr>
+          <tr><td>Selected color uses full saturation accent</td><td>bg = accent at 8% opacity, fg unchanged</td><td>Selection should not change foreground color or weight. Only background tint.</td></tr>
+          <tr><td>No tactile press feedback</td><td><code>transform: scale(0.998)</code> on <code>:active</code>, 100ms ease-out</td><td>Buttons and clickable rows must respond physically. Covered globally in change 13.</td></tr>
+          <tr><td><code>transition-all</code></td><td><code>transition: background-color 120ms cubic-bezier(0.23, 1, 0.32, 1)</code></td><td>Selection happens 100+ times per hour. Property-specific transitions only.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="mock-grid" style="margin-top: 28px;">
+        <div class="before mock" style="padding: 16px;">
+          <div class="lbl">Before. Four layered signals.</div>
+          <div class="row-mock old selected-old"><span class="status in-progress"></span><span class="title">Establish quarterly Start-Stop-Continue exercise</span></div>
+        </div>
+        <div class="after mock" style="padding: 16px;">
+          <div class="lbl">After. One signal, amplified.</div>
+          <div class="row-mock selected"><span class="status in-progress"></span><span class="title">Establish quarterly Start-Stop-Continue exercise</span></div>
+        </div>
+      </div>
+
+      <p>Multi-select uses the same treatment plus a small accent dot in the row's far-right gutter to indicate count. No new visual layer. The same background tint plus a single metadata mark.</p>
+    </div>
+  </section>
+
+  <!-- ============== 09 COMMAND PALETTE ============== -->
+  <section class="change" id="c9">
+    <div class="num-col">
+      <div class="num">09 / 16</div>
+      Command palette weight
+      <span class="tag proposed">Proposed</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">The most-used surface, <em>treated as such</em>.</h3>
+      <p>The command palette is where keyboard-first users spend half their time. The current treatment is a small centered input, weak backdrop, small category chips below. It reads as a search box, not a control surface.</p>
+
+      <p>This proposal was not implemented in the screenshot pass. The before/after full-view shots would differ only in the chip styling layered behind the palette modal, which is misleading because nothing about the palette itself changes in those photos. The focused mockups below show the actual proposal at modal-detail scale.</p>
+
+      <div class="mock-grid" style="margin-top: 28px;">
+        <div class="before mock" style="padding: 32px; min-height: 320px;">
+          <div class="lbl">Before. Modal at ~360px, weak backdrop.</div>
+          <div style="margin: 24px auto 0; width: 320px; background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 12px;">
+            <div style="display:flex; align-items:center; gap:8px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <span style="font-size:13px;color:#888;flex:1;">Search tasks... (p: @ / d: or type text)</span>
+              <span style="font-size:9px;letter-spacing:0.2em;color:#666;border:1px solid rgba(255,255,255,0.1);padding:2px 6px;border-radius:3px;">ESC</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:8px;font-size:9px;color:#888;">
+              <span style="border-bottom:1px dotted #888;">p:priority</span>
+              <span style="border-bottom:1px dotted #888;">@label</span>
+              <span style="border-bottom:1px dotted #888;">/project</span>
+              <span style="border-bottom:1px dotted #888;">d:date</span>
+              <span style="border-bottom:1px dotted #888;">s:status</span>
+            </div>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 32px; min-height: 320px;">
+          <div class="lbl">After. 560px, blur backdrop, typed results.</div>
+          <div style="margin: 16px auto 0; width: 480px; background: rgba(20,20,26,0.92); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 6px; box-shadow: 0 40px 80px -20px rgba(0,0,0,0.6);">
+            <div style="display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid rgba(255,255,255,0.08);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a5a5af" stroke-width="1.25"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <span style="font-size:15px;color:#a5a5af;flex:1;font-weight:300;">Search or type p: @ / d: ...</span>
+              <span style="font-size:9px;letter-spacing:0.2em;color:#6d6d77;border:1px solid rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-family:ui-monospace,monospace;">ESC</span>
+            </div>
+            <div style="padding: 6px;">
+              <div style="display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:6px;background:rgba(16,185,129,0.1);">
+                <span style="font-size:8px;font-weight:600;letter-spacing:0.32em;text-transform:uppercase;color:#10b981;min-width:54px;">Task</span>
+                <span style="flex:1;color:#ededed;font-size:14px;font-weight:300;">Establish structured monthly 1:1</span>
+                <span style="font-size:9px;color:#6d6d77;font-family:ui-monospace,monospace;">↵ open</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:6px;">
+                <span style="font-size:8px;font-weight:600;letter-spacing:0.32em;text-transform:uppercase;color:#6d6d77;min-width:54px;">Project</span>
+                <span style="flex:1;color:#a5a5af;font-size:14px;font-weight:300;">HOO</span>
+                <span style="font-size:9px;color:#6d6d77;"></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:6px;">
+                <span style="font-size:8px;font-weight:600;letter-spacing:0.32em;text-transform:uppercase;color:#6d6d77;min-width:54px;">View</span>
+                <span style="flex:1;color:#a5a5af;font-size:14px;font-weight:300;">Saved view: high-urgent</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:6px;">
+                <span style="font-size:8px;font-weight:600;letter-spacing:0.32em;text-transform:uppercase;color:#6d6d77;min-width:54px;">Command</span>
+                <span style="flex:1;color:#a5a5af;font-size:14px;font-weight:300;">Toggle theme</span>
+                <span style="font-size:9px;color:#6d6d77;font-family:ui-monospace,monospace;">⌘ ⇧ T</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p>What changes at modal-detail scale.</p>
+      <div class="detail-grid">
+        <div class="detail"><div class="k">Backdrop</div><div class="v">Push to <code>backdrop-blur-md bg-background/70</code>. The current overlay is too faint. When triggered while reading dense content, the eye does not know where to land.</div></div>
+        <div class="detail"><div class="k">Modal width</div><div class="v">From 360px to 560px. The palette is the most-used surface. It deserves real estate, not a tooltip.</div></div>
+        <div class="detail"><div class="k">Result type cue</div><div class="v">Add a 9px uppercase tracker label per result row (TASK, PROJECT, VIEW, COMMAND), aligned in a 54px column on the left. The user can predict what Enter will do before reading the result.</div></div>
+        <div class="detail"><div class="k">Selected row hint</div><div class="v">The selected row gets accent tint plus a faint <code>↵ open</code> hint in the right gutter. Reinforces the keyboard-first model.</div></div>
+        <div class="detail"><div class="k">Shortcut hints inline</div><div class="v">Command rows surface their shortcut (<code>⌘ ⇧ T</code>) in the right gutter. Discoverable without opening Help.</div></div>
+        <div class="detail"><div class="k">No entrance animation</div><div class="v">The palette opens 100+ times per day. emil rule. See change 12.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 10 SYNC SENTENCE ============== -->
+  <section class="change" id="c10">
+    <div class="num-col">
+      <div class="num">10 / 16</div>
+      Sync dot becomes a sentence
+      <span class="tag proposed">Proposed</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Status that <em>speaks</em>.</h3>
+      <p>The sync indicator is currently a 2px colored dot in the sidebar header. To know what it means, you click it. A tooltip explains in 12-point text. That is two layers of indirection for the second-most-anxiety-inducing piece of UI in a sync-based app (after "did my work save").</p>
+
+      <div class="mock-grid" style="margin-top: 24px;">
+        <div class="before mock" style="padding: 24px; min-height: 100px; justify-content: flex-start;">
+          <div class="lbl">Before. Sidebar header.</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e0e0;margin-top:8px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 24px; min-height: 100px; justify-content: flex-start;">
+          <div class="lbl">After. Sidebar footer.</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0;"></span>
+            <span style="font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:#a5a5af;">Synced</span>
+            <span style="font-size:10px;font-family:ui-monospace,monospace;color:#6d6d77;margin-left:auto;">2m</span>
+          </div>
+        </div>
+      </div>
+
+      <p>Move it from the cramped header to its own row in the sidebar footer next to STATS, SHORTCUTS, SETTINGS. One line. Dot, state, relative time. When stale, the accent shifts to <code>--color-danger</code> and time turns into the failure reason. Detail tooltip on hover, no click required. The header is then free to be a wordmark and nothing else.</p>
+    </div>
+  </section>
+
+  <!-- ============== 11 FILTER ROW (REFRAMED) ============== -->
+  <section class="change" id="c11">
+    <div class="num-col">
+      <div class="num">11 / 16</div>
+      Tighten the filter region, do not remove it
+      <span class="tag proposed">Proposed (revised)</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Keep what is useful, make it <em>earn the height</em>.</h3>
+      <p>First draft of this change collapsed the LABELS and PROJECTS rows to a single "active filters" line. That was wrong. The always-visible rows are a deliberate affordance for ad-hoc filtering on top of whatever the view filter already exposes. Click a label, the list refines instantly. Removing the row removes the action. The fix is not to hide it, the fix is to make the 100 to 140 pixels of vertical space pull more weight.</p>
+
+      <p>Four targeted moves that preserve the affordance.</p>
+      <div class="detail-grid">
+        <div class="detail"><div class="k">A. Chip refinement</div><div class="v">Already shipped in change 01. Neutral background plus color dot. Same row count, far less visual noise. Largest single win.</div></div>
+        <div class="detail"><div class="k">B. Cap visible chips with overflow</div><div class="v">Show the first N (eight to twelve) by used-recency or alphabetical, render the rest behind a <code>+ N more</code> popover. Currently every label in every project shows, regardless of relevance. A user with 40 labels has a wall.</div></div>
+        <div class="detail"><div class="k">C. Sort-by-use ordering</div><div class="v">Chips reorder so the labels and projects the user is actually filtering on are leftmost. Reading order matches frequency.</div></div>
+        <div class="detail"><div class="k">D. Collapse the FILTER+SORT toolbar when idle</div><div class="v">Currently the third row (+ Filter, sort, save view, clear) is always visible even with no active filters. Collapse it to a single 11px <code>Filter ⌘F</code> link when no filter is active. The full toolbar slides down only when the user opens it.</div></div>
+      </div>
+
+      <div class="mock-grid" style="margin-top: 28px;">
+        <div class="before mock" style="padding: 16px; min-height: 200px;">
+          <div class="lbl">Before. Everything shown, every chip equal weight.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:9px;font-weight:700;margin-top:8px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><span style="color:#888;letter-spacing:0.3em;">LABELS</span><span style="background:#ef444420;color:#ef4444;padding:2px 8px;border-radius:999px;">Bug</span><span style="background:#22c55e20;color:#22c55e;padding:2px 8px;border-radius:999px;">Salesforce</span><span style="background:#6366f120;color:#6366f1;padding:2px 8px;border-radius:999px;">Foundation</span><span style="background:#f59e0b20;color:#f59e0b;padding:2px 8px;border-radius:999px;">Improvement</span><span style="background:#ec489920;color:#ec4899;padding:2px 8px;border-radius:999px;">Music-Lessons</span><span style="background:#06b6d420;color:#06b6d4;padding:2px 8px;border-radius:999px;">24/7 Support</span><span style="background:#a855f720;color:#a855f7;padding:2px 8px;border-radius:999px;">Onevoice</span><span style="background:#f9731620;color:#f97316;padding:2px 8px;border-radius:999px;">Tomorrow</span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><span style="color:#888;letter-spacing:0.3em;">PROJECTS</span><span style="background:#6366f120;color:#6366f1;padding:2px 8px;border-radius:999px;">HOO</span><span style="background:#ec489920;color:#ec4899;padding:2px 8px;border-radius:999px;">Personal</span><span style="background:#22c55e20;color:#22c55e;padding:2px 8px;border-radius:999px;">2026 Objectives</span></div>
+            <div style="display:flex;gap:6px;align-items:center;color:#888;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;"><span>+ Filter</span><span>Sort</span><span>Save</span><span>Clear</span></div>
+          </div>
+        </div>
+        <div class="after mock" style="padding: 16px; min-height: 200px;">
+          <div class="lbl">After. Same affordance, calmer, sorted, capped.</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:10px;"><span style="color:#6d6d77;letter-spacing:0.28em;text-transform:uppercase;font-weight:600;">Labels</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.18);background:rgba(237,237,237,0.1);color:#ededed;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#ef4444;"></span>Bug</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#22c55e;opacity:0.7;"></span>Salesforce</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#6366f1;opacity:0.7;"></span>Foundation</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#f59e0b;opacity:0.7;"></span>Improvement</span>
+              <span style="color:#6d6d77;font-size:10px;font-weight:500;cursor:pointer;letter-spacing:0.18em;text-transform:uppercase;">+ 4 more</span>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:10px;"><span style="color:#6d6d77;letter-spacing:0.28em;text-transform:uppercase;font-weight:600;">Projects</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#6366f1;opacity:0.7;"></span>HOO</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#ec4899;opacity:0.7;"></span>Personal</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(237,237,237,0.1);background:rgba(237,237,237,0.05);color:#a5a5af;padding:2px 8px;border-radius:999px;font-weight:500;"><span style="width:5px;height:5px;border-radius:50%;background:#22c55e;opacity:0.7;"></span>2026 Objectives</span>
+            </div>
+            <div style="font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:#6d6d77;cursor:pointer;">Filter ⌘F</div>
+          </div>
+        </div>
+      </div>
+
+      <p>Active filters are highlighted (full foreground, brighter border). Inactive chips are neutral and slightly dimmed, signaling "click to filter". The toolbar collapses to a single keyboard hint when no filter is active, expands on hover or shortcut. Same usability, half the visual mass.</p>
+    </div>
+  </section>
+
+  <!-- ============== 12 KILL TRANSITION-ALL ============== -->
+  <section class="change" id="c12">
+    <div class="num-col">
+      <div class="num">12 / 16</div>
+      Kill <code style="background:transparent;color:inherit;padding:0;">transition: all</code>
+      <span class="tag skill">Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Specify what moves, then make it <em>instant</em>.</h3>
+      <p>Two violations compound. <code>main.css</code> has a global rule animating background-color, color, and border-color over 300ms on every element. <code>TaskRow</code> uses Tailwind's <code>transition-all</code>. The result is that every selection (a keyboard-initiated 100-times-per-day action) animates its background for 300ms. emil's rule is absolute: no animation on actions repeated dozens of times daily. Raycast has zero open or close animation for a reason.</p>
+
+      <div class="diff">
+        <div class="file">src/renderer/src/assets/main.css</div>
+        <div class="line del">- * {</div>
+        <div class="line del">-   transition: background-color 300ms, color 300ms, border-color 300ms;</div>
+        <div class="line del">- }</div>
+        <div class="line add">+ /* Removed. Theme swaps get a scoped fade, selection and hover are instant. */</div>
+        <div class="line ctx"> </div>
+        <div class="line add">+ html[data-theme-transitioning="true"] * {</div>
+        <div class="line add">+   transition: background-color 200ms cubic-bezier(0.23, 1, 0.32, 1),</div>
+        <div class="line add">+               color 200ms cubic-bezier(0.23, 1, 0.32, 1);</div>
+        <div class="line add">+ }</div>
+      </div>
+
+      <div class="diff" style="margin-top: 14px;">
+        <div class="file">src/renderer/src/features/tasks/TaskRow.tsx</div>
+        <div class="line del">- className=&quot;... transition-all ...&quot;</div>
+        <div class="line add">+ style={{ transition: "background-color 120ms cubic-bezier(0.23, 1, 0.32, 1)" }}</div>
+      </div>
+
+      <p>Pattern. Theme swap is the only place that justifies fading background colors, and that is a sub-second event the user triggers once. Toggle a data attribute on <code>html</code> during the swap, run the fade, drop the attribute. Everywhere else, instant.</p>
+
+      <table class="ba">
+        <thead><tr><th>Action</th><th>Frequency</th><th>Spec</th></tr></thead>
+        <tbody>
+          <tr><td>Select task (j/k, click)</td><td>100+ per day</td><td>No animation</td></tr>
+          <tr><td>Hover row</td><td>tens per day</td><td>120ms bg fade only</td></tr>
+          <tr><td>Open command palette (⌘K)</td><td>100+ per day</td><td>No animation</td></tr>
+          <tr><td>Open settings modal</td><td>few per day</td><td>180ms scale + opacity from center</td></tr>
+          <tr><td>Toggle theme</td><td>few per month</td><td>200ms global bg/color fade</td></tr>
+          <tr><td>Drag task between sections</td><td>tens per day</td><td>Spring-based with layoutId (interruptible)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== 13 TACTILE BUTTONS ============== -->
+  <section class="change" id="c13">
+    <div class="num-col">
+      <div class="num">13 / 16</div>
+      Buttons that respond
+      <span class="tag skill">Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Pressed should feel <em>pressed</em>.</h3>
+      <p>Across every button in the app (primary CTAs, sidebar nav, status toggles, label chips, filter pills), there is no <code>:active</code> tactile state. Click feedback comes entirely from the subsequent state change. Both emil and design-taste-frontend flag this. The fix is one rule in <code>main.css</code> that catches every interactive element, no per-component change required.</p>
+
+      <div class="diff">
+        <div class="file">src/renderer/src/assets/main.css</div>
+        <div class="line add">+ /* Tactile press feedback for every clickable element */</div>
+        <div class="line add">+ button, [role="button"], a[href], [role="tab"] {</div>
+        <div class="line add">+   transition: transform 100ms cubic-bezier(0.23, 1, 0.32, 1);</div>
+        <div class="line add">+ }</div>
+        <div class="line add">+ button:active:not(:disabled),</div>
+        <div class="line add">+ [role="button"]:active,</div>
+        <div class="line add">+ [role="tab"]:active {</div>
+        <div class="line add">+   transform: scale(0.97);</div>
+        <div class="line add">+ }</div>
+        <div class="line add">+ @media (prefers-reduced-motion: reduce) {</div>
+        <div class="line add">+   button, [role="button"], [role="tab"] { transition: none; }</div>
+        <div class="line add">+   button:active, [role="button"]:active, [role="tab"]:active { transform: none; }</div>
+        <div class="line add">+ }</div>
+      </div>
+
+      <p>Scale 0.97 is the canonical value (emil names it specifically). The rule lives in CSS, not per component, so existing buttons inherit it without code changes. Reduced motion takes it out cleanly.</p>
+    </div>
+  </section>
+
+  <!-- ============== 14 ICON STROKE ============== -->
+  <section class="change" id="c14">
+    <div class="num-col">
+      <div class="num">14 / 16</div>
+      Icon stroke discipline
+      <span class="tag skill">Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">One stroke weight. <em>Everywhere</em>.</h3>
+      <p>A grep across the codebase finds Lucide icons rendered at strokeWidth 1, 1.5, 2, and 2.5 depending on which file the icon lives in. Inconsistency at the pixel level reads as "shipped at different times by different hands". <code>design-taste-frontend</code> rule. Standardize globally. The premium move is 1.25, which gives Lucide icons a thinner, more deliberate line and pulls them away from their default "tech bro illustration set" register.</p>
+
+      <div class="mock-grid">
+        <div class="before mock" style="padding: 28px; min-height: 140px;">
+          <div class="lbl">Before. Mixed weights.</div>
+          <div style="display:flex; align-items:center; gap:18px; margin-top: 10px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1"><circle cx="12" cy="12" r="10"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="2.5"><path d="M5 12h14M12 5v14"/></svg>
+          </div>
+          <div style="margin-top: 14px; font-family: ui-monospace, monospace; font-size: 10px; color: var(--fg-3);">strokeWidth. 1, 1.5, 2, 2.5</div>
+        </div>
+        <div class="after mock" style="padding: 28px; min-height: 140px;">
+          <div class="lbl">After. 1.25 everywhere.</div>
+          <div style="display:flex; align-items:center; gap:18px; margin-top: 10px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1.25"><circle cx="12" cy="12" r="10"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1.25"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1.25"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ededed" stroke-width="1.25"><path d="M5 12h14M12 5v14"/></svg>
+          </div>
+          <div style="margin-top: 14px; font-family: ui-monospace, monospace; font-size: 10px; color: var(--fg-3);">strokeWidth. 1.25 (single source)</div>
+        </div>
+      </div>
+
+      <p style="margin-top: 24px;">Implementation. Wrap Lucide's <code>Icon</code> import with a project-local <code>&lt;Icon /&gt;</code> that sets <code>strokeWidth={1.25}</code> by default. Ban direct <code>lucide-react</code> imports via an ESLint rule. The two cases that should override. <code>CheckCircle2</code> when filled (done state) at 2.0 to read as a confident commit, and small 8 to 10px icons used inside chips, which need 1.5 to remain legible at that size.</p>
+    </div>
+  </section>
+
+  <!-- ============== 15 EMPTY STATES ============== -->
+  <section class="change" id="c15">
+    <div class="num-col">
+      <div class="num">15 / 16</div>
+      Empty states with presence
+      <span class="tag skill">Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Nothing is <em>something</em>.</h3>
+      <p>An empty My Day, an empty saved view, an empty archive, a project with zero tasks. These are the screens a user sees most often early on and at moments of transition. Currently they render as a centered gray "No tasks" line. <code>design-taste-frontend</code> rule. Beautifully composed empty states that indicate how to populate data. This is also the only place where an italic serif accent earns its keep without violating the dashboard-no-serif ban.</p>
+
+      <div class="mock-grid" style="margin-top: 28px;">
+        <div class="before mock" style="padding: 40px; min-height: 280px; justify-content: center; align-items: center;">
+          <div class="lbl" style="position: absolute; top: 16px; left: 18px;">Before</div>
+          <div style="text-align: center; color: var(--fg-3); font-size: 13px; margin-top: 24px;">No tasks</div>
+        </div>
+        <div class="after mock" style="padding: 32px; min-height: 280px; justify-content: center;">
+          <div class="lbl">After. My Day empty.</div>
+          <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 18px;">
+            <div style="font-family: var(--serif); font-style: italic; font-size: 28px; font-weight: 300; color: var(--fg); line-height: 1.1; letter-spacing: -0.01em;">Nothing today.</div>
+            <div style="font-size: 13px; color: var(--fg-2); max-width: 280px; line-height: 1.5;">Pull a task into My Day by pressing <kbd style="font-family: ui-monospace, monospace; font-size: 11px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-strong); padding: 2px 6px; border-radius: 4px;">⌘ ⇧ M</kbd> from any task. Or capture a new one with <kbd style="font-family: ui-monospace, monospace; font-size: 11px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-strong); padding: 2px 6px; border-radius: 4px;">N</kbd>.</div>
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top: 28px;">The pattern. Serif italic for the human line ("Nothing today.", "All caught up.", "Nothing in the archive yet."), then sans-serif body with a keyboard shortcut hint rendered as real <code>&lt;kbd&gt;</code> tags. No illustration, no clip-art mascot. The typographic accent is the illustration. Variant-specific lines per view. My Day says "Nothing today." Archive says "Nothing here yet." A project view at zero tasks says "A blank project."</p>
+
+      <p>Hard rule. Serif appears at most three times in the entire app, and only on screens that have no body content competing with it. Never in body type, never for labels, never for buttons. That restraint is what separates a typographic system from a typeface collection. It also keeps the change skill-compliant with the dashboard-no-serif ban.</p>
+    </div>
+  </section>
+
+  <!-- ============== 16 EM DASH PURGE ============== -->
+  <section class="change" id="c16">
+    <div class="num-col">
+      <div class="num">16 / 16</div>
+      Em dash purge in UX copy
+      <span class="tag skill">Skill</span>
+    </div>
+    <div class="body">
+      <h3 class="change-title">Punctuation has <em>meaning</em>.</h3>
+      <p><code>impeccable</code>'s absolute bans include em dashes. The reasoning is not aesthetic, it is voice. An em dash signals "the author is winging it." Replace with the punctuation that actually fits the relationship between clauses. Period for a hard stop. Colon to introduce. Semicolon for parallel structure. Parentheses for an aside. Commas for a brief breath.</p>
+
+      <table class="ba">
+        <thead><tr><th>Before</th><th>After</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>"Filter by label &mdash; click to toggle"</td><td>"Filter by label. Click to toggle."</td><td>Two thoughts, hard stop is honest.</td></tr>
+          <tr><td>"Task moved to My Day &mdash; press ⌘Z to undo"</td><td>"Task moved to My Day. Press ⌘Z to undo."</td><td>Same. Period works.</td></tr>
+          <tr><td>"Synced &mdash; 2 minutes ago"</td><td>"Synced. 2 minutes ago."</td><td>Em dash here pretends the relationship is causal. It is just temporal.</td></tr>
+          <tr><td>"No tasks &mdash; press N to create one"</td><td>"No tasks. Press N to create one."</td><td>Empty state copy is read in milliseconds. Periods are faster.</td></tr>
+          <tr><td>"Settings saved &mdash; theme will apply on next launch"</td><td>"Settings saved. Theme applies on next launch."</td><td>Removes the dash and tightens the verb.</td></tr>
+        </tbody>
+      </table>
+
+      <p>Scope. Find every <code>—</code>, <code>&amp;mdash;</code>, and <code>--</code>-as-em-dash in UX-facing copy (toasts, tooltips, modal copy, empty states, errors, help, settings descriptions). Replace per the table. Commit messages and dev docs are out of scope, the rule is about the surfaces a user reads.</p>
+      <p>Lint guardrail. Add an ESLint rule against literal em dashes in JSX text nodes and string literals exposed to the UI. One rule, one commit, then the codebase enforces the convention.</p>
+    </div>
+  </section>
+
+  <!-- ============== OUTRO ============== -->
+  <div class="outro">
+    <h3>Sixteen changes, plus an <em>inconsistencies audit</em>.</h3>
+    <p style="color:var(--fg-2);">Ship order for a 1.8.0 design pass.</p>
+    <ul>
+      <li><strong>Patch (low risk).</strong> Chip refinement (01), title accent (06), project pill calmer (04), row breathing (05), tactile buttons (13), em dash purge (16). Touches around six components plus one global CSS rule. No data shape changes, zero accessibility regressions.</li>
+      <li><strong>Theme defaults.</strong> Default theme reframe (02). Zero-risk version is promoting Forest as <code>DEFAULT_THEMES[0]</code> so new users land in a non-LILA palette. Larger version ships a new "Calm" theme. Existing user themes are untouched.</li>
+      <li><strong>Component rewrites.</strong> Selection without stripe (08), filter region tighten (11), kill transition-all (12), icon stroke discipline (14). Touch the most-used components and need careful keyboard-test before merge.</li>
+      <li><strong>Net-new surfaces.</strong> Calendar (07), command palette (09), sync sentence (10), empty states (15). Higher impact, bigger scope, fold into a dedicated minor release.</li>
+      <li><strong>Inconsistency sweeps.</strong> Pick one true pattern per family (destructive actions, toast variants, hover tints, reordering) and factor into shared hooks or tokens. Sweep call sites in a dedicated cleanup PR series. Documented in the Interaction inconsistencies section above.</li>
+      <li><strong>Pending external.</strong> Wordmark (03) waits on the real logo. When that arrives, drop the typographic stand-in and use the actual mark with no tile wrapper.</li>
+    </ul>
+    <p style="margin-top: 24px;color:var(--fg-3);font-size:13px;">Six changes were applied to a running v1.7.0 build for the live screenshots: 01 (chips), 02 (palette tokens to emerald, demonstrating the "Calm" option), 03 (typographic wordmark, temporary), 05 (row breathing), 06 (title accent dot), 08 (TaskRow with no left stripe on selection). All were reverted after capture. The remaining ten changes show as focused mockups within their sections.</p>
+  </div>
+
+  <footer>
+    <span>ToDoozy v1.7.0. Design deepdive.</span>
+    <span>18 May 2026</span>
+  </footer>
+
+</div>
+
+<div id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot fullscreen view">
+  <button class="lb-close" aria-label="Close fullscreen">×</button>
+  <img alt="" />
+  <div class="lb-caption">Click anywhere or press Esc to close.</div>
+</div>
+
+<script>
+  (function () {
+    var box = document.getElementById('lightbox');
+    var img = box.querySelector('img');
+    var close = box.querySelector('.lb-close');
+
+    function open(src, alt) {
+      img.src = src;
+      img.alt = alt || '';
+      box.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+    function shut() {
+      box.classList.remove('open');
+      document.body.style.overflow = '';
+      window.setTimeout(function () { img.src = ''; }, 220);
+    }
+
+    document.querySelectorAll('.hero-strip figure img, .compare figure img').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        open(el.currentSrc || el.src, el.alt);
+      });
+    });
+
+    box.addEventListener('click', function (e) {
+      if (e.target === box || e.target === close) shut();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && box.classList.contains('open')) shut();
+    });
+  })();
+</script>
+</body>
+</html>

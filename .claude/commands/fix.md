@@ -1,11 +1,13 @@
 ---
 name: fix
-description: Structured fix workflow for ToDoozy — handles both code bugs and UI issues. Use this whenever the user reports something broken, not working, visually wrong, or asks to fix/debug/investigate anything. Triggers on "this isn't working", "it broke", "fix this", "looks wrong", "spacing is off", "why is X happening", UI inconsistencies, runtime errors, or any unexpected behavior. Also invoked by /audit when the user chooses to fix an issue.
+description: Structured fix workflow for ToDoozy — handles both code bugs and UI issues. Extends the global /fix at ~/.claude/commands/fix.md with project-specific context (UI spec, debug-learnings, ToDoozy data flow) AND the vault bug-tracking lifecycle. Use this whenever the user reports something broken, not working, visually wrong, or asks to fix/debug/investigate anything. Triggers on "this isn't working", "it broke", "fix this", "looks wrong", "spacing is off", "why is X happening", UI inconsistencies, runtime errors, or any unexpected behavior. Also invoked by /audit when the user chooses to fix an issue.
 ---
 
 # ToDoozy Fix Skill
 
-You are fixing an issue in ToDoozy, an Electron + React + TypeScript app with Zustand stores, SQLite via better-sqlite3, and IPC between main/renderer processes. This skill handles both code bugs and visual/UI issues. Rushing to a fix without understanding the problem wastes time — a methodical approach gets you there faster.
+You are fixing an issue in ToDoozy, an Electron + React + TypeScript app with Zustand stores, SQLite via better-sqlite3, and IPC between main/renderer processes. This skill handles both code bugs and visual/UI issues. Rushing to a fix without understanding the problem wastes time, a methodical approach gets you there faster.
+
+This skill **extends the universal `/fix` workflow** at `~/.claude/commands/fix.md`. The universal flow owns the vault `bugs.md` lifecycle (open → in_progress → waiting_verification → fixed) and the ToDoozy task status updates. This file adds the ToDoozy-specific phases on top: UI spec consultation, IPC/Zustand data-flow tracing, dev server management, and the documentation updates ToDoozy needs.
 
 ## Before You Start: Read the Learnings and Scope
 
@@ -17,6 +19,28 @@ Check whether this bug matches a known pattern or has already been investigated:
 - If the issue is visual, also read `ui-reference.md` — the design spec for colors, typography, spacing, components
 
 If any of these files don't exist yet, skip them.
+
+---
+
+## Phase 0: Check vault bugs.md for an existing entry (universal lifecycle)
+
+Before talking to the user about a fresh interview, check whether this bug is already tracked in the vault. The universal `/fix` flow tracks every bug through `~/Documents/Vault/01-Projects/todoozy/bugs.md` with a status field.
+
+1. Read `~/Documents/Vault/01-Projects/todoozy/bugs.md`. Scan entries with `Status: open`, `Status: in_progress`, or `Status: waiting_verification` against the user's described symptom (file paths, error messages, affected components).
+2. If 1+ likely matches, present them:
+   ```
+   Possible match in vault bugs.md:
+     [1] 2026-05-15 · MCP server hangs on port collision (status: in_progress)
+     [2] 2026-05-10 · Settings modal flicker on tab switch (status: open)
+   Is this the same bug? [1/N/C]
+   ```
+3. On match:
+   - Bump that entry's status to `in_progress` in `bugs.md`
+   - Carry the entry's ID/date into the rest of this workflow so Phase 6 can close the loop
+   - If a `ToDoozy:` field exists in the entry, also bump the linked ToDoozy task status
+4. On no match: continue. At Phase 6 you'll decide whether to capture this as a new bug entry.
+
+If `01-Projects/todoozy/bugs.md` doesn't exist yet, skip this phase — the universal flow's first run on todoozy will create it.
 
 ---
 
@@ -306,6 +330,22 @@ After the fix is merged, update `scope.md`:
 - If scope.md only contained this one item, clear the file
 - If the fix revealed new information about the codebase that's relevant to remaining scope items, update those entries
 
+### Close the vault bug-tracking loop (universal lifecycle)
+
+This is the universal `/fix` workflow's responsibility. After the user has confirmed the fix works (Phase 4 confirmation):
+
+1. **If a bugs.md entry was matched in Phase 0**:
+   - Bump status: `in_progress` → `waiting_verification` (right after applying the fix)
+   - Add a `**Fix attempt**: <files touched, approach taken>` field
+   - When user confirms it works: bump status to `fixed` and add `**Resolution**: <what worked>`
+   - If the entry has a linked ToDoozy task, mark it Done via the ToDoozy MCP
+2. **If no entry was matched in Phase 0 but this fix represents a real bug worth tracking**:
+   - Append a new entry to `01-Projects/todoozy/bugs.md` with `Status: fixed` and the resolution details
+   - Also create a ToDoozy task and back-write the ID (mirrors what `/bug` would have done)
+3. **If this was trivial (typo, one-line tweak) and didn't need tracking**: skip the vault entry. Documentation in CHANGELOG/RELEASE_NOTES is enough.
+
+After this step, the vault entry and ToDoozy task accurately reflect the resolution. The lessons hook will skip this bug in future sessions because `status: fixed` is filtered out by `load-lessons.sh`.
+
 ---
 
 ## Phase 7: Hand Off — Signal Ready for Fresh Context
@@ -329,6 +369,7 @@ Before signing off, verify every persistent artifact is written and committed. W
 - [ ] `scope.md` updated or cleared
 - [ ] `.last-documented-commit` written with the new HEAD
 - [ ] ToDoozy task moved to **Done** (if a task ID was in scope) — by Phase 7 the user has confirmed and the merge is in
+- [ ] Vault `01-Projects/todoozy/bugs.md` entry updated to `Status: fixed` with `Resolution` field (or new entry appended if this bug wasn't tracked previously)
 - [ ] Final `git status` is clean (or only intentional remaining changes)
 
 Run `git status` one last time to confirm the tree is clean.

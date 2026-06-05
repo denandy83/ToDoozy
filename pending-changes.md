@@ -119,3 +119,7 @@ Working file — entries written here during a session are processed into perman
 **Files changed:** `src/renderer/src/shared/stores/authStore.ts`, `src/renderer/src/App.tsx`.
 
 **Commit:** (filled at squash merge)
+
+## 2026-05-12 — Session end (git fallback)
+<!-- Low-context entries. Use commit messages + file changes to infer docs updates. -->
+- 9fddf7d chore: bump documented-commit marker after auth-hang fix (2026-05-08) — files: 1
