@@ -131,8 +131,29 @@ describe('classifyMyDayTasks', () => {
     const result = classifyMyDayTasks(tasks, getStatus)
     expect(result.totalNonDone).toBe(2)
     expect(result.tasks).toHaveLength(2)
-    expect(result.tasks[0]).toEqual({ id: 't2', title: 'Not started', bucket: 'not_started' })
-    expect(result.tasks[1]).toEqual({ id: 't1', title: 'Working', bucket: 'in_progress' })
+    expect(result.tasks[0]).toEqual({
+      id: 't2',
+      title: 'Not started',
+      bucket: 'not_started',
+      priority: 0
+    })
+    expect(result.tasks[1]).toEqual({
+      id: 't1',
+      title: 'Working',
+      bucket: 'in_progress',
+      priority: 0
+    })
+  })
+
+  it('carries priority through to TrayTask', () => {
+    const tasks = [
+      makeTask({ id: 't1', status_id: 'default', title: 'Urgent task', priority: 4 }),
+      makeTask({ id: 't2', status_id: 'in-prog', title: 'High task', priority: 3 })
+    ]
+    const result = classifyMyDayTasks(tasks, getStatus)
+    const byId = Object.fromEntries(result.tasks.map((t) => [t.id, t.priority]))
+    expect(byId['t1']).toBe(4)
+    expect(byId['t2']).toBe(3)
   })
 
   it('limits to 15 total tasks', () => {

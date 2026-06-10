@@ -8,6 +8,7 @@ import { getMainWindow } from './index'
 import type { Status } from '../shared/types'
 import type { TimerTrayState } from '../preload/index.d'
 import { classifyMyDayTasks, truncateTitle, STATUS_ICONS, type TrayTask } from './tray-utils'
+import { getPriorityDotIcon } from './priority-icons'
 
 
 let tray: Tray | null = null
@@ -154,11 +155,14 @@ function buildLeftClickMenu(): Menu {
         menuItems.push({ type: 'separator' })
       }
       prevBucket = task.bucket
-      const icon = STATUS_ICONS[task.bucket]
-      menuItems.push({
-        label: `${icon} ${truncateTitle(task.title)}`,
+      const statusIcon = STATUS_ICONS[task.bucket]
+      const priorityIcon = getPriorityDotIcon(task.priority)
+      const item: Electron.MenuItemConstructorOptions = {
+        label: `${statusIcon} ${truncateTitle(task.title)}`,
         click: (): void => navigateToTask(task.id)
-      })
+      }
+      if (priorityIcon) item.icon = priorityIcon
+      menuItems.push(item)
     }
 
     menuItems.push({ type: 'separator' })

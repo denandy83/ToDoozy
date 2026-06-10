@@ -6,6 +6,7 @@ export interface TrayTask {
   id: string
   title: string
   bucket: 'not_started' | 'in_progress'
+  priority: number
 }
 
 export function getBucketForStatus(status: Status | undefined): TrayBucket {
@@ -50,8 +51,18 @@ export function classifyMyDayTasks(
 
   // Flat list: not started first, then in progress, up to TRAY_MAX_TASKS
   const ordered = [
-    ...notStarted.map((t) => ({ id: t.id, title: t.title, bucket: 'not_started' as const })),
-    ...inProgress.map((t) => ({ id: t.id, title: t.title, bucket: 'in_progress' as const }))
+    ...notStarted.map((t) => ({
+      id: t.id,
+      title: t.title,
+      bucket: 'not_started' as const,
+      priority: t.priority
+    })),
+    ...inProgress.map((t) => ({
+      id: t.id,
+      title: t.title,
+      bucket: 'in_progress' as const,
+      priority: t.priority
+    }))
   ].slice(0, TRAY_MAX_TASKS)
 
   return { tasks: ordered, totalNonDone }
