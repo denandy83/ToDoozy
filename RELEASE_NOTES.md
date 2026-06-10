@@ -7,6 +7,7 @@ User-facing changes by date. Most recent first.
 ## v1.7.1
 
 - **Fix: Sign-in can no longer trap you on the splash screen** — If a Supabase auth call hung (which happened during a `us-east-1` AZ outage), the TD-logo splash had no escape and you had to Force Quit the app. Now: a "Cancel" link appears below the progress bar after 5 seconds; sign-in attempts time out automatically (30 seconds for email/password, 15 seconds for Google) with a clear "auth server may be unreachable" message; and a hung cold-start drops you into offline mode after 20 seconds instead of freezing.
+- **Fix: Scrolling no longer changes your number settings** — In Settings, scrolling the mouse wheel while the cursor sat over a number field (auto-archive threshold, timer durations) used to nudge the value up or down without you noticing. Those fields now ignore the scroll wheel, so scrolling the page leaves your settings untouched.
 
 ## v1.7.0
 

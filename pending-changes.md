@@ -42,4 +42,5 @@ Working file — entries written here during a session are processed into perman
 ---
 
 <!-- entries below this line are added automatically -->
-<!-- last processed: 2026-06-10 — entries through 2026-06-05 folded into CHANGELOG/RELEASE_NOTES/DEVLOG/FEATURES (v1.6.0 + v1.7.0 sections added; v1.7.1 auth-hang was already documented) -->
+<!-- last processed: 2026-06-10 (session 2) — #69 scroll-wheel fix + #68 AI-native copy removal folded into CHANGELOG/RELEASE_NOTES v1.7.1 (untagged bucket; latest tag still v1.7.0). DEVLOG entry added. Internal commits (3a21e42 ralph completion-check, aa01e3b/4a99221 ralph model + doc processing, 7fa2d8b prd.json story planning #68–#94) intentionally NOT in user-facing docs. -->
+

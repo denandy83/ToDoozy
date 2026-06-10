@@ -4,6 +4,17 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-06-10 — Audit-fix stories #68/#69, ralph tooling, story backlog #70–#94
+
+**Session type:** Bug fixes + tooling + backlog planning (branch `ralph/audit-fixes`)
+
+- **#69 — scroll wheel mutating number inputs (69a6d57)** — Number inputs in `ProjectsSettingsContent.tsx`, `TimerSettingsContent.tsx`, and `TimerPlayButton.tsx` now ignore wheel events so scrolling over a focused field can no longer silently change auto-archive thresholds or timer durations. User-facing → CHANGELOG + RELEASE_NOTES v1.7.1.
+- **#68 — removed "AI-native" from public-facing copy (36b0240)** — README and product description no longer use the phrase. CHANGELOG-only (not visible in-app).
+- **ralph completion-check scoping (3a21e42)** — Completion sentinel check now reads the agent result text rather than the whole stream log, avoiding false COMPLETE detection.
+- **ralph model selection pinned (aa01e3b + 4a99221)** — `ralph.sh` pins `--model claude-opus-4-8` (default) with documented Fable 5 escalation criteria; global template carries the same pin.
+- **Backlog staged (7fa2d8b)** — Stories #68–#88 (audit fixes) plus a staged Fable batch #89–#94 added to `prd.json`. These are planning entries, not shipped features — no FEATURES/RELEASE_NOTES change.
+- **Docs:** Folded the user-facing 2026-06-10 changes into CHANGELOG/RELEASE_NOTES v1.7.1 (the active untagged bucket — latest git tag is still v1.7.0, package.json 1.7.0). No version bump; that happens at release time via `/buildit`.
+
 ## 2026-06-10 — Task-tracker audit: all open Todoozy-labeled tasks fact-checked & made ralph-ready
 
 **Session type:** Documentation / tracker hygiene (no code changes)

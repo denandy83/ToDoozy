@@ -7,6 +7,8 @@ All bug fixes and changes to ToDoozy. Most recent first.
 ## v1.7.1
 
 - **Sign-in no longer traps you on the splash screen** — If a Supabase auth call hung (e.g. during an upstream outage), the TD-logo splash had no Cancel button and would block the app forever, forcing a Force Quit. Sign-in now times out (30s for email/password, 15s for Google OAuth, 20s for cold-start session restore) and the splash shows a Cancel link after 5 seconds. Cold-start hangs now fall through to offline mode instead of freezing.
+- **Scroll wheel no longer changes number settings (#69)** — Scrolling the mouse wheel over a focused number input (Projects auto-archive threshold, Timer durations, and the timer play button) used to silently change its value. Number inputs now ignore wheel events so scrolling the page can't alter a setting.
+- **Removed "AI-native" from the product description (#68)** — Public-facing copy (README and the product description) no longer uses the phrase "AI-native".
 
 ## v1.7.0
 
