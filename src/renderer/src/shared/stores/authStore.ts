@@ -44,6 +44,10 @@ interface AuthState {
   isAuthenticated: boolean
   loading: boolean
   error: string | null
+  // Informational/success message (e.g. "check your email") — rendered in a
+  // neutral/success style, never red. Kept separate from `error` so the UI
+  // doesn't show success states with danger styling.
+  infoMessage: string | null
   isOffline: boolean
   isTokenPermanentlyDead: boolean
 }
@@ -55,6 +59,7 @@ interface AuthActions {
   createUser(input: CreateUserInput): Promise<User>
   updateUser(id: string, input: UpdateUserInput): Promise<User | null>
   clearError(): void
+  clearInfoMessage(): void
   signInWithEmail(email: string, password: string): Promise<boolean>
   signUpWithEmail(email: string, password: string): Promise<void>
   signInWithGoogle(): Promise<void>
@@ -136,6 +141,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   isAuthenticated: false,
   loading: false,
   error: null,
+  infoMessage: null,
   isOffline: false,
   isTokenPermanentlyDead: false,
 
@@ -202,6 +208,10 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
     set({ error: null })
   },
 
+  clearInfoMessage(): void {
+    set({ infoMessage: null })
+  },
+
   // Bumps the generation so any in-flight auth flow exits without mutating
   // state, then drops loading back to false. Used by the SplashScreen Cancel
   // button to escape a hung Supabase call (e.g. wedged AZ during sign-in).
@@ -264,7 +274,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   },
 
   async signUpWithEmail(email: string, password: string): Promise<void> {
-    set({ loading: true, error: null })
+    set({ loading: true, error: null, infoMessage: null })
     try {
       const supabase = await getSupabase()
       // Point email confirmation at our public GitHub Pages confirmation page
@@ -286,10 +296,12 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         return
       }
 
-      // If email confirmation is required, session may be null
+      // If email confirmation is required, session may be null. This is a
+      // success state, not an error — surface it via infoMessage so the UI
+      // styles it green/neutral instead of red.
       if (!data.session) {
         set({
-          error: 'Check your email for a confirmation link.',
+          infoMessage: 'Check your email for a confirmation link.',
           loading: false
         })
         return

@@ -23,3 +23,13 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Fix: introduced transient local display state (`localValues`, keyed by project.id) in ArchiveSection. onChange writes the raw string to local state only; onBlur clamps via new `clampAutoArchiveValue()` helper and commits to the store. useEffect seeds local state for newly-appearing project ids without clobbering in-flight edits.
 - Extracted clamp logic to `src/renderer/src/features/settings/autoArchiveValue.ts` (pure: empty/NaN/<1 → 1, >999 → 999) so it's unit-testable in the node vitest env. The project has no jsdom/@testing-library harness, so a full component render test would require new deps — extracting the pure helper keeps the test consistent with the existing suite.
 - Tests: autoArchiveValue.test.ts (6 cases: in-range, empty/non-numeric→1, zero/negative→1, >max→999, boundaries 1/999, parseInt leading-int semantics). Full suite 758 passed / 37 files. typecheck clean. dev compiled on 5200 (DB-open runtime warning is unrelated env/path noise).
+- ToDoozy task 7c8aefa0 → Verifying.
+---
+
+## Story #71 — "check your email for a confirmation link" shown in red [2026-06-10]
+- Root cause: signUpWithEmail wrote the no-session confirmation message into the authStore `error` field; LoginScreen renders every `error` with danger (red) classes — so a success/info state looked like an error.
+- Fix (Option A): added a dedicated `infoMessage: string | null` to AuthState + `clearInfoMessage()` action (initialised null). signUpWithEmail now sets `infoMessage` (not `error`) on the no-session branch, and clears stale infoMessage on entry alongside `error`.
+- LoginScreen: destructure `infoMessage` + `clearInfoMessage`; render a green banner (border-success/20 bg-success/10 text-success — the `--color-success` token already exists in main.css and is used app-wide). clearInfoMessage() now mirrors every clearError() call site: Escape, mode toggle, "Forgot password?", and "Back to sign in".
+- Real sign-up errors still flow through `error` → still red (verified by test). Forgot-password resetSent banner left untouched (already neutral).
+- Tests: new authStore.test.ts (3 cases) — no-session → infoMessage set + error null; real error → error set + infoMessage null; clearInfoMessage resets to null. Mocked ../../lib/supabase via vi.hoisted so the no-session branch runs without window.api/Supabase. Full suite 761 passed / 38 files. typecheck clean. dev compiled + served on :5200.
+- ToDoozy task b0aef29d → Verifying.

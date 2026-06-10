@@ -14,8 +14,16 @@ export function LoginScreen(): React.JSX.Element {
   const [resetLoading, setResetLoading] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
 
-  const { loading, error, clearError, signInWithEmail, signUpWithEmail, signInWithGoogle } =
-    useAuthStore()
+  const {
+    loading,
+    error,
+    infoMessage,
+    clearError,
+    clearInfoMessage,
+    signInWithEmail,
+    signUpWithEmail,
+    signInWithGoogle
+  } = useAuthStore()
 
   useEffect(() => {
     let cancelled = false
@@ -72,15 +80,17 @@ export function LoginScreen(): React.JSX.Element {
       }
       if (e.key === 'Escape') {
         clearError()
+        clearInfoMessage()
       }
     },
-    [clearError]
+    [clearError, clearInfoMessage]
   )
 
   const toggleMode = useCallback((): void => {
     setMode((m) => (m === 'login' ? 'signup' : 'login'))
     clearError()
-  }, [clearError])
+    clearInfoMessage()
+  }, [clearError, clearInfoMessage])
 
   const handleGoogleSignIn = useCallback(async (): Promise<void> => {
     await signInWithGoogle()
@@ -147,7 +157,7 @@ export function LoginScreen(): React.JSX.Element {
 
               {mode === 'login' && (
                 <div className="flex justify-end -mt-2">
-                  <button type="button" onClick={() => { setMode('forgot'); clearError() }}
+                  <button type="button" onClick={() => { setMode('forgot'); clearError(); clearInfoMessage() }}
                     className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent transition-colors">
                     Forgot password?
                   </button>
@@ -157,6 +167,12 @@ export function LoginScreen(): React.JSX.Element {
               {error && (
                 <div className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-[11px] font-light text-danger">
                   {error}
+                </div>
+              )}
+
+              {infoMessage && (
+                <div className="rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-[11px] font-light text-success">
+                  {infoMessage}
                 </div>
               )}
 
@@ -236,7 +252,7 @@ export function LoginScreen(): React.JSX.Element {
               </div>
             )}
             <p className="text-sm font-light text-muted text-center">
-              <button onClick={() => { setMode('login'); setResetSent(false); setResetEmail(''); setResetError(null) }}
+              <button onClick={() => { setMode('login'); setResetSent(false); setResetEmail(''); setResetError(null); clearError(); clearInfoMessage() }}
                 className="font-medium text-accent hover:underline">
                 Back to sign in
               </button>
