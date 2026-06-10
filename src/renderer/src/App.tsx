@@ -17,6 +17,7 @@ import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
 import { initPowerListener } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
+import { flushAll as flushBatchedTaskEdits } from './services/TaskBatchSyncManager'
 
 function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
@@ -384,6 +385,23 @@ function App(): React.JSX.Element {
       window.api.tray.refresh()
     })
     return unsub
+  }, [])
+
+  // Flush batched detail-panel edits at the app-level boundaries (story #92):
+  // window blur, and quit (main intercepts the first quit attempt, waits for
+  // the renderer's ack, then quits for real).
+  useEffect(() => {
+    const onBlur = (): void => {
+      void flushBatchedTaskEdits()
+    }
+    window.addEventListener('blur', onBlur)
+    const unsubQuitFlush = window.api.app.onBeforeQuitFlush(() => {
+      void flushBatchedTaskEdits().finally(() => window.api.app.beforeQuitFlushDone())
+    })
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      unsubQuitFlush()
+    }
   }, [])
 
   // Listen for timer controls from tray

@@ -101,3 +101,42 @@ Note on "reduce polling once user channel subscribed": there is no periodic poll
 Tests: +5 applyRemoteTaskLabels (tombstone/idempotence/unknown-FK/local-only-survival), +4 activityLog.applyRemote
 (created_at preserved/duplicate/missing-task/placeholder user), +5 pullActivityLogForProject (cursor skip/first
 run/incremental/held-back high-water/duplicate-clean). 889 tests green, typecheck clean, dev compiles on :5200.
+
+## Story #92 — Batch task-detail edits (2026-06-10)
+
+New `TaskBatchSyncManager.ts`: module-level `pendingTaskIds` Set + per-task 30s safety timers. While a task
+is open in the Detail panel, `taskStore.updateTask` / `addLabel` / `removeLabel` call `markPending(taskId)`
+instead of pushing; `flush(taskId)` re-reads the task from the store and pushes through the SAME
+`syncIfShared` routing (now exported from taskStore) so shared/personal both work. `flush` is a no-op when
+not pending (double-flush safe) and skips tasks deleted while buffered.
+
+Boundaries wired:
+- Task switch: `selectTask`/`navigateTask`/`setCurrentTask(id)` flush the previous lastSelectedTaskId.
+- Panel close: `setCurrentTask(null)` + `clearSelection` flushAll; DetailPanel's Escape handler (which
+  bypasses store actions with a raw setState) flushes explicitly.
+- App blur: window 'blur' listener in App.tsx.
+- Quit: main intercepts the FIRST before-quit (preventDefault), sends `app:before-quit-flush` to all
+  windows, renderer flushes and acks via `app:before-quit-flush-done`, main quits on ack or 1.5s timeout
+  (sync_queue/reconcile covers anything that didn't make it). New preload pair onBeforeQuitFlush /
+  beforeQuitFlushDone (typed in index.d.ts).
+- Safety: 30s per-task timer, re-armed on every markPending.
+
+`isImmediateOp` (bypass batching): is_archived, is_in_my_day, completion — done-status looked up
+synchronously in statusStore, with `completed_date` string as fallback proxy when the status isn't hydrated
+(cross-project views). On an immediate push the pending mark is CANCELLED, not flushed — the push carries
+the full task row so buffered edits ride along; flushing later would be a redundant duplicate.
+deleteTask/bulkDeleteTasks also cancelPending (tombstone already pushed).
+
+GOTCHA worth remembering: two CONCURRENT dynamic `import()`s of the same vi.mock'ed module inside Vitest can
+race — the second resolves to the REAL module, not the mock (hit in flushAll's Promise.all; sequential
+flushes were fine). Fixed by caching the module promise once (`getStoreModule()`), which is also what
+production wants anyway. If a future service does `await import(...)` per concurrent call and its tests
+flake with "mock not applied", this is why.
+
+Debounce interplay (intentional, no data loss): title/description keep their 1s debounce; if Escape closes
+the panel inside that window, the debounced updateTask fires AFTER close → openTaskId is null → pushes
+immediately. One push either way.
+
+Tests: +10 TaskBatchSyncManager (markPending idempotent/timer re-arm/30s flush, flush clears+skips-deleted,
+double-flush no-op, flushAll drains, cancelPending disarms). 899 tests green, typecheck clean, dev compiles
+on :5200.

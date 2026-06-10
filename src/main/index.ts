@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { app, shell, BrowserWindow, globalShortcut, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, globalShortcut, ipcMain, powerMonitor } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase, getDatabasePath } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
@@ -334,9 +334,36 @@ app.whenReady().then(() => {
   })
 })
 
-// macOS: set quitting flag before quit so the close handler lets the window close
-app.on('before-quit', () => {
+// macOS: set quitting flag before quit so the close handler lets the window close.
+// Also a sync boundary (story #92): the first quit attempt is intercepted so the
+// renderer can flush batched detail-panel edits; quit proceeds on its ack or
+// after a 1.5s timeout (sync_queue/reconcile covers anything that didn't make it).
+let quitFlushState: 'idle' | 'flushing' | 'done' = 'idle'
+app.on('before-quit', (e) => {
   isQuitting = true
+  if (quitFlushState === 'done') return
+  if (quitFlushState === 'flushing') {
+    // Re-entered while waiting for the renderer — let the ack/timeout drive it
+    e.preventDefault()
+    return
+  }
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  if (wins.length === 0) {
+    quitFlushState = 'done'
+    return
+  }
+  quitFlushState = 'flushing'
+  e.preventDefault()
+  for (const win of wins) {
+    win.webContents.send('app:before-quit-flush')
+  }
+  const proceed = (): void => {
+    if (quitFlushState === 'done') return
+    quitFlushState = 'done'
+    app.quit()
+  }
+  ipcMain.once('app:before-quit-flush-done', () => proceed())
+  setTimeout(proceed, 1500)
 })
 
 app.on('window-all-closed', () => {

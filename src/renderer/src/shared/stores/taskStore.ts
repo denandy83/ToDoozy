@@ -14,7 +14,9 @@ import { logEvent } from './logStore'
 import { useSyncStore } from './syncStore'
 import { useLabelStore } from './labelStore'
 import { useProjectStore } from './projectStore'
+import { useStatusStore } from './statusStore'
 import { deduplicateLabelsByName, remapLabelsToCurrentUser } from '../utils/labelUtils'
+import * as TaskBatchSyncManager from '../../services/TaskBatchSyncManager'
 
 function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
@@ -48,8 +50,10 @@ function scheduleSavedViewRecount(): void {
     .catch(() => {})
 }
 
-// Sync task changes to Supabase for ALL projects (shared and personal)
-async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
+// Sync task changes to Supabase for ALL projects (shared and personal).
+// Exported for TaskBatchSyncManager, which flushes batched detail-panel
+// edits through the same shared/personal routing (story #92).
+export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
   try {
     const project = await window.api.projects.findById(task.project_id)
     if (!project) return
@@ -90,6 +94,25 @@ async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE
     }
     useSyncStore.getState().setError(msg)
   }
+}
+
+/**
+ * Ops that must reach Supabase immediately even while the task is open in
+ * the Detail panel: archive/unarchive, completion, and My Day membership —
+ * the tray and other devices read these live. Everything else batches until
+ * a panel boundary (story #92).
+ */
+function isImmediateOp(input: UpdateTaskInput): boolean {
+  if (input.is_archived !== undefined) return true
+  if (input.is_in_my_day !== undefined) return true
+  if (input.status_id !== undefined) {
+    const status = useStatusStore.getState().statuses[input.status_id]
+    if (status?.is_done === 1) return true
+    // Status not hydrated (cross-project views): completed_date is only ever
+    // set alongside a done status, so a non-null value means completion.
+    if (typeof input.completed_date === 'string') return true
+  }
+  return false
 }
 
 interface RecurringCloneResult {
@@ -445,7 +468,16 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             }
           }
         }
-        syncIfShared(task, 'UPDATE')
+        const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
+        if (task.id === openTaskId && !isImmediateOp(input)) {
+          TaskBatchSyncManager.markPending(task.id)
+        } else {
+          // An immediate push carries the full task row, so any buffered
+          // edits ride along — drop the pending mark instead of pushing the
+          // same state again at the next boundary.
+          TaskBatchSyncManager.cancelPending(task.id)
+          syncIfShared(task, 'UPDATE')
+        }
         scheduleSavedViewRecount()
       }
       return task
@@ -512,6 +544,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
           }
         })
+        TaskBatchSyncManager.cancelPending(id)
         if (taskToDelete) syncIfShared(taskToDelete, 'DELETE')
         scheduleSavedViewRecount()
       }
@@ -647,7 +680,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const added = labels.find((l) => l.id === labelId)
       logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
       const task = get().tasks[taskId]
-      if (task) syncIfShared(task, 'UPDATE')
+      if (task) {
+        const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
+        if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id)
+        else syncIfShared(task, 'UPDATE')
+      }
       scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
@@ -705,7 +742,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       if (anyRemoved) {
         logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null)
         const task = get().tasks[taskId]
-        if (task) syncIfShared(task, 'UPDATE')
+        if (task) {
+          const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
+          if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id)
+          else syncIfShared(task, 'UPDATE')
+        }
         scheduleSavedViewRecount()
       }
       return anyRemoved
@@ -750,18 +791,28 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   setCurrentTask(id: string | null): void {
     if (id === null) {
+      // Panel close boundary — push everything buffered while it was open.
+      void TaskBatchSyncManager.flushAll()
       set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null, showDetailPanel: false })
     } else {
+      const prev = get().lastSelectedTaskId
+      if (prev && prev !== id) void TaskBatchSyncManager.flush(prev)
       set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id, showDetailPanel: true })
     }
   },
 
   // Navigate to a task without affecting showDetailPanel (for Tab key navigation)
   navigateTask(id: string): void {
+    // Task switch boundary — flush the previous task's buffered edits.
+    const prev = get().lastSelectedTaskId
+    if (prev && prev !== id) void TaskBatchSyncManager.flush(prev)
     set({ selectedTaskIds: new Set<string>([id]), lastSelectedTaskId: id })
   },
 
   selectTask(id: string, options?: { fromContextMenu?: boolean; openPanel?: boolean }): void {
+    // Task switch boundary — flush the previous task's buffered edits.
+    const prev = get().lastSelectedTaskId
+    if (prev && prev !== id) void TaskBatchSyncManager.flush(prev)
     const currentlyOpen = get().showDetailPanel
     const showPanel = options?.fromContextMenu
       ? currentlyOpen
@@ -795,6 +846,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   clearSelection(): void {
+    // Panel close boundary — push everything buffered while it was open.
+    void TaskBatchSyncManager.flushAll()
     set({ selectedTaskIds: new Set<string>(), lastSelectedTaskId: null, showDetailPanel: false })
   },
 
@@ -829,6 +882,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       await Promise.all(ids.map((id) => window.api.tasks.delete(id)))
       // Sync deletions to Supabase
       for (const task of tasksToDelete) {
+        TaskBatchSyncManager.cancelPending(task.id)
         syncIfShared(task, 'DELETE')
       }
       set((state) => {

@@ -405,6 +405,8 @@ export interface AppAPI {
   setLoginItemSettings(openAtLogin: boolean): Promise<void>
   getChangelog(): Promise<string>
   getDatabasePath(): Promise<string>
+  onBeforeQuitFlush(callback: () => void): () => void
+  beforeQuitFlushDone(): void
 }
 
 export interface ReleaseNotesSyncResult {

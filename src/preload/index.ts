@@ -318,7 +318,15 @@ const api: TodoozyAPI = {
     getLoginItemSettings: () => ipcRenderer.invoke('app:getLoginItemSettings'),
     setLoginItemSettings: (openAtLogin) => ipcRenderer.invoke('app:setLoginItemSettings', openAtLogin),
     getChangelog: () => ipcRenderer.invoke('app:getChangelog'),
-    getDatabasePath: () => ipcRenderer.invoke('app:getDatabasePath') as Promise<string>
+    getDatabasePath: () => ipcRenderer.invoke('app:getDatabasePath') as Promise<string>,
+    onBeforeQuitFlush: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('app:before-quit-flush', handler)
+      return () => {
+        ipcRenderer.removeListener('app:before-quit-flush', handler)
+      }
+    },
+    beforeQuitFlushDone: () => ipcRenderer.send('app:before-quit-flush-done')
   },
 
   projectAreas: {

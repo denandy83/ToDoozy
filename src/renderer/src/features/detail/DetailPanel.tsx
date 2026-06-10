@@ -22,6 +22,7 @@ import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
 import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
 import { formatDate } from '../../shared/utils/dateFormat'
+import { flushAll as flushBatchedTaskEdits } from '../../services/TaskBatchSyncManager'
 
 export function DetailPanel(): React.JSX.Element | null {
   const task = useTaskStore(selectCurrentTask)
@@ -58,7 +59,9 @@ export function DetailPanel(): React.JSX.Element | null {
         // If a date/time picker dropdown is open (or was just closed), don't close the panel
         if (document.querySelector('.react-datepicker-popper')) return
         if ((e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled) return
-        // Close detail panel but keep task selected, then focus the task row
+        // Close detail panel but keep task selected, then focus the task row.
+        // Panel close is a sync boundary — push the buffered edits (story #92).
+        void flushBatchedTaskEdits()
         const selectedId = useTaskStore.getState().lastSelectedTaskId
         useTaskStore.setState({ showDetailPanel: false })
         if (selectedId) {
