@@ -65,6 +65,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
+  const pendingScrollTaskId = useTaskStore((s) => s.pendingScrollTaskId)
   const layoutMode = useViewStore(selectLayoutMode)
   const project = useProjectStore((s) => s.projects[projectId])
   const syncStatus = useSyncStore(selectSyncStatus)
@@ -304,6 +305,25 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     }
     return result
   }, [filteredTasks, statuses, expandedTaskIds, prioritySortFn, doneSortFn])
+
+  // Consume a pending scroll request (set by "Go to task" toast, tray/notification
+  // navigation). Re-runs when flatTasks changes so a cross-project navigation that
+  // hydrates asynchronously still scrolls once the row is rendered. Clear the
+  // pending id only after the element is found so it isn't dropped mid-hydration.
+  useEffect(() => {
+    if (!pendingScrollTaskId) return
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const raf = requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(`[data-task-id="${pendingScrollTaskId}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+        useTaskStore.getState().setPendingScrollTask(null)
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pendingScrollTaskId, flatTasks])
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {

@@ -97,3 +97,22 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Tests: sortTasks.test.ts +3 cases (completed_date asc nulls-last, desc most-recent-first, two-null tie→order_index) and SORT_FIELD_LABELS.completed_date assertion. 20 pass in file; full suite 815 pass / 45 files.
 - typecheck clean; dev server compiles all three processes on :5200 (runtime DB-open error is env-only — no dev DB in unattended run, unrelated to this renderer-only change).
 - ToDoozy task f0f90144 → Verifying.
+
+## Story #81 — "go to task" on recurring clone doesn't scroll into view (2026-06-10)
+- Added pending-scroll mechanism to taskStore: `pendingScrollTaskId: string | null` state +
+  `setPendingScrollTask(id)` action. Default null.
+- AppLayout: after `selectTask(taskId)` in the recurring-clone "Go to task" toast handler,
+  the tray `onNavigateToTask`, and the notification `onNavigateToTask` handlers, also call
+  `setPendingScrollTask(taskId)`.
+- Consumers: added a `useEffect` in BOTH `TaskListView` and `MyDayView` that, when
+  `pendingScrollTaskId` is set, RAFs to find `[data-task-id="<id>"]` inside `containerRef`,
+  `scrollIntoView({ block: 'nearest' })`, then clears the pending id. Effect deps
+  `[pendingScrollTaskId, flatTasks]` so cross-project async hydration re-runs it once the row
+  renders; id is only cleared after the element is actually found (won't drop mid-hydration).
+  Respects prefers-reduced-motion (behavior 'auto' vs 'smooth').
+- Why MyDayView too: the tray handler navigates to my-day; without a my-day consumer the
+  pending id would linger and could mis-fire on the next project view mount. Both views render
+  TaskRow (which already carries `data-task-id`) inside a scrollable `containerRef`.
+- Tests: extended taskStore.selection.test.ts with a `setPendingScrollTask` describe block
+  (default null, set, clear-once-consumed, does-not-touch-selection). Full suite 819 pass,
+  typecheck clean, dev build compiles on 5200.

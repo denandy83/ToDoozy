@@ -368,6 +368,25 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     return result
   }, [bucketGroups, prioritySortFn, expandedTaskIds, allTasks])
 
+  // Consume a pending scroll request (set by tray "Go to task" navigation, which
+  // opens My Day). Re-runs when flatTasks changes so the row is scrolled into view
+  // once rendered; clears the pending id only after the element is found.
+  const pendingScrollTaskId = useTaskStore((s) => s.pendingScrollTaskId)
+  useEffect(() => {
+    if (!pendingScrollTaskId) return
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const raf = requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(`[data-task-id="${pendingScrollTaskId}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+        useTaskStore.getState().setPendingScrollTask(null)
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pendingScrollTaskId, flatTasks])
+
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
       if (!currentUser || !addTaskProject) return

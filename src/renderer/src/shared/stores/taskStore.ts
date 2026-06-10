@@ -95,6 +95,7 @@ interface TaskState {
   pendingBulkDeleteTaskIds: string[] | null
   movingTaskId: string | null
   lastRecurringClone: RecurringCloneResult | null
+  pendingScrollTaskId: string | null
   loading: boolean
   error: string | null
 }
@@ -133,6 +134,7 @@ interface TaskActions {
   setPendingSubtaskParent(parentId: string | null): void
   setPendingDeleteTask(taskId: string | null): void
   setMovingTask(taskId: string | null): void
+  setPendingScrollTask(taskId: string | null): void
   clearError(): void
   clearLastRecurringClone(): void
 }
@@ -151,6 +153,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   pendingBulkDeleteTaskIds: null,
   movingTaskId: null,
   lastRecurringClone: null,
+  pendingScrollTaskId: null,
   loading: false,
   error: null,
 
@@ -910,6 +913,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   setMovingTask(taskId: string | null): void {
     set({ movingTaskId: taskId })
+  },
+
+  setPendingScrollTask(taskId: string | null): void {
+    set({ pendingScrollTaskId: taskId })
   },
 
   clearError(): void {

@@ -39,7 +39,8 @@ describe('taskStore selection methods', () => {
         't5': makeFakeTask({ id: 't5', order_index: 4 })
       },
       selectedTaskIds: new Set<string>(),
-      lastSelectedTaskId: null
+      lastSelectedTaskId: null,
+      pendingScrollTaskId: null
     })
   })
 
@@ -159,6 +160,30 @@ describe('taskStore selection methods', () => {
 
       useTaskStore.getState().setPendingBulkDeleteTasks(null)
       expect(useTaskStore.getState().pendingBulkDeleteTaskIds).toBeNull()
+    })
+  })
+
+  describe('setPendingScrollTask', () => {
+    it('defaults to null', () => {
+      expect(useTaskStore.getState().pendingScrollTaskId).toBeNull()
+    })
+
+    it('sets a task id to scroll to', () => {
+      useTaskStore.getState().setPendingScrollTask('t3')
+      expect(useTaskStore.getState().pendingScrollTaskId).toBe('t3')
+    })
+
+    it('clears the pending scroll once consumed', () => {
+      useTaskStore.getState().setPendingScrollTask('t3')
+      useTaskStore.getState().setPendingScrollTask(null)
+      expect(useTaskStore.getState().pendingScrollTaskId).toBeNull()
+    })
+
+    it('does not affect selection state', () => {
+      useTaskStore.getState().selectTask('t1')
+      useTaskStore.getState().setPendingScrollTask('t4')
+      expect(useTaskStore.getState().selectedTaskIds).toEqual(new Set(['t1']))
+      expect(useTaskStore.getState().pendingScrollTaskId).toBe('t4')
     })
   })
 })

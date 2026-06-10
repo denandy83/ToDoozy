@@ -128,6 +128,7 @@ export function AppLayout(): React.JSX.Element {
     const unsubTask = window.api.tray.onNavigateToTask((taskId) => {
       rawSetView('my-day')
       useTaskStore.getState().selectTask(taskId)
+      useTaskStore.getState().setPendingScrollTask(taskId)
     })
     const unsubMyDay = window.api.tray.onNavigateToMyDay(() => {
       rawSetView('my-day')
@@ -143,6 +144,7 @@ export function AppLayout(): React.JSX.Element {
     const unsub = window.api.notifications.onNavigateToTask((taskId, projectId) => {
       useViewStore.setState({ currentView: 'project', selectedProjectId: projectId })
       useTaskStore.getState().selectTask(taskId)
+      useTaskStore.getState().setPendingScrollTask(taskId)
     })
     return unsub
   }, [])
@@ -451,6 +453,7 @@ export function AppLayout(): React.JSX.Element {
             }
           }
           useTaskStore.getState().selectTask(taskId)
+          useTaskStore.getState().setPendingScrollTask(taskId)
         }
       }
     })
