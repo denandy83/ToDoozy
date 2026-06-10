@@ -9,6 +9,7 @@ import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
 import { useUpdateStore } from './shared/stores/updateStore'
 import { useSyncStore } from './shared/stores/syncStore'
+import { useSavedViewStore } from './shared/stores/savedViewStore'
 import { logEvent } from './shared/stores/logStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
@@ -263,6 +264,8 @@ function App(): React.JSX.Element {
             useTaskStore.getState().hydrateAllForProject(pid, userId)
             useTaskStore.getState().hydrateAllTaskLabels(pid)
           }
+          // Remote task arrivals can start/stop matching saved-view filters.
+          useSavedViewStore.getState().scheduleRecount(userId)
         }
       } finally {
         pullInProgress = false
@@ -313,6 +316,8 @@ function App(): React.JSX.Element {
       hydrateAllTaskLabels(currentProjectId)
       hydrateMyDay(currentUser.id)
       hydrateSettings()
+      // Local MCP / quick-add writes can change saved-view membership too.
+      useSavedViewStore.getState().scheduleRecount(currentUser.id)
     })
     return unsub
   }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])

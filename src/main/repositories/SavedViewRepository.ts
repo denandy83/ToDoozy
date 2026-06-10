@@ -189,12 +189,29 @@ export class SavedViewRepository {
       const conditions: string[] = ['t.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
       const params: (string | number)[] = []
 
+      // Label filters are stored as lowercased label NAMES (the filter store keys
+      // on name, not id — see labelStore.toggleLabelFilter). Match by name so the
+      // sidebar count agrees with the open view's live name-based matching.
+      // labelLogic 'all' (default) → task must carry every filter label;
+      // 'any' → at least one.
       const labelIds = config.labelIds as string[] | undefined
       if (labelIds && labelIds.length > 0) {
-        sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
-        const placeholders = labelIds.map(() => '?').join(', ')
-        conditions.push(`tl.label_id IN (${placeholders})`)
-        params.push(...labelIds)
+        const names = labelIds.map((s) => String(s).toLowerCase())
+        const placeholders = names.map(() => '?').join(', ')
+        const labelLogic = config.labelLogic === 'any' ? 'any' : 'all'
+        if (labelLogic === 'all') {
+          conditions.push(
+            `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
+              ` WHERE LOWER(l.name) IN (${placeholders})` +
+              ` GROUP BY tl.task_id HAVING COUNT(DISTINCT LOWER(l.name)) = ${names.length})`
+          )
+        } else {
+          conditions.push(
+            `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
+              ` WHERE LOWER(l.name) IN (${placeholders}))`
+          )
+        }
+        params.push(...names)
       }
 
       const projectIds = config.projectIds as string[] | undefined
@@ -228,9 +245,14 @@ export class SavedViewRepository {
       // Exclusion filters
       const excludeLabelIds = config.excludeLabelIds as string[] | undefined
       if (excludeLabelIds && excludeLabelIds.length > 0) {
-        const placeholders = excludeLabelIds.map(() => '?').join(', ')
-        conditions.push(`t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}))`)
-        params.push(...excludeLabelIds)
+        // Stored as lowercased names too — exclude any task carrying one of them.
+        const names = excludeLabelIds.map((s) => String(s).toLowerCase())
+        const placeholders = names.map(() => '?').join(', ')
+        conditions.push(
+          `t.id NOT IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
+            ` WHERE LOWER(l.name) IN (${placeholders}))`
+        )
+        params.push(...names)
       }
 
       const excludeStatusIds = config.excludeStatusIds as string[] | undefined

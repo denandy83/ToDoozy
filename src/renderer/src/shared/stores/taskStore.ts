@@ -33,6 +33,21 @@ function logTaskActivity(taskId: string, action: string, oldValue: string | null
   }).catch(() => {})
 }
 
+/**
+ * Tell the saved-view store to refresh its sidebar counts (debounced 1s).
+ * Called after any task mutation that can change which tasks match a view's
+ * filter (create/update/delete/archive/label add+remove, bulk variants).
+ * Dynamic import avoids a static taskStore → savedViewStore → viewStore →
+ * taskStore cycle; the recount is debounced so the import latency is irrelevant.
+ */
+function scheduleSavedViewRecount(): void {
+  const userId = getUserId()
+  if (!userId) return
+  import('./savedViewStore')
+    .then(({ useSavedViewStore }) => useSavedViewStore.getState().scheduleRecount(userId))
+    .catch(() => {})
+}
+
 // Sync task changes to Supabase for ALL projects (shared and personal)
 async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
   try {
@@ -106,6 +121,7 @@ interface TaskActions {
   hydrateArchived(projectId: string): Promise<void>
   hydrateTemplates(projectId: string): Promise<void>
   hydrateAllForProject(projectId: string, userId: string): Promise<void>
+  hydrateAllForUser(userId: string): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
   deleteTask(id: string): Promise<boolean>
@@ -258,6 +274,43 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
+  async hydrateAllForUser(userId: string): Promise<void> {
+    // Cross-project hydration for views that span every project (Saved Views).
+    // Loads top-level + sub tasks AND their label mappings for ALL of the
+    // user's projects, then MERGES into the store (never resets, never toggles
+    // `loading`) so a view can match tasks from projects not visited this
+    // session without a jarring full reload. Gap A in the saved-view spec.
+    try {
+      const allProjects = await window.api.projects.getProjectsForUser(userId)
+      const [taskArrays, labelMappingArrays] = await Promise.all([
+        Promise.all(allProjects.map((p) => window.api.tasks.findByProjectId(p.id))),
+        Promise.all(allProjects.map((p) => window.api.labels.findTaskLabelsByProject(p.id)))
+      ])
+      set((state) => {
+        const tasks = { ...state.tasks }
+        for (const arr of taskArrays) {
+          for (const task of arr) tasks[task.id] = task
+        }
+        const taskLabels = { ...state.taskLabels }
+        for (const mappings of labelMappingArrays) {
+          const grouped: Record<string, Label[]> = {}
+          for (const m of mappings) {
+            const { task_id, ...label } = m
+            if (!grouped[task_id]) grouped[task_id] = []
+            grouped[task_id].push(label)
+          }
+          for (const [tid, labels] of Object.entries(grouped)) {
+            taskLabels[tid] = labels
+          }
+        }
+        return { tasks, taskLabels }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
+      set({ error: message })
+    }
+  },
+
   async createTask(input: CreateTaskInput): Promise<Task> {
     try {
       const task = await window.api.tasks.create(input)
@@ -266,6 +319,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       }))
       syncIfShared(task, 'INSERT')
       logTaskActivity(task.id, 'created', null, null)
+      scheduleSavedViewRecount()
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create task'
@@ -387,6 +441,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           }
         }
         syncIfShared(task, 'UPDATE')
+        scheduleSavedViewRecount()
       }
       return task
     } catch (err) {
@@ -453,6 +508,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           }
         })
         if (taskToDelete) syncIfShared(taskToDelete, 'DELETE')
+        scheduleSavedViewRecount()
       }
       return result
     } catch (err) {
@@ -490,6 +546,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         for (const st of subtasks) {
           syncIfShared(st, 'INSERT')
         }
+        scheduleSavedViewRecount()
       }
       return task
     } catch (err) {
@@ -563,6 +620,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       })
       syncIfShared(task, 'INSERT')
       logTaskActivity(task.id, 'created', null, null)
+      scheduleSavedViewRecount()
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create subtask'
@@ -585,6 +643,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
       const task = get().tasks[taskId]
       if (task) syncIfShared(task, 'UPDATE')
+      scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
       console.error('[addLabel] threw', err)
@@ -642,6 +701,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null)
         const task = get().tasks[taskId]
         if (task) syncIfShared(task, 'UPDATE')
+        scheduleSavedViewRecount()
       }
       return anyRemoved
     } catch (err) {
@@ -749,6 +809,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       for (const task of results) {
         if (task) syncIfShared(task, 'UPDATE')
       }
+      scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to bulk update tasks'
       set({ error: message })
@@ -800,6 +861,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
         }
       })
+      scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to bulk delete tasks'
       set({ error: message })
@@ -823,6 +885,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         const task = get().tasks[id]
         if (task) syncIfShared(task, 'UPDATE')
       }
+      scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label to tasks'
       set({ error: message })
@@ -859,6 +922,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         const task = get().tasks[id]
         if (task) syncIfShared(task, 'UPDATE')
       }
+      scheduleSavedViewRecount()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label from tasks'
       set({ error: message })

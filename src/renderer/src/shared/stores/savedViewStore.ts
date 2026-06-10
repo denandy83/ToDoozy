@@ -2,6 +2,7 @@ import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { SavedView, CreateSavedViewInput } from '../../../../shared/types'
 import { LABEL_AUTO_COLORS } from '../hooks/smartInputParser'
+import { useViewStore } from './viewStore'
 
 interface SavedViewState {
   views: SavedView[]
@@ -14,6 +15,12 @@ interface SavedViewState {
 interface SavedViewActions {
   hydrate(userId: string): Promise<void>
   hydrateCounts(userId: string): Promise<void>
+  /**
+   * Debounced (1s) recount of every saved view's matching-task count. Wired to
+   * task mutations / Realtime / WAL events so sidebar counts refresh when a task
+   * starts (or stops) matching a view's filter without needing an app restart.
+   */
+  scheduleRecount(userId: string): void
   setActiveViewFilterConfig(config: string | null): void
   setViewCount(viewId: string, count: number): void
   createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView>
@@ -23,6 +30,33 @@ interface SavedViewActions {
 }
 
 export type SavedViewStore = SavedViewState & SavedViewActions
+
+/** Debounce handle for scheduleRecount — module-level so rapid mutations coalesce. */
+let recountTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Recompute matching-task counts for every saved view via one indexed SQL
+ * COUNT per view. When `skipViewId` is set, that view's existing count is
+ * preserved instead of recomputed — used by scheduleRecount so the currently
+ * open saved view (which keeps its own count live from the rendered task list,
+ * and may carry unsaved filter edits) isn't clobbered by the saved-config count.
+ */
+async function recomputeCounts(userId: string, skipViewId: string | null): Promise<void> {
+  const { views, viewCounts } = useSavedViewStore.getState()
+  const counts: Record<string, number> = {}
+  for (const view of views) {
+    if (view.id === skipViewId) {
+      if (viewCounts[view.id] !== undefined) counts[view.id] = viewCounts[view.id]
+      continue
+    }
+    try {
+      counts[view.id] = await window.api.savedViews.countMatching(view.filter_config, userId)
+    } catch {
+      counts[view.id] = 0
+    }
+  }
+  useSavedViewStore.setState({ viewCounts: counts })
+}
 
 export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => ({
   views: [],
@@ -43,16 +77,22 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   },
 
   async hydrateCounts(userId: string): Promise<void> {
-    const views = useSavedViewStore.getState().views
-    const counts: Record<string, number> = {}
-    for (const view of views) {
-      try {
-        counts[view.id] = await window.api.savedViews.countMatching(view.filter_config, userId)
-      } catch {
-        counts[view.id] = 0
-      }
-    }
-    set({ viewCounts: counts })
+    // Explicit recount of every view (app start, view-unmount cleanup, save).
+    await recomputeCounts(userId, null)
+  },
+
+  scheduleRecount(userId: string): void {
+    if (recountTimer) clearTimeout(recountTimer)
+    recountTimer = setTimeout(() => {
+      recountTimer = null
+      // Skip the currently open saved view: it maintains its own count live
+      // from the rendered task list and may have unsaved filter edits whose
+      // count must not be overwritten by the saved-config SQL count. Its
+      // unmount cleanup re-runs hydrateCounts to settle on the saved value.
+      const view = useViewStore.getState()
+      const skipId = view.currentView === 'saved-view' ? view.selectedSavedViewId : null
+      void recomputeCounts(userId, skipId)
+    }, 1000)
   },
 
   async createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView> {

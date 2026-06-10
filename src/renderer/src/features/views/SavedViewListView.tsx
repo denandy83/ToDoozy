@@ -98,6 +98,14 @@ export function SavedViewListView(): React.JSX.Element {
     useLabelStore.getState().hydrateAllLabels()
   }, [])
 
+  // Gap A: a saved view spans every project, so make sure tasks (and their
+  // label mappings) from projects not yet visited this session are in the
+  // store. Without this the live `matchingTasks` set can simply lack matching
+  // tasks from unvisited projects. Merges into the store, so no reload flash.
+  useEffect(() => {
+    if (userId) useTaskStore.getState().hydrateAllForUser(userId)
+  }, [userId])
+
   // Parse stored filter config and apply to filter store on mount
   useEffect(() => {
     if (!currentView) return

@@ -162,6 +162,113 @@ describe('SavedViewRepository — sync surface', () => {
   })
 })
 
+describe('SavedViewRepository — countMatchingTasks', () => {
+  let db: DatabaseSync
+  let repo: SavedViewRepository
+  let userId: string
+
+  // Status ids
+  const TODO = 'st-todo'
+  const DONE = 'st-done'
+  // Label ids
+  const BUG = 'lbl-bug'
+  const FEATURE = 'lbl-feature'
+
+  function seedProjectStatusesLabels(): void {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO projects (id, name, owner_id, color, icon, sidebar_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run('p1', 'Project', userId, '#888', 'folder', 0, now, now)
+    db.prepare(
+      `INSERT INTO statuses (id, project_id, name, order_index, is_done, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(TODO, 'p1', 'To Do', 0, 0, 1, now, now)
+    db.prepare(
+      `INSERT INTO statuses (id, project_id, name, order_index, is_done, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(DONE, 'p1', 'Done', 1, 1, 0, now, now)
+    // Labels (post-migration labels table has no project_id column)
+    db.prepare(
+      'INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(BUG, 'Bug', '#ff0000', 0, now, now)
+    db.prepare(
+      'INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(FEATURE, 'Feature', '#00ff00', 1, now, now)
+  }
+
+  function addTask(
+    id: string,
+    opts: { status?: string; archived?: number; parent?: string | null; labels?: string[] } = {}
+  ): void {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO tasks (id, project_id, owner_id, title, status_id, priority, parent_id, is_archived, is_template, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, 'p1', userId, id, opts.status ?? TODO, 0, opts.parent ?? null, opts.archived ?? 0, 0, now, now)
+    for (const lbl of opts.labels ?? []) {
+      db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run(id, lbl)
+    }
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    userId = seedUser(db)
+    repo = new SavedViewRepository(db)
+    seedProjectStatusesLabels()
+    // t1: Bug | t2: Bug+Feature | t3: Feature | t4: none
+    addTask('t1', { labels: [BUG] })
+    addTask('t2', { labels: [BUG, FEATURE] })
+    addTask('t3', { labels: [FEATURE] })
+    addTask('t4', {})
+    // Excluded rows: done, archived, subtask — all carry Bug
+    addTask('t5', { status: DONE, labels: [BUG] })
+    addTask('t6', { archived: 1, labels: [BUG] })
+    addTask('t7', { parent: 't1', labels: [BUG] })
+  })
+
+  it('counts tasks matching a single label (filter stores lowercased name)', () => {
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(2) // t1, t2
+  })
+
+  it("labelLogic 'all' (default) requires every label", () => {
+    // t2 is the only task carrying BOTH Bug and Feature
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug', 'feature'] }), userId)).toBe(1)
+  })
+
+  it("labelLogic 'any' matches tasks carrying at least one label", () => {
+    expect(
+      repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug', 'feature'], labelLogic: 'any' }), userId)
+    ).toBe(3) // t1, t2, t3
+  })
+
+  it('matches label names case-insensitively', () => {
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['BUG'] }), userId)).toBe(2)
+  })
+
+  it('excludeLabelIds drops tasks carrying the excluded label', () => {
+    // Tasks without Bug, not done/archived/subtask: t3, t4
+    expect(repo.countMatchingTasks(JSON.stringify({ excludeLabelIds: ['bug'] }), userId)).toBe(2)
+  })
+
+  it('ignores done, archived, and subtask rows in label counts', () => {
+    // Only top-level, non-archived, non-done Bug tasks count (t1, t2) — never t5/t6/t7
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(2)
+  })
+
+  it('combines a label filter with a priority filter', () => {
+    // Give t1 a high priority; only it should match Bug + priority 3
+    db.prepare('UPDATE tasks SET priority = 3 WHERE id = ?').run('t1')
+    expect(
+      repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'], priorities: [3] }), userId)
+    ).toBe(1)
+  })
+
+  it('returns 0 for an unknown label name', () => {
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['nonexistent'] }), userId)).toBe(0)
+  })
+})
+
 describe('SavedViewRepository — applyRemote', () => {
   let db: DatabaseSync
   let repo: SavedViewRepository
