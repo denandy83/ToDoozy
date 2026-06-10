@@ -915,6 +915,16 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   // Create local project if not exists
   const localProject = await window.api.projects.findById(projectId)
   if (!localProject) {
+    // Append the newly-discovered shared project after the member's own
+    // projects rather than inheriting the owner's sidebar_order (which can be
+    // a large integer that pushes it past the sidebar's MAX_VISIBLE_PROJECTS
+    // cutoff). sidebar_order is a per-device preference; applyRemote preserves
+    // this local value on subsequent syncs (COALESCE in the ON CONFLICT clause).
+    const localProjects = await window.api.projects.getProjectsForUser(userId)
+    const maxLocalOrder = localProjects.reduce(
+      (m, p) => Math.max(m, p.sidebar_order ?? 0),
+      -1
+    )
     await window.api.projects.create({
       id: project.id,
       name: project.name,
@@ -922,7 +932,8 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       color: project.color,
       icon: project.icon,
       owner_id: project.owner_id,
-      is_default: 0
+      is_default: 0,
+      sidebar_order: maxLocalOrder + 1
     })
     // Add current user as member locally
     await window.api.projects.addMember(projectId, userId, 'member')

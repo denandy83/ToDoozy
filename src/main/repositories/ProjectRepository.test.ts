@@ -242,6 +242,48 @@ describe('ProjectRepository — applyRemote', () => {
     expect(local.name).toBe('Updated remote')
     expect(local.updated_at).toBe(fresh.updated_at)
   })
+
+  it('does not overwrite an existing local sidebar_order (per-device preference)', () => {
+    // Member placed the project at order 2 locally.
+    const p = repo.create({ id: 'r5', owner_id: ownerId, name: 'Shared', sidebar_order: 2 })
+    expect(p.sidebar_order).toBe(2)
+    // Owner pushes a fresh update carrying their own ordering (99).
+    const fresh: Project = {
+      ...p,
+      name: 'Shared (renamed by owner)',
+      sidebar_order: 99,
+      updated_at: new Date(new Date(p.updated_at).getTime() + 60_000).toISOString()
+    }
+    repo.applyRemote(fresh)
+    const local = repo.findById('r5')!
+    // Name change applies, but the member's local order is preserved.
+    expect(local.name).toBe('Shared (renamed by owner)')
+    expect(local.sidebar_order).toBe(2)
+  })
+
+  it('sets sidebar_order from the remote value for brand-new rows', () => {
+    const remote: Project = {
+      id: 'r6',
+      name: 'New from remote',
+      description: null,
+      color: '#888888',
+      icon: 'folder',
+      owner_id: ownerId,
+      is_default: 0,
+      is_shared: 0,
+      is_archived: 0,
+      sidebar_order: 7,
+      area_id: null,
+      auto_archive_enabled: 0,
+      auto_archive_value: 3,
+      auto_archive_unit: 'days',
+      created_at: '2026-04-25T10:00:00.000Z',
+      updated_at: '2026-04-25T10:00:00.000Z',
+      deleted_at: null
+    }
+    repo.applyRemote(remote)
+    expect(repo.findById('r6')!.sidebar_order).toBe(7)
+  })
 })
 
 describe('ProjectRepository — archive/unarchive', () => {

@@ -173,6 +173,12 @@ export class ProjectRepository {
     // default to 0 for brand-new rows — sync down for shared projects
     // sets it to 1 explicitly elsewhere.
     const isShared = existing?.is_shared ?? 0
+    // `sidebar_order` is a per-device preference, not synced state. The
+    // ON CONFLICT clause uses COALESCE(projects.sidebar_order, excluded.…)
+    // so an existing local value is never clobbered by the owner's ordering
+    // (which would otherwise push a shared project past the sidebar's
+    // MAX_VISIBLE_PROJECTS cutoff on the member's device). Brand-new rows
+    // still take the remote value via the INSERT VALUES below.
     this.db
       .prepare(
         `INSERT INTO projects (
@@ -188,7 +194,7 @@ export class ProjectRepository {
            icon = excluded.icon,
            owner_id = excluded.owner_id,
            is_default = excluded.is_default,
-           sidebar_order = excluded.sidebar_order,
+           sidebar_order = COALESCE(projects.sidebar_order, excluded.sidebar_order),
            area_id = excluded.area_id,
            auto_archive_enabled = excluded.auto_archive_enabled,
            auto_archive_value = excluded.auto_archive_value,
