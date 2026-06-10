@@ -9,3 +9,11 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Static-string change only, zero TS/TSX source touched → no new tests. typecheck clean, full suite 752/752 pass. Skipped `npm run dev` (no compilable source changed; typecheck is conclusive).
 - Decision: edited project CLAUDE.md too, since the story explicitly lists it as a public-facing occurrence — the "What Is This" tagline is user/contributor-facing, distinct from the internal ralph instructions below it.
 ---
+
+## Story #69 — scrolling over a number input changes the value (2026-06-10)
+- Added `onWheel={(e) => e.currentTarget.blur()}` to all 7 `<input type="number">` in the renderer: 5 in TimerSettingsContent.tsx (cookie min/hr, default reps, break duration, long-break interval, long-break duration), 1 in ProjectsSettingsContent.tsx (auto-archive value), 1 in TimerPlayButton.tsx (start-dialog Reps).
+- `blur()` chosen over `preventDefault()`: page scroll keeps working, the input just deselects on wheel — `preventDefault` would also block page scrolling.
+- Verified: `grep -rn onWheel src/` → exactly 7 handlers, one per number input. typecheck clean, full suite 752/752 pass, `npm run dev` compiles and serves on :5200.
+- One-liner DOM handler with no new repository methods / utility functions → no new unit tests (jsdom does not drive native number-input wheel increments, so a test would assert nothing meaningful); confirmed via existing suite + manual repro path.
+- ToDoozy task 381660b5 → Verifying.
+---

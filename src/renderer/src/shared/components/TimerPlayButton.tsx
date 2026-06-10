@@ -308,6 +308,7 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
                 max={99}
                 value={reps}
                 onChange={(e) => setReps(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                onWheel={(e) => e.currentTarget.blur()}
                 onFocus={(e) => e.currentTarget.select()}
                 onClick={(e) => e.currentTarget.select()}
                 className="w-12 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground selection:bg-accent/30 selection:text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"

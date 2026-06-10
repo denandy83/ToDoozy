@@ -252,6 +252,7 @@ export function TimerSettingsContent(): React.JSX.Element {
             min={0}
             value={cookieMinutesPerHour}
             onChange={(e) => setSetting('timer_cookie_minutes_per_hour', e.target.value)}
+            onWheel={(e) => e.currentTarget.blur()}
             className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min/hr</span>
@@ -296,6 +297,7 @@ export function TimerSettingsContent(): React.JSX.Element {
             max={99}
             value={defaultReps}
             onChange={(e) => setSetting('timer_default_reps', e.target.value)}
+            onWheel={(e) => e.currentTarget.blur()}
             className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
         </div>
@@ -313,6 +315,7 @@ export function TimerSettingsContent(): React.JSX.Element {
             max={60}
             value={breakMinutes}
             onChange={(e) => setSetting('timer_break_minutes', e.target.value)}
+            onWheel={(e) => e.currentTarget.blur()}
             className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>
@@ -349,6 +352,7 @@ export function TimerSettingsContent(): React.JSX.Element {
                 max={10}
                 value={longBreakInterval}
                 onChange={(e) => setSetting('timer_long_break_interval', e.target.value)}
+                onWheel={(e) => e.currentTarget.blur()}
                 className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted">sessions</span>
@@ -366,6 +370,7 @@ export function TimerSettingsContent(): React.JSX.Element {
                 max={60}
                 value={longBreakMinutes}
                 onChange={(e) => setSetting('timer_long_break_minutes', e.target.value)}
+                onWheel={(e) => e.currentTarget.blur()}
                 className="w-14 rounded-lg border border-border bg-transparent px-2 py-1.5 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted">min</span>

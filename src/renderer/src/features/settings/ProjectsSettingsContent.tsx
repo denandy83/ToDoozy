@@ -795,6 +795,7 @@ function ArchiveSection({ projects }: { projects: Project[] }): React.JSX.Elemen
                     max={999}
                     value={project.auto_archive_value ?? 3}
                     onChange={(e) => updateProject(project.id, { auto_archive_value: parseInt(e.target.value, 10) || 3 })}
+                    onWheel={(e) => e.currentTarget.blur()}
                     className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <select
