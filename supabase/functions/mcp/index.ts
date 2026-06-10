@@ -4,6 +4,7 @@
 import { McpServer, StreamableHttpTransport } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import rruleLib from 'npm:rrule@2'
+import { upsertTaskLabel, deleteTaskLabel } from './labelMutations.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -302,14 +303,14 @@ class TaskRepo {
     }
   }
   async addLabel(taskId: string, labelId: string) {
-    await this.client.from('task_labels').upsert({ task_id: taskId, label_id: labelId }, { onConflict: 'task_id,label_id' })
+    // Throws on a silently-dropped upsert (RLS reject / FK violation) — see labelMutations.ts.
+    await upsertTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
   }
   async removeLabel(taskId: string, labelId: string) {
-    const { error } = await this.client.from('task_labels').delete().eq('task_id', taskId).eq('label_id', labelId)
-    if (error) return false
+    // Throws on error rather than returning false, so callers can't ignore a failed delete.
+    await deleteTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
-    return true
   }
   async getLabels(taskId: string) {
     const { data } = await this.client.from('task_labels').select('task_id, label_id').eq('task_id', taskId)
@@ -1001,6 +1002,12 @@ function createHandlers(repos: Repos, userId: string) {
     async assign_label_to_task(args) {
       const taskId = requireStr(args, 'task_id'); const labelId = requireStr(args, 'label_id')
       await repos.tasks.addLabel(taskId, labelId)
+      // Verify-after-write: an RLS policy can reject the insert without surfacing an
+      // error on the upsert, so confirm the junction row is actually present.
+      const labels = await repos.tasks.getLabels(taskId)
+      if (!labels.some((l: { label_id: string }) => l.label_id === labelId)) {
+        throw new Error('Failed to assign label: row not present after write (likely blocked by RLS)')
+      }
       const label = await repos.labels.findById(labelId); const task = await repos.tasks.findById(taskId)
       await logActivity(taskId, userId, 'label_added', null, label?.name ?? labelId, task?.project_id)
       return { assigned: true, task_id: taskId, label_id: labelId }
@@ -1008,9 +1015,10 @@ function createHandlers(repos: Repos, userId: string) {
     async remove_label_from_task(args) {
       const taskId = requireStr(args, 'task_id'); const labelId = requireStr(args, 'label_id')
       const label = await repos.labels.findById(labelId); const task = await repos.tasks.findById(taskId)
-      const removed = await repos.tasks.removeLabel(taskId, labelId)
-      if (removed) await logActivity(taskId, userId, 'label_removed', label?.name ?? labelId, null, task?.project_id)
-      return { removed, task_id: taskId, label_id: labelId }
+      // removeLabel throws on a failed delete, so reaching this point means it landed.
+      await repos.tasks.removeLabel(taskId, labelId)
+      await logActivity(taskId, userId, 'label_removed', label?.name ?? labelId, null, task?.project_id)
+      return { removed: true, task_id: taskId, label_id: labelId }
     },
     async list_statuses(args) { return await repos.statuses.findByProjectId(requireStr(args, 'project_id')) },
     async search_tasks(args) {
