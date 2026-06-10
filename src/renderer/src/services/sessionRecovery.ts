@@ -129,6 +129,13 @@ export async function tryRestoreSession(attempts = 1): Promise<boolean> {
 
 interface RecoveryHandlers {
   onRecovered: () => void | Promise<void>
+  /**
+   * Fired when a recovery tick discovers the refresh token is permanently dead.
+   * Without this hook the module-level flag is invisible to React — the
+   * SessionBanner keeps showing the amber retry variant instead of flipping to
+   * the red "Session expired — Sign in again" variant.
+   */
+  onPermanentlyDead?: () => void
 }
 
 /**
@@ -159,6 +166,7 @@ export function startRecoveryTimer(handlers: RecoveryHandlers): void {
       } else if (permanentlyDead) {
         logEvent('warn', 'sync', 'Stopping recovery timer — token permanently dead, sign-in required')
         stopRecoveryTimer()
+        handlers.onPermanentlyDead?.()
       }
     } finally {
       recoveryInFlight = false

@@ -6,7 +6,7 @@
  * in the background. On new device, all data is pulled from Supabase.
  */
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import { getSupabase } from '../lib/supabase'
+import { getSupabase, safeRefresh } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { useLabelStore } from '../shared/stores/labelStore'
@@ -79,17 +79,15 @@ async function attemptSessionRefresh(): Promise<boolean> {
   if (refreshAttemptedThisCycle) return false
   refreshAttemptedThisCycle = true
   try {
-    const supabase = await getSupabase()
-    const { data, error } = await supabase.auth.refreshSession()
-    if (error || !data.session) {
-      console.error('[PersonalSync] Session refresh failed:', error?.message)
+    // safeRefresh serializes against autoRefreshToken via the authMutex and
+    // persists the rotated tokens itself. A bare auth.refreshSession() here can
+    // race the auto-refresher on the same refresh_token — the loser gets
+    // refresh_token_already_used and the whole session chain dies.
+    const session = await safeRefresh()
+    if (!session) {
+      console.error('[PersonalSync] Session refresh failed')
       return false
     }
-    // Store the refreshed session for persistence across restarts
-    await window.api.auth.storeSession(JSON.stringify({
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token
-    }))
     console.log('[PersonalSync] Session refreshed successfully')
     authFailureCount = 0
     return true

@@ -468,6 +468,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           // Start the auto-retry timer so we recover the moment the network
           // (or a fresh refresh) lets `setSession` succeed again.
           startRecoveryTimer({
+            onPermanentlyDead: () => set({ isTokenPermanentlyDead: true }),
             onRecovered: async () => {
               const sb = await getSupabase()
               const { data: { user } } = await sb.auth.getUser()
@@ -531,6 +532,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
       if (offlineUser) {
         set({ currentUser: offlineUser, isAuthenticated: true, isOffline: true, loading: false })
         startRecoveryTimer({
+          onPermanentlyDead: () => set({ isTokenPermanentlyDead: true }),
           onRecovered: async () => {
             const sb = await getSupabase()
             const { data: { user } } = await sb.auth.getUser()

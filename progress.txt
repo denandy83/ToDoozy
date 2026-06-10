@@ -1,206 +1,23 @@
 # Ralph Progress Log
-Started: Wed Jun 10 16:05:59 CEST 2026
+Started: Wed Jun 10 22:17:41 CEST 2026
 ---
 
-## Story #68 — remove "AI-native" from public-facing product description (2026-06-10)
-- Removed "AI-native" from 3 public-facing strings: package.json:4 description, README.md first sentence, CLAUDE.md "What Is This".
-- Left REBUILD_SPEC.md:20 untouched — that occurrence is an intentional design-principle bullet explaining the built-in MCP server, not a product tagline.
-- Verification: `grep -ri "ai.native" package.json README.md CLAUDE.md` → no matches (AC1 ✓); REBUILD_SPEC.md still contains it (AC2 ✓).
-- Static-string change only, zero TS/TSX source touched → no new tests. typecheck clean, full suite 752/752 pass. Skipped `npm run dev` (no compilable source changed; typecheck is conclusive).
-- Decision: edited project CLAUDE.md too, since the story explicitly lists it as a public-facing occurrence — the "What Is This" tagline is user/contributor-facing, distinct from the internal ralph instructions below it.
----
-
-## Story #69 — scrolling over a number input changes the value (2026-06-10)
-- Added `onWheel={(e) => e.currentTarget.blur()}` to all 7 `<input type="number">` in the renderer: 5 in TimerSettingsContent.tsx (cookie min/hr, default reps, break duration, long-break interval, long-break duration), 1 in ProjectsSettingsContent.tsx (auto-archive value), 1 in TimerPlayButton.tsx (start-dialog Reps).
-- `blur()` chosen over `preventDefault()`: page scroll keeps working, the input just deselects on wheel — `preventDefault` would also block page scrolling.
-- Verified: `grep -rn onWheel src/` → exactly 7 handlers, one per number input. typecheck clean, full suite 752/752 pass, `npm run dev` compiles and serves on :5200.
-- One-liner DOM handler with no new repository methods / utility functions → no new unit tests (jsdom does not drive native number-input wheel increments, so a test would assert nothing meaningful); confirmed via existing suite + manual repro path.
-- ToDoozy task 381660b5 → Verifying.
----
-
-## Story #70 — archive can't delete last number (auto-archive value input) [2026-06-10]
-- Root cause: ArchiveSection drove the auto-archive <input type="number"> fully from the Zustand store with `parseInt(e.target.value,10) || 3` on every keystroke. Clearing the field → parseInt("")=NaN → `NaN || 3` → 3, committed synchronously, so the field snapped back to 3 before the next keypress. Could never reach an empty transient state.
-- Fix: introduced transient local display state (`localValues`, keyed by project.id) in ArchiveSection. onChange writes the raw string to local state only; onBlur clamps via new `clampAutoArchiveValue()` helper and commits to the store. useEffect seeds local state for newly-appearing project ids without clobbering in-flight edits.
-- Extracted clamp logic to `src/renderer/src/features/settings/autoArchiveValue.ts` (pure: empty/NaN/<1 → 1, >999 → 999) so it's unit-testable in the node vitest env. The project has no jsdom/@testing-library harness, so a full component render test would require new deps — extracting the pure helper keeps the test consistent with the existing suite.
-- Tests: autoArchiveValue.test.ts (6 cases: in-range, empty/non-numeric→1, zero/negative→1, >max→999, boundaries 1/999, parseInt leading-int semantics). Full suite 758 passed / 37 files. typecheck clean. dev compiled on 5200 (DB-open runtime warning is unrelated env/path noise).
-- ToDoozy task 7c8aefa0 → Verifying.
----
-
-## Story #71 — "check your email for a confirmation link" shown in red [2026-06-10]
-- Root cause: signUpWithEmail wrote the no-session confirmation message into the authStore `error` field; LoginScreen renders every `error` with danger (red) classes — so a success/info state looked like an error.
-- Fix (Option A): added a dedicated `infoMessage: string | null` to AuthState + `clearInfoMessage()` action (initialised null). signUpWithEmail now sets `infoMessage` (not `error`) on the no-session branch, and clears stale infoMessage on entry alongside `error`.
-- LoginScreen: destructure `infoMessage` + `clearInfoMessage`; render a green banner (border-success/20 bg-success/10 text-success — the `--color-success` token already exists in main.css and is used app-wide). clearInfoMessage() now mirrors every clearError() call site: Escape, mode toggle, "Forgot password?", and "Back to sign in".
-- Real sign-up errors still flow through `error` → still red (verified by test). Forgot-password resetSent banner left untouched (already neutral).
-- Tests: new authStore.test.ts (3 cases) — no-session → infoMessage set + error null; real error → error set + infoMessage null; clearInfoMessage resets to null. Mocked ../../lib/supabase via vi.hoisted so the no-session branch runs without window.api/Supabase. Full suite 761 passed / 38 files. typecheck clean. dev compiled + served on :5200.
-- ToDoozy task b0aef29d → Verifying.
-
-## Story #72 — clicking "Less" on an expanded projects list doesn't work [2026-06-10]
-- Root cause: the sidebar auto-expand `useEffect` listed `projectsExpanded` in its dependency array. Clicking "Less" → `setProjectsExpanded(false)` → dep changed → effect re-ran → selected project still at idx >= 5 and `!projectsExpanded` now true → `setProjectsExpanded(true)`, immediately re-expanding. The click looked dead. (Matches debug-learnings.md:104 — keep useEffect deps minimal; don't include frequently-changing state the effect itself sets.)
-- Fix: read the current expanded state via a ref (`projectsExpandedRef`, kept in sync by a one-line effect) and removed `projectsExpanded` from the auto-expand effect's deps, so it fires only on navigation (currentView/selectedProjectId/projects), never on manual toggle.
-- Extracted the decision into a pure helper `shouldAutoExpandProjects()` + exported `MAX_VISIBLE_PROJECTS` in new `sidebarProjects.ts` (replacing the file-local const), so the navigation logic is unit-testable in the existing node vitest env. The project has no jsdom/@testing-library harness; following the #70 precedent, a pure helper test is preferred over adding DOM-render deps for a single fix.
-- Tests: sidebarProjects.test.ts (8 cases) — not-a-project / no-selection / within-cutoff / hidden-beyond-cutoff / boundary idx===MAX / already-expanded regression guard / missing id / custom maxVisible. Full suite 769 passed / 39 files (was 761). typecheck clean. dev compiled + served on :5200 (DB-open warning is the usual unrelated env/path noise).
-- ToDoozy task 493d85fd → Verifying.
-
-## Story #73 — creating a new project should take the next color in line [2026-06-10]
-- Goal: new projects pre-select the next unused palette color instead of always defaulting to #6366f1 (indigo). Both creation flows (NewProjectModal + Sidebar inline form) previously hardcoded the first color and duplicated the palette literal.
-- New shared module `src/renderer/src/features/projects/projectColors.ts`: exports `PROJECT_COLORS` (the 8-color palette) and `pickNextProjectColor(existingColors)` — returns the first palette color not present in existingColors (case-insensitive), falling back to deterministic cycling by `existingColors.length % 8` when all 8 are used.
-- NewProjectModal.tsx: removed the local PROJECT_COLORS const, imported from projectColors.ts, moved the `allProjects` selector above the `color` state, initialised color via `useState(() => pickNextProjectColor(...))`, and re-pick from fresh store state (`useProjectStore.getState().projects`) on both after-create and on-close resets. Color-picker swatches still render from the shared PROJECT_COLORS.
-- Sidebar.tsx: imported PROJECT_COLORS + pickNextProjectColor; replaced the duplicated inline palette literal with PROJECT_COLORS; initial newProjectColor + the after-create reset + the Escape reset all use the helper. Added a re-pick in the "Add" button onClick so the suggested color refreshes each time the inline form opens (the form toggles via state, it doesn't remount). After-create reset reads fresh store state so the just-used color isn't re-suggested. Left the unrelated saved-view color picker palette (line 599, 12 colors) untouched.
-- Tests: projectColors.test.ts (7 cases) — empty→first, first-taken→second, skip-multiple, order-independent, case-insensitive used-detection, cycle-by-count when all used (8%8=0, 9%8=1), cycle with uppercase duplicates. Full suite 776 passed / 40 files (was 769). typecheck clean. dev compiled + served on :5200 (DB-open warning is the usual unrelated env/path noise).
-- ToDoozy task 3de51a1f → Verifying.
-
-## Story #74 — shared projects hidden behind "More" (sidebar_order overwrite)
-- Root cause: applyRemote (ProjectRepository) overwrote local sidebar_order with the owner's value on every sync; syncProjectDown created discovered shared projects with the default sidebar_order=0.
-- Fix 1 (ProjectRepository.applyRemote): ON CONFLICT clause now `sidebar_order = COALESCE(projects.sidebar_order, excluded.sidebar_order)` — sidebar_order is a per-device preference, never clobbered by the owner's ordering. Brand-new rows still take the remote value via INSERT VALUES.
-- Fix 2 (SyncService.syncProjectDown): a newly-discovered shared project is created with sidebar_order = maxLocalOrder + 1 (appends after the member's own projects) instead of defaulting to 0.
-- Tests: added two cases to ProjectRepository.test.ts applyRemote block — existing local sidebar_order preserved on remote update; brand-new rows take the remote value. typecheck clean, 778 tests pass, dev compiles on 5200.
-
-## Story #75 — dismissing NLP date chip still applied the date & stripped the title
-- Root cause: getSubmitData re-parsed the unchanged input via parseNlpDate() on every submit, ignoring nlpDismissedRef. Dismissing the chip cleared nlpDateResult state but the fresh re-parse re-detected the same date, so the due date was applied and the date phrase stripped from the title.
-- Fix (useSmartInput.ts): extracted the submit-time NLP decision into a pure, exported `resolveSubmitNlp({title, selectedDate, nlpDismissed, nlpDateResult})` (mirrors the TimerPlayButton `paramsToStoreArgs` testability pattern — no renderHook/DOM infra exists in this repo). It skips parseNlpDate when dismissed and fully suppresses NLP (never falls back to stale nlpDateResult) when dismissed. getSubmitData now delegates to it; removed two leftover `[SmartInput]` debug console.logs whose locals moved into the helper.
-- Tests: new src/renderer/src/shared/hooks/useSmartInput.test.ts (6 cases): applies+strips when detected; dismissed → no date + full title preserved (the regression); dismissed suppresses even with stale state; selectedDate skips NLP; d: operator skips NLP; falls back to prior nlpDateResult when not dismissed. typecheck clean, 784 tests pass, dev compiles on 5200.
-- Note: AddTaskInput shares useSmartInput so it benefits automatically (no component change needed).
-
-## Story #76 — bare "121s" / "5m" / "3d" tokens falsely set a date
-- Root cause: parseNlpDate uses chrono's casual parser (chrono.parse), which has a relative-duration parser that reads a bare NNs/NNm/NNh/NNd/NNw/NNy token as "NN <unit> from now". In multi-word task names ("fix bug 121s", "migrate data 2w") the 80% match-coverage filter in useSmartInput doesn't fire, so the chip appears and the due date is applied on submit.
-- Fix (src/shared/nlpDateParser.ts): after each chrono.parse result (both the normalized-text branch and the original-text branch), reject when the matched text is a bare relative-duration abbreviation — `if (/^\d+[smhdwy]$/i.test(r.text.trim())) return null`. The regex only matches single-token abbreviations: it does NOT match "3pm"/"9am" (2-char suffix), "in 5m"/"in 2h" (matched text includes "in "), "tomorrow"/"next friday" (no digit prefix), or "0.5h" (decimal). So intentional relative durations via "in 5m"/"in 121s" still parse.
-- Tests: added 9 cases to nlpDateParser.test.ts — no false positive for 121s/5m/2h/3d/2w/2y; still parses "in 5m"/"in 121s"/"tomorrow". nlpDateParser file: 28 tests pass. Full suite 796 pass / 42 files (was 787). typecheck clean. dev compiles + serves on :5200 (DB-open warning is the usual unrelated env/path noise).
-- ToDoozy task 7a6830d9 → Verifying.
-
-## Story #77 — creating labels from inside a project doesn't actually sync the project link
-- Root cause: labelStore.createLabel() pushed only the user_labels row (pushLabel) and never the project_labels junction. LabelRepository.create links the label to the project in SQLite, so it looked fine on the same device, but the junction never reached Supabase — on a second device / after a reconcile the label existed globally but was unlinked from the project (missing from its FilterBar/LabelPicker). Only the existing-label path (addToProject) pushed the junction.
-- Fix (labelStore.ts createLabel): in the same fire-and-forget dynamic-import block that calls pushLabel, also destructure pushProjectLabel and call `void pushProjectLabel(input.project_id, label.id, null)` when input.project_id is set. Single dynamic import (no extra round-trip); pushProjectLabel already does a pushLabel pre-flight + handles FK 23503 (offline) gracefully, so no extra error handling needed. Labels created without project_id (Settings → Labels) are unaffected.
-- Tests: new src/renderer/src/shared/stores/labelStore.test.ts (2 cases) — mocks ./authStore (getUserId) + ../../services/PersonalSyncService (pushLabel/pushProjectLabel) and stubs window.api.labels.{create,findAll}: (1) create with project_id → pushProjectLabel called with (projectId, labelId, null); (2) create without project_id → pushProjectLabel never called. The push runs in a .then() callback so the test flushes via vi.waitFor. typecheck clean, full suite 798 pass / 43 files (was 796), dev compiles + serves on :5200 (DB-open warning is the usual unrelated env/path noise).
-- ToDoozy task ccca14d1 → Verifying.
-
-## Story #78 — start timer context menu doesn't show flow timer when default mode is Flowtime
-- Root cause: two code paths build StartTimerParams. The task-row play button (TimerPlayButton.startWithParams) was fixed in aa5d8c4 to derive isFlowtime/cookieMinutesPerHour via paramsToStoreArgs, but the context-menu path (TimerSubmenu.handleStart in ContextMenuSubmenus.tsx) was missed — it never set isFlowtime and never passed cookieMinutesPerHour, so right-click → Start Timer always started a countdown even with Settings → Timer → Default mode = Flowtime.
-- Fix (eliminate the divergence permanently): extracted the shared arg-builder into src/renderer/src/shared/utils/timerStartArgs.ts — moved paramsToStoreArgs + StartParams there and added buildTimerStartArgs(params, settings, identity) that returns the full StartTimerParams (flowtime → reps 0 / isPerpetual false / cookieMinutesPerHour = settings.cookieMinutesPerHour; timer+infinite → perpetual reps 1; timer+limited → chosen reps; cookie always 0 outside flowtime; long-break fields zeroed when disabled). TimerPlayButton now imports + re-exports paramsToStoreArgs/StartParams (so existing TimerPlayButton.test.ts import path stays valid) and uses buildTimerStartArgs in startWithParams. ContextMenuSubmenus.TimerSubmenu.handleStart now builds StartParams from settings.defaultMode/defaultDuration/defaultReps and calls buildTimerStartArgs — so the submenu honours flowtime + cookie pool identically to the play button.
-- Submenu UI: when defaultMode === 'flowtime', the Start Timer flyout shows a single "Start Flowtime · Count up" entry instead of the minute presets (count-up ignores fixed durations); timer mode keeps the preset list unchanged. isRunning guard preserved.
-- Tests: new src/renderer/src/shared/utils/timerStartArgs.test.ts (9 cases) covering paramsToStoreArgs (kept) + buildTimerStartArgs flowtime/timer/infinite/identity-passthrough/long-break-disabled. No jsdom/RTL in repo, so the testable unit is the pure helper (the bug was the submenu not calling it). typecheck clean, full suite 806 pass / 44 files (was 798), dev compiles + serves on :5200 (DB-open warning is the usual unrelated env/path noise).
-- ToDoozy task 1a17c4fc → Verifying.
-
-## Story #79 — add color to tray My Day according to priority (2026-06-10)
-- Goal: show a priority-colored dot icon next to each task in the macOS tray's left-click My Day menu so urgent/high tasks stand out at a glance.
-- TrayTask (src/main/tray-utils.ts) gained a `priority: number` field; classifyMyDayTasks now carries `t.priority` through into the not_started + in_progress mapped entries.
-- New src/main/priority-icons.ts: getPriorityDotIcon(priority) returns an Electron.NativeImage for priorities 1–4, undefined for 0/unknown. Icons are 32×32 RGBA solid-circle PNGs embedded as base64 constants (zero npm deps), decoded via nativeImage.createFromBuffer(buf, { scaleFactor: 2.0 }) → 16×16 logical points (standard macOS menu icon size), and module-level cached. Colors mirror PriorityIndicator: 1=#22c55e 2=#3b82f6 3=#f59e0b 4=#ef4444. NOT marked template images (would strip color). PNGs generated with a one-off zlib + manual-PNG-encoder script (4× supersampled anti-aliased circle on transparent bg) — documented in the file header for regeneration.
-- tray.ts buildLeftClickMenu: each task item now attaches `item.icon = getPriorityDotIcon(task.priority)` when defined; renamed local `icon` → `statusIcon` for clarity. Status prefix (○/◑) + truncated title unchanged.
-- Tests: updated tray-utils.test.ts toEqual fixtures to include priority:0 + added a "carries priority through" case; new priority-icons.test.ts (5 cases) mocks electron via vi.hoisted (node test env has no electron API) — covers 1–4 → NativeImage, 0/out-of-range → undefined, PNG signature + scaleFactor 2.0 on the decoded buffer, and per-priority caching.
-- Learning: vi.mock factory is hoisted above module top-level vars — reference mock fns through vi.hoisted(). Module-level caches persist across tests in a file, so assert on the returned value, not on mock.calls, when the value may already be cached.
-- typecheck clean; full suite 812 pass / 45 files (was 806); npm run build compiles all three processes cleanly.
-- ToDoozy task 4c9e9266 → Verifying.
-
-## Story #80 — sort options for 'done' tasks per project (2026-06-10)
-- sortTasks.ts: `completed_date` added to SortField, compareField case (nulls-last, mirrors due_date), and SORT_FIELD_LABELS ('Completed'). NOTE: this file's changes were already present in the working tree from interrupted iter-11 — kept as-is, they match the spec exactly.
-- FilterBar.tsx: added 'completed_date' to ALL_SORT_FIELDS (after due_date) so "Completed" shows in the sort picker (picker iterates ALL_SORT_FIELDS, not SORT_FIELD_LABELS keys — the spec's "appears automatically" was inaccurate; explicit add required).
-- TaskListView.tsx: new `doneSortFn` memo — under custom sort, done sections auto-sort by completed_date desc (most recent first), falling back to order_index for null completed_date; explicit sort still wins (returns prioritySortFn). Applied per-status in BOTH the render loop and the `flatTasks` memo (keyboard nav order matches render). Done sections get `disableDrag={isDoneSection || !isCustomSort || isOfflineShared}` so StatusSection trusts the parent's pre-sorted order (see debug-learnings "Sort applied at parent but child re-sorts internally").
-- Tests: sortTasks.test.ts +3 cases (completed_date asc nulls-last, desc most-recent-first, two-null tie→order_index) and SORT_FIELD_LABELS.completed_date assertion. 20 pass in file; full suite 815 pass / 45 files.
-- typecheck clean; dev server compiles all three processes on :5200 (runtime DB-open error is env-only — no dev DB in unattended run, unrelated to this renderer-only change).
-- ToDoozy task f0f90144 → Verifying.
-
-## Story #81 — "go to task" on recurring clone doesn't scroll into view (2026-06-10)
-- Added pending-scroll mechanism to taskStore: `pendingScrollTaskId: string | null` state +
-  `setPendingScrollTask(id)` action. Default null.
-- AppLayout: after `selectTask(taskId)` in the recurring-clone "Go to task" toast handler,
-  the tray `onNavigateToTask`, and the notification `onNavigateToTask` handlers, also call
-  `setPendingScrollTask(taskId)`.
-- Consumers: added a `useEffect` in BOTH `TaskListView` and `MyDayView` that, when
-  `pendingScrollTaskId` is set, RAFs to find `[data-task-id="<id>"]` inside `containerRef`,
-  `scrollIntoView({ block: 'nearest' })`, then clears the pending id. Effect deps
-  `[pendingScrollTaskId, flatTasks]` so cross-project async hydration re-runs it once the row
-  renders; id is only cleared after the element is actually found (won't drop mid-hydration).
-  Respects prefers-reduced-motion (behavior 'auto' vs 'smooth').
-- Why MyDayView too: the tray handler navigates to my-day; without a my-day consumer the
-  pending id would linger and could mis-fire on the next project view mount. Both views render
-  TaskRow (which already carries `data-task-id`) inside a scrollable `containerRef`.
-- Tests: extended taskStore.selection.test.ts with a `setPendingScrollTask` describe block
-  (default null, set, clear-once-consumed, does-not-touch-selection). Full suite 819 pass,
-  typecheck clean, dev build compiles on 5200.
-
-## Story #82 — add "go to task" in views (Saved Views) (2026-06-10)
-- ContextMenu.tsx: broadened the "Go to Task" guard from `isMyDay` to a new
-  `showGoToTask` (My Day OR saved-view, and task has a project_id). Decision logic
-  extracted to a pure helper `shared/utils/goToTask.ts::shouldShowGoToTask(currentView, projectId)`
-  so it's unit-testable without a React/RTL/jsdom stack (the codebase has ZERO component
-  tests and no @testing-library installed — all 44 existing test files are repo/util unit tests).
-- onClick now: (1) guards against a missing/deleted/archived project via
-  `useProjectStore.getState().projects[projectId]` → danger toast + bail if absent;
-  (2) navigates with `setSelectedProject`; (3) `selectTask`; (4) `setPendingScrollTask(task.id)`
-  so the row scrolls into view after navigation (story #81's mechanism, consumed by TaskListView's
-  pendingScrollTaskId effect — the post-nav view is always `project`, so the project consumer handles it).
-- No changes to SavedViewListView.tsx — the shared ContextMenu reads `currentView` from the view store.
-- Tests: new goToTask.test.ts (6 cases: my-day✓, saved-view✓, project✗, archive/templates/calendar/stats✗,
-  null/undefined/'' project✗). Full suite 824 pass / 46 files; typecheck clean; dev build compiles on 5200
-  (runtime DB-open error is env-only, unrelated to this renderer change).
-- ToDoozy task f1f6a8cb → Verifying.
-
-## Story #83 — Context menu rehaul (regroup by cognitive action + section labels)
-- Extracted shared primitives into new `src/renderer/src/shared/components/ContextMenuPrimitives.tsx`:
-  `Divider`, `MenuItem` (now with `shortcut?` + `danger?` props), `SectionLabel`, and a generic
-  `FlyoutItem<T extends string>`. Both ContextMenu.tsx and BulkContextMenu.tsx now import these —
-  no local primitive definitions remain in either file.
-- `MenuItem.onClick` widened to `(e: React.MouseEvent) => void` so the Delete item can pass the event
-  to `shouldForceDelete(e)` (shift-click skip-confirm) — existing `() => ...` callers stay compatible.
-- ContextMenu.tsx restructured: My Day / Go to Task — Organize (Status, Priority, Labels) —
-  Schedule (Recurrence, Snooze) — Start Timer — Add Subtask/Duplicate/Save as Template/Copy(⌘C) —
-  Archive/Delete(danger, ⌫). FocusSubmenu fully removed (import, FlyoutItem, Focus icon, 'focus' SubmenuId).
-- BulkContextMenu.tsx: same Organize (Status/Priority/Labels) + Schedule (Snooze) section labels;
-  Delete + Copy converted to MenuItem (danger + ⌫ on Delete, ⌘C on Copy).
-- Removed dead `FocusSubmenu`/`FOCUS_PRESETS` from ContextMenuSubmenus.tsx.
-- FlyoutItem genericity: `SubmenuId` unions made non-null + `useState<SubmenuId | null>`; TS infers
-  T = SubmenuId at each call site, typecheck clean. `ChevronRight` import dropped from both menu files.
-- Tests: no new repository methods/utility functions added (pure presentational components); vitest
-  runs in node env with no jsdom/testing-library, so no component test added. typecheck 0 errors;
-  full suite 821/821 pass; `npm run dev` compiled cleanly on 5200 (renderer+main+preload built).
-
-## Story #84 — Inline label-in-view filter chips for Saved Views (2026-06-10)
-- Added `getLabelsInUse(taskIds, taskLabels, allLabels, currentUserId)` to `labelUtils.ts`: collects label IDs present on the given tasks, filters the RAW label set, then dedups by name. Filtering raw-then-dedup (not dedup-then-filter) matters for cross-project same-name labels — debug-learnings.md §"findAllForUser leaks foreign-user labels": the canonical row may differ from the row actually on a task, so the guide's `allLabels.filter(...)` snippet could drop a chip. Mirrored MyDayView's proven approach instead.
-- SavedViewListView: added `labelsInView` memo via `getLabelsInUse(matchingTasks, taskLabels, rawAllLabels, userId)`; FilterBar now gets `labels={labelsInView}` and renders chips inline.
-- Refactored MyDayView's identical `labelsInUse` memo to call the shared util (DRY; test now covers both views).
-- FilterBar: the `labelsInFilterMenu` prop was doing triple duty (hide inline chips + suppress "save as new view" fallback + suppress Blur/Hide toggle). Renamed to `isSavedView` and decoupled: chips now always render inline when labels exist; `isSavedView` keeps the two saved-view suppressions. This avoids two regressions a naive prop-drop would cause — a confusing "save as NEW view" button on an unchanged saved view, and a no-op Blur/Hide toggle (saved views always hide non-matching tasks).
-- Deleted dead `LabelFilterBar.tsx` (wired into no view) + its ui-reference.md entry.
-- Tests: 7 new cases for `getLabelsInUse` (scoping, empty/no-task, cross-project dedup + non-canonical-row regression, missing task id, ordering). typecheck clean; 828/828 vitest pass.
-
-## Story #85 — Saved view sidebar counts + open views auto-update when a task starts matching the filter (2026-06-10)
-- Root cause confirmed (matches the audited description): nobody recounts saved-view sidebar counts on task mutations/Realtime/WAL events — `hydrateCounts` was only called at app start, on saved-view unmount, and after Save. So counts only refreshed at restart or by opening/leaving the view.
-- **Recount triggers (Fix-plan #1):** Added `scheduleRecount(userId)` to `savedViewStore` — a module-level 1s debounce that recomputes every view via the existing `savedViews:countMatching` IPC. Wired into taskStore `createTask/updateTask/deleteTask/addLabel/removeLabel` plus the bulk variants, `createSubtask`, and `duplicateTask` (archive/unarchive flow through `updateTask`, so the edge case is covered). Also wired into App.tsx `flushRealtime` (remote arrivals) and the `onTasksChanged` WAL handler (local MCP/quick-add writes).
-- taskStore → savedViewStore is a **dynamic import** inside `scheduleSavedViewRecount()` to avoid a static taskStore → savedViewStore → viewStore → taskStore cycle; debounced, so the import latency is irrelevant.
-- **Don't-clobber-open-view edge case:** `scheduleRecount` reads `useViewStore` and SKIPS the currently-open saved view (preserving its existing count). The open view maintains its own live count from the rendered list and may carry unsaved filter edits; its unmount cleanup re-runs `hydrateCounts` to settle on the saved value. `hydrateCounts` (explicit callers) still recomputes ALL views.
-- **countMatchingTasks consistency fix:** saved-view filter configs store **lowercased label NAMES** (the filter store keys on name — `labelStore.toggleLabelFilter`), but `countMatchingTasks` was matching `tl.label_id IN (names)` → label-filtered sidebar counts were effectively always 0. Rewrote the include/exclude label clauses to JOIN `labels` and match `LOWER(l.name) IN (...)`, and to respect `labelLogic` ('all' default → HAVING COUNT(DISTINCT name)=N; 'any' → IN). Now the SQL count agrees with the open view's live name-based matching.
-- **Gap A (cross-project hydration):** Added `taskStore.hydrateAllForUser(userId)` — loads top-level+sub tasks AND their label mappings for ALL of the user's projects and MERGES into the store (never resets, never toggles `loading`). Called on `SavedViewListView` mount so a view can match tasks from never-visited projects without a reload flash.
-- **Gap B (remote label arrivals):** out of scope per the description — depends on task 4c89a910 Part 3 (task_labels targeted pull). Referenced, not duplicated.
-- Tests: 8 new `SavedViewRepository.countMatchingTasks` cases (single/all/any label logic, case-insensitivity, exclude, done/archived/subtask exclusion, label+priority combo, unknown label); 4 `savedViewStore` cases (debounce coalescing, skip-open-view, hydrateCounts recomputes-all, error→0); 2 `hydrateAllForUser` cases (merge tasks+grouped labels, no loading flash). typecheck clean; 842/842 vitest pass. Dev server compiled clean on :5200.
-
-## Story #86 — Add filters and full row details on Archive (2026-06-10)
-- Extracted the include/exclude filter logic into a PURE testable util `src/renderer/src/features/views/archiveFilter.ts` (`archiveTaskMatchesFilters` + `hasAnyArchiveFilter`, `ArchiveFilterCriteria`). Mirrors `TaskListView.taskMatchesFilters` exactly (label any/all, priority, status, project, exclusions, due-date via `matchesDueDateFilter`, keyword over title+description). Tests run in node with no jsdom/testing-library, so — following the established #70/#80 precedent — the testable surface is the pure function, not a component render. 11 new vitest cases.
-- ArchiveView wiring:
-  - Reads the shared filter store (`useLabelStore` selectors) into a memoized `ArchiveFilterCriteria`.
-  - Hydrates task labels for every project shown (`hydrateAllTaskLabels` per group, merges into store — no reload flash; LabelRepository's SQL has no is_archived filter so it returns archived-task labels too).
-  - `filteredGroupedByProject` memo: filters each group's tasks; keeps the group when it still has a matching task OR the project itself is archived (archived-project headers always stay visible per the spec edge case). Header counts + flat `archivedTasks` (keyboard nav / shift-range / bulk select) now derive from the FILTERED groups so visible == navigable.
-  - Mounted `<FilterBar labels={filterLabels} isSavedView showProjectFilter showSort={false} />`. Chose `isSavedView` deliberately (NOT a literal saved view): it gives always-visible + hide-only semantics + suppresses the save-as-view button — exactly right for the archive, which always hides non-matching tasks and has its own fixed completed-date-desc sort. `showProjectFilter` enables the cross-project Projects filter; `showSort={false}` hides sort.
-  - Row enrichment: `PriorityBadge` (priority>0), inline `LabelChip`s (click → `toggleLabelFilter`, no remove since archive is read-only), due date with `CalendarClock` icon when `due_date && !completed_date`, then the existing completed-date badge. Title span made `min-w-0 truncate` so metadata never overflows the row.
-  - Empty state now distinguishes "no archived tasks" vs "no archived tasks match the current filters".
-- DECISION on FilterBar labels: the spec step 3 wrote `labels={Object.values(s.labels)}` (ALL labels). Kept that intent but passed `deduplicateLabelsByName(selectAllLabels, userId)` to avoid same-name duplicate chips and the new-array-every-render churn. So the inline label-filter row shows all (deduped) labels, not just labels-in-archive — matches the spec's literal guidance (cf. #84 which scoped to in-view; #86 intentionally did not).
-- NOTE: status filtering is applied if present in the shared store (mirrors TaskListView) but the archive's +Filter menu does not OFFER status (no projectId) — consistent with the spec's listed filters (project/label/priority/due-date/keyword).
-- typecheck 0 errors; full suite 853/853 pass (11 new); `npm run build` compiled the renderer clean (only pre-existing dynamic-import chunk warnings). `npm run lint` is broken project-wide (ESLint 10 config "Unexpected key config" — pre-existing, not from this story).
-
-## Story #87 — MCP creation is not part of the activity in task details (2026-06-10) — RESOLVED AS OBSOLETE (no code change)
-- The story's fix plan targets `src/main/mcp-server.ts` (the local Electron stdio MCP server, built to `out/main/mcp-server.js`). **That file no longer exists in source** — it was deleted in commit `04c561c` "feat: remote MCP server via Supabase Edge Function (#59)" (1611 lines removed), which is an ANCESTOR of the story's own stated HEAD `d4c9f69`. The "verified @ HEAD d4c9f69 … the local MCP server logs nothing" status note was written against a stale snapshot; the file was already gone at d4c9f69. Confirmed: `git merge-base --is-ancestor 04c561c d4c9f69` → true; `find src -name mcp-server.ts` → no match (only copies inside `.claude/worktrees/`).
-- Current architecture: MCP is **remote-only**. The single source-level MCP server is the Supabase Edge Function `supabase/functions/mcp/index.ts`; the app's MCP settings (`McpSettingsContent.tsx:4`) point users at `https://znmgsyjkaftbnhtlcxrm.supabase.co/functions/v1/mcp` (http transport). There is no local stdio MCP server to add activity logging to.
-- The story's INTENT ("every MCP write operation produces an activity_log entry") is **already fully satisfied** by the remote edge function. Verified `logActivity(...)` call sites cover every write tool the story enumerates: create_task (806), complete/reopen (855/866), set_priority (874), set_due_date (882), set_description (890), archive/unarchive (930/936), assign_label/remove_label (1005/1012), create_subtask (955), duplicate_task (942/1058) — plus update_task field-diffs (830-834), delete (841), set_recurrence (904), add/remove_my_day (910/916), snooze (924), use_task_template (1058). No write-tool gap remains. activity_log is task-scoped, so project/label/area/view tools correctly do not log (renderer doesn't either).
-- The local desktop app's OWN mutations still log activity via the renderer → IPC `activityLog:create` (ipc-handlers.ts:650) → `ActivityLogRepository.create`. Unaffected, fully working, covered by existing repo tests.
-- The only remaining user-visible symptom (MCP-created task's activity not showing on the desktop for PERSONAL projects) is a sync-DOWN gap: remote writes activity_log to Supabase but personal-project activity rows aren't pulled to local SQLite. The story itself defers this to the separate task **4c89a910** ("activity rows written remotely for personal projects don't flow down to the desktop"). Out of scope here.
-- No source change made: editing a deleted file is impossible, re-introducing 1611 lines of removed local-MCP code would directly contradict the committed remote-MCP direction (04c561c) and is far outside an unattended bugfix, and the remote function already meets the intent. Marking passes/tested true with this transparent record; `verified` stays false for user review. NOTE for reviewer: `debug-learnings.md` §"Don't kill MCP server" lines 7-19 still reference `out/main/mcp-server.js` — accurate only for the user's *installed* (pre-04c561c) app bundle, stale relative to current source; left untouched per ralph scope rules.
-- typecheck: 0 errors. Full suite: 853/853 vitest pass (unchanged — no new repository methods or utilities were added, so per the story's test instruction nothing new to test).
-
-## Story #88 — MCP write tools return assigned/ok=true without verifying side effect (2026-06-10) — RESOLVED
-- Scope (per the 2026-06-10 narrowing in the story): the silent-drop risk is isolated to `addLabel`/`assign_label_to_task` and `remove_label_from_task`'s soft-false in the REMOTE edge function `supabase/functions/mcp/index.ts`. All other write tools were already hardened (`if (!result) throw` / return full object).
-- ROOT CAUSE confirmed @ HEAD: `TaskRepo.addLabel` (index.ts:304) discarded the upsert's `{ error }`; the `assign_label_to_task` handler returned `{ assigned: true }` unconditionally. `removeLabel` returned `false` on error and the handler propagated `{ removed: false }` instead of throwing.
-- FIX:
-  - New `supabase/functions/mcp/labelMutations.ts` — two dependency-free pure helpers `upsertTaskLabel` / `deleteTaskLabel` that capture `{ error }` and `throw new Error('Failed to assign/remove label: …')`. Extracted into their own module specifically so the throw-on-failure contract is unit-testable under vitest (Node) — the edge function `index.ts` can't be imported in vitest because it uses Deno `npm:`/`https:` imports + top-level `Deno.serve`. Helpers type the client via a minimal structural interface (no `@supabase/supabase-js` import) so they load under both Deno and Node.
-  - `index.ts`: imported the helpers via relative `./labelMutations.ts` (standard Supabase multi-file pattern; `.ts` extension required by Deno). `addLabel`/`removeLabel` now delegate to them. `removeLabel` is now `Promise<void>` (throws on error instead of returning bool).
-  - `assign_label_to_task` handler: added verify-after-write — after `addLabel`, re-reads `getLabels(taskId)` and throws if the `label_id` isn't present (catches RLS rejections that don't surface an error on the upsert itself). `remove_label_from_task` handler: removed the soft `{ removed: false }` path; reaching the return means the delete landed → `{ removed: true }`.
-- DECISION — extracted helper vs inline `if (error) throw`: the story's minimal-diff plan suggested inlining, but that leaves nothing importable to test. Followed CLAUDE.md ("write Vitest tests for new repository methods/utility functions") by extracting the two mutations into a tested module. Mirrors how the edge function's inlined recurrence utils are covered via the shared `src/shared/recurrenceUtils.ts` tests.
-- The hardened `addLabel` also benefits internal callers (`duplicate`, `saveAsTemplate`, `completeRecurringTask`, subtask/template handlers) — a failed label copy now throws instead of silently dropping. Aligned with the no-silent-drop intent.
-- SCOPE GUARD honored: code + tests only. Did NOT run `supabase functions deploy mcp`, no SQL, no data backfill — those are manual user steps after review.
-- VERIFICATION: `npm run typecheck` 0 errors (supabase/functions is outside the typecheck include set — it's Deno; the Electron app build is unaffected since zero `src/` files changed). `npm run test` 859/859 pass incl. 6 new in `labelMutations.test.ts` (success no-throw, FK-violation throw, arg/onConflict assertions, dual-eq filter). `npm run dev` compiled main+preload+renderer clean on port 5200 (the runtime "unable to open database file" is the unattended-run dev-DB env, unrelated to this change). Deno not installed locally so `deno check` couldn't run; relative `.ts` import + structural client typing verified by inspection against Supabase's PostgrestFilterBuilder.
+## Story #89 — setAuth storm / refresh_token_already_used self-logout (2026-06-10)
+- Gap 1: attemptSessionRefresh (PersonalSyncService.ts) now uses safeRefresh() instead of a bare
+  supabase.auth.refreshSession() — serialized against autoRefreshToken via the authMutex.
+  DEVIATION from story snippet: dropped the explicit window.api.auth.storeSession() call after
+  safeRefresh() because safeRefresh already persists rotated tokens internally (persistTokens);
+  keeping it would double-write the same pair over IPC.
+- Gap 2: RecoveryHandlers gained optional onPermanentlyDead; recovery timer invokes it when the
+  token chain dies mid-session. Both startRecoveryTimer call sites in authStore.ts pass
+  onPermanentlyDead: () => set({ isTokenPermanentlyDead: true }) → SessionBanner now flips to the
+  red "Session expired" variant live, no restart needed.
+- Deliberately NOT touched: SessionBanner handleRetry ignoring the restore result — that is
+  story #90's scope (retry + Realtime re-subscribe after recovery).
+- New tests: sessionRecovery.test.ts (9 tests) — permanent-error fail-fast + token clearing,
+  message-pattern fallback, transient retry w/ backoff, timer fires onRecovered/onPermanentlyDead
+  and stops, refuses to start when already dead. Suite: 868 tests / 50 files green.
+- Note: this batch's prd.json schema has no `verified` field (acceptance tracked via ToDoozy
+  Verifying→Done lifecycle instead).
+- Dev-run note: npm run dev compiles clean; runtime "unable to open database file" in dev log is
+  environmental (another instance holding the DB) — unrelated to these renderer-only changes.
