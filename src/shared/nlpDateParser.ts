@@ -105,6 +105,9 @@ export function parseNlpDate(text: string, referenceDate?: Date): NlpDateResult 
     const normResults = chrono.parse(normalizedText, ref, { forwardDate: true })
     if (normResults.length > 0) {
       const r = normResults[0]
+      // Reject bare relative duration abbreviations: NNs / NNm / NNh / NNd / NNw / NNy.
+      // False positives for code/ticket/version names; intentional uses appear as "in NNs" etc.
+      if (/^\d+[smhdwy]$/i.test(r.text.trim())) return null
       const date = forwardTimeIfNeeded(r.start.date(), ref, r)
       const origStart = indexMap[r.index] ?? r.index
       const origEnd = indexMap[r.index + r.text.length] ?? (r.index + r.text.length)
@@ -123,6 +126,9 @@ export function parseNlpDate(text: string, referenceDate?: Date): NlpDateResult 
   const results = chrono.parse(text, ref, { forwardDate: true })
   if (results.length > 0) {
     const r = results[0]
+    // Reject bare relative duration abbreviations: NNs / NNm / NNh / NNd / NNw / NNy.
+    // False positives for code/ticket/version names; intentional uses appear as "in NNs" etc.
+    if (/^\d+[smhdwy]$/i.test(r.text.trim())) return null
     const date = forwardTimeIfNeeded(r.start.date(), ref, r)
     return {
       date,

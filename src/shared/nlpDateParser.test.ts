@@ -60,6 +60,42 @@ describe('parseNlpDate', () => {
     expect(result).toBeNull()
   })
 
+  it('no false positive for bare "121s"', () => {
+    expect(parseNlpDate('fix bug 121s', ref)).toBeNull()
+  })
+
+  it('no false positive for "5m"', () => {
+    expect(parseNlpDate('deploy code 5m', ref)).toBeNull()
+  })
+
+  it('no false positive for "2h"', () => {
+    expect(parseNlpDate('close issue 2h', ref)).toBeNull()
+  })
+
+  it('no false positive for "3d"', () => {
+    expect(parseNlpDate('update 3d', ref)).toBeNull()
+  })
+
+  it('no false positive for "2w"', () => {
+    expect(parseNlpDate('migrate data 2w', ref)).toBeNull()
+  })
+
+  it('no false positive for "2y"', () => {
+    expect(parseNlpDate('update node 2y', ref)).toBeNull()
+  })
+
+  it('still parses "in 5m"', () => {
+    expect(parseNlpDate('remind me in 5m', ref)).not.toBeNull()
+  })
+
+  it('still parses "in 121s"', () => {
+    expect(parseNlpDate('alert in 121s', ref)).not.toBeNull()
+  })
+
+  it('still parses "tomorrow"', () => {
+    expect(parseNlpDate('call Alice tomorrow', ref)).not.toBeNull()
+  })
+
   it('returns index and endIndex for stripping', () => {
     const result = parseNlpDate('buy groceries tomorrow at 2pm', ref)
     expect(result).not.toBeNull()
