@@ -89,7 +89,9 @@ echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 echo "Log file: $LOG_FILE"
 echo "Ralph started at $(date) - Tool: $TOOL - Max iterations: $MAX_ITERATIONS" > "$LOG_FILE"
 
+NOOP_COUNT=0
 for i in $(seq 1 $MAX_ITERATIONS); do
+  HEAD_BEFORE=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
   echo ""
   echo "==============================================================="
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
@@ -110,7 +112,10 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     # Override per-run for the hardest stories (2x cost):
     #   RALPH_MODEL=claude-fable-5 ./ralph.sh --tool claude 3
     ITER_LOG="$SCRIPT_DIR/.ralph-iter-$i.jsonl"
-    claude --model "${RALPH_MODEL:-claude-opus-4-8}" --dangerously-skip-permissions --verbose --output-format stream-json < "$SCRIPT_DIR/CLAUDE.md" 2>>"$LOG_FILE" | tee "$ITER_LOG" | while IFS= read -r line; do
+    # Prompt must be prompt.md (imperative runner instructions), NOT CLAUDE.md:
+    # CLAUDE.md is auto-loaded as memory and reads as context, not a request —
+    # unattended agents respond to it by asking what to do and the iteration no-ops.
+    claude -p --model "${RALPH_MODEL:-claude-opus-4-8}" --dangerously-skip-permissions --verbose --output-format stream-json < "$SCRIPT_DIR/prompt.md" 2>>"$LOG_FILE" | tee "$ITER_LOG" | while IFS= read -r line; do
       # Extract assistant text messages for human-readable log
       type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
       if [[ "$type" == "assistant" ]]; then
@@ -149,6 +154,23 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     echo "Completed at iteration $i - $(date)" >> "$LOG_FILE"
     exit 0
+  fi
+
+  # Every productive iteration commits a story. No new commit means the agent
+  # no-op'd (e.g. asked for clarification); two in a row means the loop is
+  # broken — abort instead of burning the remaining iterations.
+  HEAD_AFTER=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
+  if [[ "$HEAD_AFTER" == "$HEAD_BEFORE" ]]; then
+    NOOP_COUNT=$((NOOP_COUNT + 1))
+    echo "Iteration $i produced no commit (no-op $NOOP_COUNT/2)"
+    echo "Iteration $i produced no commit (no-op $NOOP_COUNT/2) - $(date)" >> "$LOG_FILE"
+    if [[ $NOOP_COUNT -ge 2 ]]; then
+      echo "Two consecutive iterations produced no commit - aborting loop."
+      echo "Aborted after $i iterations: consecutive no-ops - $(date)" >> "$LOG_FILE"
+      exit 1
+    fi
+  else
+    NOOP_COUNT=0
   fi
 
   echo "Iteration $i complete. Continuing..."
