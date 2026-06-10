@@ -17,3 +17,9 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - One-liner DOM handler with no new repository methods / utility functions → no new unit tests (jsdom does not drive native number-input wheel increments, so a test would assert nothing meaningful); confirmed via existing suite + manual repro path.
 - ToDoozy task 381660b5 → Verifying.
 ---
+
+## Story #70 — archive can't delete last number (auto-archive value input) [2026-06-10]
+- Root cause: ArchiveSection drove the auto-archive <input type="number"> fully from the Zustand store with `parseInt(e.target.value,10) || 3` on every keystroke. Clearing the field → parseInt("")=NaN → `NaN || 3` → 3, committed synchronously, so the field snapped back to 3 before the next keypress. Could never reach an empty transient state.
+- Fix: introduced transient local display state (`localValues`, keyed by project.id) in ArchiveSection. onChange writes the raw string to local state only; onBlur clamps via new `clampAutoArchiveValue()` helper and commits to the store. useEffect seeds local state for newly-appearing project ids without clobbering in-flight edits.
+- Extracted clamp logic to `src/renderer/src/features/settings/autoArchiveValue.ts` (pure: empty/NaN/<1 → 1, >999 → 999) so it's unit-testable in the node vitest env. The project has no jsdom/@testing-library harness, so a full component render test would require new deps — extracting the pure helper keeps the test consistent with the existing suite.
+- Tests: autoArchiveValue.test.ts (6 cases: in-range, empty/non-numeric→1, zero/negative→1, >max→999, boundaries 1/999, parseInt leading-int semantics). Full suite 758 passed / 37 files. typecheck clean. dev compiled on 5200 (DB-open runtime warning is unrelated env/path noise).

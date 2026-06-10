@@ -9,6 +9,7 @@ import { MemberSettings } from '../collaboration/MemberSettings'
 import { MyDaySection } from './GeneralSettingsContent'
 import type { Project, Status } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { clampAutoArchiveValue } from './autoArchiveValue'
 
 interface ProjectsSettingsContentProps {
   projects: Project[]
@@ -772,6 +773,21 @@ function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchi
 
 function ArchiveSection({ projects }: { projects: Project[] }): React.JSX.Element {
   const updateProject = useProjectStore((s) => s.updateProject)
+  // Transient display state keyed by project id so the user can clear the field
+  // while typing. The store write happens only on commit (blur, via clampAutoArchiveValue).
+  const [localValues, setLocalValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(projects.map((p) => [p.id, String(p.auto_archive_value ?? 3)]))
+  )
+
+  // Seed local state for any project that appears after the initial render.
+  // Existing keys are left untouched so in-flight edits aren't clobbered.
+  useEffect(() => {
+    setLocalValues((prev) => {
+      const next = { ...prev }
+      for (const p of projects) if (!(p.id in next)) next[p.id] = String(p.auto_archive_value ?? 3)
+      return next
+    })
+  }, [projects])
 
   return (
     <div className="flex flex-col gap-1">
@@ -793,8 +809,13 @@ function ArchiveSection({ projects }: { projects: Project[] }): React.JSX.Elemen
                     type="number"
                     min={1}
                     max={999}
-                    value={project.auto_archive_value ?? 3}
-                    onChange={(e) => updateProject(project.id, { auto_archive_value: parseInt(e.target.value, 10) || 3 })}
+                    value={localValues[project.id] ?? String(project.auto_archive_value ?? 3)}
+                    onChange={(e) => setLocalValues((prev) => ({ ...prev, [project.id]: e.target.value }))}
+                    onBlur={(e) => {
+                      const clamped = clampAutoArchiveValue(e.target.value)
+                      setLocalValues((prev) => ({ ...prev, [project.id]: String(clamped) }))
+                      updateProject(project.id, { auto_archive_value: clamped })
+                    }}
                     onWheel={(e) => e.currentTarget.blur()}
                     className="w-14 rounded-lg border border-border bg-transparent px-2 py-1 text-center text-sm font-light text-foreground focus:border-accent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
