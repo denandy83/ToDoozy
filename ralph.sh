@@ -130,8 +130,10 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     # Extract the final result for completion check
     if [[ -f "$ITER_LOG" ]]; then
       OUTPUT=$(tail -1 "$ITER_LOG" | jq -r '.result // .message // empty' 2>/dev/null || echo "")
-      # Also check all result lines for completion signal
-      if grep -q "<promise>COMPLETE</promise>" "$ITER_LOG" 2>/dev/null; then
+      # Also check result lines for completion signal. Only scan the agent's
+      # final result text — the raw stream echoes the prompt (CLAUDE.md), which
+      # contains the literal promise tag and would match every iteration.
+      if jq -r 'select(.type == "result") | .result // empty' "$ITER_LOG" 2>/dev/null | grep -q "<promise>COMPLETE</promise>"; then
         OUTPUT="<promise>COMPLETE</promise>"
       fi
       rm -f "$ITER_LOG"
