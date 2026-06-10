@@ -165,9 +165,16 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         }
         return { labels: labelMap, projectLabels: updatedProjectLabels }
       })
-      // Push to Supabase
-      import('../../services/PersonalSyncService').then(({ pushLabel }) => {
+      // Push to Supabase. When the label was created inside a project context,
+      // also push the project_labels junction row — otherwise the label↔project
+      // link only exists locally (LabelRepository.create links it in SQLite) and
+      // never reaches other devices, so the label is missing from that project's
+      // FilterBar/LabelPicker after a reconcile or on a second device (#77).
+      import('../../services/PersonalSyncService').then(({ pushLabel, pushProjectLabel }) => {
         pushLabel(label, getUserId()).catch(() => {})
+        if (input.project_id) {
+          void pushProjectLabel(input.project_id, label.id, null)
+        }
       })
       return label
     } catch (err) {
