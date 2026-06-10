@@ -171,3 +171,47 @@ confirmed with a fresh ./dev-db.sh feature copy).
 
 USER FOLLOW-UPS for this story (after review): `supabase functions deploy mcp`, then one-time backfill of
 legacy label_data-only links into project_labels (#93 fix plan step 5).
+
+## Story #94 — Remove password login for OAuth users (Edge Function with service_role) (2026-06-10)
+
+Third leg of the password story (#65 shipped Add/Change): a Google-OAuth user who previously added a
+password can now remove it again from Settings → Profile → Password and revert to Google-only sign-in.
+Needs the admin API (no client-side way to clear encrypted_password), so it ships as a new
+supabase/functions/remove-password edge function.
+
+Edge function follows the story-#88/#93 extraction pattern: core logic in dependency-free
+removePassword.ts (structural RemovePasswordClient interface, no npm:/Deno imports → vitest-testable),
+index.ts is a thin Deno.serve wrapper modeled on send-password-reset (same CORS + admin client; adds
+Content-Type: application/json so functions.invoke parses the body). Contract: missing/invalid Bearer →
+401; user without a non-email identity → 200 {ok:false, error:'no_oauth_identity'} (200 on purpose —
+non-2xx surfaces to invoke() as an opaque FunctionsHttpError, the renderer wants to read the body);
+otherwise updateUserById(id, {password: null}) then {user_metadata:{has_password:false}} → {ok:true}.
+Admin-call failures → 500 with the message, metadata write skipped if the password clear failed.
+supabase-js types password as string|undefined, so the wrapper casts through the structural interface —
+GoTrue's admin endpoint accepts the explicit null (per the audited story).
+
+Renderer: extracted identity detection into features/settings/identityFlags.ts —
+deriveIdentityFlags(user) ORs the email identity with the has_password metadata flag (OAuth users who add
+a password never gain an 'email' identity; flag set by handlePasswordSave, cleared by the edge function,
+so add → remove → add round-trips), plus canRemovePasswordLogin() encoding the visibility rule
+(hasEmailIdentity && hasOAuthIdentity — never offer to strip the only sign-in method).
+ProfileSettingsContent now uses the utility and conditionally renders the new RemovePasswordSection
+component (kept separate — the parent is already over the 150-line rule): danger button per the
+Forget-Saved-Login pattern, persistent confirm toast (Remove danger / Cancel muted), invoke with explicit
+Bearer header, on success clearCredentials() (wipes Keychain + saved email — existing IPC, no new bridge
+method) + refreshSavedLogin() + setHasEmailIdentity(false) so the section flips back to "Add Password
+Login" without a reload.
+
+DEVIATION (cosmetic): the story said surface failures in the parent's passwordError; the section shows
+its own error line directly under the Remove button instead — same visual treatment, better proximity
+(passwordError renders inside the change-password form, far from the Remove button).
+
+Tests: +13 in removePassword.test.ts (401 missing header / non-Bearer / bad JWT; jwt extraction;
+email-only and no-identities rejected without admin calls; happy path asserts both updateUserById payloads
+in order; first/second admin failure → 500), +10 in identityFlags.test.ts (flag matrix incl. has_password
+round-trip, missing/null identities; canRemovePasswordLogin truth table). 929 tests green (55 files),
+typecheck clean, dev compiles on :5200 (same TODOOZY_DEV_DB-not-in-subshell DB warning as #93 — known
+env artifact, not a compile error).
+
+SCOPE GUARD respected: nothing deployed. USER FOLLOW-UP after review: `supabase functions deploy
+remove-password` (plus the #88/#93 `deploy mcp` still pending).

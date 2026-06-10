@@ -3,6 +3,8 @@ import { Check, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useToast } from '../../shared/components/Toast'
 import { getSupabase } from '../../lib/supabase'
+import { deriveIdentityFlags, canRemovePasswordLogin } from './identityFlags'
+import { RemovePasswordSection } from './RemovePasswordSection'
 
 function SectionLabel({ children, first }: { children: string; first?: boolean }): React.JSX.Element {
   return (
@@ -37,6 +39,7 @@ export function ProfileSettingsContent(): React.JSX.Element {
   const nameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [hasEmailIdentity, setHasEmailIdentity] = useState(false)
+  const [hasOAuthIdentity, setHasOAuthIdentity] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showNew, setShowNew] = useState(false)
@@ -95,9 +98,9 @@ export function ProfileSettingsContent(): React.JSX.Element {
           const meta = user.user_metadata ?? {}
           setFirstName((meta.first_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ')[0] ?? '')
           setLastName((meta.last_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ').slice(1).join(' ') ?? '')
-          const hasEmailProvider = user.identities?.some((i) => i.provider === 'email') ?? false
-          const hasPasswordFlag = (meta.has_password as boolean | undefined) ?? false
-          setHasEmailIdentity(hasEmailProvider || hasPasswordFlag)
+          const flags = deriveIdentityFlags(user)
+          setHasEmailIdentity(flags.hasEmailIdentity)
+          setHasOAuthIdentity(flags.hasOAuthIdentity)
           return
         }
       } catch { /* offline */ }
@@ -271,6 +274,14 @@ export function ProfileSettingsContent(): React.JSX.Element {
               {passwordSaved && <Check size={16} className="text-success" />}
             </div>
           </div>
+          {canRemovePasswordLogin({ hasEmailIdentity, hasOAuthIdentity }) && (
+            <RemovePasswordSection
+              onRemoved={() => {
+                setHasEmailIdentity(false)
+                void refreshSavedLogin()
+              }}
+            />
+          )}
         </div>
       )}
     </div>
