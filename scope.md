@@ -1,5 +1,31 @@
 # Scope
 
+## 2026-06-10 — Ralph runbook for the audited backlog (ACTIVE)
+
+Two prepared batches; descriptions in prd files are verbatim copies of the audited ToDoozy task descriptions (each story header carries its ToDoozy task ID for the status lifecycle).
+
+**Batch 1 — Opus 4.8, 21 stories (#68–#88), branch `ralph/audit-fixes` (current prd.json):**
+```
+./ralph.sh --tool claude 25
+```
+Small/medium fixes in dependency order (pendingScroll → go-to-task → menu rehaul; labels-in-view → saved-view counts). Story #88 (MCP addLabel) is code-only — carries a SCOPE GUARD against deploying.
+
+**Batch 2 — Fable 5, 6 stories (#89–#94), AFTER batch 1 is reviewed:**
+```
+git checkout -b ralph/sync-hardening
+cp prd-fable.json prd.json
+git add prd.json && git commit -m "feat: load sync-hardening stories #89–#94"
+RALPH_MODEL=claude-fable-5 ./ralph.sh --tool claude 8
+```
+Sync/auth surface in order: setAuth gaps → offline retry → Realtime coverage → batch edits → MCP label junction → remove-password. The two edge-fn stories are code-only (SCOPE GUARD).
+
+**Manual user steps after the runs (ralph is forbidden from these):**
+- `supabase functions deploy mcp` (stories #88, #93) and `deploy remove-password` (#94)
+- One-time backfill of legacy `label_data` links into `project_labels` (#93 description, step 5)
+- Verify the Verifying pile in-app (8 pre-existing + everything ralph lands there)
+
+**NOT in any batch:** `cbc728c9` (Gabriel What's New — blocked on his app version/logs), the 3 `Later`-labeled features, all Verifying tasks.
+
 ## 2026-06-10 — ToDoozy task-tracker audit (descriptions only; NO code changed)
 
 All 46 open tasks labeled `Todoozy` (excl. `Later`) were fact-checked against HEAD `d4c9f69` and their ToDoozy descriptions rewritten as self-contained, ralph-ready implementation guides (file:line root causes, numbered fix plans, edge cases, tests, status-check lines). **The descriptions in ToDoozy are now the single source of truth per task** — start there, not here.

@@ -1610,3 +1610,1247 @@ Before marking passes: true: read ui-reference.md and debug-learnings.md. Write 
 - **Acceptance Criteria:** Archive icon replaces trash, archived projects hidden from sidebar, archive restores via undo toast, Archive view shows archived project groups with restore/delete, settings archive section with undo toast.
 - **Passes:** true
 - **Implemented:** 2026-05-01
+
+---
+
+### #65 — Profile Settings — Display Name, Password Management, and Forgot Password
+- **Description:** Add a "Profile" tab as the first tab in the Settings modal. It has three sections: Account (email read-only), Display Name (first + last name, autosave), and Password (set or change, with validation, explicit save button). Also add a Forgot Password flow on the login screen, and a Supabase Edge Function to differentiate reset emails between email/password users and Google-only users.
+
+---
+
+## Part A — UnifiedSettingsModal.tsx
+
+**File:** `src/renderer/src/features/settings/UnifiedSettingsModal.tsx`
+
+**Line 16** — extend Tab union (profile first):
+```ts
+type Tab = 'profile' | 'general' | 'projects' | 'appearance' | 'labels' | 'timer' | 'integrations' | 'logs' | 'about'
+```
+
+**Line 31** — change default tab:
+```ts
+const [activeTab, setActiveTab] = useState<Tab>((initialTab as Tab) ?? 'profile')
+```
+
+**Lines 76–82 (handleClose)** — both `setActiveTab('general')` calls become `setActiveTab('profile')`.
+
+**Lines 89–94** — tabs array, Profile first:
+```ts
+const tabs: { key: Tab; label: string }[] = [
+  { key: 'profile', label: 'Profile' },
+  { key: 'general', label: 'General' },
+  { key: 'projects', label: 'Projects' },
+  { key: 'appearance', label: 'Appearance' },
+  { key: 'labels', label: 'Labels' },
+  { key: 'timer', label: 'Timer' },
+  { key: 'integrations', label: 'Integrations' },
+  { key: 'logs', label: 'Logs' },
+  { key: 'about', label: 'About' }
+]
+```
+
+In the content area, add before `{activeTab === 'general' && ...}`:
+```tsx
+{activeTab === 'profile' && <ProfileSettingsContent />}
+```
+
+Add import:
+```ts
+import { ProfileSettingsContent } from './ProfileSettingsContent'
+```
+
+---
+
+## Part B — New ProfileSettingsContent.tsx
+
+**File:** `src/renderer/src/features/settings/ProfileSettingsContent.tsx` (create new)
+
+Sections: Account (email read-only), Display Name (first + last autosave), Password (change/add with validation + explicit save).
+
+```tsx
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Check, Eye, EyeOff } from 'lucide-react'
+import { useAuthStore } from '../../shared/stores/authStore'
+import { getSupabase } from '../../lib/supabase'
+
+function SectionLabel({ children, first }: { children: string; first?: boolean }): React.JSX.Element {
+  return (
+    <p className={`text-[10px] font-bold uppercase tracking-[0.3em] text-muted ${first ? '' : 'mt-6'}`}>
+      {children}
+    </p>
+  )
+}
+
+function validatePassword(pw: string): string | null {
+  if (pw.length < 8) return 'At least 8 characters required'
+  if (!/[A-Z]/.test(pw)) return 'Must contain at least one uppercase letter'
+  if (!/[a-z]/.test(pw)) return 'Must contain at least one lowercase letter'
+  if (!/[0-9]/.test(pw)) return 'Must contain at least one number'
+  return null
+}
+
+export function ProfileSettingsContent(): React.JSX.Element {
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const updateUser = useAuthStore((s) => s.updateUser)
+
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [nameSaved, setNameSaved] = useState(false)
+  const [nameOffline, setNameOffline] = useState(false)
+  const nameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const nameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [hasEmailIdentity, setHasEmailIdentity] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showNew, setShowNew] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSaved, setPasswordSaved] = useState(false)
+  const [passwordSaving, setPasswordSaving] = useState(false)
+
+  useEffect(() => {
+    if (!currentUser) return
+    const init = async (): Promise<void> => {
+      try {
+        const sb = await getSupabase()
+        const { data: { user } } = await sb.auth.getUser()
+        if (user) {
+          const meta = user.user_metadata ?? {}
+          setFirstName((meta.first_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ')[0] ?? '')
+          setLastName((meta.last_name as string | undefined) ?? (meta.full_name as string | undefined)?.split(' ').slice(1).join(' ') ?? '')
+          setHasEmailIdentity(user.identities?.some((i) => i.provider === 'email') ?? false)
+          return
+        }
+      } catch { /* offline */ }
+      if (currentUser.display_name) {
+        const parts = currentUser.display_name.split(' ')
+        setFirstName(parts[0] ?? '')
+        setLastName(parts.slice(1).join(' '))
+      }
+    }
+    void init()
+  }, [currentUser])
+
+  const doSaveName = useCallback(async (fn: string, ln: string): Promise<void> => {
+    if (!currentUser) return
+    const display_name = [fn.trim(), ln.trim()].filter(Boolean).join(' ') || null
+    await updateUser(currentUser.id, { display_name })
+    try {
+      const sb = await getSupabase()
+      await sb.auth.updateUser({ data: { display_name, first_name: fn.trim(), last_name: ln.trim() } })
+      await window.api.settings.set(currentUser.id, 'profile_sync_pending', '')
+      setNameSaved(true)
+      setNameOffline(false)
+    } catch {
+      await window.api.settings.set(currentUser.id, 'profile_sync_pending', 'true')
+      setNameOffline(true)
+      setNameSaved(false)
+    }
+    if (nameTimerRef.current) clearTimeout(nameTimerRef.current)
+    nameTimerRef.current = setTimeout(() => { setNameSaved(false); setNameOffline(false) }, 2000)
+  }, [currentUser, updateUser])
+
+  const scheduleSave = useCallback((fn: string, ln: string): void => {
+    if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current)
+    nameDebounceRef.current = setTimeout(() => { void doSaveName(fn, ln) }, 1000)
+  }, [doSaveName])
+
+  const handlePasswordSave = useCallback(async (): Promise<void> => {
+    const err = validatePassword(newPassword)
+    if (err) { setPasswordError(err); return }
+    if (newPassword !== confirmPassword) { setPasswordError('Passwords do not match'); return }
+    setPasswordError(null)
+    setPasswordSaving(true)
+    try {
+      const sb = await getSupabase()
+      const { error } = await sb.auth.updateUser({ password: newPassword })
+      if (error) { setPasswordError(error.message); return }
+      setHasEmailIdentity(true)
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordSaved(true)
+      setTimeout(() => setPasswordSaved(false), 2000)
+    } catch (e) {
+      setPasswordError(e instanceof Error ? e.message : 'Failed to update password')
+    } finally {
+      setPasswordSaving(false)
+    }
+  }, [newPassword, confirmPassword])
+
+  return (
+    <div className="flex flex-col gap-4">
+      <SectionLabel first>Account</SectionLabel>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Email</p>
+        <p className="text-sm font-light text-foreground">{currentUser?.email ?? '—'}</p>
+      </div>
+
+      <SectionLabel>Display Name</SectionLabel>
+      <p className="text-[10px] text-muted -mt-2">Shown to other members in shared projects. Leave blank to use your email.</p>
+      <div className="flex items-end gap-3">
+        <div className="flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">First name</p>
+          <input type="text" value={firstName}
+            onChange={(e) => { setFirstName(e.target.value); scheduleSave(e.target.value, lastName) }}
+            placeholder="First"
+            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+        </div>
+        <div className="flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Last name</p>
+          <input type="text" value={lastName}
+            onChange={(e) => { setLastName(e.target.value); scheduleSave(firstName, e.target.value) }}
+            placeholder="Last"
+            className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+        </div>
+        <div className="h-[38px] w-6 flex items-center justify-center flex-shrink-0">
+          {nameSaved && <Check size={16} className="text-success" />}
+          {nameOffline && <span className="text-[9px] text-muted">Local</span>}
+        </div>
+      </div>
+      {nameOffline && <p className="text-[10px] text-muted -mt-2">Saved locally — will sync when reconnected</p>}
+
+      <SectionLabel>{hasEmailIdentity ? 'Change Password' : 'Add Password Login'}</SectionLabel>
+      {!hasEmailIdentity && (
+        <p className="text-[10px] text-muted -mt-2">Set a password to also log in with your email, in addition to Google.</p>
+      )}
+      <p className="text-[10px] text-muted -mt-2">Requirements: 8+ characters, one uppercase, one lowercase, one number.</p>
+      <div className="flex flex-col gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">New password</p>
+          <div className="relative">
+            <input type={showNew ? 'text' : 'password'} value={newPassword}
+              onChange={(e) => { setNewPassword(e.target.value); setPasswordError(null) }}
+              placeholder="New password"
+              className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+            <button type="button" onClick={() => setShowNew((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
+              {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted mb-1">Confirm password</p>
+          <div className="relative">
+            <input type={showConfirm ? 'text' : 'password'} value={confirmPassword}
+              onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(null) }}
+              placeholder="Confirm password"
+              className="w-full rounded-lg border border-border bg-transparent px-3 py-2 pr-10 text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent/50" />
+            <button type="button" onClick={() => setShowConfirm((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors">
+              {showConfirm ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </div>
+        {passwordError && <p className="text-[10px] text-danger">{passwordError}</p>}
+        <div className="flex items-center gap-3">
+          <button onClick={() => { void handlePasswordSave() }}
+            disabled={passwordSaving || !newPassword || !confirmPassword}
+            className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 disabled:opacity-40">
+            {passwordSaving ? 'Saving...' : hasEmailIdentity ? 'Change Password' : 'Set Password'}
+          </button>
+          {passwordSaved && <Check size={16} className="text-success" />}
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+---
+
+## Part C — LoginScreen.tsx — Forgot Password flow
+
+**File:** `src/renderer/src/features/auth/LoginScreen.tsx`
+
+Add `'forgot'` to AuthMode:
+```ts
+type AuthMode = 'login' | 'signup' | 'forgot'
+```
+
+Add state and handler at the top of the component:
+```ts
+const [resetEmail, setResetEmail] = useState('')
+const [resetSent, setResetSent] = useState(false)
+const [resetLoading, setResetLoading] = useState(false)
+const [resetError, setResetError] = useState<string | null>(null)
+
+const handleForgotPassword = useCallback(async (): Promise<void> => {
+  if (!resetEmail.trim()) return
+  setResetLoading(true)
+  setResetError(null)
+  try {
+    const sb = await getSupabase()
+    const { error } = await sb.functions.invoke('send-password-reset', {
+      body: { email: resetEmail.trim() }
+    })
+    if (error) { setResetError('Something went wrong. Please try again.'); return }
+    setResetSent(true)
+  } catch {
+    setResetError('Something went wrong. Please try again.')
+  } finally {
+    setResetLoading(false)
+  }
+}, [resetEmail])
+```
+
+Add import: `import { getSupabase } from '../../lib/supabase'`
+
+Below the password input (inside the form, login mode only), add "Forgot password?" link:
+```tsx
+{mode === 'login' && (
+  <div className="flex justify-end -mt-2">
+    <button type="button" onClick={() => { setMode('forgot'); clearError() }}
+      className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent transition-colors">
+      Forgot password?
+    </button>
+  </div>
+)}
+```
+
+Update the subtitle `<p>` to handle forgot mode:
+```tsx
+<p className="text-sm font-light text-muted">
+  {mode === 'login' ? 'Sign in to continue' : mode === 'signup' ? 'Create your account' : 'Reset your password'}
+</p>
+```
+
+Wrap the form, divider, Google button, and toggle link in `{mode !== 'forgot' && (...)}` so they hide in forgot mode.
+
+Add forgot mode UI (renders when `mode === 'forgot'`):
+```tsx
+{mode === 'forgot' && (
+  <div className="flex w-full flex-col gap-4">
+    {!resetSent ? (
+      <>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Email</label>
+          <input type="email" value={resetEmail}
+            onChange={(e) => setResetEmail(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void handleForgotPassword() }}
+            placeholder="you@example.com" autoFocus
+            className="rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none" />
+        </div>
+        {resetError && (
+          <div className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-[11px] font-light text-danger">{resetError}</div>
+        )}
+        <button onClick={() => void handleForgotPassword()}
+          disabled={resetLoading || !resetEmail.trim()}
+          className="mt-1 rounded-lg bg-accent px-4 py-2.5 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80 disabled:opacity-40">
+          {resetLoading ? 'Sending...' : 'Send Reset Email'}
+        </button>
+      </>
+    ) : (
+      <div className="rounded-lg border border-border bg-surface/50 px-4 py-4 text-sm font-light text-foreground">
+        If an account exists for <span className="font-medium">{resetEmail}</span>, you&apos;ll receive an email shortly with instructions.
+      </div>
+    )}
+    <p className="text-sm font-light text-muted text-center">
+      <button onClick={() => { setMode('login'); setResetSent(false); setResetEmail(''); setResetError(null) }}
+        className="font-medium text-accent hover:underline">
+        Back to sign in
+      </button>
+    </p>
+  </div>
+)}
+```
+
+---
+
+## Part D — Supabase Edge Function send-password-reset
+
+**File:** `supabase/functions/send-password-reset/index.ts` (create new)
+
+This function receives `{ email }`, uses the admin client to check `auth.identities` for provider type, then:
+- Email/password user → `adminClient.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo: 'https://denandy83.github.io/ToDoozy/reset-password.html' } })`
+- Google-only user → `adminClient.auth.admin.generateLink({ type: 'magiclink', email, options: { redirectTo: 'https://denandy83.github.io/ToDoozy/no-password.html' } })`
+- Not found → return OK silently
+
+For checking identities, use:
+```ts
+const { data: identities } = await adminClient
+  .schema('auth')
+  .from('identities')
+  .select('provider, user_id, users!inner(email)')
+  .eq('users.email', email)
+```
+If `.schema('auth').from('identities')` is unavailable via the JS client, fall back to `adminClient.auth.admin.listUsers()` and filter in JS.
+
+Full function:
+```ts
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  try {
+    const { email } = await req.json() as { email: string }
+    if (!email) return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    )
+
+    // Determine if user has email identity
+    let hasEmailIdentity = false
+    let userExists = false
+    try {
+      const { data: rows } = await adminClient
+        .schema('auth')
+        .from('identities')
+        .select('provider, users!inner(email)')
+        .eq('users.email', email)
+      if (rows && rows.length > 0) {
+        userExists = true
+        hasEmailIdentity = rows.some((r: { provider: string }) => r.provider === 'email')
+      }
+    } catch {
+      // Fallback: listUsers
+      const { data: { users } } = await adminClient.auth.admin.listUsers()
+      const user = users.find((u) => u.email === email)
+      if (user) {
+        userExists = true
+        hasEmailIdentity = user.identities?.some((i) => i.provider === 'email') ?? false
+      }
+    }
+
+    if (!userExists) return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+
+    if (hasEmailIdentity) {
+      await adminClient.auth.admin.generateLink({
+        type: 'recovery',
+        email,
+        options: { redirectTo: 'https://denandy83.github.io/ToDoozy/reset-password.html' }
+      })
+    } else {
+      await adminClient.auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+        options: { redirectTo: 'https://denandy83.github.io/ToDoozy/no-password.html' }
+      })
+    }
+
+    return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+  } catch (e) {
+    console.error('send-password-reset error:', e)
+    return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+  }
+})
+```
+
+---
+
+## Part E — GitHub Pages files
+
+Check if the project has a `docs/` folder (GitHub Pages source). Create two HTML files:
+
+**`docs/reset-password.html`** — reads `access_token` from URL fragment, shows "Set new password" + "Confirm" fields with same validation rules (8+ chars, 1 upper, 1 lower, 1 number), calls Supabase JS CDN client to `setSession` then `updateUser({ password })`, shows success message. Use the Supabase JS CDN: `https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js`. Supabase URL: `https://znmgsyjkaftbnhtlcxrm.supabase.co`, anon key from env or hardcoded (anon key is public-safe).
+
+**`docs/no-password.html`** — static page with message: "Your ToDoozy account uses Google Sign-In. Open the ToDoozy app and click 'Continue with Google' to sign in. Once signed in, go to Settings → Profile to add a password for email login."
+
+---
+
+## Part F — authStore.ts — Profile sync retry on reconnect
+
+**File:** `src/renderer/src/shared/stores/authStore.ts`
+
+In BOTH `onRecovered` callbacks (one around line 375, one around line 424), after the `processSyncQueue` try/catch block, add:
+
+```ts
+try {
+  const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+  if (pending === 'true') {
+    const localUser2 = await window.api.users.findById(user.id)
+    if (localUser2 !== null) {
+      const dn = localUser2.display_name ?? ''
+      const parts = dn.split(' ')
+      await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+      await window.api.settings.set(user.id, 'profile_sync_pending', '')
+    }
+  }
+} catch (e) {
+  console.warn('[Auth] Profile sync retry failed:', e)
+}
+```
+
+`sb` is already in scope (`const sb = await getSupabase()`) in both callbacks. `user` is the Supabase user already fetched at the top of each callback.
+
+---
+
+## Edge cases
+
+- Empty name fields → `display_name: null`, member display falls back to email
+- Google user with `full_name` pre-populates first/last on mount
+- Offline on init → falls back to splitting local `display_name` from SQLite
+- Password fields mismatch → inline error, no Supabase call
+- Password too short / missing case / no digit → specific rule shown inline
+- Password save fails (offline) → error shown, fields NOT cleared
+- Forgot password: non-existent email → silent OK
+- Forgot password: Google-only → magic link to no-password.html
+- Forgot password: email/password user → recovery link to reset-password.html
+- `.schema('auth').from('identities')` may fail → use listUsers fallback
+- Do NOT try to queue password updates offline — auth API requires live session
+
+---
+
+Before marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** 
+  - Settings modal's first tab is 'Profile'; it opens by default when Settings is launched
+  - Profile tab shows: email (read-only), First name input, Last name input, password section
+  - First/last name pre-populated from Google OAuth metadata for Google users; from stored display_name (split) for email users
+  - Editing name then pausing 1 second autosaves to local SQLite + Supabase auth metadata; green check icon appears then fades after 2s
+  - Offline name save: local saved, 'Local' indicator and 'Saved locally — will sync when reconnected' shown; Supabase auth metadata updated automatically on reconnect via onRecovered callback
+  - Password section header reads 'Add Password Login' for Google-only users (with explanation text), 'Change Password' for users who already have a password
+  - Password requirements text always visible: '8+ characters, one uppercase, one lowercase, one number'
+  - Each password input has an independent Eye/EyeOff toggle
+  - Clicking Save with mismatched passwords shows inline error 'Passwords do not match'
+  - Clicking Save with a password failing any rule shows the specific rule that failed
+  - Successful password save: fields clear, green check appears, hasEmailIdentity becomes true (section relabels to 'Change Password')
+  - Login screen shows 'Forgot password?' link below the password field in login mode only
+  - Clicking 'Forgot password?' switches to a reset form with email input, 'Send Reset Email' button, and 'Back to sign in' link
+  - Submitting the reset form always shows the same confirmation message regardless of whether the email exists
+  - Email/password users receive a Supabase recovery email linking to reset-password.html where they can set a new password in the browser
+  - Google-only users receive a magic link to no-password.html explaining to use Google auth and then add a password in Settings → Profile
+  - reset-password.html lets the user set a new password in the browser with the same validation rules
+  - no-password.html is a static info page explaining the Google auth flow
+  - npm run typecheck passes with zero errors
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #66 — Save Login Credentials (Email Pre-fill + Keychain Password)
+- **Description:** After a successful email/password login, silently save the email to `userData/saved-email.json` and show a persistent toast: "Save password to Keychain?" with Save/No thanks actions. If the user chooses Save, store the password via `keytar` in the OS Keychain (visible in macOS Keychain Access under "ToDoozy"). On the next login screen load, pre-fill both fields. For Google OAuth logins, save only the email (no password prompt). On logout, clear both the saved email JSON and the Keychain entry.
+
+---
+
+## Change 1 — Install keytar
+
+```bash
+npm install keytar
+npm install --save-dev @types/keytar
+```
+
+`keytar` is a native module that creates named entries in the OS Keychain (macOS Keychain Access / Windows Credential Manager / libsecret on Linux). It goes in `dependencies` — electron-builder rebuilds it automatically for the Electron binary during `dist:mac`.
+
+---
+
+## Change 2 — IPC handlers (`src/main/ipc-handlers.ts`)
+
+Add import at the top (line 1 area):
+```ts
+import keytar from 'keytar'
+```
+
+Add file path helpers after `getTokenPath()` (~line 28):
+```ts
+const getSavedEmailPath = (): string => {
+  const suffix = is.dev ? '.dev' : ''
+  return join(app.getPath('userData'), `saved-email${suffix}.json`)
+}
+const KEYTAR_SERVICE = 'ToDoozy'
+```
+
+Add five new IPC handlers inside `registerAuthHandlers()` (after `auth:clearSession` handler at ~line 74):
+```ts
+ipcMain.handle('auth:saveEmail', (_e, email: string) => {
+  try {
+    writeFileSync(getSavedEmailPath(), JSON.stringify({ email }), 'utf-8')
+  } catch (err) {
+    console.error('Failed to save email:', err)
+  }
+})
+
+ipcMain.handle('auth:getSavedEmail', () => {
+  const path = getSavedEmailPath()
+  if (!existsSync(path)) return null
+  try {
+    const raw = readFileSync(path, 'utf-8')
+    const parsed = JSON.parse(raw) as { email?: string }
+    return parsed.email ?? null
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('auth:savePassword', async (_e, email: string, password: string) => {
+  try {
+    await keytar.setPassword(KEYTAR_SERVICE, email, password)
+  } catch (err) {
+    console.error('Failed to save password to Keychain:', err)
+  }
+})
+
+ipcMain.handle('auth:getSavedPassword', async (_e, email: string) => {
+  try {
+    return await keytar.getPassword(KEYTAR_SERVICE, email)
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('auth:clearCredentials', async () => {
+  const path = getSavedEmailPath()
+  let savedEmail: string | null = null
+  if (existsSync(path)) {
+    try {
+      const raw = readFileSync(path, 'utf-8')
+      savedEmail = (JSON.parse(raw) as { email?: string }).email ?? null
+      unlinkSync(path)
+    } catch {
+      // ignore
+    }
+  }
+  if (savedEmail) {
+    try {
+      await keytar.deletePassword(KEYTAR_SERVICE, savedEmail)
+    } catch {
+      // ignore
+    }
+  }
+})
+```
+
+---
+
+## Change 3 — Preload bridge
+
+`src/preload/index.ts` — in the `auth:` section (line ~190), add after `switchDatabase`:
+```ts
+saveEmail: (email) => ipcRenderer.invoke('auth:saveEmail', email),
+getSavedEmail: () => ipcRenderer.invoke('auth:getSavedEmail'),
+savePassword: (email, password) => ipcRenderer.invoke('auth:savePassword', email, password),
+getSavedPassword: (email) => ipcRenderer.invoke('auth:getSavedPassword', email),
+clearCredentials: () => ipcRenderer.invoke('auth:clearCredentials'),
+```
+
+`src/preload/index.d.ts` — add to `AuthAPI` interface (after `switchDatabase` on line ~265):
+```ts
+saveEmail(email: string): Promise<void>
+getSavedEmail(): Promise<string | null>
+savePassword(email: string, password: string): Promise<void>
+getSavedPassword(email: string): Promise<string | null>
+clearCredentials(): Promise<void>
+```
+
+---
+
+## Change 4 — authStore (`src/renderer/src/shared/stores/authStore.ts`)
+
+Add a module-level pending prompt variable (above the store, after imports):
+```ts
+let pendingPasswordSave: { email: string; password: string } | null = null
+export function takePendingPasswordSave(): { email: string; password: string } | null {
+  const p = pendingPasswordSave
+  pendingPasswordSave = null
+  return p
+}
+```
+
+**`signInWithEmail`** (line 178) — change return type `Promise<void>` → `Promise<boolean>`:
+- At each early-return error path (lines ~184, ~189): add `return false` before the `return`
+- After the catch block (line ~210): return `false`
+- After the success `set(...)` call (line ~207), before closing the try block, add:
+  ```ts
+  window.api.auth.saveEmail(email).catch(() => {})
+  pendingPasswordSave = { email, password }
+  return true
+  ```
+
+Update the interface signature at line ~32: `signInWithEmail(email: string, password: string): Promise<boolean>`
+
+**`signUpWithEmail`** (line ~214) — after the success `set({ currentUser: localUser, isAuthenticated: true, loading: false })` call (~line 255), add:
+```ts
+window.api.auth.saveEmail(email).catch(() => {})
+```
+(Do NOT set pendingPasswordSave here — signup mode doesn't prompt for password save.)
+
+**`signInWithGoogle`** (line ~262) — in BOTH success branches (implicit flow ~line 309, PKCE flow ~line 335), after each `set({ currentUser: localUser, isAuthenticated: true ... })` call, add:
+```ts
+if (localUser.email) {
+  window.api.auth.saveEmail(localUser.email).catch(() => {})
+}
+```
+
+**`logout`** (line ~130) — after `await window.api.auth.clearSession()` (line ~138), add:
+```ts
+await window.api.auth.clearCredentials().catch(() => {})
+```
+
+---
+
+## Change 5 — AppLayout.tsx (`src/renderer/src/AppLayout.tsx`)
+
+Add `takePendingPasswordSave` to the authStore import line.
+
+Add a one-time `useEffect` near the top of the component body (after existing store hooks, `addToast` is already available):
+```ts
+useEffect(() => {
+  const pending = takePendingPasswordSave()
+  if (!pending) return
+  addToast({
+    message: 'Save password to Keychain?',
+    persistent: true,
+    actions: [
+      {
+        label: 'Save',
+        variant: 'accent' as const,
+        onClick: async () => {
+          await window.api.auth.savePassword(pending.email, pending.password).catch(() => {})
+        }
+      },
+      { label: 'No thanks', variant: 'muted' as const, onClick: () => {} }
+    ]
+  })
+}, []) // runs once on AppLayout mount — right after login transitions to main view
+```
+
+`addToast` is already destructured from `useToast()` in AppLayout. Do NOT add it to the dependency array — this must only fire once on mount.
+
+---
+
+## Change 6 — LoginScreen (`src/renderer/src/features/auth/LoginScreen.tsx`)
+
+Add `useEffect` to the React import (line 1 currently has `useState, useCallback, type FormEvent, type KeyboardEvent`).
+
+Add a `useEffect` that loads saved credentials on mount (after the existing state declarations, ~line 10):
+```ts
+useEffect(() => {
+  let cancelled = false
+  const load = async (): Promise<void> => {
+    const savedEmail = await window.api.auth.getSavedEmail()
+    if (!savedEmail || cancelled) return
+    setEmail(savedEmail)
+    const savedPassword = await window.api.auth.getSavedPassword(savedEmail)
+    if (!savedPassword || cancelled) return
+    setPassword(savedPassword)
+  }
+  load().catch(() => {})
+  return () => { cancelled = true }
+}, [])
+```
+
+---
+
+## Edge cases
+
+- If keytar fails (Keychain locked, unavailable): errors caught and swallowed — app works normally, no password saved
+- Saved email exists but no Keychain entry: email pre-fills, password stays empty
+- User clears the email field manually: they can type any email freely
+- Multiple logins: each successful login overwrites the saved email JSON; old keytar entry persists until next `clearCredentials()` on logout
+- Google OAuth: only email saved, no save-password toast
+- Signup mode: email saved, no save-password prompt
+- Dev mode: uses `saved-email.dev.json` to avoid conflicting with prod
+- Do NOT save password from signup mode (set `pendingPasswordSave` only in `signInWithEmail`)
+- Do NOT add `addToast` to the AppLayout useEffect dependency array
+
+Before marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for any new repository methods or utility functions. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** 
+  - After a successful email/password login, the email is saved to userData/saved-email.json (saved-email.dev.json in dev mode)
+  - A persistent toast 'Save password to Keychain?' appears with Save and No thanks buttons
+  - Clicking Save stores the password in the OS Keychain via keytar (service 'ToDoozy', account = email) — visible in macOS Keychain Access
+  - On next login screen load (after logout or token death), the email field is pre-filled from the saved JSON
+  - If a Keychain password exists for the saved email, the password field is also pre-filled
+  - After explicit logout, the saved email JSON and Keychain entry are preserved so re-sign-in is friction-free; only the Supabase session is cleared. (A separate 'Forget saved login on this device' Settings action can be added later for explicit credential wipe.)
+  - Google OAuth login saves the email to JSON silently (no password prompt shown)
+  - Signup mode saves the email but does NOT show the save-password prompt
+  - npm run typecheck passes with zero errors
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #67 — Project Archive & Restore
+- **Description:** Add the ability to archive a project (hides it from the active sidebar, archives all its tasks), and restore it (brings it back as a personal project with all tasks unarchived). The trash/delete icon on active projects becomes an archive icon. Delete is only accessible from the Archive view when viewing an already-archived project (shown next to a Restore button). This replaces the inline confirmation UI in settings with standard undo-toast pattern.
+
+**Every change below references exact file paths and line numbers as of this writing. Do not re-explore — follow the guide.**
+
+---
+
+## Change 1 — DB migration (SQLite + Supabase)
+
+`src/main/database/migrations.ts` — add after `migration_23` body (line 668):
+```ts
+const migration_24: Migration = (db) => {
+  db.exec(`ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0;`)
+}
+```
+Append `migration_24` to the `migrations` array at line 670.
+
+Also apply via `mcp__supabase__apply_migration`:
+```sql
+ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0;
+```
+
+---
+
+## Change 2 — Types (`src/shared/types.ts`)
+
+- `Project` interface (line 13–30): add `is_archived: number` after `deleted_at` (line 29)
+- `UpdateProjectInput` interface (line 176–187): add `is_archived?: number` after `auto_archive_unit` (line 186)
+
+---
+
+## Change 3 — ProjectRepository (`src/main/repositories/ProjectRepository.ts`)
+
+In `update()` (line 84–133), after the `auto_archive_unit` block (~line 127):
+```ts
+if (input.is_archived !== undefined) {
+  sets.push('is_archived = ?')
+  values.push(String(input.is_archived))
+}
+```
+
+Add two new methods after `update()`:
+```ts
+archiveWithTasks(id: string): Project | undefined {
+  const now = new Date().toISOString()
+  this.db.transaction(() => {
+    this.db.prepare(`UPDATE projects SET is_archived = 1, updated_at = ? WHERE id = ?`).run(now, id)
+    this.db.prepare(`UPDATE tasks SET is_archived = 1, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
+  })()
+  return this.findById(id)
+}
+
+unarchiveWithTasks(id: string): Project | undefined {
+  const now = new Date().toISOString()
+  this.db.transaction(() => {
+    this.db.prepare(`UPDATE projects SET is_archived = 0, updated_at = ? WHERE id = ?`).run(now, id)
+    this.db.prepare(`UPDATE tasks SET is_archived = 0, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
+  })()
+  return this.findById(id)
+}
+```
+
+---
+
+## Change 4 — IPC handlers (`src/main/ipc-handlers.ts`)
+
+After the `projects:updateSidebarOrder` handler (~line 460):
+```ts
+ipcMain.handle('projects:archiveWithTasks', (_e, id: string) => {
+  return db.projects.archiveWithTasks(id)
+})
+ipcMain.handle('projects:unarchiveWithTasks', (_e, id: string) => {
+  return db.projects.unarchiveWithTasks(id)
+})
+```
+
+---
+
+## Change 5 — Preload bridge
+
+`src/preload/index.ts` — in the `projects:` block, after `updateSidebarOrder` (line 96):
+```ts
+archiveWithTasks: (id) => ipcRenderer.invoke('projects:archiveWithTasks', id),
+unarchiveWithTasks: (id) => ipcRenderer.invoke('projects:unarchiveWithTasks', id),
+```
+
+`src/preload/index.d.ts` — in `ProjectsAPI` (line 126–147), after `updateSidebarOrder`:
+```ts
+archiveWithTasks(id: string): Promise<Project | undefined>
+unarchiveWithTasks(id: string): Promise<Project | undefined>
+```
+
+---
+
+## Change 6 — Project Store (`src/renderer/src/shared/stores/projectStore.ts`)
+
+Add two new store actions (after `deleteProject`, ~line 157):
+```ts
+async archiveProject(id: string): Promise<Project | null> {
+  try {
+    const project = await window.api.projects.archiveWithTasks(id)
+    if (project) {
+      set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
+      import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
+        pushProjectArchive(id, 1).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
+      })
+    }
+    return project ?? null
+  } catch (err) {
+    set({ error: err instanceof Error ? err.message : 'Failed to archive project' })
+    throw err
+  }
+},
+
+async unarchiveProject(id: string): Promise<Project | null> {
+  try {
+    const project = await window.api.projects.unarchiveWithTasks(id)
+    if (project) {
+      set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
+      import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
+        pushProjectArchive(id, 0).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
+      })
+    }
+    return project ?? null
+  } catch (err) {
+    set({ error: err instanceof Error ? err.message : 'Failed to unarchive project' })
+    throw err
+  }
+},
+```
+
+Add to the store interface (find the existing `deleteProject` signature and add alongside):
+```ts
+archiveProject(id: string): Promise<Project | null>
+unarchiveProject(id: string): Promise<Project | null>
+```
+
+Add new `selectActiveProjects` selector after `selectAllProjects` (line 198):
+```ts
+export const selectActiveProjects = (state: ProjectState): Project[] =>
+  Object.values(state.projects).filter((p) => p.is_archived !== 1)
+```
+
+---
+
+## Change 7 — PersonalSyncService (`src/renderer/src/services/PersonalSyncService.ts`)
+
+In `pushProject` parameter type (line 919–934), add `is_archived?: number` to the parameter object type.
+
+In `pushProject` body, after the existing `auto_archive` update block (~line 966), add:
+```ts
+if (project.is_archived !== undefined) {
+  await supabase.from('projects').update({ is_archived: project.is_archived }).eq('id', project.id)
+}
+```
+
+In `pullProjectMetadata` (line 1461), update the SELECT at line 1466:
+```ts
+.select('name, color, icon, description, updated_at, is_archived')
+```
+In the remote→local update block (~line 1480), add `is_archived: remote.is_archived ?? 0`.
+In the metadata-changed comparison (~line 1491), add `|| (local.is_archived !== (remote.is_archived ?? 0))`.
+
+Add new exported function after `pushProject`:
+```ts
+export async function pushProjectArchive(projectId: string, isArchived: number): Promise<void> {
+  if (!(await hasLiveSession('pushProjectArchive', `id=${projectId}`))) return
+  try {
+    const supabase = await getSupabase()
+    const now = new Date().toISOString()
+    const { error: projErr } = await supabase
+      .from('projects')
+      .update({ is_archived: isArchived, updated_at: now })
+      .eq('id', projectId)
+    if (projErr) logEvent('error', 'sync', `pushProjectArchive (project) failed: ${projErr.message}`, `project=${projectId}`)
+    const { error: taskErr } = await supabase
+      .from('tasks')
+      .update({ is_archived: isArchived, updated_at: now })
+      .eq('project_id', projectId)
+    if (taskErr) logEvent('error', 'sync', `pushProjectArchive (tasks) failed: ${taskErr.message}`, `project=${projectId}`)
+    markSynced()
+  } catch (err) {
+    logEvent('error', 'sync', `pushProjectArchive threw: ${err instanceof Error ? err.message : String(err)}`, `project=${projectId}`)
+  }
+}
+```
+
+---
+
+## Change 8 — AppLayout.tsx (`src/renderer/src/AppLayout.tsx`)
+
+**Imports (line 10):** Add `Archive` to lucide-react import (keep `Trash2` — still used for saved view delete at line 1321).
+
+**Imports (line 29):** Add `selectActiveProjects` to projectStore import.
+
+**Line 75:** Change `useProjectStore(selectAllProjects)` → `useProjectStore(selectActiveProjects)`. This makes `sortedProjects` exclude archived projects automatically.
+
+**Pull new store actions** (add near other project store hooks):
+```ts
+const archiveProjectAction = useProjectStore((s) => s.archiveProject)
+const unarchiveProjectAction = useProjectStore((s) => s.unarchiveProject)
+```
+
+**Replace `handleDeleteCurrentProject` entirely** (lines 1017–1061) with `handleArchiveCurrentProject`:
+
+```ts
+const handleArchiveCurrentProject = useCallback(async () => {
+  if (!selectedProject) return
+  if (selectedProject.is_default === 1) {
+    addToast({ message: "Can't archive the default project", variant: 'danger' })
+    return
+  }
+  const savedProject = selectedProject
+
+  const doArchive = async (): Promise<void> => {
+    try {
+      await archiveProjectAction(savedProject.id)
+      const updatedTasks: Record<string, Task> = {}
+      for (const [tid, t] of Object.entries(useTaskStore.getState().tasks)) {
+        updatedTasks[tid] = (t as Task).project_id === savedProject.id ? { ...(t as Task), is_archived: 1 } : (t as Task)
+      }
+      useTaskStore.setState({ tasks: updatedTasks })
+      const remaining = sortedProjects.filter((p) => p.id !== savedProject.id)
+      if (remaining.length > 0) setSelectedProject(remaining[0].id)
+      else setView('my-day')
+      addToast({
+        message: `"${savedProject.name}" archived`,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            await unarchiveProjectAction(savedProject.id)
+            const tasks = { ...useTaskStore.getState().tasks }
+            for (const [tid, t] of Object.entries(tasks)) {
+              if ((t as Task).project_id === savedProject.id) tasks[tid] = { ...(t as Task), is_archived: 0 }
+            }
+            useTaskStore.setState({ tasks })
+            setSelectedProject(savedProject.id)
+            setView('project')
+          }
+        }
+      })
+    } catch (err) {
+      addToast({ message: err instanceof Error ? err.message : 'Failed to archive project', variant: 'danger' })
+    }
+  }
+
+  if (savedProject.is_shared === 1) {
+    const members = await window.api.projects.getMembers(savedProject.id)
+    const otherMembers = members.filter((m) => m.user_id !== currentUser?.id)
+    const isOwner = savedProject.owner_id === currentUser?.id
+    const message = `Archive "${savedProject.name}"? You will be removed from the shared project.${isOwner && otherMembers.length > 0 ? ' Ownership will be transferred to another member.' : ''}`
+    addToast({
+      message,
+      persistent: true,
+      actions: [
+        {
+          label: 'Archive',
+          variant: 'danger' as const,
+          onClick: async () => {
+            if (isOwner && otherMembers.length > 0) {
+              const firstMember = [...otherMembers].sort((a, b) => a.joined_at.localeCompare(b.joined_at))[0]
+              try {
+                const { getSupabase } = await import('./services/PersonalSyncService')
+                const supabase = await getSupabase()
+                await supabase.from('projects').update({ owner_id: firstMember.user_id }).eq('id', savedProject.id)
+              } catch (err) { console.error('[Archive] Failed to transfer ownership:', err) }
+            }
+            if (currentUser) {
+              try {
+                const { removeSharedMember, unsubscribeFromProject } = await import('./services/SyncService')
+                await removeSharedMember(savedProject.id, currentUser.id)
+                await unsubscribeFromProject(savedProject.id)
+              } catch (err) { console.error('[Archive] Failed to leave shared project:', err) }
+            }
+            await window.api.projects.update(savedProject.id, { is_shared: 0 })
+            await doArchive()
+          }
+        },
+        { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+      ]
+    })
+    return
+  }
+  await doArchive()
+}, [selectedProject, sortedProjects, archiveProjectAction, unarchiveProjectAction, addToast, setView, setSelectedProject, currentUser])
+```
+
+**Update the header button** (lines 1271–1281):
+- `onClick={handleDeleteCurrentProject}` → `onClick={handleArchiveCurrentProject}`
+- `aria-label="Delete project"` → `aria-label="Archive project"`
+- `<Trash2 size={16} />` → `<Archive size={16} />`
+- Disabled condition: `sortedProjects.length <= 1 || selectedProject?.is_default === 1`
+- Button class: change `hover:bg-danger/10 hover:text-danger` → `hover:bg-foreground/10 hover:text-foreground`
+- Tooltip text: `selectedProject?.is_default === 1 ? "Can't archive the default project" : sortedProjects.length <= 1 ? "Can't archive the last project" : 'Archive project'`
+- Remove the "Shift+click to skip confirmation" hint from the tooltip
+
+---
+
+## Change 9 — ArchiveView (`src/renderer/src/features/views/ArchiveView.tsx`)
+
+**Imports:** Add `useViewStore` from stores, keep `selectAllProjects` for allProjects (Archive view needs all). Add `unarchiveProject`, `deleteProject`, `archiveProject` from project store. Add `RotateCcw` icon from lucide-react.
+
+**`groupedByProject` useMemo** (lines 33–54): update to include archived projects that may have no archived tasks:
+```ts
+for (const project of allProjects) {
+  if (byProject[project.id]?.length || project.is_archived === 1) {
+    groups.push({ project, tasks: byProject[project.id] ?? [] })
+  }
+}
+```
+
+**Project header** (lines 240–258): add `group` class to the header div, and append project-level Restore/Delete buttons that appear on hover when `project.is_archived === 1`:
+
+```tsx
+{project.is_archived === 1 && (
+  <>
+    <button
+      onClick={(e) => { e.stopPropagation(); void handleRestoreProject(project) }}
+      className="ml-auto rounded px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 transition-opacity hover:bg-foreground/6 group-hover:opacity-100"
+    >
+      Restore Project
+    </button>
+    <button
+      onClick={(e) => { e.stopPropagation(); handleDeleteProject(project) }}
+      className="rounded px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-danger opacity-0 transition-opacity hover:bg-danger/10 group-hover:opacity-100"
+    >
+      Delete Project
+    </button>
+  </>
+)}
+```
+
+Add handlers:
+```ts
+const archiveProjectAction = useProjectStore((s) => s.archiveProject)
+const unarchiveProjectAction = useProjectStore((s) => s.unarchiveProject)
+const deleteProjectAction = useProjectStore((s) => s.deleteProject)
+
+const handleRestoreProject = useCallback(async (project: Project) => {
+  await unarchiveProjectAction(project.id)
+  const tasks = { ...useTaskStore.getState().tasks }
+  for (const [tid, t] of Object.entries(tasks)) {
+    if ((t as Task).project_id === project.id) tasks[tid] = { ...(t as Task), is_archived: 0 }
+  }
+  useTaskStore.setState({ tasks })
+  useViewStore.getState().setSelectedProject(project.id)
+  useViewStore.getState().setView('project')
+  addToast({
+    message: `"${project.name}" restored`,
+    action: {
+      label: 'Undo',
+      onClick: async () => {
+        await archiveProjectAction(project.id)
+        const tasks2 = { ...useTaskStore.getState().tasks }
+        for (const [tid, t] of Object.entries(tasks2)) {
+          if ((t as Task).project_id === project.id) tasks2[tid] = { ...(t as Task), is_archived: 1 }
+        }
+        useTaskStore.setState({ tasks: tasks2 })
+        useViewStore.getState().setView('archive')
+      }
+    }
+  })
+}, [unarchiveProjectAction, archiveProjectAction, addToast])
+
+const handleDeleteProject = useCallback((project: Project) => {
+  addToast({
+    message: `Permanently delete "${project.name}" and all its tasks?`,
+    persistent: true,
+    actions: [
+      {
+        label: 'Delete',
+        variant: 'danger' as const,
+        onClick: async () => {
+          await deleteProjectAction(project.id)
+          const remaining: Record<string, Task> = {}
+          for (const [tid, t] of Object.entries(useTaskStore.getState().tasks)) {
+            if ((t as Task).project_id !== project.id) remaining[tid] = t as Task
+          }
+          useTaskStore.setState({ tasks: remaining })
+        }
+      },
+      { label: 'Cancel', variant: 'muted' as const, onClick: () => {} }
+    ]
+  })
+}, [deleteProjectAction, addToast])
+```
+
+Also import `useTaskStore` and `useViewStore` if not already imported in ArchiveView.
+
+---
+
+## Change 10 — ProjectGeneralSettings (`src/renderer/src/features/projects/ProjectGeneralSettings.tsx`)
+
+Replace the entire delete section (lines 105–132) with an archive button that uses the toast system, not inline confirmation:
+
+```ts
+const archiveProjectAction = useProjectStore((s) => s.archiveProject)
+
+const handleArchive = async (): Promise<void> => {
+  if (project.is_default === 1) {
+    addToast({ message: "Can't archive the default project", variant: 'danger' })
+    return
+  }
+  try {
+    await archiveProjectAction(project.id)
+    addToast({
+      message: `"${project.name}" archived`,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const { unarchiveProject } = useProjectStore.getState()
+          await unarchiveProject(project.id)
+        }
+      }
+    })
+    onClose()
+  } catch (err) {
+    addToast({ message: err instanceof Error ? err.message : 'Failed to archive project', variant: 'danger' })
+  }
+}
+```
+
+Replace the render section (lines 105–132) with:
+```tsx
+{project.is_default !== 1 && (
+  <div className="mt-4 border-t border-border pt-4">
+    <button
+      onClick={() => void handleArchive()}
+      className="rounded-lg border border-border px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6"
+    >
+      Archive Project
+    </button>
+  </div>
+)}
+```
+
+---
+
+## Change 11 — ProjectsSettingsContent (`src/renderer/src/features/settings/ProjectsSettingsContent.tsx`)
+
+Lines 726–766 — rename `ProjectDeleteSection` → `ProjectArchiveSection`, replace the delete logic with archive:
+- Import `archiveProject` from projectStore
+- Remove the `confirmDelete` state pattern entirely
+- Replace the delete button with an archive button with the same toast-undo pattern as Change 10 above
+- Update the component name in the render call: `<ProjectArchiveSection ...>`
+- Update the interface name to `ProjectArchiveSectionProps`
+
+---
+
+## Supabase/sync notes
+- `is_archived` on the Supabase `projects` table defaults to 0 — existing projects are unaffected
+- `pullProjectMetadata` now syncs `is_archived` bidirectionally
+- `pushProjectArchive` does a batch UPDATE on both the project and all its tasks — no N+1
+
+## Edge cases
+- Default project: archive button disabled/guarded everywhere. Show toast "Can't archive the default project."
+- Last project: if `sortedProjects.length <= 1` (only one active project), archive is disabled in header
+- Shared project archive: requires persistent toast confirmation → leave shared project on Supabase → transfer ownership if owner → set local `is_shared = 0` → then archive
+- Undo after shared project archive: only unarchives locally (restores `is_archived = 0`) — does NOT re-join the shared project
+- Archived project not appearing in sidebar: guaranteed by `selectActiveProjects` filter
+- ArchiveView empty state: if no archived tasks and no archived projects, existing empty state still shows
+
+## Do NOT
+- Do NOT add a right-click context menu to sidebar project items (none exists today)
+- Do NOT show the undo toast for shared project archive (shared project leave is not undoable)
+- Do NOT filter projects in `selectAllProjects` — keep that selector as-is, ArchiveView needs it
+- Do NOT mark a project's tasks as individually restored when restoring at project level — restore ALL tasks wholesale
+
+Before marking passes: true: read ui-reference.md and debug-learnings.md. Write tests for `archiveWithTasks` and `unarchiveWithTasks` repository methods. Run npm run test — all existing and new tests must pass. Run npm run typecheck — zero errors.
+- **Spec Section:** N/A
+- **Acceptance Criteria:** 
+  - The project header trash icon is replaced by an archive icon (Archive from lucide-react). Clicking it archives the project + all its tasks and navigates to the next project. A toast with 'Undo' restores everything.
+  - The default project's archive button is disabled (header icon is visually disabled; guard in handler prevents action).
+  - If only one active (non-archived) project exists, the archive button is disabled.
+  - Archiving a shared project shows a persistent confirmation toast warning about removal from the shared project. On confirm: ownership is transferred to the earliest-joined other member (if current user is owner), the user is removed from project_members on Supabase, the local project is set to is_shared=0, is_archived=1, and tasks are archived.
+  - Archived projects do NOT appear in the sidebar project list.
+  - The Archive view shows archived projects as groups, even if all their tasks are also archived. Each archived project group header reveals 'Restore Project' and 'Delete Project' buttons on hover (using opacity-0 + group-hover:opacity-100 — same pattern as TaskRow). The trash icon supports Shift+click to skip the confirm toast per ui-reference.md.
+  - 'Restore Project' in Archive view: sets project + all tasks to is_archived=0, navigates to the project, shows undo toast.
+  - 'Delete Project' in Archive view: shows persistent 'Permanently delete?' confirmation toast. On confirm: project and all tasks are hard-deleted from local SQLite and the store.
+  - Project General Settings (right panel) has 'Archive Project' button replacing the old 'Delete Project' inline confirmation. Clicking it archives immediately with undo toast.
+  - ProjectsSettingsContent (Settings → Projects) has the same archive button replacing delete.
+  - is_archived is added to the SQLite projects table via migration_24 and to the Supabase projects table.
+  - Archiving/restoring a project syncs is_archived to Supabase for both the project and all its tasks via pushProjectArchive.
+  - npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass.
+- **Passes:** true
+- **Implemented:** 2026-06-10
