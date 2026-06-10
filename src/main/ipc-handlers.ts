@@ -292,6 +292,10 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.removeLabel(taskId, labelId)
   })
 
+  ipcMain.handle('tasks:applyRemoteTaskLabels', (_e, taskId: string, labelIds: string[]) => {
+    return getRepos().tasks.applyRemoteTaskLabels(taskId, labelIds)
+  })
+
   ipcMain.handle('tasks:getLabels', (_e, taskId: string) => {
     return getRepos().tasks.getLabels(taskId)
   })
@@ -650,6 +654,13 @@ export function registerIpcHandlers(): void {
     'activityLog:create',
     (_e, input: Parameters<Repositories['activityLog']['create']>[0]) => {
       return getRepos().activityLog.create(input)
+    }
+  )
+
+  ipcMain.handle(
+    'activityLog:applyRemote',
+    (_e, input: Parameters<Repositories['activityLog']['applyRemote']>[0]) => {
+      return getRepos().activityLog.applyRemote(input)
     }
   )
 

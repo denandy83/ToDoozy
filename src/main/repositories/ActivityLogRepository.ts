@@ -1,5 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { ActivityLogEntry, CreateActivityLogInput } from '../../shared/types'
+import { placeholderEmail } from '../../shared/placeholderUser'
+
+/** Result of applying a remote activity_log row. `missing-task` means the
+ * referenced task isn't local yet — callers may retry after the task pull. */
+export type ApplyRemoteActivityResult = 'applied' | 'duplicate' | 'missing-task'
 
 export class ActivityLogRepository {
   constructor(private db: DatabaseSync) {}
@@ -39,6 +44,44 @@ export class ActivityLogRepository {
         now
       )
     return this.findById(input.id)!
+  }
+
+  /**
+   * Apply a remote activity_log row (Realtime event or reconcile pull).
+   * INSERT OR IGNORE by primary key — idempotent against rows this device
+   * already wrote (same id). Preserves the remote created_at; create() would
+   * stamp NOW and reorder the feed. The remote table carries project_id,
+   * which the local table doesn't have — callers pass only the shared fields.
+   * Activity authors can be users this device has never seen (remote MCP /
+   * Telegram), so a placeholder user row is seeded for the user_id FK.
+   */
+  applyRemote(input: CreateActivityLogInput & { created_at: string }): ApplyRemoteActivityResult {
+    const task = this.db.prepare('SELECT id FROM tasks WHERE id = ?').get(input.task_id)
+    if (!task) return 'missing-task'
+    const user = this.db.prepare('SELECT id FROM users WHERE id = ?').get(input.user_id)
+    if (!user) {
+      const now = new Date().toISOString()
+      this.db
+        .prepare(
+          'INSERT OR IGNORE INTO users (id, email, display_name, avatar_url, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, ?)'
+        )
+        .run(input.user_id, placeholderEmail(input.user_id), now, now)
+    }
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO activity_log (id, task_id, user_id, action, old_value, new_value, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        input.id,
+        input.task_id,
+        input.user_id,
+        input.action,
+        input.old_value ?? null,
+        input.new_value ?? null,
+        input.created_at
+      )
+    return Number(result.changes) > 0 ? 'applied' : 'duplicate'
   }
 
   deleteByTaskId(taskId: string): number {

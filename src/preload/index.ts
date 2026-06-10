@@ -24,6 +24,8 @@ const api: TodoozyAPI = {
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
+    applyRemoteTaskLabels: (taskId, labelIds) =>
+      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     getTaskLabelsForUser: (userId) => ipcRenderer.invoke('tasks:getTaskLabelsForUser', userId),
     getTaskLabelsForSharedProjects: () =>
@@ -131,6 +133,7 @@ const api: TodoozyAPI = {
     findByTaskId: (taskId) => ipcRenderer.invoke('activityLog:findByTaskId', taskId),
     findByUserId: (userId) => ipcRenderer.invoke('activityLog:findByUserId', userId),
     create: (input) => ipcRenderer.invoke('activityLog:create', input),
+    applyRemote: (input) => ipcRenderer.invoke('activityLog:applyRemote', input),
     deleteByTaskId: (taskId) => ipcRenderer.invoke('activityLog:deleteByTaskId', taskId),
     getRecent: (userId, limit) => ipcRenderer.invoke('activityLog:getRecent', userId, limit)
   },

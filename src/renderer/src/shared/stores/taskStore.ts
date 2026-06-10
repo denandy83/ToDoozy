@@ -111,6 +111,9 @@ interface TaskState {
   movingTaskId: string | null
   lastRecurringClone: RecurringCloneResult | null
   pendingScrollTaskId: string | null
+  /** Per-task counter bumped when a remote activity_log row lands — the
+   * Detail panel's activity list re-fetches when its task's counter moves. */
+  activityRefresh: Record<string, number>
   loading: boolean
   error: string | null
 }
@@ -151,6 +154,7 @@ interface TaskActions {
   setPendingDeleteTask(taskId: string | null): void
   setMovingTask(taskId: string | null): void
   setPendingScrollTask(taskId: string | null): void
+  bumpActivityRefresh(taskId: string): void
   clearError(): void
   clearLastRecurringClone(): void
 }
@@ -170,6 +174,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   movingTaskId: null,
   lastRecurringClone: null,
   pendingScrollTaskId: null,
+  activityRefresh: {},
   loading: false,
   error: null,
 
@@ -981,6 +986,15 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   setPendingScrollTask(taskId: string | null): void {
     set({ pendingScrollTaskId: taskId })
+  },
+
+  bumpActivityRefresh(taskId: string): void {
+    set((state) => ({
+      activityRefresh: {
+        ...state.activityRefresh,
+        [taskId]: (state.activityRefresh[taskId] ?? 0) + 1
+      }
+    }))
   },
 
   clearError(): void {

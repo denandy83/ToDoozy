@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ActivityLogEntry } from '../../../../shared/types'
 import { useSetting } from '../../shared/stores/settingsStore'
+import { useTaskStore } from '../../shared/stores/taskStore'
 
 interface DetailActivityLogProps {
   taskId: string
@@ -41,6 +42,9 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
   const [loading, setLoading] = useState(false)
   const timezoneSetting = useSetting('timezone') ?? 'auto'
   const timezone = timezoneSetting === 'auto' ? undefined : timezoneSetting
+  // Bumped when a remote activity row for this task lands via Realtime —
+  // re-runs the fetch below so MCP/Telegram entries appear without reopening.
+  const refreshKey = useTaskStore((s) => s.activityRefresh[taskId] ?? 0)
 
   useEffect(() => {
     let cancelled = false
@@ -68,7 +72,7 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
     return () => {
       cancelled = true
     }
-  }, [taskId])
+  }, [taskId, refreshKey])
 
   const toggle = useCallback(() => {
     setExpanded((prev) => !prev)

@@ -1304,3 +1304,90 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   return stats
 }
 
+// ── activity_log (pull-only) ─────────────────────────────────────────────
+// activity_log doesn't fit SyncTableDescriptor: rows are immutable and
+// INSERT-only (no updated_at), the local table has no project_id, and the
+// desktop never pushes activity to Supabase (remote rows come from the MCP
+// edge function / Telegram / iOS). A bidirectional descriptor would re-list
+// the full history every pass and try to upload thousands of local-only
+// rows. Instead: an incremental pull cursored on (project_id, created_at)
+// via the syncMeta high-water store.
+
+export interface RemoteActivityRow {
+  id: string
+  project_id: string
+  task_id: string
+  user_id: string
+  action: string
+  old_value: string | null
+  new_value: string | null
+  created_at: string
+}
+
+/**
+ * Pull remote activity_log rows for one project that are newer than the
+ * stored high-water mark. Safety net behind the Realtime activity_log
+ * subscriptions. The high-water only advances on a clean pass — rows whose
+ * task hasn't been pulled locally yet stay behind the cursor and are
+ * retried on the next reconcile.
+ */
+export async function pullActivityLogForProject(
+  projectId: string,
+  userId: string
+): Promise<number> {
+  const supabase = await getSupabase()
+  const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
+
+  const storedHigh = await window.api.syncMeta.getHighWater(userId, projectId, 'activity_log')
+
+  // Tiny max() probe — skip the listing when nothing new arrived remotely.
+  const { data: maxRow, error: maxErr } = await supabase
+    .from('activity_log')
+    .select('created_at')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (maxErr) throw maxErr
+  const remoteMax = (maxRow?.created_at as string | undefined) ?? null
+
+  const nowIso = new Date().toISOString()
+  if (!remoteMax || (storedHigh && tsMs(remoteMax) <= tsMs(storedHigh))) {
+    await window.api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
+    return 0
+  }
+
+  let query = supabase
+    .from('activity_log')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true })
+  if (storedHigh) query = query.gt('created_at', storedHigh)
+  const { data, error } = await query
+  if (error) throw error
+
+  let applied = 0
+  let missingTask = 0
+  for (const row of (data ?? []) as RemoteActivityRow[]) {
+    const result = await window.api.activityLog
+      .applyRemote({
+        id: row.id,
+        task_id: row.task_id,
+        user_id: row.user_id,
+        action: row.action,
+        old_value: row.old_value,
+        new_value: row.new_value,
+        created_at: row.created_at
+      })
+      .catch(() => 'missing-task' as const)
+    if (result === 'applied') applied++
+    else if (result === 'missing-task') missingTask++
+  }
+
+  if (missingTask === 0) {
+    await window.api.syncMeta.setHighWater(userId, projectId, 'activity_log', remoteMax)
+  }
+  await window.api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
+  return applied
+}
+

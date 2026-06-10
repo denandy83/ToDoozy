@@ -383,6 +383,62 @@ describe('TaskRepository', () => {
     expect(repo.getLabels(taskId)).toHaveLength(0)
   })
 
+  describe('applyRemoteTaskLabels', () => {
+    let taskId: string
+    let labelId: string
+
+    beforeEach(() => {
+      taskId = randomUUID()
+      repo.create({ id: taskId, project_id: projectId, owner_id: userId, title: 'Task', status_id: statusId })
+      labelId = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+        labelId, 'Bug', '#ff0000', 0, now, now
+      )
+    })
+
+    it('inserts missing pairs as active', () => {
+      expect(repo.applyRemoteTaskLabels(taskId, [labelId])).toBe(1)
+      expect(repo.getLabels(taskId)).toHaveLength(1)
+    })
+
+    it('is idempotent for already-active pairs', () => {
+      repo.addLabel(taskId, labelId)
+      expect(repo.applyRemoteTaskLabels(taskId, [labelId])).toBe(0)
+      expect(repo.getLabels(taskId)).toHaveLength(1)
+    })
+
+    it('does not resurrect a locally tombstoned pair', () => {
+      repo.addLabel(taskId, labelId)
+      repo.removeLabel(taskId, labelId)
+      expect(repo.applyRemoteTaskLabels(taskId, [labelId])).toBe(0)
+      expect(repo.getLabels(taskId)).toHaveLength(0)
+      // tombstone row still exists, untouched
+      const row = db
+        .prepare('SELECT deleted_at FROM task_labels WHERE task_id = ? AND label_id = ?')
+        .get(taskId, labelId) as { deleted_at: string | null }
+      expect(row.deleted_at).not.toBeNull()
+    })
+
+    it('skips unknown labels and unknown tasks without throwing', () => {
+      expect(repo.applyRemoteTaskLabels(taskId, [randomUUID()])).toBe(0)
+      expect(repo.applyRemoteTaskLabels(randomUUID(), [labelId])).toBe(0)
+      expect(repo.getLabels(taskId)).toHaveLength(0)
+    })
+
+    it('keeps local-active pairs that are absent from the remote set', () => {
+      const otherLabel = randomUUID()
+      const now = new Date().toISOString()
+      db.prepare('INSERT INTO labels (id, name, color, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+        otherLabel, 'Local-only', '#00ff00', 1, now, now
+      )
+      repo.addLabel(taskId, otherLabel)
+      // remote only knows labelId — the local-only pair must survive
+      expect(repo.applyRemoteTaskLabels(taskId, [labelId])).toBe(1)
+      expect(repo.getLabels(taskId)).toHaveLength(2)
+    })
+  })
+
   it('duplicates a task', () => {
     const id = randomUUID()
     repo.create({ id, project_id: projectId, owner_id: userId, title: 'Original', status_id: statusId, priority: 2 })
@@ -1327,6 +1383,65 @@ describe('ActivityLogRepository', () => {
       repo.create({ id: randomUUID(), task_id: taskId, user_id: userId, action: `action_${i}` })
     }
     expect(repo.getRecent(userId, 3)).toHaveLength(3)
+  })
+
+  describe('applyRemote', () => {
+    it('applies a remote row preserving its created_at', () => {
+      const id = randomUUID()
+      const remoteCreatedAt = '2026-06-01T10:00:00.000Z'
+      const result = repo.applyRemote({
+        id,
+        task_id: taskId,
+        user_id: userId,
+        action: 'created',
+        old_value: null,
+        new_value: null,
+        created_at: remoteCreatedAt
+      })
+      expect(result).toBe('applied')
+      expect(repo.findById(id)!.created_at).toBe(remoteCreatedAt)
+    })
+
+    it('is idempotent — re-applying the same id reports duplicate', () => {
+      const id = randomUUID()
+      const input = {
+        id,
+        task_id: taskId,
+        user_id: userId,
+        action: 'created',
+        created_at: '2026-06-01T10:00:00.000Z'
+      }
+      expect(repo.applyRemote(input)).toBe('applied')
+      expect(repo.applyRemote(input)).toBe('duplicate')
+      expect(repo.findByTaskId(taskId)).toHaveLength(1)
+    })
+
+    it('reports missing-task when the task is not local yet', () => {
+      const result = repo.applyRemote({
+        id: randomUUID(),
+        task_id: randomUUID(),
+        user_id: userId,
+        action: 'created',
+        created_at: new Date().toISOString()
+      })
+      expect(result).toBe('missing-task')
+    })
+
+    it('seeds a placeholder user for unknown remote authors', () => {
+      const strangerId = randomUUID()
+      const result = repo.applyRemote({
+        id: randomUUID(),
+        task_id: taskId,
+        user_id: strangerId,
+        action: 'updated',
+        old_value: 'a',
+        new_value: 'b',
+        created_at: new Date().toISOString()
+      })
+      expect(result).toBe('applied')
+      const user = db.prepare('SELECT email FROM users WHERE id = ?').get(strangerId) as { email: string }
+      expect(user.email).toContain(strangerId)
+    })
   })
 })
 

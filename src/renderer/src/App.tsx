@@ -242,8 +242,12 @@ function App(): React.JSX.Element {
     })
     startPolling()
 
-    // Debounced flush for Realtime events across all subscribed projects
+    // Debounced flush for Realtime events across all subscribed projects.
+    // pendingLabelProjectIds tracks projects whose task_labels changed via
+    // the targeted pull (story #91) — those need a chip rehydrate even when
+    // pullNewTasks reports nothing (label assigns don't bump task updated_at).
     const pendingProjectIds = new Set<string>()
+    const pendingLabelProjectIds = new Set<string>()
     let realtimeTimer: ReturnType<typeof setTimeout> | null = null
     let pullInProgress = false
 
@@ -254,6 +258,8 @@ function App(): React.JSX.Element {
         const { pullNewTasks } = await import('./services/PersonalSyncService')
         const projects = [...pendingProjectIds]
         pendingProjectIds.clear()
+        const labelPids = new Set(pendingLabelProjectIds)
+        pendingLabelProjectIds.clear()
         // Defensive filter — shared projects sync via SyncService Realtime,
         // not through pullNewTasks (which would re-push archived rows).
         const projectMap = useProjectStore.getState().projects
@@ -263,15 +269,20 @@ function App(): React.JSX.Element {
           const pulled = await pullNewTasks(pid).catch(() => 0)
           if (pulled > 0) anyChanged = true
         }
+        const pid = currentProjectRef.current
         if (anyChanged) {
-          const pid = currentProjectRef.current
           useProjectStore.getState().hydrateProjects(userId)
           if (pid) {
             useLabelStore.getState().hydrateLabels(pid)
             useTaskStore.getState().hydrateAllForProject(pid, userId)
             useTaskStore.getState().hydrateAllTaskLabels(pid)
           }
-          // Remote task arrivals can start/stop matching saved-view filters.
+        } else if (pid && labelPids.has(pid)) {
+          useLabelStore.getState().hydrateLabels(pid)
+          useTaskStore.getState().hydrateAllTaskLabels(pid)
+        }
+        if (anyChanged || labelPids.size > 0) {
+          // Remote task/label arrivals can start/stop matching saved-view filters.
           useSavedViewStore.getState().scheduleRecount(userId)
         }
       } finally {
@@ -284,6 +295,22 @@ function App(): React.JSX.Element {
       realtimeTimer = setTimeout(flushRealtime, 500)
     }
 
+    // Per-project Realtime handler for personal channels. Also used by the
+    // user channel when it discovers a brand-new personal project mid-session.
+    const makePersonalOnChange = (projectId: string) =>
+      (event: string, data: Record<string, unknown>): void => {
+        if (event === 'activity') {
+          // Row already applied locally (PersonalSyncService) — just refresh
+          // the Detail panel's activity list if it's showing this task.
+          const taskId = data?.task_id
+          if (typeof taskId === 'string') useTaskStore.getState().bumpActivityRefresh(taskId)
+          return
+        }
+        if (event === 'task_labels') pendingLabelProjectIds.add(projectId)
+        else pendingProjectIds.add(projectId)
+        scheduleFlush()
+      }
+
     const setupRealtime = async (): Promise<void> => {
       if (!navigator.onLine) return
       const { subscribeToPersonalProject, cacheProjectNames: cachePNames } = await import('./services/PersonalSyncService')
@@ -293,11 +320,15 @@ function App(): React.JSX.Element {
       // get their own subscriptions via SyncService.subscribeToProject (started in syncShared).
       const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
       for (const project of personalProjects) {
-        await subscribeToPersonalProject(project.id, () => {
-          pendingProjectIds.add(project.id)
-          scheduleFlush()
-        })
+        await subscribeToPersonalProject(project.id, makePersonalOnChange(project.id))
       }
+      // Per-user channel: cross-device labels/saved views/areas + new-project
+      // discovery (story #91). Same offline/recovery lifecycle as above.
+      const { subscribeToUserChannel } = await import('./services/UserChannelService')
+      await subscribeToUserChannel(userId, {
+        subscribePersonalProject: (pid) =>
+          subscribeToPersonalProject(pid, makePersonalOnChange(pid))
+      })
     }
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
 
@@ -307,6 +338,7 @@ function App(): React.JSX.Element {
       unsubRealtimeState()
       if (realtimeTimer) clearTimeout(realtimeTimer)
       import('./services/PersonalSyncService').then(({ unsubscribeAllPersonal }) => unsubscribeAllPersonal())
+      import('./services/UserChannelService').then(({ unsubscribeUserChannel }) => unsubscribeUserChannel())
     }
   }, [userId, isOffline])
 

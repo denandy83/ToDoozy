@@ -12,7 +12,7 @@ import { logEvent } from '../shared/stores/logStore'
 import { useLabelStore } from '../shared/stores/labelStore'
 import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
-import { SYNC_TABLES, reconcileTable } from './syncTables'
+import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
 
@@ -1765,6 +1765,73 @@ export async function pullStatuses(projectId: string): Promise<number> {
   }
 }
 
+/**
+ * Ensure every referenced remote label exists locally. If a remote label is a
+ * case/exact duplicate of a local one (same name, different id — typically
+ * MCP-created), it isn't recreated; instead the returned map remaps the
+ * remote id to the canonical local id so task_labels inserts don't reference
+ * a non-existent local row.
+ */
+async function ensureLabelsExistLocally(labelIds: string[]): Promise<Map<string, string>> {
+  const remap = new Map<string, string>()
+  if (labelIds.length === 0) return remap
+  const supabase = await getSupabase()
+  const { useAuthStore } = await import('../shared/stores/authStore')
+  const ownerId = useAuthStore.getState().currentUser?.id ?? null
+  for (const labelId of labelIds) {
+    const localLabel = await window.api.labels.findById(labelId)
+    if (localLabel) continue
+    const { data: remoteLabel } = await supabase
+      .from('user_labels')
+      .select('*')
+      .eq('id', labelId)
+      .single()
+    if (!remoteLabel) continue
+    const ownerForLabel = ownerId ?? remoteLabel.user_id ?? null
+    if (!ownerForLabel) continue
+    const sameName = await window.api.labels.findByName(ownerForLabel, remoteLabel.name)
+    if (sameName) {
+      remap.set(labelId, sameName.id)
+    } else {
+      await window.api.labels.create({
+        id: remoteLabel.id,
+        user_id: ownerForLabel,
+        name: remoteLabel.name,
+        color: remoteLabel.color
+      }).catch(() => {})
+    }
+  }
+  return remap
+}
+
+/**
+ * Targeted task_labels pull for one task (story #91, option (a)).
+ * task_labels has no project_id column, so a filtered Realtime subscription
+ * is impossible (and unfiltered subscriptions are forbidden by the
+ * performance rules). Instead, every tasks Realtime event triggers this
+ * O(1) fetch — the MCP edge function rewrites tasks.label_names on every
+ * assign/remove, so a tasks UPDATE event fires per label change even though
+ * updated_at doesn't advance (which is why pullNewTasks never sees it).
+ * Returns the number of newly applied label assignments.
+ */
+export async function pullTaskLabelsForTask(taskId: string): Promise<number> {
+  try {
+    const supabase = await getSupabase()
+    const { data: pairs, error } = await supabase
+      .from('task_labels')
+      .select('task_id, label_id')
+      .eq('task_id', taskId)
+    if (error || !pairs || pairs.length === 0) return 0
+    const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
+    const remap = await ensureLabelsExistLocally(labelIds)
+    const resolved = [...new Set(labelIds.map((id) => remap.get(id) ?? id))]
+    return await window.api.tasks.applyRemoteTaskLabels(taskId, resolved)
+  } catch (err) {
+    console.warn('[PersonalSync] pullTaskLabelsForTask failed:', err)
+    return 0
+  }
+}
+
 export async function pullNewTasks(projectId: string): Promise<number> {
   try {
     // Ensure statuses exist locally before inserting tasks (FK constraint)
@@ -1888,36 +1955,8 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           .in('task_id', touchedTaskIds)
 
         if (remoteTaskLabels && remoteTaskLabels.length > 0) {
-          // Ensure all referenced labels exist locally; if a remote label is a
-          // case/exact duplicate of one we already have, remap to the local id
-          // so task_labels insert doesn't reference a non-existent local row.
           const labelIds = [...new Set(remoteTaskLabels.map((tl) => tl.label_id))]
-          const remap = new Map<string, string>()
-          const { useAuthStore } = await import('../shared/stores/authStore')
-          const ownerId = useAuthStore.getState().currentUser?.id ?? null
-          for (const labelId of labelIds) {
-            const localLabel = await window.api.labels.findById(labelId)
-            if (localLabel) continue
-            const { data: remoteLabel } = await supabase
-              .from('user_labels')
-              .select('*')
-              .eq('id', labelId)
-              .single()
-            if (!remoteLabel) continue
-            const ownerForLabel = ownerId ?? remoteLabel.user_id ?? null
-            if (!ownerForLabel) continue
-            const sameName = await window.api.labels.findByName(ownerForLabel, remoteLabel.name)
-            if (sameName) {
-              remap.set(labelId, sameName.id)
-            } else {
-              await window.api.labels.create({
-                id: remoteLabel.id,
-                user_id: ownerForLabel,
-                name: remoteLabel.name,
-                color: remoteLabel.color
-              }).catch(() => {})
-            }
-          }
+          const remap = await ensureLabelsExistLocally(labelIds)
           for (const tl of remoteTaskLabels) {
             const localLabelId = remap.get(tl.label_id) ?? tl.label_id
             await window.api.tasks.addLabel(tl.task_id, localLabelId).catch(() => {})
@@ -2041,9 +2080,31 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     const allProjects = await window.api.projects.getProjectsForUser(userId)
     const personalProjects = allProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
 
+    // activity_log is pull-only (no descriptor — see syncTables.ts): an
+    // incremental sweep cursored on (project_id, created_at). Safety net for
+    // Realtime gaps, and runs for shared projects too — remote members'
+    // activity has no other path into local SQLite besides the live event.
+    const pullActivity = async (projectId: string): Promise<void> => {
+      try {
+        const pulled = await pullActivityLogForProject(projectId, userId)
+        if (pulled > 0) {
+          totalPulled += pulled
+          logEvent('info', 'sync', `Reconcile: activity_log`, `pulled=${pulled} scope=${projectId}`)
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        logEvent('error', 'sync', `Reconcile: activity_log failed`, `scope=${projectId} err=${msg}`)
+      }
+    }
+
     for (const project of personalProjects) {
       await runTable('statuses', project.id)
       await runTable('tasks', project.id)
+      await pullActivity(project.id)
+    }
+
+    for (const project of allProjects.filter((p) => p.is_shared === 1)) {
+      await pullActivity(project.id)
     }
 
     // 3. User-scoped: labels, themes, settings, saved_views, project_areas, project_templates.
@@ -2780,6 +2841,48 @@ function getReconnectDelay(attempt: number): number {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
 }
 
+/**
+ * Apply a Realtime activity_log INSERT to the local table. One delayed retry
+ * covers the task-INSERT race: the task row for a brand-new remote task only
+ * lands locally via the debounced flush (~0.5–1s after its event), and the
+ * activity event for that task can beat it. Rows still missing after the
+ * retry are picked up by the reconcile-time pullActivityLogForProject sweep,
+ * which holds its high-water back for exactly this case.
+ */
+async function applyRemoteActivityRow(
+  row: Record<string, unknown>,
+  onApplied: () => void
+): Promise<void> {
+  const id = row.id as string | undefined
+  const taskId = row.task_id as string | undefined
+  if (!id || !taskId) return
+  const input = {
+    id,
+    task_id: taskId,
+    user_id: (row.user_id as string) ?? '',
+    action: (row.action as string) ?? '',
+    old_value: (row.old_value as string | null) ?? null,
+    new_value: (row.new_value as string | null) ?? null,
+    created_at: (row.created_at as string) ?? new Date().toISOString()
+  }
+  const first = await window.api.activityLog
+    .applyRemote(input)
+    .catch(() => 'missing-task' as const)
+  if (first === 'applied') {
+    onApplied()
+    return
+  }
+  if (first !== 'missing-task') return // duplicate — this device already has it
+  setTimeout(() => {
+    void window.api.activityLog
+      .applyRemote(input)
+      .then((second) => {
+        if (second === 'applied') onApplied()
+      })
+      .catch(() => {})
+  }, 2_500)
+}
+
 async function createPersonalChannel(projectId: string, state: PersonalChannelState): Promise<void> {
   const supabase = await getSupabase()
   const channel = supabase
@@ -2791,7 +2894,30 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
+        // Targeted task_labels pull (story #91): a remote label assign/remove
+        // only rewrites tasks.label_names (updated_at unchanged), so the
+        // debounced pullNewTasks never treats the task as dirty. Fetch the
+        // junction rows for this one task; fire a dedicated onChange when
+        // something landed so the flush rehydrates the chips.
+        if (payload.eventType !== 'DELETE' && typeof data.id === 'string') {
+          const taskId = data.id
+          void pullTaskLabelsForTask(taskId).then((added) => {
+            if (added > 0 && !state.cancelled) {
+              state.onChange('task_labels', { task_id: taskId, project_id: projectId })
+            }
+          })
+        }
         state.onChange(payload.eventType, data)
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'activity_log', filter: `project_id=eq.${projectId}` },
+      (payload) => {
+        const row = payload.new as Record<string, unknown>
+        void applyRemoteActivityRow(row, () => {
+          if (!state.cancelled) state.onChange('activity', row)
+        })
       }
     )
     .subscribe((status, err) => {
@@ -2886,6 +3012,12 @@ export function pauseReconnectsForSuspend(): void {
       state.reconnectTimer = null
     }
   }
+  // The per-user channel shares the suspend/resume lifecycle with the
+  // personal channels. Dynamic import — UserChannelService imports from
+  // this module, so a static import would be a cycle.
+  void import('./UserChannelService').then(({ pauseUserChannelReconnect }) => {
+    pauseUserChannelReconnect()
+  })
 }
 
 /**
@@ -2913,6 +3045,10 @@ export async function forceReconnectAllPersonal(): Promise<void> {
     }
     await createPersonalChannel(projectId, state)
   }
+  // Force the per-user channel too — same resume/online/manual-retry triggers.
+  void import('./UserChannelService').then(({ forceReconnectUserChannel }) =>
+    forceReconnectUserChannel().catch(() => {})
+  )
 }
 
 /**
@@ -2946,6 +3082,25 @@ export async function subscribeToPersonalProject(
   }
   personalChannelStates.set(projectId, state)
   await createPersonalChannel(projectId, state)
+}
+
+/**
+ * Unsubscribe from a single personal-project Realtime channel. Used when a
+ * membership DELETE arrives on the user channel (project removed remotely).
+ */
+export async function unsubscribePersonalProject(projectId: string): Promise<void> {
+  const state = personalChannelStates.get(projectId)
+  if (!state) return
+  state.cancelled = true
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer)
+    state.reconnectTimer = null
+  }
+  if (state.channel) {
+    const supabase = await getSupabase()
+    try { await supabase.removeChannel(state.channel) } catch { /* already dead */ }
+  }
+  personalChannelStates.delete(projectId)
 }
 
 /**

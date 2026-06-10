@@ -65,6 +65,7 @@ export interface TasksAPI {
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
+  applyRemoteTaskLabels(taskId: string, labelIds: string[]): Promise<number>
   getLabels(taskId: string): Promise<TaskLabel[]>
   getTaskLabelsForUser(userId: string): Promise<TaskLabel[]>
   getTaskLabelsForSharedProjects(): Promise<TaskLabel[]>
@@ -181,6 +182,9 @@ export interface ActivityLogAPI {
   findByTaskId(taskId: string): Promise<ActivityLogEntry[]>
   findByUserId(userId: string): Promise<ActivityLogEntry[]>
   create(input: CreateActivityLogInput): Promise<ActivityLogEntry>
+  applyRemote(
+    input: CreateActivityLogInput & { created_at: string }
+  ): Promise<'applied' | 'duplicate' | 'missing-task'>
   deleteByTaskId(taskId: string): Promise<number>
   getRecent(userId: string, limit: number): Promise<ActivityLogEntry[]>
 }
@@ -359,6 +363,7 @@ export type SyncTableName =
   | 'task_labels'
   | 'project_labels'
   | 'project_templates'
+  | 'activity_log'
 
 export interface SyncMetaAPI {
   getHighWater(

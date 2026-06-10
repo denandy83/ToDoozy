@@ -269,7 +269,11 @@ export function AppLayout(): React.JSX.Element {
         if (!userId || !selectedProject || removedFlag) return
 
         if (table === 'member') {
-          if (event === 'DELETE' && payload?.user_id === userId) {
+          // project_id guard: every shared channel funnels into this one
+          // callback, so a removal from a NON-active shared project must not
+          // tear down the active one. Non-active removals are handled by the
+          // per-user channel (UserChannelService).
+          if (event === 'DELETE' && payload?.user_id === userId && payload?.project_id === selectedProject.id) {
             // Set flag immediately to block all subsequent events in this batch
             removedFlag = true
             unsubscribeFromProject(selectedProject.id)
@@ -404,6 +408,29 @@ export function AppLayout(): React.JSX.Element {
         if (table === 'status') {
           // Full status re-sync is fine — statuses are few
           useStatusStore.getState().hydrateStatuses(selectedProject.id)
+        }
+
+        if (table === 'activity' && event === 'INSERT') {
+          // Persist remote members' activity entries locally (idempotent by
+          // id) and refresh the Detail panel if it's showing this task.
+          const taskId = payload?.task_id as string | undefined
+          const rowId = payload?.id as string | undefined
+          if (rowId && taskId) {
+            await window.api.activityLog
+              .applyRemote({
+                id: rowId,
+                task_id: taskId,
+                user_id: (payload.user_id as string) ?? '',
+                action: (payload.action as string) ?? '',
+                old_value: (payload.old_value as string | null) ?? null,
+                new_value: (payload.new_value as string | null) ?? null,
+                created_at: (payload.created_at as string) ?? new Date().toISOString()
+              })
+              .then((res) => {
+                if (res === 'applied') useTaskStore.getState().bumpActivityRefresh(taskId)
+              })
+              .catch(() => {})
+          }
         }
 
         if (table === 'project_label') {

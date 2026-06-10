@@ -47,3 +47,57 @@ Started: Wed Jun 10 22:17:41 CEST 2026
   instance, unrelated).
 - Noticed: prd.json gained story #95 (batch review doc) mid-iteration — left untouched, next
   iterations will reach it after #91–#94.
+
+## 2026-06-10 — Story #91: Expand Realtime coverage (per-user channel + activity_log + task_labels)
+
+Implemented all four parts:
+1. **Per-user channel** — new `UserChannelService.ts`: stable channel `user:${userId}` with filtered subs on
+   project_members / user_labels / user_saved_views / user_project_areas. Membership INSERT pulls the project
+   down (shared → syncProjectDown+subscribeToProject; personal → projects descriptor applyRemote + addMember +
+   pullNewTasks + personal channel, distinguished by remote member count). Membership DELETE removes the project
+   locally + tears down its channel; the ACTIVE shared project is excluded (AppLayout's dialog owns that case).
+   Reconnect/backoff mirrors the personal channels (suspend/online gates, joined auto-rejoin guard, give-up →
+   connectionLost banner); pause/force are invoked from PersonalSyncService's pauseReconnectsForSuspend /
+   forceReconnectAllPersonal so powerMonitor resume, the online listener, and SessionBanner retry all cover it.
+   Offline-start recovery: bootstrapped inside App.tsx's realtime effect (keyed on [userId, isOffline]) — the
+   isOffline flip in finishSessionRecovery re-runs it, same as the project channels.
+2. **activity_log on personal channels** — INSERT sub per personal project; new IPC `activityLog:applyRemote`
+   (INSERT OR IGNORE by id, preserves remote created_at, seeds placeholder users, returns
+   applied/duplicate/missing-task). One 2.5s retry covers the activity-before-task Realtime race. Detail panel
+   refresh via new `taskStore.activityRefresh` counter + `bumpActivityRefresh` (DetailActivityLog re-fetches on
+   bump). ALSO wired the shared channel's 'activity' events in AppLayout — they were being dropped on the floor
+   (remote members' activity never reached local SQLite live).
+3. **task_labels targeted pull (option a)** — root cause confirmed: the MCP edge fn's addLabel/removeLabel
+   rewrite tasks.label_names WITHOUT bumping updated_at, so a tasks UPDATE event fires but pullNewTasks never
+   treats the task as touched. Fix: every personal-channel tasks INSERT/UPDATE triggers
+   `pullTaskLabelsForTask(taskId)` (O(1) fetch .eq('task_id')) → new `tasks:applyRemoteTaskLabels` IPC.
+   DELIBERATE DEVIATION from the story's "replace-set" wording: the apply is additive + tombstone-aware, NOT a
+   strict replace-set. Deleting local-active pairs absent from remote would race our own pushTask echo (task row
+   upserts before the junction sync inside pushTask → the echo event sees a stale remote set and would wipe a
+   fresh local label add). Story #92 (batched detail edits) will widen that unpushed window further, so strict
+   replace-set would be a data-loss bug. Tombstoned pairs are never resurrected (pending local removes survive);
+   remote removals still converge via the project_labels cascade + reconcile key-set diff.
+   Extracted `ensureLabelsExistLocally()` from pullNewTasks (shared by both paths).
+4. **Polling safety net** — `pullActivityLogForProject` in syncTables.ts: pull-only incremental sweep cursored on
+   (project_id, created_at) via syncMeta high-water; cursor only advances on a clean pass (missing-task rows
+   stay behind it and retry next reconcile). Wired into reconcileImpl for personal AND shared projects (shared
+   activity had no pull path at all). NOT a SyncTableDescriptor: activity is immutable/INSERT-only with no
+   updated_at, and the desktop never pushes activity — a bidirectional descriptor would re-list full history
+   every pass and upload thousands of local-only rows.
+
+DEPLOY REQUIRED (user step, scope-guarded): `supabase/migrations/20260610230000_realtime_user_channel.sql` must
+be applied to prod — user_labels/user_saved_views/user_project_areas were NEVER in the supabase_realtime
+publication (the new user-channel subs silently receive nothing until then; project_members + activity_log
+inherited publication membership from the shared_* renames and work immediately). Also adds the compound indexes
+the story requires: user_labels(user_id,updated_at), activity_log(project_id,created_at) (+ saved_views/areas).
+
+Also fixed while in there: AppLayout's member-DELETE branch now guards on payload.project_id — previously a
+removal from ANY shared project tore down whichever project was active (all shared channels funnel into one
+callback).
+
+Note on "reduce polling once user channel subscribed": there is no periodic polling for the user-scoped tables
+(they reconcile on startup/reconnect only), so nothing to throttle — the reconcile pass stays as the safety net.
+
+Tests: +5 applyRemoteTaskLabels (tombstone/idempotence/unknown-FK/local-only-survival), +4 activityLog.applyRemote
+(created_at preserved/duplicate/missing-task/placeholder user), +5 pullActivityLogForProject (cursor skip/first
+run/incremental/held-back high-water/duplicate-clean). 889 tests green, typecheck clean, dev compiles on :5200.

@@ -328,6 +328,39 @@ export class TaskRepository {
       .run(taskId, labelId)
   }
 
+  /**
+   * Apply remote task_labels rows for one task (Realtime targeted pull).
+   * Additive + tombstone-aware, deliberately NOT a strict replace-set:
+   * - missing pair → insert active
+   * - locally tombstoned pair → left alone; a local remove whose push is
+   *   still in flight must not be resurrected by the echo of our own
+   *   task-row push
+   * - local-active pairs absent from remote are KEPT — they may be local
+   *   adds whose pushTask hasn't completed; deleting them here would lose
+   *   data. Remote removals converge via the project_labels cascade and
+   *   the reconcile key-set diff.
+   * Skips label ids without a local labels row (FK) — callers run
+   * ensureLabelsExistLocally first. Returns the number of inserted pairs.
+   */
+  applyRemoteTaskLabels(taskId: string, labelIds: string[]): number {
+    const task = this.db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
+    if (!task) return 0
+    let added = 0
+    for (const labelId of labelIds) {
+      const label = this.db.prepare('SELECT id FROM labels WHERE id = ?').get(labelId)
+      if (!label) continue
+      const existing = this.db
+        .prepare('SELECT deleted_at FROM task_labels WHERE task_id = ? AND label_id = ?')
+        .get(taskId, labelId) as { deleted_at: string | null } | undefined
+      if (existing) continue
+      this.db
+        .prepare('INSERT INTO task_labels (task_id, label_id, deleted_at) VALUES (?, ?, NULL)')
+        .run(taskId, labelId)
+      added++
+    }
+    return added
+  }
+
   removeLabel(taskId: string, labelId: string): boolean {
     // Soft-delete to match the read paths' `tl.deleted_at IS NULL` filter
     // and to keep parity with LabelRepository.removeFromProject (which

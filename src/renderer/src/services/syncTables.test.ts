@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { SyncTableDescriptor } from './syncTables'
+import type { SyncTableDescriptor, RemoteActivityRow } from './syncTables'
+
+// pullActivityLogForProject talks to Supabase directly — swap the client for
+// a per-test fake. The reconcileTable tests never call getSupabase, so the
+// module-wide mock is inert for them.
+const supabaseHolder = vi.hoisted(() => ({ client: null as unknown }))
+vi.mock('../lib/supabase', () => ({
+  getSupabase: vi.fn(async () => supabaseHolder.client)
+}))
 
 interface FakeRow {
   id: string
@@ -239,5 +247,183 @@ describe('reconcileTable — high-water short-circuit', () => {
     expect(stats.failed).toBe(1)
     expect(stats.pushed).toBe(0)
     expect(syncMetaStub.setHighWater).not.toHaveBeenCalled()
+  })
+})
+
+// ── pullActivityLogForProject ────────────────────────────────────────────
+
+interface FakeActivityQuery {
+  select(cols: string): FakeActivityQuery
+  eq(col: string, val: string): FakeActivityQuery
+  gt(col: string, val: string): FakeActivityQuery
+  order(col: string, opts?: { ascending: boolean }): FakeActivityQuery
+  limit(n: number): FakeActivityQuery
+  maybeSingle(): Promise<{ data: { created_at: string } | null; error: null }>
+  then(resolve: (v: { data: RemoteActivityRow[]; error: null }) => void): void
+}
+
+function makeFakeActivitySupabase(opts: {
+  maxCreatedAt: string | null
+  rows: RemoteActivityRow[]
+}): { from(table: string): FakeActivityQuery } {
+  return {
+    from(): FakeActivityQuery {
+      let since: string | null = null
+      const builder: FakeActivityQuery = {
+        select: () => builder,
+        eq: () => builder,
+        gt: (_col, val) => {
+          since = val
+          return builder
+        },
+        order: () => builder,
+        limit: () => builder,
+        maybeSingle: async () => ({
+          data: opts.maxCreatedAt ? { created_at: opts.maxCreatedAt } : null,
+          error: null
+        }),
+        then: (resolve) => {
+          const rows = since ? opts.rows.filter((r) => r.created_at > since!) : opts.rows
+          resolve({ data: rows, error: null })
+        }
+      }
+      return builder
+    }
+  }
+}
+
+function makeActivityRow(createdAt: string): RemoteActivityRow {
+  return {
+    id: `act-${createdAt}`,
+    project_id: 'proj-1',
+    task_id: 'task-1',
+    user_id: 'user-1',
+    action: 'created',
+    old_value: null,
+    new_value: null,
+    created_at: createdAt
+  }
+}
+
+describe('pullActivityLogForProject', () => {
+  let syncMetaStub: ReturnType<typeof stubSyncMeta>
+  let applyRemoteMock: ReturnType<typeof vi.fn>
+
+  function stubWindow(): void {
+    vi.stubGlobal('window', {
+      ...globalThis.window,
+      api: {
+        syncMeta: {
+          getHighWater: syncMetaStub.getHighWater,
+          setHighWater: syncMetaStub.setHighWater,
+          getLastReconciledAt: vi.fn(async () => null),
+          setLastReconciledAt: syncMetaStub.setLastReconciledAt,
+          clearAll: vi.fn(async () => 0)
+        },
+        activityLog: {
+          applyRemote: applyRemoteMock
+        }
+      }
+    })
+  }
+
+  beforeEach(() => {
+    syncMetaStub = stubSyncMeta({ highWater: null })
+    applyRemoteMock = vi.fn(async () => 'applied')
+    stubWindow()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  it('skips the listing when remote max <= stored high-water', async () => {
+    syncMetaStub.getHighWater.mockResolvedValueOnce('2026-06-10T10:00:00.000Z')
+    supabaseHolder.client = makeFakeActivitySupabase({
+      maxCreatedAt: '2026-06-10T10:00:00+00:00', // format-equivalent to the cursor
+      rows: [makeActivityRow('2026-06-10T09:00:00.000Z')]
+    })
+
+    const { pullActivityLogForProject } = await import('./syncTables')
+    const pulled = await pullActivityLogForProject('proj-1', 'user-1')
+
+    expect(pulled).toBe(0)
+    expect(applyRemoteMock).not.toHaveBeenCalled()
+    expect(syncMetaStub.setHighWater).not.toHaveBeenCalled()
+    expect(syncMetaStub.setLastReconciledAt).toHaveBeenCalledOnce()
+  })
+
+  it('pulls everything on first run (no cursor) and advances the high-water', async () => {
+    supabaseHolder.client = makeFakeActivitySupabase({
+      maxCreatedAt: '2026-06-10T12:00:00.000Z',
+      rows: [
+        makeActivityRow('2026-06-10T11:00:00.000Z'),
+        makeActivityRow('2026-06-10T12:00:00.000Z')
+      ]
+    })
+
+    const { pullActivityLogForProject } = await import('./syncTables')
+    const pulled = await pullActivityLogForProject('proj-1', 'user-1')
+
+    expect(pulled).toBe(2)
+    expect(applyRemoteMock).toHaveBeenCalledTimes(2)
+    expect(syncMetaStub.setHighWater).toHaveBeenCalledWith(
+      'user-1',
+      'proj-1',
+      'activity_log',
+      '2026-06-10T12:00:00.000Z'
+    )
+  })
+
+  it('pulls only rows newer than the stored cursor', async () => {
+    syncMetaStub.getHighWater.mockResolvedValueOnce('2026-06-10T11:30:00.000Z')
+    supabaseHolder.client = makeFakeActivitySupabase({
+      maxCreatedAt: '2026-06-10T12:00:00.000Z',
+      rows: [
+        makeActivityRow('2026-06-10T11:00:00.000Z'),
+        makeActivityRow('2026-06-10T12:00:00.000Z')
+      ]
+    })
+
+    const { pullActivityLogForProject } = await import('./syncTables')
+    const pulled = await pullActivityLogForProject('proj-1', 'user-1')
+
+    expect(pulled).toBe(1)
+    expect(applyRemoteMock).toHaveBeenCalledOnce()
+  })
+
+  it('holds the high-water back when a row\'s task is missing locally', async () => {
+    applyRemoteMock
+      .mockResolvedValueOnce('applied')
+      .mockResolvedValueOnce('missing-task')
+    supabaseHolder.client = makeFakeActivitySupabase({
+      maxCreatedAt: '2026-06-10T12:00:00.000Z',
+      rows: [
+        makeActivityRow('2026-06-10T11:00:00.000Z'),
+        makeActivityRow('2026-06-10T12:00:00.000Z')
+      ]
+    })
+
+    const { pullActivityLogForProject } = await import('./syncTables')
+    const pulled = await pullActivityLogForProject('proj-1', 'user-1')
+
+    expect(pulled).toBe(1)
+    expect(syncMetaStub.setHighWater).not.toHaveBeenCalled()
+    expect(syncMetaStub.setLastReconciledAt).toHaveBeenCalledOnce()
+  })
+
+  it('treats duplicate rows as clean and still advances the cursor', async () => {
+    applyRemoteMock.mockResolvedValue('duplicate')
+    supabaseHolder.client = makeFakeActivitySupabase({
+      maxCreatedAt: '2026-06-10T12:00:00.000Z',
+      rows: [makeActivityRow('2026-06-10T12:00:00.000Z')]
+    })
+
+    const { pullActivityLogForProject } = await import('./syncTables')
+    const pulled = await pullActivityLogForProject('proj-1', 'user-1')
+
+    expect(pulled).toBe(0)
+    expect(syncMetaStub.setHighWater).toHaveBeenCalledOnce()
   })
 })
