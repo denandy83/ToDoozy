@@ -4,6 +4,7 @@ import { PRIORITY_LEVELS } from './PriorityIndicator'
 import { LabelPicker } from './LabelPicker'
 import { useTimerStore } from '../stores/timerStore'
 import { useTimerSettings } from '../hooks/useTimerSettings'
+import { buildTimerStartArgs } from '../utils/timerStartArgs'
 import { useAuthStore } from '../stores/authStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
@@ -314,25 +315,19 @@ export function TimerSubmenu({ taskId, taskTitle, projectId, openLeft, onClose }
     }
   }, [task, statuses, updateTask])
 
+  const isFlowtime = settings.defaultMode === 'flowtime'
+
   const handleStart = useCallback(
     (minutes: number) => {
       if (!currentUser || isRunning) return
       autoMoveToInProgress()
-      const isInfinite = settings.defaultDuration === 'infinite'
-      startTimer({
-        taskId,
-        taskTitle,
-        minutes,
-        reps: isInfinite ? 1 : settings.defaultReps,
-        isPerpetual: isInfinite,
-        breakMinutes: settings.breakMinutes,
-        soundEnabled: settings.soundEnabled,
-        notificationEnabled: settings.notificationEnabled,
-        autoBreak: settings.autoBreak,
-        userId: currentUser.id,
-        longBreakMinutes: settings.longBreakEnabled ? settings.longBreakMinutes : 0,
-        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0
-      })
+      startTimer(
+        buildTimerStartArgs(
+          { mode: settings.defaultMode, duration: settings.defaultDuration, minutes, reps: settings.defaultReps },
+          settings,
+          { taskId, taskTitle, userId: currentUser.id }
+        )
+      )
       onClose()
     },
     [taskId, taskTitle, settings, currentUser, isRunning, startTimer, autoMoveToInProgress, onClose]
@@ -342,6 +337,14 @@ export function TimerSubmenu({ taskId, taskTitle, projectId, openLeft, onClose }
     <SubmenuContainer openLeft={openLeft}>
       {isRunning ? (
         <div className="px-3 py-1.5 text-sm font-light text-muted">Timer already running</div>
+      ) : isFlowtime ? (
+        <button
+          onClick={() => handleStart(settings.defaultPreset.minutes)}
+          className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
+        >
+          <span>Start Flowtime</span>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Count up</span>
+        </button>
       ) : (
         settings.presets.map((preset) => (
           <button

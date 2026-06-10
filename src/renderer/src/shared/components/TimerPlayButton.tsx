@@ -6,28 +6,16 @@ import { useTimerSettings, type TimerSettings, type TimerMode, type TimerDuratio
 import { useAuthStore } from '../stores/authStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useStatusesByProject } from '../stores/statusStore'
+import { buildTimerStartArgs, paramsToStoreArgs, type StartParams } from '../utils/timerStartArgs'
+
+// Re-exported for backwards compatibility with existing imports/tests.
+export { paramsToStoreArgs }
+export type { StartParams }
 
 interface TimerPlayButtonProps {
   taskId: string
   taskTitle: string
   projectId: string
-}
-
-export interface StartParams {
-  mode: TimerMode
-  duration: TimerDuration
-  minutes: number
-  reps: number
-}
-
-export function paramsToStoreArgs(p: StartParams): { isFlowtime: boolean; isPerpetual: boolean; reps: number; minutes: number } {
-  if (p.mode === 'flowtime') {
-    return { isFlowtime: true, isPerpetual: false, reps: 0, minutes: p.minutes }
-  }
-  if (p.duration === 'infinite') {
-    return { isFlowtime: false, isPerpetual: true, reps: 1, minutes: p.minutes }
-  }
-  return { isFlowtime: false, isPerpetual: false, reps: p.reps, minutes: p.minutes }
 }
 
 export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButtonProps): React.JSX.Element {
@@ -58,24 +46,8 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
   const startWithParams = useCallback(
     (params: StartParams) => {
       if (!currentUser) return
-      const { isFlowtime, isPerpetual, reps, minutes } = paramsToStoreArgs(params)
       autoMoveToInProgress()
-      startTimer({
-        taskId,
-        taskTitle,
-        minutes,
-        reps,
-        isPerpetual,
-        breakMinutes: settings.breakMinutes,
-        soundEnabled: settings.soundEnabled,
-        notificationEnabled: settings.notificationEnabled,
-        autoBreak: settings.autoBreak,
-        userId: currentUser.id,
-        isFlowtime,
-        longBreakMinutes: settings.longBreakEnabled ? settings.longBreakMinutes : 0,
-        longBreakInterval: settings.longBreakEnabled ? settings.longBreakInterval : 0,
-        cookieMinutesPerHour: isFlowtime ? settings.cookieMinutesPerHour : 0
-      })
+      startTimer(buildTimerStartArgs(params, settings, { taskId, taskTitle, userId: currentUser.id }))
       setPopupOpen(false)
     },
     [taskId, taskTitle, settings, currentUser, startTimer, autoMoveToInProgress]
