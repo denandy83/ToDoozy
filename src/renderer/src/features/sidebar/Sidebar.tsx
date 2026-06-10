@@ -38,6 +38,7 @@ import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 import { MAX_VISIBLE_PROJECTS, shouldAutoExpandProjects } from './sidebarProjects'
+import { PROJECT_COLORS, pickNextProjectColor } from '../projects/projectColors'
 
 interface SidebarProps {
   viewCounts: { 'my-day': number; archive: number; templates: number }
@@ -108,7 +109,9 @@ export function Sidebar({
   const [projectsExpanded, setProjectsExpanded] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectColor, setNewProjectColor] = useState('#6366f1')
+  const [newProjectColor, setNewProjectColor] = useState(() =>
+    pickNextProjectColor(projects.map((p) => p.color))
+  )
   const addProjectRef = useRef<HTMLInputElement>(null)
   const createProject = useProjectStore((s) => s.createProject)
   const createStatus = useStatusStore((s) => s.createStatus)
@@ -222,7 +225,7 @@ export function Sidebar({
     setSelectedProject(project.id)
     setAddingProject(false)
     setNewProjectName('')
-    setNewProjectColor('#6366f1')
+    setNewProjectColor(pickNextProjectColor(Object.values(useProjectStore.getState().projects).map((p) => p.color)))
   }, [newProjectName, newProjectColor, currentUser, projects, createProject, createStatus, setSelectedProject])
 
   // Auto-expand projects when the selected project is beyond the visible top 5.
@@ -358,7 +361,7 @@ export function Sidebar({
           title="New folder" aria-label="New folder" tabIndex={-1}>
           <Plus size={8} /><span className="text-[7px] font-bold uppercase tracking-wider">Folder</span>
         </button>
-        <button onClick={() => { setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
+        <button onClick={() => { setNewProjectColor(pickNextProjectColor(projects.map((p) => p.color))); setAddingProject(true); setTimeout(() => addProjectRef.current?.focus(), 0) }}
           className="flex items-center gap-0.5 rounded px-1 py-0.5 text-muted/0 transition-colors group-hover/projects:text-muted hover:text-foreground hover:bg-foreground/6"
           title="New project" aria-label="New project" tabIndex={-1}>
           <Plus size={10} /><span className="text-[8px] font-bold uppercase tracking-wider">Add</span>
@@ -375,10 +378,10 @@ export function Sidebar({
         {addingProject && (
           <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
             <input ref={addProjectRef} type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} tabIndex={-1}
-              onKeyDown={(e) => { if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject(); if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor('#6366f1') } }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject(); if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor(pickNextProjectColor(projects.map((p) => p.color))) } }}
               placeholder="Project name..." className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none" />
             <div className="flex items-center gap-1">
-              {['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'].map((c) => (
+              {PROJECT_COLORS.map((c) => (
                 <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
                   className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
                   style={{ backgroundColor: c }} />

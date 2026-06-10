@@ -3,25 +3,21 @@ import { Modal } from '../../shared/components/Modal'
 import { useProjectStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useStatusStore } from '../../shared/stores/statusStore'
+import { PROJECT_COLORS, pickNextProjectColor } from './projectColors'
 
 interface NewProjectModalProps {
   open: boolean
   onClose: () => void
 }
 
-const PROJECT_COLORS = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
-  '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'
-]
-
 export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.JSX.Element {
+  const allProjects = useProjectStore((s) => s.projects)
   const [name, setName] = useState('')
-  const [color, setColor] = useState(PROJECT_COLORS[0])
+  const [color, setColor] = useState(() => pickNextProjectColor(Object.values(allProjects).map((p) => p.color)))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const createProject = useProjectStore((s) => s.createProject)
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject)
-  const allProjects = useProjectStore((s) => s.projects)
   const createStatus = useStatusStore((s) => s.createStatus)
   const currentUser = useAuthStore((s) => s.currentUser)
 
@@ -64,7 +60,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
 
       setCurrentProject(project.id)
       setName('')
-      setColor(PROJECT_COLORS[0])
+      setColor(pickNextProjectColor(Object.values(useProjectStore.getState().projects).map((p) => p.color)))
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project')
@@ -75,7 +71,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
 
   const handleClose = (): void => {
     setName('')
-    setColor(PROJECT_COLORS[0])
+    setColor(pickNextProjectColor(Object.values(useProjectStore.getState().projects).map((p) => p.color)))
     setError(null)
     onClose()
   }
