@@ -50,8 +50,13 @@ type FilterType = 'priority' | 'due_date' | 'status' | 'keyword' | 'labels' | 'p
 interface FilterBarProps {
   labels: Label[]
   projectId?: string
-  /** When true, labels appear in the +Filter menu instead of always being visible (used in saved views) */
-  labelsInFilterMenu?: boolean
+  /**
+   * Saved-view mode (used by SavedViewListView). Keeps the bar always visible,
+   * suppresses the "save as a new view" fallback button (the Save button updates
+   * the current view via onSave instead), and hides the Blur/Hide toggle (saved
+   * views always hide non-matching tasks, so the toggle would be a no-op).
+   */
+  isSavedView?: boolean
   /** When true, shows project filter in the +Filter menu (used in saved views) */
   showProjectFilter?: boolean
   /** Override the save button behavior (e.g., to update the current saved view instead of creating a new one) */
@@ -64,7 +69,7 @@ interface FilterBarProps {
   showSort?: boolean
 }
 
-export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFilter, onSave, saveLabel, showCustomSort, showSort = true }: FilterBarProps): React.JSX.Element | null {
+export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, onSave, saveLabel, showCustomSort, showSort = true }: FilterBarProps): React.JSX.Element | null {
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const filterMode = useLabelStore(selectFilterMode)
   const priorityFilters = useLabelStore(selectPriorityFilters)
@@ -200,7 +205,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
     if (projectId) types.push('status') // only in project views
     types.push('keyword') // always available
     return types
-  }, [projectId, labelsInFilterMenu, labels.length, showProjectFilter])
+  }, [projectId, labels.length, showProjectFilter])
 
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
   const sortDropdownRef = useRef<HTMLDivElement>(null)
@@ -218,8 +223,8 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
   }, [sortDropdownOpen])
 
   const hasLabels = labels.length > 0
-  const showLabelsInline = hasLabels && !labelsInFilterMenu
-  const alwaysShow = labelsInFilterMenu || showProjectFilter
+  const showLabelsInline = hasLabels
+  const alwaysShow = isSavedView || showProjectFilter
   if (!alwaysShow && !showLabelsInline && !hasAnyFilter && sortRules.length === 0) return null
 
   return (
@@ -379,7 +384,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
             <Save size={10} />
             {saveLabel ?? 'Save'}
           </button>
-        ) : labelsInFilterMenu ? null : savingView ? (
+        ) : isSavedView ? null : savingView ? (
           <div className="flex items-center gap-1">
             <input
               ref={saveViewInputRef}
@@ -412,7 +417,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
         ) : null}
 
         {/* Blur/Hide */}
-        {!labelsInFilterMenu && hasAnyFilter && (
+        {!isSavedView && hasAnyFilter && (
           <button
             onClick={handleToggleMode}
             className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"

@@ -152,3 +152,11 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Tests: no new repository methods/utility functions added (pure presentational components); vitest
   runs in node env with no jsdom/testing-library, so no component test added. typecheck 0 errors;
   full suite 821/821 pass; `npm run dev` compiled cleanly on 5200 (renderer+main+preload built).
+
+## Story #84 — Inline label-in-view filter chips for Saved Views (2026-06-10)
+- Added `getLabelsInUse(taskIds, taskLabels, allLabels, currentUserId)` to `labelUtils.ts`: collects label IDs present on the given tasks, filters the RAW label set, then dedups by name. Filtering raw-then-dedup (not dedup-then-filter) matters for cross-project same-name labels — debug-learnings.md §"findAllForUser leaks foreign-user labels": the canonical row may differ from the row actually on a task, so the guide's `allLabels.filter(...)` snippet could drop a chip. Mirrored MyDayView's proven approach instead.
+- SavedViewListView: added `labelsInView` memo via `getLabelsInUse(matchingTasks, taskLabels, rawAllLabels, userId)`; FilterBar now gets `labels={labelsInView}` and renders chips inline.
+- Refactored MyDayView's identical `labelsInUse` memo to call the shared util (DRY; test now covers both views).
+- FilterBar: the `labelsInFilterMenu` prop was doing triple duty (hide inline chips + suppress "save as new view" fallback + suppress Blur/Hide toggle). Renamed to `isSavedView` and decoupled: chips now always render inline when labels exist; `isSavedView` keeps the two saved-view suppressions. This avoids two regressions a naive prop-drop would cause — a confusing "save as NEW view" button on an unchanged saved view, and a no-op Blur/Hide toggle (saved views always hide non-matching tasks).
+- Deleted dead `LabelFilterBar.tsx` (wired into no view) + its ui-reference.md entry.
+- Tests: 7 new cases for `getLabelsInUse` (scoping, empty/no-task, cross-project dedup + non-canonical-row regression, missing task id, ordering). typecheck clean; 828/828 vitest pass.

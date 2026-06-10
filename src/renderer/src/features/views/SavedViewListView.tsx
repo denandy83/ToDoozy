@@ -19,7 +19,7 @@ import { useSetting } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
-import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
+import { deduplicateLabelsByName, getLabelsInUse } from '../../shared/utils/labelUtils'
 import { TaskRow } from '../tasks/TaskRow'
 import type { Status } from '../../../../shared/types'
 import type { SortRule } from '../../shared/utils/sortTasks'
@@ -272,6 +272,14 @@ export function SavedViewListView(): React.JSX.Element {
     return [...filtered].sort(comparator)
   }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasActiveFilters, activeLabelFilters, labelFilterLogic, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter, sortRules, statusOrderMap])
 
+  // Labels present on the currently visible tasks — rendered as inline filter
+  // chips. Filters from the raw label set then dedups (matches MyDayView), so a
+  // cross-project same-name label whose canonical row was dropped still surfaces.
+  const labelsInView = useMemo(
+    () => getLabelsInUse(matchingTasks.map((t) => t.id), taskLabels, rawAllLabels, userId),
+    [matchingTasks, taskLabels, rawAllLabels, userId]
+  )
+
   // Keep sidebar count in sync with actual matching tasks
   useEffect(() => {
     if (currentView) {
@@ -387,10 +395,11 @@ export function SavedViewListView(): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Filter bar (editable) — save updates the current view */}
+      {/* Filter bar (editable) — save updates the current view. Label chips are
+          shown inline, scoped to the labels present on the visible tasks. */}
       <FilterBar
-        labels={allLabels}
-        labelsInFilterMenu
+        labels={labelsInView}
+        isSavedView
         showProjectFilter
         showSort
         onSave={filtersChanged ? handleUpdateView : undefined}

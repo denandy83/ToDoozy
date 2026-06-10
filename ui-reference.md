@@ -182,12 +182,6 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 **Submenus:** Hover to open (150ms delay), flyout right (or left near edge).
 **Delete:** Always red, always last.
 
-### LabelFilterBar
-**File:** `shared/components/LabelFilterBar.tsx`
-**Render:** Only if labels exist. `flex items-center gap-2 border-b border-border px-4 py-2`.
-**Filter modes:** "Hide" (removes non-matching) or "Blur" (fades to 20% opacity).
-**Active filter:** Ring highlight with box-shadow glow.
-
 ### Avatar
 **Shows:** Initials if no `avatar_url`.
 **Sizes:** 16px in rows, 24px in detail, 32px in member list.

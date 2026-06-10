@@ -13,6 +13,30 @@ export function deduplicateLabelsByName(labels: Label[], currentUserId: string):
 }
 
 /**
+ * Given the tasks currently visible in a view, return the deduplicated set of
+ * labels actually present on those tasks — for inline "labels in view" filter
+ * chips (My Day, Saved Views).
+ *
+ * Filtering happens against the RAW label set (not a pre-deduplicated one) so a
+ * label whose canonical row was dropped during cross-project name-dedup is still
+ * surfaced (see debug-learnings.md: foreign-user same-name label duplicates).
+ * Dedup is applied last so the chip row never shows two same-name labels.
+ */
+export function getLabelsInUse(
+  taskIds: string[],
+  taskLabels: Record<string, Label[]>,
+  allLabels: Label[],
+  currentUserId: string
+): Label[] {
+  const usedIds = new Set<string>()
+  for (const taskId of taskIds) {
+    for (const label of taskLabels[taskId] ?? []) usedIds.add(label.id)
+  }
+  const used = allLabels.filter((l) => usedIds.has(l.id))
+  return deduplicateLabelsByName(used, currentUserId)
+}
+
+/**
  * Remap each label in `labels` to the viewer's own same-name label when one
  * exists, then deduplicate. Used for task chips: if User A tagged a task
  * with their red "testlabel" and User B (the viewer) has a yellow "testLABEL"

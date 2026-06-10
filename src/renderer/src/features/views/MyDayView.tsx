@@ -34,7 +34,7 @@ import { usePrioritySettings } from '../../shared/hooks/usePrioritySettings'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
-import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
+import { getLabelsInUse } from '../../shared/utils/labelUtils'
 import { createSortComparator } from '../../shared/utils/sortTasks'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../tasks/AddTaskInput'
 import { StatusSection } from '../tasks/StatusSection'
@@ -194,17 +194,10 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [addTaskProjectId])
 
   // Labels in use within My Day tasks
-  const labelsInUse = useMemo(() => {
-    const usedLabelIds = new Set<string>()
-    for (const task of myDayTasks) {
-      const labels = taskLabels[task.id]
-      if (labels) {
-        for (const l of labels) usedLabelIds.add(l.id)
-      }
-    }
-    const used = allLabelsAcrossProjects.filter((l) => usedLabelIds.has(l.id))
-    return deduplicateLabelsByName(used, currentUser?.id ?? '')
-  }, [myDayTasks, taskLabels, allLabelsAcrossProjects, currentUser?.id])
+  const labelsInUse = useMemo(
+    () => getLabelsInUse(myDayTasks.map((t) => t.id), taskLabels, allLabelsAcrossProjects, currentUser?.id ?? ''),
+    [myDayTasks, taskLabels, allLabelsAcrossProjects, currentUser?.id]
+  )
 
   // Shared filter match for My Day
   const taskMatchesFilters = useCallback((task: Task): boolean => {
