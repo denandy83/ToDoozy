@@ -314,6 +314,14 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - Configured per-project in project settings
 - **Status:** Complete (2026-04-08, Story #58)
 
+### Project Archive & Restore
+- Archive a whole project: `archiveWithTasks` transactionally sets `is_archived` on the project AND all its non-deleted tasks; project disappears from the sidebar (undo toast)
+- Archive view groups archived tasks under project headers with a "Project Archived" badge; hover reveals Restore / Delete buttons
+- Shift+click on Delete skips the confirmation toast (when enabled in Settings → General)
+- The default project can be archived too
+- Restore brings the project and all its tasks back; archive state syncs to Supabase (`pushProjectArchive`)
+- **Status:** Complete (v1.7.0, Story #67)
+
 ---
 
 ## Theme System
@@ -407,11 +415,16 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete
 
 ### Profile Settings
-- New Profile tab in Settings for account management
-- Change password (for email/password accounts)
-- Update display name
-- View account info (email, login method)
-- **Status:** Complete (v1.5.5, Story #65)
+- New Profile tab in Settings for account management, split into Account and Password subtabs
+- Account: read-only email, first/last name editor (1s-debounce autosave, offline retry via `profile_sync_pending`), "Saved Login on This Device" section
+- Password: "Add Password Login" (OAuth users) / "Change Password" (detected via `user.identities` + `user_metadata.has_password`); forgot-password flow on the login screen via the `send-password-reset` Edge Function
+- **Status:** Complete (v1.5.5–v1.7.0, Story #65)
+
+### Saved Login Credentials ("Remember Me")
+- Email saved to `saved-email.json`, password to the macOS Keychain (`keytar`) after an opt-in "Save password to Keychain?" toast
+- Login screen pre-fills both fields on mount; prompt suppressed when the stored password already matches
+- Explicit logout preserves saved credentials (like Linear/Slack); "Forget Saved Login" in Settings → Profile → Account clears both
+- **Status:** Complete (v1.7.0, Story #66)
 
 ### Supabase Authentication
 - Email/password and Google OAuth via Supabase Auth
@@ -437,9 +450,11 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **project_labels junction table on Supabase**: label↔project associations sync as individual rows (add/remove propagates immediately, with LWW on tombstones)
 - `syncProjectDown` and `discoverRemoteMemberships` skip gracefully when offline
 - **Auto-reconnect Realtime channels** with exponential backoff on drop (sleep/wake, network switch)
+- **Power-aware reconnect + give-up banner** (v1.7.0): `powerMonitor` suspend/resume IPC pauses reconnect timers during macOS sleep (no more Power Nap dark-wake noise); backoff `[5s, 15s, 30s, 60s]` capped at 4 attempts, then an amber "Connection lost — Retry now" banner; anomaly detector ignores channel-error log lines
+- **Cross-user label dedup & tombstone correctness** (v1.7.0): `project_labels` tombstones with name-aware removal across same-name labels owned by different members, `project_labels` Realtime subscription on shared channels, reconcile reads the junction table (not legacy JSON), FK-safe push ordering (`user_labels` before `project_labels`)
 - **setAuth deduplication**: token refresh fans out only once regardless of open channel count
 - In-app connection log for Realtime events (Settings)
-- **Status:** Complete (updated v1.5.5)
+- **Status:** Complete (updated v1.7.0)
 
 ---
 

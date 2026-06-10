@@ -4,6 +4,26 @@ Reverse-chronological log of development sessions, decisions, and milestones.
 
 ---
 
+## 2026-06-10 — Task-tracker audit: all open Todoozy-labeled tasks fact-checked & made ralph-ready
+
+**Session type:** Documentation / tracker hygiene (no code changes)
+
+All 46 open ToDoozy tasks labeled `Todoozy` (excluding `Later`) were fact-checked against HEAD d4c9f69 and their descriptions rewritten as self-contained implementation guides (symptom/repro/root cause with file:line, numbered fix plan, edge cases, tests) so a fresh ralph or /fix session can pick any of them up with zero re-exploration. Key outcomes: 6 tasks found ALREADY FIXED in code (2433e979 WAL-mtime live refresh, 728b8b08 activity_log NOT NULL, 89e5c4de FK ordering, 1cd6ec4c recurrence tests — re-run, 47/47 pass — plus the 7716ca1f re-add symptom); 4 duplicates flagged (1b958040→3fa6299c, 8f1af047→1babcdcc, ba0d2086→856d3d46, 89e5c4de≈80388508); 4 tasks PARTIALLY fixed with narrowed remaining scope (41183299, b1ee3217, 1827d14e, 07a1f88a); 8 Verifying tasks documented with exact manual verification steps. Also processed the missing v1.6.0/v1.7.0 doc sections (this file, CHANGELOG, RELEASE_NOTES, FEATURES) and corrected the stale "What's New comes from GitHub releases" text in the /fix and /feature skill files (it comes from the Supabase `release_notes` table).
+
+## v1.7.0 — Stories #66/#67, profile polish, power-aware Realtime, label sync correctness (2026-05-01 – 2026-05-05)
+
+**Session type:** Features + sync resilience
+
+**What was built/fixed:**
+
+- **Save login credentials (#66, dfb22d3 + e4686f0/b30f0c7/732163c)** — keytar Keychain storage, email pre-fill, opt-in save toast, logout preserves credentials, "Forget Saved Login" in Profile.
+- **Project archive & restore (#67, 35987ec + aefc21f/c500150/5d3d9d7)** — `archiveWithTasks`/`unarchiveWithTasks` transactional repository methods, Archive view project grouping with hover-reveal Restore/Delete, shift+click delete, default project archivable, Supabase sync via `pushProjectArchive`.
+- **Profile polish (#65 follow-ups, cc37a95/aeeb404/a316387/142a6eb)** — Account/Password subtabs, `has_password` metadata detection for OAuth users, typing-guard on name inputs.
+- **Power-aware Realtime reconnect (8bdf339)** — powerMonitor suspend/resume IPC → `powerState.ts`; reconnect gating on `isSuspended()`/`navigator.onLine`; backoff `[5s,15s,30s,60s]` ×4 then `connectionLost` banner; anomaly-detector exclusions for channel-error lines.
+- **Label sync correctness (72097f6, 23 files)** — `project_labels` tombstones + name-aware cross-user removal, shared-channel `project_labels` Realtime subscription, reconcile reads the junction table, FK-safe push ordering with 23503 graceful handling.
+
+**Key commits:** c485360 (v1.6.0 bump), dfb22d3, 35987ec, 8bdf339, 72097f6, 40c8a7f (v1.7.0 bump), 3d5c1c8 (merge ralph/profile-settings-65).
+
 ## v1.5.5 — Sidebar color, profile settings, session-expired banner, label dedup (2026-04-29 – 2026-05-01)
 
 **Session type:** Feature + bug fixes

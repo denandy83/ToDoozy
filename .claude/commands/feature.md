@@ -266,9 +266,9 @@ After implementation is complete, update `scope.md`:
 - If the feature revealed new codebase knowledge relevant to other scope items, update those
 - If all scope items are done, clear the file
 
-### 9g — In-app "What's New" (no manual action needed)
+### 9g — In-app "What's New" (no manual action needed during the feature flow)
 
-The in-app "What's New" tab is populated from GitHub releases at build time (bundled into `resources/release-notes.md`) and refreshed from the GitHub API at runtime. You do NOT need to update it manually — it is included automatically when the GitHub release is created. Just ensure the release notes on GitHub are complete.
+The in-app "What's New" tab is sourced from the `release_notes` table on Supabase (synced at app launch and on tab open by `ReleaseNotesService` into the device-local `whats_new` setting). You do NOT need to update it while implementing a feature — release notes are published to that table at release time via the `/buildit` pipeline (or the `set_whats_new` MCP tool / SQL editor). GitHub releases are for distribution only and no longer feed What's New. Just ensure RELEASE_NOTES.md is complete so the next `/buildit` run has accurate content to publish.
 
 ### 9h — Update HELP.md
 

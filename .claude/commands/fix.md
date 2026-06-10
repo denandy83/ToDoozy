@@ -317,7 +317,7 @@ If the fix affects something the user interacts with directly (not an internal r
 - **Fix: <short title>** — <What changed for the user>
 ```
 
-The in-app "What's New" is populated from GitHub releases at build time (bundled into `resources/release-notes.md`) and refreshed from the GitHub API at runtime. You do NOT need to update it manually — it will be included automatically when the next release is created.
+The in-app "What's New" is sourced from the `release_notes` table on Supabase (synced at app launch and on tab open by `ReleaseNotesService`). You do NOT need to update it during a fix — release notes are published to that table at release time via the `/buildit` pipeline (or the `set_whats_new` MCP tool). GitHub releases are for distribution only and no longer feed What's New.
 
 If the fix changes user-facing behavior documented in HELP.md, update both `HELP.md` and the `HELP_SECTIONS` data in `src/renderer/src/features/help/HelpSettingsContent.tsx` to keep the in-app help in sync.
 

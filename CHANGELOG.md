@@ -8,6 +8,19 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 - **Sign-in no longer traps you on the splash screen** — If a Supabase auth call hung (e.g. during an upstream outage), the TD-logo splash had no Cancel button and would block the app forever, forcing a Force Quit. Sign-in now times out (30s for email/password, 15s for Google OAuth, 20s for cold-start session restore) and the splash shows a Cancel link after 5 seconds. Cold-start hangs now fall through to offline mode instead of freezing.
 
+## v1.7.0
+
+- **Save login credentials (#66)** — Email is remembered (`saved-email.json`) and the password can be saved to the macOS Keychain after an opt-in toast; the login screen pre-fills both on next launch. Explicit logout preserves saved credentials; a "Forget Saved Login" action in Settings → Profile clears them. The Keychain prompt is skipped when the stored password already matches.
+- **Project archive & restore (#67)** — Archive an entire project (with all its tasks, transactionally) from the project header or settings; archived projects appear as grouped sections in the Archive view with hover-reveal Restore/Delete buttons. Shift+click Delete skips confirmation; the default project can be archived; archive state syncs to Supabase.
+- **Profile settings polish (#65 follow-ups)** — Profile split into Account and Password subtabs; existing password detected via `user_metadata.has_password` (fixes OAuth users who set a password); the name input no longer gets overwritten while typing; redundant section label dropped.
+- **Power-aware Realtime reconnect + give-up banner** — macOS suspend/resume now pauses/resumes reconnect timers (no more Power Nap dark-wake notification spam); reconnect backoff is `[5s, 15s, 30s, 60s]` capped at 4 attempts, after which an amber "Connection lost — Retry now" banner appears; the anomaly detector no longer counts channel-error log lines.
+- **Cross-user label dedup, sync correctness, and reconcile fixes** — Removing a label from a shared project now tombstones every same-name label link (per-user label IDs differ), shared channels subscribe to `project_labels` Realtime events, reconcile reads `project_labels` from the junction table instead of the legacy JSON snapshot, and `user_labels` is always pushed before `project_labels` (no more 409 FK violations).
+- **Detail panel border** — Uses `border-foreground/10` for the structural border so it's visible in all themes.
+
+## v1.6.0
+
+- **Maintenance release** — Packaged the v1.5.5 changes for distribution; removed a duplicate SessionBanner mount in App.tsx.
+
 ## v1.5.5
 
 ### Fixed

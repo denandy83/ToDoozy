@@ -8,6 +8,18 @@ User-facing changes by date. Most recent first.
 
 - **Fix: Sign-in can no longer trap you on the splash screen** — If a Supabase auth call hung (which happened during a `us-east-1` AZ outage), the TD-logo splash had no escape and you had to Force Quit the app. Now: a "Cancel" link appears below the progress bar after 5 seconds; sign-in attempts time out automatically (30 seconds for email/password, 15 seconds for Google) with a clear "auth server may be unreachable" message; and a hung cold-start drops you into offline mode after 20 seconds instead of freezing.
 
+## v1.7.0
+
+- **Remember me** — ToDoozy now remembers your email and (optionally, stored in the macOS Keychain) your password, pre-filling the login screen so re-login is one click. Signing out keeps your saved login; "Forget Saved Login" in Settings → Profile removes it.
+- **Archive whole projects** — Archive a project and all its tasks in one action; find it later in the Archive view grouped under the project name, and restore it (or delete it for good) from there. Auto-archive settings live in Settings → Projects → Archive.
+- **Profile tab grew up** — Account and Password are now separate subtabs; Google users who add a password get the right "Change Password" state everywhere.
+- **Quieter sleep, clearer failures** — Closing your laptop no longer floods notifications with "sync anomaly" alerts. If the connection genuinely can't be re-established, you get a single "Connection lost — Retry now" banner instead of silent endless retries.
+- **Shared-project labels behave** — Removing a label from a shared project now sticks: it disappears for every member (even when members had their own same-named label) and no longer resurrects when someone re-opens the project.
+
+## v1.6.0
+
+- Packaging release of the v1.5.5 improvements (sidebar color, profile settings, label dedup, session-expired banner).
+
 ## v1.5.5
 
 - **Sidebar color** — Settings → Theme now has a dedicated "Sidebar" color field so you can set the left panel background independently from the rest of the app. All 12 built-in themes have been updated with sidebar values, and custom themes can set their own.

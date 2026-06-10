@@ -105,8 +105,12 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee -a "$LOG_FILE" | tee /dev/stderr) || true
   else
     # Claude Code: use --verbose --output-format stream-json for real-time streaming to log
+    # Model pinned 2026-06-10: Opus 4.8 @ default effort (xhigh) — best long-horizon agentic
+    # coding per model docs; pin protects against managed-settings/default changes.
+    # Override per-run for the hardest stories (2x cost):
+    #   RALPH_MODEL=claude-fable-5 ./ralph.sh --tool claude 3
     ITER_LOG="$SCRIPT_DIR/.ralph-iter-$i.jsonl"
-    claude --dangerously-skip-permissions --verbose --output-format stream-json < "$SCRIPT_DIR/CLAUDE.md" 2>>"$LOG_FILE" | tee "$ITER_LOG" | while IFS= read -r line; do
+    claude --model "${RALPH_MODEL:-claude-opus-4-8}" --dangerously-skip-permissions --verbose --output-format stream-json < "$SCRIPT_DIR/CLAUDE.md" 2>>"$LOG_FILE" | tee "$ITER_LOG" | while IFS= read -r line; do
       # Extract assistant text messages for human-readable log
       type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
       if [[ "$type" == "assistant" ]]; then
