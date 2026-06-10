@@ -49,6 +49,45 @@ export interface SmartInputActions {
 
 export type SmartInput = SmartInputState & SmartInputActions
 
+/**
+ * Resolve the NLP-detected due date for a task at submit time. Pure so it can be
+ * unit-tested without React.
+ *
+ * The title is re-parsed at submit time because the live `nlpDateResult` state can
+ * lag behind the latest keystroke. Crucially, when the user has dismissed the
+ * detected date chip (`nlpDismissed`), the date is neither applied nor stripped
+ * from the title — even though the raw text still contains the date phrase. This is
+ * the fix for the bug where dismissing the chip still set the due date and stripped
+ * the phrase from the title (#75).
+ */
+export function resolveSubmitNlp(params: {
+  title: string
+  selectedDate: string | null
+  nlpDismissed: boolean
+  nlpDateResult: NlpDateResult | null
+}): { title: string; nlpDate: string | null; nlpRecurrenceRule: string | null } {
+  let title = params.title
+  const { selectedDate, nlpDismissed, nlpDateResult } = params
+
+  const freshNlp = (!selectedDate && !title.includes('d:') && !nlpDismissed)
+    ? parseNlpDate(title)
+    : null
+  // A dismissed chip fully suppresses NLP — never fall back to stale state.
+  const effectiveNlp = nlpDismissed ? null : (freshNlp ?? nlpDateResult)
+
+  if (effectiveNlp && !selectedDate) {
+    title = stripDateFromTitle(title, effectiveNlp)
+    // Empty title after stripping = use "Untitled"
+    if (!title) title = 'Untitled'
+    return {
+      title,
+      nlpDate: formatNlpDate(effectiveNlp),
+      nlpRecurrenceRule: effectiveNlp.recurrenceRule
+    }
+  }
+  return { title, nlpDate: null, nlpRecurrenceRule: null }
+}
+
 export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>): SmartInput {
   const [inputValue, setInputValueRaw] = useState('')
   const [attachedLabels, setAttachedLabels] = useState<Label[]>([])
@@ -283,24 +322,16 @@ export function useSmartInput(inputRef: React.RefObject<HTMLInputElement | null>
       title = text.trim()
     }
 
-    // Apply NLP date stripping if NLP detected and no explicit date
-    // Re-parse at submit time to get the most accurate result (state may lag behind typing)
-    let nlpDate: string | null = null
-    let nlpRecurrenceRule: string | null = null
-    const freshNlp = (!selectedDate && !title.includes('d:')) ? parseNlpDate(title) : null
-    const effectiveNlp = freshNlp ?? nlpDateResult
-    console.log('[SmartInput] getSubmitData:', { title, selectedDate, freshNlpText: freshNlp?.text, freshNlpRule: freshNlp?.recurrenceRule, stateNlpText: nlpDateResult?.text, effectiveText: effectiveNlp?.text, effectiveRule: effectiveNlp?.recurrenceRule })
-    if (effectiveNlp && !selectedDate) {
-      title = stripDateFromTitle(title, effectiveNlp)
-      nlpDate = formatNlpDate(effectiveNlp)
-      nlpRecurrenceRule = effectiveNlp.recurrenceRule
+    // Apply NLP date stripping if NLP detected and no explicit date. A dismissed
+    // chip is honoured here even though the raw text still contains the phrase.
+    const { title: finalTitle, nlpDate, nlpRecurrenceRule } = resolveSubmitNlp({
+      title,
+      selectedDate,
+      nlpDismissed: nlpDismissedRef.current,
+      nlpDateResult
+    })
 
-      // Empty title after stripping = use "Untitled"
-      if (!title) title = 'Untitled'
-    }
-
-    console.log('[SmartInput] submit result:', { title, nlpDate, nlpRecurrenceRule })
-    return { title, extractedReferenceUrl, nlpDate, nlpRecurrenceRule }
+    return { title: finalTitle, extractedReferenceUrl, nlpDate, nlpRecurrenceRule }
   }, [nlpDateResult, selectedDate])
 
   return {
