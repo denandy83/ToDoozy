@@ -1,7 +1,7 @@
 # ToDoozy
 
 ## What Is This
-ToDoozy is a collaborative, keyboard-driven, AI-native task manager built with Electron. Read `REBUILD_SPEC.md` for the complete 37-section product specification.
+ToDoozy is a collaborative, keyboard-driven task manager built with Electron. Read `REBUILD_SPEC.md` for the complete 37-section product specification.
 
 ## Your Task
 1. Read `prd.json` to find the next story where `passes` is `false`

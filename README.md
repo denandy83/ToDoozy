@@ -1,6 +1,6 @@
 # ToDoozy
 
-A keyboard-driven, AI-native task manager built as a native macOS Electron app. ToDoozy combines local-first SQLite storage with Supabase cloud sync, a rich task editing experience, and deep keyboard navigation — designed for power users who live in their task list.
+A keyboard-driven task manager built as a native macOS Electron app. ToDoozy combines local-first SQLite storage with Supabase cloud sync, a rich task editing experience, and deep keyboard navigation — designed for power users who live in their task list.
 
 ---
 

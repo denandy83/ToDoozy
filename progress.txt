@@ -1,66 +1,11 @@
 # Ralph Progress Log
-Started: Fri May  1 07:48:09 CDT 2026
+Started: Wed Jun 10 16:05:59 CEST 2026
 ---
 
+## Story #68 — remove "AI-native" from public-facing product description (2026-06-10)
+- Removed "AI-native" from 3 public-facing strings: package.json:4 description, README.md first sentence, CLAUDE.md "What Is This".
+- Left REBUILD_SPEC.md:20 untouched — that occurrence is an intentional design-principle bullet explaining the built-in MCP server, not a product tagline.
+- Verification: `grep -ri "ai.native" package.json README.md CLAUDE.md` → no matches (AC1 ✓); REBUILD_SPEC.md still contains it (AC2 ✓).
+- Static-string change only, zero TS/TSX source touched → no new tests. typecheck clean, full suite 752/752 pass. Skipped `npm run dev` (no compilable source changed; typecheck is conclusive).
+- Decision: edited project CLAUDE.md too, since the story explicitly lists it as a public-facing occurrence — the "What Is This" tagline is user/contributor-facing, distinct from the internal ralph instructions below it.
 ---
-
-## Story #65 — Profile Settings (2026-05-01)
-
-**Implemented:**
-- Part A: Added `profile` as first tab in `UnifiedSettingsModal.tsx`. Default tab is now `profile`.
-- Part B: Created `ProfileSettingsContent.tsx` — Account (email read-only), Display Name (first/last autosave to SQLite + Supabase auth metadata, offline detection), Password (Change/Add with validation, eye toggles, explicit save).
-- Part C: Updated `LoginScreen.tsx` — added `forgot` mode with forgot password flow. Main form/divider/Google/toggle hidden in forgot mode. `handleForgotPassword` calls `send-password-reset` Edge Function.
-- Part D: Created `supabase/functions/send-password-reset/index.ts` — differentiates email/password users (recovery link → reset-password.html) from Google-only users (magic link → no-password.html). Deployed to Supabase.
-- Part E: Created `docs/reset-password.html` (set new password in browser, same validation, Supabase JS CDN) and `docs/no-password.html` (static info page for Google users).
-- Part F: Added profile sync retry in both `onRecovered` callbacks in `authStore.ts` — re-pushes `display_name` to Supabase auth metadata when `profile_sync_pending` setting is `'true'`.
-
-**Decisions:**
-- Removed unused `useEffect` import in `LoginScreen.tsx` (that's for story #66's credential pre-fill).
-- `verify_jwt: false` on the Edge Function — it's intentionally unauthenticated (same as Supabase's password reset workflow).
-- No new repository methods → no new Vitest tests needed. All 741 existing tests pass.
-
----
-
-## Story #66 — Save Login Credentials (2026-05-01)
-
-**Implemented:**
-- Installed `keytar` + `@types/keytar` (native OS Keychain / Credential Manager wrapper)
-- Added `getSavedEmailPath()` helper and `KEYTAR_SERVICE = 'ToDoozy'` constant in `ipc-handlers.ts`
-- Added 5 IPC handlers: `auth:saveEmail`, `auth:getSavedEmail`, `auth:savePassword`, `auth:getSavedPassword`, `auth:clearCredentials`
-- Added 5 preload bridge methods and updated `AuthAPI` interface in `index.d.ts`
-- `authStore.signInWithEmail` now returns `Promise<boolean>`, saves email + sets `pendingPasswordSave` on success
-- `authStore.signUpWithEmail` saves email on success (no password prompt)
-- `authStore.signInWithGoogle` saves email (both implicit + PKCE branches) on success
-- `authStore.logout` calls `clearCredentials` to delete both saved-email JSON and Keychain entry
-- Exported `takePendingPasswordSave()` module-level function from authStore
-- `AppLayout.tsx` calls `takePendingPasswordSave()` on mount; if pending, shows "Save password to Keychain?" persistent toast with Save/No thanks actions
-- `LoginScreen.tsx` `useEffect` pre-fills email and password from saved JSON/Keychain on mount (cancelled on cleanup)
-
-**Decisions:**
-- `signInWithEmail` return type changed from `Promise<void>` to `Promise<boolean>` — updated interface too
-- No changes to tests (no new repository methods)
-
----
-
-## Story #67 — Project Archive & Restore (2026-05-01)
-
-**What was built:**
-- SQLite migration_24: `ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0` (Supabase column already existed)
-- `ProjectRepository.archiveWithTasks(id)` and `unarchiveWithTasks(id)` using `withTransaction`
-- IPC handlers `projects:archiveWithTasks` and `projects:unarchiveWithTasks`
-- Preload bridge + `ProjectsAPI` type signatures
-- `projectStore`: `archiveProject`, `unarchiveProject` actions, `selectActiveProjects` selector exported from stores barrel
-- `PersonalSyncService`: `pushProjectArchive` batch sync function, `is_archived` in `pullProjectMetadata` and `pushProject`
-- `AppLayout`: Archive icon replaces Trash2, `handleArchiveCurrentProject` handler with shared-project ownership transfer, sidebar uses `selectActiveProjects`
-- `ArchiveView`: includes archived projects (even with no tasks) as group headers with inline Restore/Delete buttons
-- `ProjectGeneralSettings`: archive section with undo toast replaces inline delete confirm
-- `ProjectsSettingsContent`: `ProjectArchiveSection` replaces `ProjectDeleteSection`
-
-**Decisions:**
-- Used `withTransaction` wrapper instead of `this.db.transaction()` (DatabaseSync does not have `.transaction()` in Node.js 25 types)
-- `selectAllProjects` kept unchanged — ArchiveView uses it to see archived projects; sidebar uses new `selectActiveProjects`
-- `shouldForceDelete` import removed from AppLayout as it was only used in old delete handler
-- 5 new Vitest tests added for `archiveWithTasks`/`unarchiveWithTasks` in `ProjectRepository.test.ts`
-- All 746 tests pass, zero typecheck errors
-
-**Blockers:** None

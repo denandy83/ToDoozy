@@ -13,8 +13,8 @@
         "npm run typecheck — zero errors",
         "npm run test — all existing and new tests pass"
       ],
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     },
     {
       "id": "69",
