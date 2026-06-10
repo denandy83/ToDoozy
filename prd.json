@@ -99,8 +99,8 @@
         "Main working tree never left HEAD (worktrees used for before-shots); npm run typecheck green"
       ],
       "spec_section": "n/a — process/documentation story; spec is fully contained in the description",
-      "passes": false,
-      "tested": false
+      "passes": true,
+      "tested": true
     }
   ]
 }

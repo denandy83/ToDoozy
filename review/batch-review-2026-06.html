@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ToDoozy · Batch Review · June 2026</title>
+<style>
+  :root {
+    --bg: oklch(0.21 0.015 275);
+    --surface: oklch(0.24 0.018 275);
+    --surface-2: oklch(0.27 0.02 275);
+    --border: oklch(0.32 0.02 275);
+    --border-faint: oklch(0.28 0.018 275);
+    --fg: oklch(0.93 0.005 275);
+    --muted: oklch(0.62 0.012 275);
+    --faint: oklch(0.48 0.012 275);
+    --accent: oklch(0.65 0.17 277);
+    --green: oklch(0.72 0.14 152);
+    --green-bg: oklch(0.72 0.14 152 / 0.1);
+    --amber: oklch(0.78 0.13 75);
+    --amber-bg: oklch(0.78 0.13 75 / 0.1);
+    --red: oklch(0.66 0.18 25);
+    --red-bg: oklch(0.66 0.18 25 / 0.1);
+    --blue: oklch(0.7 0.12 240);
+    --blue-bg: oklch(0.7 0.12 240 / 0.1);
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: oklch(0.975 0.004 275);
+      --surface: oklch(0.955 0.005 275);
+      --surface-2: oklch(0.93 0.007 275);
+      --border: oklch(0.87 0.008 275);
+      --border-faint: oklch(0.91 0.006 275);
+      --fg: oklch(0.25 0.015 275);
+      --muted: oklch(0.5 0.012 275);
+      --faint: oklch(0.62 0.01 275);
+      --accent: oklch(0.52 0.17 277);
+      --green: oklch(0.52 0.14 152);
+      --amber: oklch(0.56 0.13 75);
+      --red: oklch(0.52 0.18 25);
+      --blue: oklch(0.5 0.12 240);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 2rem; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition: none !important; }
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    line-height: 1.6;
+    display: grid;
+    grid-template-columns: 270px minmax(0, 1fr);
+  }
+  code, kbd, .mono {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    font-weight: 400;
+  }
+  code {
+    background: var(--surface-2);
+    border: 1px solid var(--border-faint);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    white-space: nowrap;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border-faint);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; }
+
+  /* ── Sidebar ─────────────────────────────── */
+  nav {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-faint);
+    padding: 2rem 1.25rem 3rem;
+    scrollbar-width: thin;
+  }
+  nav .brand {
+    font-size: 13px;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  nav .progress {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1.75rem;
+  }
+  nav .progress .bar {
+    margin-top: 0.5rem;
+    height: 2px;
+    background: var(--border-faint);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  nav .progress .bar i {
+    display: block;
+    height: 100%;
+    background: var(--green);
+    width: 0%;
+    transition: width 0.25s ease-out;
+  }
+  nav .group-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 1.5rem 0 0.5rem;
+  }
+  nav a {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.28rem 0.5rem;
+    margin-left: -0.5rem;
+    border-radius: 6px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 300;
+    line-height: 1.35;
+  }
+  nav a:hover { background: oklch(from var(--fg) l c h / 0.06); color: var(--fg); }
+  nav a .dot {
+    flex: none;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    border: 1px solid var(--faint);
+    background: transparent;
+  }
+  nav a.accepted .dot { background: var(--green); border-color: var(--green); }
+  nav a.accepted { color: var(--faint); }
+  nav a .num { color: var(--faint); font-family: var(--mono); font-size: 10.5px; flex: none; width: 1.9em; }
+
+  /* ── Main column ─────────────────────────── */
+  main { padding: 3.5rem 4rem 8rem; max-width: 980px; }
+  header.doc h1 {
+    font-size: 30px;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    line-height: 1.25;
+  }
+  header.doc .sub {
+    margin-top: 0.6rem;
+    color: var(--muted);
+    max-width: 68ch;
+  }
+  .howto {
+    margin: 2rem 0 0;
+    border: 1px solid var(--border-faint);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    max-width: 76ch;
+  }
+  .howto p { color: var(--muted); max-width: 68ch; }
+  .howto p + p { margin-top: 0.5rem; }
+  .howto strong { font-weight: 500; color: var(--fg); }
+
+  .deploy-first {
+    margin: 1.5rem 0 0;
+    border: 1px solid oklch(from var(--amber) l c h / 0.45);
+    background: var(--amber-bg);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    max-width: 76ch;
+  }
+  .deploy-first .label, .deploy-flag .label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  .deploy-first p { color: var(--muted); margin-top: 0.4rem; max-width: 68ch; }
+
+  section.entry {
+    border-top: 1px solid var(--border-faint);
+    margin-top: 3.25rem;
+    padding-top: 2.5rem;
+  }
+  .entry .head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .entry h2 {
+    font-size: 19px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+    max-width: 64ch;
+  }
+  .entry h2 .num { color: var(--faint); font-family: var(--mono); font-weight: 400; font-size: 15px; margin-right: 0.5rem; }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    flex-wrap: wrap;
+    margin-top: 0.7rem;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .meta .mono { font-size: 10.5px; letter-spacing: 0.04em; text-transform: none; color: var(--muted); }
+  .chip {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    border: 1px solid;
+  }
+  .chip.fix { color: var(--blue); border-color: oklch(from var(--blue) l c h / 0.4); background: var(--blue-bg); }
+  .chip.feature { color: var(--green); border-color: oklch(from var(--green) l c h / 0.4); background: var(--green-bg); }
+  .chip.improvement { color: var(--amber); border-color: oklch(from var(--amber) l c h / 0.4); background: var(--amber-bg); }
+
+  .entry .summary { margin-top: 1rem; max-width: 70ch; color: var(--fg); }
+  .entry .summary p + p { margin-top: 0.5rem; }
+
+  .verify {
+    margin-top: 1.5rem;
+  }
+  .verify .vlabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 0.75rem;
+  }
+  .verify ol { margin: 0.5rem 0 0 1.2rem; max-width: 68ch; color: var(--muted); }
+  .verify ol li { padding-left: 0.3rem; margin-top: 0.35rem; }
+  .verify ol li::marker { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .verify p { color: var(--muted); max-width: 68ch; }
+  .verify p + p, .verify p + ol { margin-top: 0.5rem; }
+  .verify strong { font-weight: 500; color: var(--fg); }
+
+  figure { margin: 1rem 0 0; }
+  figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: oklch(0.19 0.014 275);
+  }
+  figcaption {
+    margin-top: 0.45rem;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 1rem; align-items: start; }
+  .pair figure { margin: 0; }
+  @media (max-width: 1100px) { .pair { grid-template-columns: 1fr; } }
+  .shots-narrow { max-width: 560px; }
+  .dots { display: flex; gap: 1.5rem; align-items: center; margin-top: 0.9rem; }
+  .dots .d { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+  .dots img { width: 18px; height: 18px; border: none; border-radius: 0; background: none; }
+  .dots span { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+
+  .deploy-flag {
+    margin-top: 1.25rem;
+    border: 1px solid oklch(from var(--amber) l c h / 0.5);
+    background: var(--amber-bg);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    max-width: 76ch;
+  }
+  .deploy-flag p { color: var(--muted); margin-top: 0.35rem; max-width: 68ch; }
+  .deploy-flag pre { margin-bottom: 0; }
+
+  .fallback-note {
+    margin-top: 0.9rem;
+    font-size: 12.5px;
+    color: var(--faint);
+    max-width: 68ch;
+  }
+
+  .accept {
+    margin-top: 1.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: none;
+    font-family: inherit;
+    transition: border-color 0.15s ease-out, color 0.15s ease-out;
+  }
+  .accept:hover { border-color: var(--muted); color: var(--fg); }
+  .accept .box {
+    width: 14px; height: 14px;
+    border: 1px solid var(--faint);
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .accept .box svg { display: none; }
+  section.accepted .accept { border-color: oklch(from var(--green) l c h / 0.5); color: var(--green); }
+  section.accepted .accept .box { background: var(--green); border-color: var(--green); }
+  section.accepted .accept .box svg { display: block; }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border-faint); }
+    main { padding: 2rem 1.5rem 5rem; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="brand">ToDoozy · Batch Review</div>
+  <div class="progress"><span id="prog-text">0 of 27 accepted</span><div class="bar"><i id="prog-bar"></i></div></div>
+  <div class="group-label">Batch 1 · Audit Fixes</div>
+  <div id="nav-b1"></div>
+  <div class="group-label">Batch 2 · Sync Hardening</div>
+  <div id="nav-b2"></div>
+</nav>
+
+<main>
+<header class="doc">
+  <h1>Batch Review</h1>
+  <p class="sub">27 stories shipped 10–11 June 2026. Batch 1 covers the audit fixes (#68–#88, branch <span class="mono">ralph/audit-fixes</span>), batch 2 the sync hardening work (#89–#94, branch <span class="mono">ralph/sync-hardening</span>). Walk this page top to bottom; each entry tells you exactly how to confirm the fix.</p>
+</header>
+
+<div class="howto">
+  <p><strong>How to use this page.</strong> Each entry names the commit, the ToDoozy task (short id, find it via search), what changed in plain language, and one verification path: before/after screenshots, a numbered repro, or a test scenario for the invisible sync and MCP work.</p>
+  <p>When a fix checks out, click <strong>Accepted</strong> on the entry (saved locally in this browser) and move the matching ToDoozy task from Verifying to Done. The sidebar tracks your progress.</p>
+</div>
+
+<div class="deploy-first">
+  <div class="label">Deploy before testing</div>
+  <p>Four entries cannot be verified until you deploy. Run these once, before walking the list:</p>
+  <pre><code>supabase functions deploy mcp                # stories #88 and #93
+supabase functions deploy remove-password    # story #94
+supabase db push                             # story #91 Realtime migration
+                                             # (20260610230000_realtime_user_channel.sql)</code></pre>
+  <p>Everything else is verifiable in the app as built from this branch.</p>
+</div>
+
+<!-- ═══════════════ BATCH 1 ═══════════════ -->
+
+<section class="entry" id="s68" data-story="68">
+  <div class="head"><h2><span class="num">#68</span>Remove "AI-native" from the public product description</h2></div>
+  <div class="meta"><span class="chip improvement">improvement</span><span>commit <span class="mono">36b0240</span></span><span>task <span class="mono">9838a89a</span></span></div>
+  <div class="summary">
+    <p>The marketing phrase "AI-native task manager" was removed from every public-facing string: the package.json description, the README opening line, and the CLAUDE.md project intro. The one mention left in REBUILD_SPEC.md stays on purpose, since there it describes the built-in MCP server as a design principle rather than a tagline.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · quick check</div>
+    <ol>
+      <li>Open <code>package.json</code> and the README on this branch.</li>
+      <li>Before: both led with "AI-native task manager". Now: the phrase is gone from both, and from CLAUDE.md's intro.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s69" data-story="69">
+  <div class="head"><h2><span class="num">#69</span>Scrolling over a number input no longer changes the value</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">69a6d57</span></span><span>task <span class="mono">381660b5</span></span></div>
+  <div class="summary">
+    <p>All seven numeric fields in the app (five in Timer settings, the auto-archive value, and the start-dialog reps field) used to react to the scroll wheel: scrolling the page while the cursor happened to sit over one would silently increment or decrement it. Each input now drops focus the moment a wheel event hits it, so the page scrolls and the value stays put.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure class="shots-narrow"><img src="img/69-after-timer-settings.png" alt="Timer settings with number inputs" loading="lazy"><figcaption>After · Settings → Timer, one of the seven protected inputs</figcaption></figure>
+    <ol>
+      <li>Open Settings → Timer and put the cursor over "Cookie break minutes per hour".</li>
+      <li>Scroll the wheel or trackpad.</li>
+      <li>Before: the value crept up or down. Now: the value never changes; the input just deselects and the page scrolls normally.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s70" data-story="70">
+  <div class="head"><h2><span class="num">#70</span>Auto-archive value can be cleared while typing</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">4060199</span></span><span>task <span class="mono">7c8aefa0</span></span></div>
+  <div class="summary">
+    <p>The auto-archive duration field in Settings → Projects → Archive committed every keystroke straight to the store, and an empty field instantly snapped back to a default. You literally could not delete the last digit to type a new number; the only workaround was select-all and overwrite. The field now keeps what you type locally while editing and only validates (clamping to 1–999) when you leave it.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure class="shots-narrow"><img src="img/70-after-autoarchive.png" alt="Auto-archive per project settings" loading="lazy"><figcaption>After · Settings → Projects → Archive</figcaption></figure>
+    <ol>
+      <li>Open Settings → Projects → Archive and enable auto-archive on a project.</li>
+      <li>Click into the duration value and press Backspace until it is empty.</li>
+      <li>Before: the field refused to empty, snapping back to a number after each delete. Now: it empties normally; type a new value, and on blur an empty or invalid value clamps to 1.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s71" data-story="71">
+  <div class="head"><h2><span class="num">#71</span>"Check your email" sign-up message is green, not red</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">16e481a</span></span><span>task <span class="mono">b0aef29d</span></span></div>
+  <div class="summary">
+    <p>After signing up, the "Check your email for a confirmation link." notice rendered through the error banner, so a success state looked like a failure. The auth store now carries an informational message separate from errors, and the login screen renders it in the green success style. Real sign-up errors still come through red.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · before / after</div>
+    <div class="pair">
+      <figure><img src="img/71-before-red.png" alt="Confirmation message shown in red" loading="lazy"><figcaption>Before · success message styled as an error</figcaption></figure>
+      <figure><img src="img/71-after-green.png" alt="Confirmation message shown in green" loading="lazy"><figcaption>After · same message in the success style</figcaption></figure>
+    </div>
+    <p class="fallback-note">Captured from the real login screen at the pre-fix commit and at HEAD. The message state was injected directly into the auth store rather than performing a live sign-up, so no test account was created; the banner component and styling are exactly what a real sign-up renders.</p>
+    <ol>
+      <li>To verify live: sign out, switch to Sign up, and register any new address.</li>
+      <li>Before: the confirmation notice appeared in red. Now: green, with red reserved for actual errors.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s72" data-story="72">
+  <div class="head"><h2><span class="num">#72</span>Clicking "Less" actually collapses the projects list</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">98fd5df</span></span><span>task <span class="mono">493d85fd</span></span></div>
+  <div class="summary">
+    <p>With a project selected beyond the first five, clicking "Less" appeared dead: an auto-expand effect watched its own output and immediately re-expanded the list. The effect now only fires on navigation, so the manual toggle wins and the list stays collapsed.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <div class="pair">
+      <figure><img src="img/72-after-expanded-less.png" alt="Sidebar expanded showing Less control" loading="lazy"><figcaption>After · expanded list with the Less control</figcaption></figure>
+      <figure><img src="img/72-after-collapsed.png" alt="Sidebar collapsed back to five projects" loading="lazy"><figcaption>After · one click on Less collapses back to five</figcaption></figure>
+    </div>
+    <ol>
+      <li>Click "More" in the sidebar, then select a project that sits below the fifth position.</li>
+      <li>Click "Less".</li>
+      <li>Before: nothing happened (the list re-expanded instantly). Now: the list collapses to five and stays collapsed.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s73" data-story="73">
+  <div class="head"><h2><span class="num">#73</span>New projects pre-select the next unused color</h2></div>
+  <div class="meta"><span class="chip improvement">improvement</span><span>commit <span class="mono">1de93e4</span></span><span>task <span class="mono">3de51a1f</span></span></div>
+  <div class="summary">
+    <p>Both project creation flows (the modal and the inline sidebar form) always pre-selected the first palette color, indigo, even when an existing project already used it. They now suggest the first palette color not yet taken by any of your projects, and cycle deterministically once all eight are in use.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · before / after</div>
+    <div class="pair">
+      <figure><img src="img/73-before-color-default.png" alt="First swatch selected despite being in use" loading="lazy"><figcaption>Before · indigo pre-selected although Personal already uses it</figcaption></figure>
+      <figure><img src="img/73-after-color-preselect.png" alt="Next free swatch pre-selected" loading="lazy"><figcaption>After · the next unused color (violet) is pre-selected</figcaption></figure>
+    </div>
+    <ol>
+      <li>Click the new-project button in the sidebar.</li>
+      <li>Before: the first swatch was always ringed. Now: the ring sits on the first color none of your projects use.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s74" data-story="74">
+  <div class="head"><h2><span class="num">#74</span>Shared projects stay visible in the sidebar (local order preserved)</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">8a3d988</span></span><span>task <span class="mono">6b762989</span></span></div>
+  <div class="summary">
+    <p>Every sync pass overwrote your local sidebar ordering with the project owner's, and newly discovered shared projects were created at position zero. Both together pushed shared projects behind the "More" fold even when you had placed them higher. Sidebar order is now treated as a per-device preference that sync never clobbers, and a newly discovered shared project appends after your own projects instead of hiding.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · sync scenario</div>
+    <ol>
+      <li>In the sidebar, drag a shared project (for example Todoozy Bugs or Crewlounge) into the top five.</li>
+      <li>Have the project owner (or a second account in another window) reorder or rename their own projects, or just wait for the next sync pass and restart the app.</li>
+      <li>Before: your shared project would drop back below the fold after the owner's order synced over yours. Now: it stays exactly where you put it; only a brand-new shared membership appears at the end of your list.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s75" data-story="75">
+  <div class="head"><h2><span class="num">#75</span>Dismissing the date chip really removes the date</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">437b6aa</span></span><span>task <span class="mono">c18e314c</span></span></div>
+  <div class="summary">
+    <p>Typing "call mom tomorrow" in quick add shows a date chip. Clicking the chip's ✕ was supposed to keep the task date-free, but submit re-parsed the text anyway: the task got the due date and "tomorrow" was stripped from the title. The dismissal is now honored at submit time, so the full title is kept and no date is applied.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure><img src="img/75-after-chip-detail.png" alt="Quick add with date chip and dismiss control" loading="lazy"><figcaption>After · the chip with its dismiss control</figcaption></figure>
+    <ol>
+      <li>Type <code>call mom tomorrow</code> in any quick-add input; the "tomorrow" chip appears.</li>
+      <li>Click the ✕ on the chip, then press Enter.</li>
+      <li>Before: the task was created with tomorrow's due date and the title shortened to "call mom". Now: no due date, and the title stays "call mom tomorrow".</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s76" data-story="76">
+  <div class="head"><h2><span class="num">#76</span>Bare tokens like "121s" no longer set a due date</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">613d994</span></span><span>task <span class="mono">7a6830d9</span></span></div>
+  <div class="summary">
+    <p>The natural-language date parser read bare duration abbreviations ("121s", "5m", "3d", "2w") inside task titles as "that long from now" and set a due date. Those single tokens are now rejected. Deliberate phrasing still works: "in 5m" or "tomorrow" parse exactly as before, and clock times like "3pm" are unaffected.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure><img src="img/76-after-no-chip.png" alt="Quick add containing 121s with no date chip" loading="lazy"><figcaption>After · "121s" in the title produces no date chip</figcaption></figure>
+    <ol>
+      <li>Type <code>why does adding 121s set a date?</code> in quick add.</li>
+      <li>Before: a date chip appeared and submit set a due date 121 seconds out. Now: no chip, no date.</li>
+      <li>Counter-check: type <code>in 5m</code>; the chip still appears, as intended.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s77" data-story="77">
+  <div class="head"><h2><span class="num">#77</span>Labels created inside a project now sync their project link</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">bb0349d</span></span><span>task <span class="mono">ccca14d1</span></span></div>
+  <div class="summary">
+    <p>Creating a label from inside a project linked it locally but never pushed the project link to Supabase. On your other devices the label existed globally yet was missing from the project's filter bar and label picker. The link (the project_labels junction row) is now pushed together with the label.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · sync scenario</div>
+    <ol>
+      <li>Inside any project, open the label picker on a task and create a brand-new label from there.</li>
+      <li>On a second device (or after a fresh sign-in elsewhere), open the same project.</li>
+      <li>Before: the label existed in Settings → Labels but was absent from this project's filter bar and picker. Now: it appears in both, linked to the project.</li>
+      <li>Direct check, if you prefer SQL: the Supabase <code>project_labels</code> table has a row pairing the new label id with the project id.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s78" data-story="78">
+  <div class="head"><h2><span class="num">#78</span>Context-menu Start Timer honours the Flowtime default</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">1096bcc</span></span><span>task <span class="mono">1a17c4fc</span></span></div>
+  <div class="summary">
+    <p>With Settings → Timer → Default mode set to Flowtime, the task row's play button started a flow session but the right-click Start Timer menu still started a fixed countdown. Both paths now build their timer parameters through one shared helper, and the flyout offers "Start Flowtime · Count up" when Flowtime is the default.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure><img src="img/78-after-flowtime-flyout.png" alt="Start Timer flyout offering Start Flowtime" loading="lazy"><figcaption>After · the flyout in Flowtime mode</figcaption></figure>
+    <ol>
+      <li>Ensure Settings → Timer → "Pre-selected when you press play" is Flowtime.</li>
+      <li>Right-click any task and hover Start Timer.</li>
+      <li>Before: the flyout showed minute presets and started a countdown. Now: it shows "Start Flowtime · Count up", and starting it counts up with the cookie-break pool active.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s79" data-story="79">
+  <div class="head"><h2><span class="num">#79</span>Tray My Day menu shows priority-colored dots</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">d0818b1</span></span><span>task <span class="mono">4c9e9266</span></span></div>
+  <div class="summary">
+    <p>The macOS tray's My Day menu listed tasks as plain text, so urgent items did not stand out. Each task now carries a small colored dot matching its priority, using the same colors as the in-app priority indicator: green for low, blue for medium, amber for high, red for urgent. Tasks without a priority show no dot.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <div class="dots">
+      <div class="d"><img src="img/79-dot-p1.png" alt="green dot"><span>Low</span></div>
+      <div class="d"><img src="img/79-dot-p2.png" alt="blue dot"><span>Medium</span></div>
+      <div class="d"><img src="img/79-dot-p3.png" alt="amber dot"><span>High</span></div>
+      <div class="d"><img src="img/79-dot-p4.png" alt="red dot"><span>Urgent</span></div>
+    </div>
+    <p class="fallback-note">Fallback: the native menu cannot be screen-captured programmatically (synthetic clicks do not open Electron tray menus), so shown above are the actual icon assets the menu renders, extracted from the build. Verify the real thing in one click below.</p>
+    <ol>
+      <li>Give a few My Day tasks different priorities.</li>
+      <li>Left-click the ToDoozy icon in the macOS menu bar.</li>
+      <li>Before: plain text entries. Now: each prioritized task has its colored dot; unprioritized tasks have none.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s80" data-story="80">
+  <div class="head"><h2><span class="num">#80</span>Done sections sort by completion date, plus a "Completed" sort option</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">37133c0</span></span><span>task <span class="mono">f0f90144</span></span></div>
+  <div class="summary">
+    <p>Completed tasks used to keep their manual order, burying the most recently finished work. Under custom sort, Done sections now auto-sort newest-completed first. A "Completed" field was also added to the sort menu so any view can sort by completion date explicitly; an explicit sort always wins over the automatic one.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure class="shots-narrow"><img src="img/80-after-sort-menu.png" alt="Sort menu including Completed option" loading="lazy"><figcaption>After · "Completed" in the add-sort menu</figcaption></figure>
+    <ol>
+      <li>Open a project with several completed tasks while in custom (manual) sort.</li>
+      <li>Before: the Done section kept manual order. Now: most recently completed tasks are on top.</li>
+      <li>Open Sort in the filter bar: "Completed" is available as an explicit field and overrides the automatic ordering when chosen.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s81" data-story="81">
+  <div class="head"><h2><span class="num">#81</span>"Go to task" scrolls the task into view</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">30b276c</span></span><span>task <span class="mono">b1f620ae</span></span></div>
+  <div class="summary">
+    <p>Following "Go to task" from the recurring-task toast, the tray, or a notification selected the task but left the list scrolled wherever it was, so the highlighted row could sit off-screen. Navigation now records the target task, and the destination view scrolls it into view once rendered, in both project views and My Day.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro (no screenshot: a still image cannot show scrolling)</div>
+    <ol>
+      <li>Pick a project long enough to scroll and complete a recurring task near the bottom, or trigger any task notification.</li>
+      <li>Click "Go to task" on the toast (or the task entry in the tray menu).</li>
+      <li>Before: the view opened with the selection off-screen; you had to scroll to find it. Now: the list scrolls until the selected row is visible.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s82" data-story="82">
+  <div class="head"><h2><span class="num">#82</span>"Go to Task" available in Saved Views</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">b3744d1</span></span><span>task <span class="mono">f1f6a8cb</span></span></div>
+  <div class="summary">
+    <p>The right-click "Go to Task" action existed only in My Day. Saved Views aggregate tasks from many projects, where jumping to a task's home project is just as useful, so the action now appears there too. It navigates to the project, selects the task, and scrolls it into view using the mechanism from #81.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure class="shots-narrow"><img src="img/82-after-goto-task.png" alt="Saved view context menu with Go to Task" loading="lazy"><figcaption>After · context menu inside the High/Urgent saved view</figcaption></figure>
+    <ol>
+      <li>Open any saved view and right-click a task.</li>
+      <li>Before: no "Go to Task" entry. Now: it is the second item; clicking it lands you in the task's project with the row selected and visible.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s83" data-story="83">
+  <div class="head"><h2><span class="num">#83</span>Context menu regrouped by action, with section labels</h2></div>
+  <div class="meta"><span class="chip improvement">improvement</span><span>commit <span class="mono">1410ec2</span></span><span>task <span class="mono">856d3d46</span></span></div>
+  <div class="summary">
+    <p>The task context menu had grown into a flat list with no logic to its order. It is now grouped by what you are doing: navigation on top, an Organize section (Status, Priority, Labels), a Schedule section (Recurrence, Snooze), the timer, then creation actions, with Archive and Delete isolated at the bottom. The unused Focus submenu was removed, and the bulk-selection menu received the same treatment.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · before / after</div>
+    <div class="pair">
+      <figure><img src="img/83-before-context-menu.png" alt="Old flat context menu" loading="lazy"><figcaption>Before · flat list, Focus submenu still present</figcaption></figure>
+      <figure><img src="img/83-after-context-menu.png" alt="New grouped context menu" loading="lazy"><figcaption>After · Organize and Schedule sections, danger zone at the bottom</figcaption></figure>
+    </div>
+    <ol>
+      <li>Right-click any task and compare against the after shot; spot-check the bulk menu by selecting several tasks first.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s84" data-story="84">
+  <div class="head"><h2><span class="num">#84</span>Saved Views show the labels of their tasks as filter chips</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">8fb9c00</span></span><span>task <span class="mono">8b6b6b3d</span></span></div>
+  <div class="summary">
+    <p>A saved view now lists, directly above its tasks, every label currently present on those tasks. Click a chip to narrow the view to that label without editing the saved filter. Same-named labels from different projects are de-duplicated into one chip.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <figure><img src="img/84-after-view-chips.png" alt="Saved view with label chips row" loading="lazy"><figcaption>After · the High/Urgent view listing the labels in use</figcaption></figure>
+    <ol>
+      <li>Open a saved view whose tasks carry labels.</li>
+      <li>Before: no label row; narrowing required editing the view filter. Now: the LABELS row shows exactly the labels in the view; clicking one filters the list, clicking again clears it.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s85" data-story="85">
+  <div class="head"><h2><span class="num">#85</span>Saved view counts and open views update live</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">a82ab62</span></span><span>task <span class="mono">62df0d2c</span></span></div>
+  <div class="summary">
+    <p>Sidebar counts next to saved views were computed once at startup, so a task that started matching a view (new label, raised priority) changed nothing until restart. Counts now recompute, debounced, after every task mutation, remote arrival, and MCP write. A counting bug was also fixed where label-based views always counted zero, and views now match tasks from projects you have never opened.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · scenario</div>
+    <ol>
+      <li>Note the sidebar count on a label-based saved view (for example a "Bug" view).</li>
+      <li>From any project, add that label to a task that did not have it.</li>
+      <li>Before: the count stayed stale until app restart. Now: it ticks up within about a second; removing the label ticks it back down.</li>
+      <li>Cross-project check: create a task with the label in a project you have not opened this session; the count still updates and the task appears when you open the view.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s86" data-story="86">
+  <div class="head"><h2><span class="num">#86</span>Archive gains filters and full row details</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">169f82b</span></span><span>task <span class="mono">d6e06073</span></span></div>
+  <div class="summary">
+    <p>The archive was a bare list of titles with completion dates, with no way to search 200+ archived tasks. It now mounts the same filter bar as regular views (labels, priority, project, due date, keyword) and each row shows its priority, label chips, and due date. Clicking a label chip filters by it; group headers and keyboard navigation follow the filtered result.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · before / after</div>
+    <div class="pair">
+      <figure><img src="img/86-before-archive.png" alt="Old archive, plain rows" loading="lazy"><figcaption>Before · titles only, no filtering</figcaption></figure>
+      <figure><img src="img/86-after-archive.png" alt="New archive with filter bar and row details" loading="lazy"><figcaption>After · filter bar on top, metadata on rows</figcaption></figure>
+    </div>
+    <ol>
+      <li>Open Archive, expand a project group, and confirm rows show priority, labels, and dates where present.</li>
+      <li>Use +Filter or a label chip to narrow; the group counts and empty state should follow the filter.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s87" data-story="87">
+  <div class="head"><h2><span class="num">#87</span>MCP writes and the activity feed: resolved as already covered</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">5ef4a2d</span></span><span>task <span class="mono">07a1f88a</span></span></div>
+  <div class="summary">
+    <p>The reported gap (tasks created through MCP produce no activity entries) targeted the old local MCP server, which had already been deleted in favor of the remote Edge Function, and that function was verified to log activity for every write tool it exposes. No code change was needed; the story is closed with that verification on record. Activity rows reaching your desktop live for personal projects is the part that was actually missing, and that shipped separately as story #91.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · scenario (after deploying the #91 migration)</div>
+    <ol>
+      <li>Ask Claude (via the ToDoozy MCP) to create a task in a personal project, then set its priority.</li>
+      <li>Open the task's detail panel in the app and check the activity feed.</li>
+      <li>Before: nothing appeared for MCP writes. Now: creation and the priority change are listed, arriving live with #91 in place.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s88" data-story="88">
+  <div class="head"><h2><span class="num">#88</span>MCP label tools fail loudly instead of faking success</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">aa8e49d</span></span><span>task <span class="mono">41183299</span></span></div>
+  <div class="summary">
+    <p>The MCP tools for assigning and removing labels reported success without checking whether the database write actually landed, so a rejected write (bad id, permission issue) silently dropped data. Both now verify the write and raise a real error when it did not stick; the assign tool re-reads the task's labels after writing to catch silent permission rejections.</p>
+  </div>
+  <div class="deploy-flag">
+    <div class="label">Deploy before testing</div>
+    <pre><code>supabase functions deploy mcp</code></pre>
+    <p>The fix lives in the MCP Edge Function; until deployed, production still runs the old silent behavior.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · MCP scenario</div>
+    <ol>
+      <li>Via MCP, call <code>assign_label_to_task</code> with a valid task id but a made-up label id (any random UUID).</li>
+      <li>Before: the call returned <code>assigned: true</code> and nothing happened. Now: it returns an explicit error ("Failed to assign label").</li>
+      <li>Happy path: assign a real label, confirm it appears on the task in the app; remove it, confirm <code>removed: true</code> and it disappears.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<!-- ═══════════════ BATCH 2 ═══════════════ -->
+
+<section class="entry" id="s89" data-story="89">
+  <div class="head"><h2><span class="num">#89</span>Token refresh storm no longer logs you out</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">fb4b2c8</span></span><span>task <span class="mono">b1ee3217</span></span></div>
+  <div class="summary">
+    <p>After long sessions with several projects open, two refresh paths could race on the same refresh token; Supabase treats a reused token as theft and kills the whole session, silently logging you out. The last unguarded refresh call now goes through the same mutex as every other session write. And when a token does die mid-session, the banner flips to "Session expired" immediately instead of after a restart.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · observational scenario (the race was probabilistic)</div>
+    <ol>
+      <li>Keep the app running 60+ minutes with 5 or more projects, toggling Wi-Fi off and on once or twice mid-session.</li>
+      <li>Watch Settings → Logs. Before: the signature was "Session restore attempt 1/1 failed: refresh_token_already_used" followed by "token permanently dead", then a forced sign-in. Now: refreshes serialize (you may see "setAuth deduped" entries, which are normal) and no <code>refresh_token_already_used</code> appears.</li>
+      <li>Banner check: if a token ever does die permanently, the red "Session expired" banner now appears at that moment, without restarting the app.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s90" data-story="90">
+  <div class="head"><h2><span class="num">#90</span>Manual Retry works after starting offline, and Realtime comes back</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">df2f6cd</span></span><span>task <span class="mono">1827d14e</span></span></div>
+  <div class="summary">
+    <p>Starting ToDoozy without a connection put it in offline mode, but after the network returned, the banner's "Retry now" button ignored the successful reconnect: the app stayed "offline" until restart, and live sync never resumed. Retry now acts on its result, and a successful recovery (manual or from the automatic 30-second timer) re-runs the full sync setup, Realtime subscriptions included.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · repro</div>
+    <ol>
+      <li>Disconnect Wi-Fi, quit and relaunch ToDoozy; the offline banner appears.</li>
+      <li>Reconnect Wi-Fi, then click "Retry now" on the banner.</li>
+      <li>Before: the banner stayed up and changes from other devices never arrived. Now: the banner clears within a moment and Settings → Logs shows Realtime channels re-subscribing.</li>
+      <li>Live check: make a change on a second device or via MCP; it appears without restarting.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s91" data-story="91">
+  <div class="head"><h2><span class="num">#91</span>Wider Realtime coverage: per-user channel, live activity, live labels</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">a8d83c1</span></span><span>task <span class="mono">4c89a910</span></span></div>
+  <div class="summary">
+    <p>Several things only synced on restart or reconcile: being added to or removed from a shared project, label and saved-view changes from other devices, activity entries on personal projects, and label assignments made through MCP. A new per-user Realtime channel now carries membership and user-scoped data live, personal project channels stream activity entries, and any task event triggers a targeted pull of that task's labels. A polling safety net sweeps activity on reconcile for both personal and shared projects.</p>
+  </div>
+  <div class="deploy-flag">
+    <div class="label">Deploy before testing</div>
+    <pre><code>supabase db push   # applies 20260610230000_realtime_user_channel.sql</code></pre>
+    <p>The migration adds three user-scoped tables to the Realtime publication plus the supporting indexes. Without it, the new user channel subscribes successfully but receives nothing.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · two-window scenario</div>
+    <ol>
+      <li>Membership: from a second account (or the owner), add your account to a shared project. Before: it appeared only after restart. Now: the project shows up in your sidebar within seconds; removal takes it away live too.</li>
+      <li>Activity: with a personal project's task open in the detail panel, change its priority via MCP. The activity feed gains the entry live.</li>
+      <li>Labels via MCP: call <code>assign_label_to_task</code> on a task you have visible. Before: the chip appeared only after clicking around or restarting. Now: it pops in on its own.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s92" data-story="92">
+  <div class="head"><h2><span class="num">#92</span>Detail-panel edits sync in batches, not per keystroke</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">b73f86b</span></span><span>task <span class="mono">d174ec02</span></span></div>
+  <div class="summary">
+    <p>Editing a task in the detail panel used to push every saved change to Supabase as it happened, generating a stream of small writes. Edits to an open task are now buffered and pushed once at a natural boundary: switching tasks, closing the panel, the app losing focus, or quitting (with a 30-second safety timer as backstop). Completing, archiving, and My Day changes still push immediately, carrying any buffered edits with them.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · two-window scenario</div>
+    <ol>
+      <li>Open the same shared project in two windows (second account or second device).</li>
+      <li>In window one, open a task's detail panel and make several quick edits: retitle, change priority, add a label.</li>
+      <li>Before: each edit appeared in window two within a couple of seconds. Now: window two stays unchanged while you keep editing, then receives everything at once when you switch tasks, close the panel, or click away from the app.</li>
+      <li>Safety check: quit the app immediately after an edit; relaunch and confirm the edit reached the other window anyway.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s93" data-story="93">
+  <div class="head"><h2><span class="num">#93</span>MCP create_label writes the real project link</h2></div>
+  <div class="meta"><span class="chip fix">fix</span><span>commit <span class="mono">309040b</span></span><span>task <span class="mono">2d4282aa</span></span></div>
+  <div class="summary">
+    <p>Labels created through MCP with a project were linked using a legacy storage column the app stopped reading in v1.7.0, so the label existed but was invisible inside the project. The MCP server now writes the same junction table the app uses, reads project labels from it, and the legacy column is gone from the function entirely. A failed link now errors instead of pretending success, matching #88's contract.</p>
+  </div>
+  <div class="deploy-flag">
+    <div class="label">Deploy before testing</div>
+    <pre><code>supabase functions deploy mcp</code></pre>
+    <p>Same function as #88, one deploy covers both. Afterwards, a one-time backfill of any label links stranded in the legacy column remains on your list (fix plan step 5 in the task).</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · MCP scenario</div>
+    <ol>
+      <li>Via MCP, call <code>create_label</code> with a name and a <code>project_id</code>.</li>
+      <li>Before: the label landed in Settings → Labels but never showed inside the project. Now: it appears in that project's filter bar and label picker (live with #91 deployed, otherwise after a reconcile).</li>
+      <li>Direct check: the Supabase <code>project_labels</code> table has the junction row; the project's <code>label_data</code> column stays untouched.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<section class="entry" id="s94" data-story="94">
+  <div class="head"><h2><span class="num">#94</span>OAuth users can remove their password login again</h2></div>
+  <div class="meta"><span class="chip feature">feature</span><span>commit <span class="mono">1776432</span></span><span>task <span class="mono">6a8adf77</span></span></div>
+  <div class="summary">
+    <p>A Google account that added a password (story #65) had no way back to Google-only sign-in; clearing a password requires admin rights no client has. A new <code>remove-password</code> Edge Function does it server-side, and Settings → Profile → Password shows a Remove section, with a confirmation step, only when you genuinely have both sign-in methods. It never offers to remove your only way in, and it clears the saved Keychain credentials so nothing stale lingers.</p>
+  </div>
+  <div class="deploy-flag">
+    <div class="label">Deploy before testing</div>
+    <pre><code>supabase functions deploy remove-password</code></pre>
+    <p>The button calls this function; without the deploy it fails with a not-found error.</p>
+  </div>
+  <div class="verify">
+    <div class="vlabel">Verification · auth scenario (use your Google account, which has a password set)</div>
+    <ol>
+      <li>Open Settings → Profile → Password. The "Remove password login" section is visible because the account has both Google and a password.</li>
+      <li>Click Remove, confirm in the toast. The section flips back to "Add Password Login" without a reload and you stay signed in.</li>
+      <li>Sign out, then try signing in with email and the old password: it must fail. "Continue with Google" works.</li>
+      <li>Round-trip: add a password again from the same screen; the Remove section reappears.</li>
+    </ol>
+  </div>
+  <button class="accept"><span class="box"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5.5L4 8L8.5 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></span>Accepted</button>
+</section>
+
+<footer style="margin-top:4rem; padding-top:1.5rem; border-top:1px solid var(--border-faint); color:var(--faint); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; font-weight:700;">
+  Generated 11 June 2026 · ralph story #95 · screenshots from dev builds at the listed commits
+</footer>
+</main>
+
+<script>
+(function () {
+  var KEY = 'todoozy-review-2026-06';
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { state = {}; }
+
+  var entries = Array.prototype.slice.call(document.querySelectorAll('section.entry'));
+  var navB1 = document.getElementById('nav-b1');
+  var navB2 = document.getElementById('nav-b2');
+  var progText = document.getElementById('prog-text');
+  var progBar = document.getElementById('prog-bar');
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  function render() {
+    var done = 0;
+    entries.forEach(function (s) {
+      var id = s.dataset.story;
+      var on = !!state[id];
+      s.classList.toggle('accepted', on);
+      var link = document.getElementById('nav-' + id);
+      if (link) link.classList.toggle('accepted', on);
+      if (on) done++;
+    });
+    progText.textContent = done + ' of ' + entries.length + ' accepted';
+    progBar.style.width = (done / entries.length * 100) + '%';
+  }
+
+  entries.forEach(function (s) {
+    var id = s.dataset.story;
+    var title = s.querySelector('h2').textContent.replace('#' + id, '').trim();
+    var a = document.createElement('a');
+    a.href = '#s' + id;
+    a.id = 'nav-' + id;
+    a.innerHTML = '<span class="dot"></span><span class="num">' + id + '</span><span>' + title + '</span>';
+    (parseInt(id, 10) <= 88 ? navB1 : navB2).appendChild(a);
+
+    s.querySelector('.accept').addEventListener('click', function () {
+      state[id] = !state[id];
+      save();
+      render();
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

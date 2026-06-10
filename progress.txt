@@ -215,3 +215,40 @@ env artifact, not a compile error).
 
 SCOPE GUARD respected: nothing deployed. USER FOLLOW-UP after review: `supabase functions deploy
 remove-password` (plus the #88/#93 `deploy mcp` still pending).
+
+## Story #95 — Batch review doc for stories #68-#94 (2026-06-11)
+
+Built review/batch-review-2026-06.html: 27 entries (batch 1 #68-#88, batch 2 #89-#94), each with commit
+hash, ToDoozy short-id, category chip, plain-language summary, and a verification path. #88/#93/#94 carry
+DEPLOY BEFORE TESTING flags with exact commands; added the #91 Realtime migration (supabase db push) to the
+deploy-first block too, since the user-channel verification silently no-ops without it. Sticky sidebar index
+with localStorage-persisted "Accepted" checkboxes + progress bar. Dark default / light via
+prefers-color-scheme; ToDoozy typography scale; design skills consulted per the story.
+
+Screenshots (19 PNGs + 4 tray dot assets in review/img/, checkpointed via review/checklist.json):
+- HOW: the user is OAuth-only (no keychain password, no dev session), so the dev app couldn't be signed in
+  unattended. Solution: launch `npm run dev -- -- --remote-debugging-port=9223` and drive the renderer over
+  CDP; Vite dev serves store modules by URL, so `await import('/src/shared/stores/authStore.ts')` returns the
+  LIVE zustand store → set isAuthenticated/currentUser directly (window.api.users.findById for the local user
+  row). App renders the full UI from the local dev DB with ZERO Supabase credentials — safest possible mode
+  (no prod writes possible). Same trick drove navigation (viewStore.setView), saved views, settings tabs,
+  context menus (dispatch MouseEvent('contextmenu') on [data-task-id] rows — menus are React components, not
+  native), and the #71 banners (inject infoMessage at HEAD / error at the pre-fix commit; noted transparently
+  in the entry — no real signup performed). Screenshots via Page.captureScreenshot with clip crops. Driver
+  script: /tmp/todoozy-cdp.mjs (session-scoped, not committed).
+- BEFORE shots: ONE worktree at 4060199 (parent of #71's commit = before #71/#73/#83/#86 simultaneously,
+  all batch-1 fixes landed sequentially) instead of per-story worktrees. Symlinked node_modules, copied .env,
+  same CDP flow. Worktree removed afterwards; main tree never left HEAD.
+- #79 tray menu: native NSMenu can't be captured programmatically (AX click doesn't fire Electron's tray
+  click handler; item reports x=-1). Fallback per story rules: extracted the 4 priority-dot PNGs from
+  src/main/priority-icons.ts base64 + written repro; fallback noted in the entry.
+- #81: repro-only by design (a still can't show scroll-into-view).
+- Port 9222 was taken by the user's Chrome → used 9223.
+
+GOTCHA / logged bug: dev-db.sh copies the legacy EMPTY todoozy.db — real data lives in the per-user
+todoozy-andy.cassiers.db since the switchDatabase change. Worked around with sqlite3 VACUUM INTO a dev-dbs
+copy; logged as ToDoozy task 938c848d (Personal, Todoozy+Bug labels).
+
+Verification: typecheck exit 0 (no app source touched); all 27 entries present with commit+id+path (grep
+count 27, all referenced images exist); doc rendered in headless Chrome in both color schemes. No Vitest
+additions (no new app code, per the story). No ToDoozy task lifecycle for #95 (story says none exists).
