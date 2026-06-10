@@ -37,6 +37,7 @@ import type { SyncStatus } from '../../shared/stores/syncStore'
 import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
+import { MAX_VISIBLE_PROJECTS, shouldAutoExpandProjects } from './sidebarProjects'
 
 interface SidebarProps {
   viewCounts: { 'my-day': number; archive: number; templates: number }
@@ -86,8 +87,6 @@ export function useSidebarItems(): Array<{ id: string; shortcut: string }> {
       }))
   }, [orderJson, hiddenJson])
 }
-
-const MAX_VISIBLE_PROJECTS = 5
 
 export function Sidebar({
   viewCounts,
@@ -226,14 +225,21 @@ export function Sidebar({
     setNewProjectColor('#6366f1')
   }, [newProjectName, newProjectColor, currentUser, projects, createProject, createStatus, setSelectedProject])
 
-  // Auto-expand projects when the selected project is beyond the visible top 5
+  // Auto-expand projects when the selected project is beyond the visible top 5.
+  // Read the current expanded state via a ref so this effect fires only on
+  // navigation — never when the user manually toggles "More"/"Less". Including
+  // `projectsExpanded` in the deps would make clicking "Less" immediately
+  // re-expand the list whenever the selected project sits past the cutoff.
+  const projectsExpandedRef = useRef(projectsExpanded)
   useEffect(() => {
-    if (currentView !== 'project' || !selectedProjectId) return
-    const idx = projects.findIndex((p) => p.id === selectedProjectId)
-    if (idx >= MAX_VISIBLE_PROJECTS && !projectsExpanded) {
+    projectsExpandedRef.current = projectsExpanded
+  }, [projectsExpanded])
+
+  useEffect(() => {
+    if (shouldAutoExpandProjects(currentView, selectedProjectId, projects, projectsExpandedRef.current)) {
       setProjectsExpanded(true)
     }
-  }, [currentView, selectedProjectId, projects, projectsExpanded])
+  }, [currentView, selectedProjectId, projects])
 
   const handleToggleDayNight = useCallback(async () => {
     if (!currentTheme) return
