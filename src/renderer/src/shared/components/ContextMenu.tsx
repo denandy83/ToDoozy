@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, SunMedium, Plus, Copy, Clipboard, Archive, Trash2,
-  CircleDot, Signal, Repeat, Tag, Clock, Focus, LayoutTemplate, Timer, ExternalLink
+  Sun, SunMedium, Plus, Copy, Clipboard, Archive, Trash2,
+  CircleDot, Signal, Repeat, Tag, Clock, LayoutTemplate, Timer, ExternalLink
 } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useFocusRestore } from '../hooks/useFocusRestore'
@@ -17,22 +17,22 @@ import { useProjectStore } from '../stores/projectStore'
 import { shouldShowGoToTask } from '../utils/goToTask'
 import { useSettingsStore } from '../stores/settingsStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
+import { Divider, MenuItem, SectionLabel, FlyoutItem } from './ContextMenuPrimitives'
 import {
   StatusSubmenu,
   PrioritySubmenu,
   RecurrenceSubmenu,
   LabelsSubmenu,
   SnoozeSubmenu,
-  FocusSubmenu,
   TimerSubmenu
 } from './ContextMenuSubmenus'
 
-type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'focus' | 'timer' | null
+type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'timer'
 
 export function ContextMenu(): React.JSX.Element | null {
   const { isOpen, position, taskId, close } = useContextMenuStore()
   const menuRef = useRef<HTMLDivElement>(null)
-  const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId>(null)
+  const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
@@ -98,7 +98,7 @@ export function ContextMenu(): React.JSX.Element | null {
     }
   }, [])
 
-  const handleSubmenuEnter = useCallback((id: SubmenuId) => {
+  const handleSubmenuEnter = useCallback((id: SubmenuId | null) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
     hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
   }, [])
@@ -196,38 +196,15 @@ export function ContextMenu(): React.JSX.Element | null {
           }}
         />
       )}
-      {/* Add Subtask */}
-      <MenuItem
-        icon={<Plus size={14} />}
-        label="Add Subtask"
-        onClick={() =>
-          handleAction(() => {
-            setPendingSubtaskParent(task.id)
-          })
-        }
-      />
       <Divider />
 
-      {/* Flyout submenus */}
+      {/* Organize — what the task is */}
+      <SectionLabel label="Organize" />
       <FlyoutItem id="status" icon={<CircleDot size={14} />} label="Status" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <StatusSubmenu task={task} statuses={statuses} openLeft={openLeft} onStatusChange={handleStatusChange} />
       </FlyoutItem>
       <FlyoutItem id="priority" icon={<Signal size={14} />} label="Priority" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <PrioritySubmenu task={task} openLeft={openLeft} onPriorityChange={(p) => handleAction(() => updateTask(task.id, { priority: p }))} />
-      </FlyoutItem>
-      <FlyoutItem id="recurrence" icon={<Repeat size={14} />} label="Recurrence" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
-        <RecurrenceSubmenu
-          task={task}
-          openLeft={openLeft}
-          onRecurrenceChange={(r) => handleAction(() => {
-            const updates: Record<string, string | null> = { recurrence_rule: r }
-            if (r && !task.due_date) {
-              const today = new Date()
-              updates.due_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-            }
-            updateTask(task.id, updates)
-          })}
-        />
       </FlyoutItem>
       <FlyoutItem id="labels" icon={<Tag size={14} />} label="Labels" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <LabelsSubmenu
@@ -248,18 +225,50 @@ export function ContextMenu(): React.JSX.Element | null {
           }}
         />
       </FlyoutItem>
+      <Divider />
+
+      {/* Schedule — when the task happens */}
+      <SectionLabel label="Schedule" />
+      <FlyoutItem id="recurrence" icon={<Repeat size={14} />} label="Recurrence" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
+        <RecurrenceSubmenu
+          task={task}
+          openLeft={openLeft}
+          onRecurrenceChange={(r) => handleAction(() => {
+            const updates: Record<string, string | null> = { recurrence_rule: r }
+            if (r && !task.due_date) {
+              const today = new Date()
+              updates.due_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+            }
+            updateTask(task.id, updates)
+          })}
+        />
+      </FlyoutItem>
       <FlyoutItem id="snooze" icon={<Clock size={14} />} label="Snooze" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <SnoozeSubmenu openLeft={openLeft} currentDueDate={task.due_date} onSnooze={(date) => handleAction(() => updateTask(task.id, { due_date: date }))} />
       </FlyoutItem>
-      <FlyoutItem id="focus" icon={<Focus size={14} />} label="Focus" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
-        <FocusSubmenu openLeft={openLeft} onFocus={(mins) => handleAction(() => { addToast({ message: `Focus: ${mins} min` }) })} />
-      </FlyoutItem>
+      <Divider />
+
+      {/* Timer */}
       <FlyoutItem id="timer" icon={<Timer size={14} />} label="Start Timer" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <TimerSubmenu taskId={task.id} taskTitle={task.title} projectId={task.project_id} openLeft={openLeft} onClose={close} />
       </FlyoutItem>
       <Divider />
 
-      {/* Save as Template */}
+      {/* Task actions */}
+      <MenuItem
+        icon={<Plus size={14} />}
+        label="Add Subtask"
+        onClick={() =>
+          handleAction(() => {
+            setPendingSubtaskParent(task.id)
+          })
+        }
+      />
+      <MenuItem
+        icon={<Copy size={14} />}
+        label="Duplicate"
+        onClick={() => handleAction(() => duplicateTask(task.id, crypto.randomUUID()))}
+      />
       <MenuItem
         icon={<LayoutTemplate size={14} />}
         label="Save as Template"
@@ -270,16 +279,10 @@ export function ContextMenu(): React.JSX.Element | null {
           })
         }
       />
-      {/* Duplicate */}
-      <MenuItem
-        icon={<Copy size={14} />}
-        label="Duplicate"
-        onClick={() => handleAction(() => duplicateTask(task.id, crypto.randomUUID()))}
-      />
-      {/* Copy to clipboard */}
       <MenuItem
         icon={<Clipboard size={14} />}
         label="Copy"
+        shortcut="⌘C"
         onClick={() => {
           navigator.clipboard.writeText(task.title).then(() => {
             addToast({ message: 'Copied' })
@@ -301,74 +304,14 @@ export function ContextMenu(): React.JSX.Element | null {
       )}
 
       {/* Delete */}
-      <button
+      <MenuItem
+        danger
+        icon={<Trash2 size={14} />}
+        label="Delete"
+        shortcut="⌫"
         onClick={handleDelete}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-danger transition-colors hover:bg-danger/10"
-        role="menuitem"
-      >
-        <Trash2 size={14} />
-        <span>Delete</span>
-      </button>
+      />
     </div>,
     document.body
-  )
-}
-
-// --- Small helper components ---
-
-function Divider(): React.JSX.Element {
-  return <div className="my-1 border-t border-border" />
-}
-
-interface MenuItemProps {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-}
-
-function MenuItem({ icon, label, onClick }: MenuItemProps): React.JSX.Element {
-  return (
-    <button
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-      role="menuitem"
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  )
-}
-
-interface FlyoutItemProps {
-  id: SubmenuId
-  icon: React.ReactNode
-  label: string
-  activeSubmenu: SubmenuId
-  children: React.ReactNode
-  onEnter: (id: SubmenuId) => void
-  onLeave: () => void
-}
-
-function FlyoutItem({ id, icon, label, activeSubmenu, children, onEnter, onLeave }: FlyoutItemProps): React.JSX.Element {
-  return (
-    <div
-      className="relative"
-      onMouseEnter={() => onEnter(id)}
-      onMouseLeave={onLeave}
-    >
-      <div
-        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-sm font-light transition-colors ${
-          activeSubmenu === id ? 'bg-foreground/6 text-foreground' : 'text-foreground hover:bg-foreground/6'
-        }`}
-        role="menuitem"
-        aria-haspopup="true"
-        aria-expanded={activeSubmenu === id}
-      >
-        {icon}
-        <span className="flex-1">{label}</span>
-        <ChevronRight size={12} className="text-muted" />
-      </div>
-      {activeSubmenu === id && children}
-    </div>
   )
 }

@@ -133,3 +133,22 @@ Started: Wed Jun 10 16:05:59 CEST 2026
   null/undefined/'' project✗). Full suite 824 pass / 46 files; typecheck clean; dev build compiles on 5200
   (runtime DB-open error is env-only, unrelated to this renderer change).
 - ToDoozy task f1f6a8cb → Verifying.
+
+## Story #83 — Context menu rehaul (regroup by cognitive action + section labels)
+- Extracted shared primitives into new `src/renderer/src/shared/components/ContextMenuPrimitives.tsx`:
+  `Divider`, `MenuItem` (now with `shortcut?` + `danger?` props), `SectionLabel`, and a generic
+  `FlyoutItem<T extends string>`. Both ContextMenu.tsx and BulkContextMenu.tsx now import these —
+  no local primitive definitions remain in either file.
+- `MenuItem.onClick` widened to `(e: React.MouseEvent) => void` so the Delete item can pass the event
+  to `shouldForceDelete(e)` (shift-click skip-confirm) — existing `() => ...` callers stay compatible.
+- ContextMenu.tsx restructured: My Day / Go to Task — Organize (Status, Priority, Labels) —
+  Schedule (Recurrence, Snooze) — Start Timer — Add Subtask/Duplicate/Save as Template/Copy(⌘C) —
+  Archive/Delete(danger, ⌫). FocusSubmenu fully removed (import, FlyoutItem, Focus icon, 'focus' SubmenuId).
+- BulkContextMenu.tsx: same Organize (Status/Priority/Labels) + Schedule (Snooze) section labels;
+  Delete + Copy converted to MenuItem (danger + ⌫ on Delete, ⌘C on Copy).
+- Removed dead `FocusSubmenu`/`FOCUS_PRESETS` from ContextMenuSubmenus.tsx.
+- FlyoutItem genericity: `SubmenuId` unions made non-null + `useState<SubmenuId | null>`; TS infers
+  T = SubmenuId at each call site, typecheck clean. `ChevronRight` import dropped from both menu files.
+- Tests: no new repository methods/utility functions added (pure presentational components); vitest
+  runs in node env with no jsdom/testing-library, so no component test added. typecheck 0 errors;
+  full suite 821/821 pass; `npm run dev` compiled cleanly on 5200 (renderer+main+preload built).

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, Sun, CircleDot, Signal, Tag, Clock, Clipboard, Archive, Trash2
+  Sun, CircleDot, Signal, Tag, Clock, Clipboard, Archive, Trash2
 } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useFocusRestore } from '../hooks/useFocusRestore'
@@ -12,6 +12,7 @@ import { shouldForceDelete } from '../utils/shiftDelete'
 import { useStatusesByProject } from '../stores/statusStore'
 import { useLabelsByProject } from '../stores/labelStore'
 import { useCreateOrMatchLabel } from '../hooks/useCreateOrMatchLabel'
+import { Divider, MenuItem, SectionLabel, FlyoutItem } from './ContextMenuPrimitives'
 import {
   StatusSubmenu,
   PrioritySubmenu,
@@ -21,12 +22,12 @@ import {
 import { useToast } from './Toast'
 import { useViewStore } from '../stores/viewStore'
 
-type SubmenuId = 'status' | 'priority' | 'labels' | 'snooze' | null
+type SubmenuId = 'status' | 'priority' | 'labels' | 'snooze'
 
 export function BulkContextMenu(): React.JSX.Element | null {
   const { isOpen, isBulk, position, bulkTaskIds, close } = useContextMenuStore()
   const menuRef = useRef<HTMLDivElement>(null)
-  const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId>(null)
+  const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
@@ -80,7 +81,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
     }
   }, [])
 
-  const handleSubmenuEnter = useCallback((id: SubmenuId) => {
+  const handleSubmenuEnter = useCallback((id: SubmenuId | null) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
     hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
   }, [])
@@ -158,7 +159,8 @@ export function BulkContextMenu(): React.JSX.Element | null {
       />
       <Divider />
 
-      {/* Flyout submenus */}
+      {/* Organize — what the tasks are */}
+      <SectionLabel label="Organize" />
       <FlyoutItem id="status" icon={<CircleDot size={14} />} label="Status" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <StatusSubmenu task={{ status_id: '' } as never} statuses={sortedStatuses} openLeft={openLeft} onStatusChange={handleStatusChange} />
       </FlyoutItem>
@@ -179,6 +181,10 @@ export function BulkContextMenu(): React.JSX.Element | null {
           }}
         />
       </FlyoutItem>
+      <Divider />
+
+      {/* Schedule — when the tasks happen */}
+      <SectionLabel label="Schedule" />
       <FlyoutItem id="snooze" icon={<Clock size={14} />} label="Snooze" activeSubmenu={activeSubmenu} onEnter={handleSubmenuEnter} onLeave={handleSubmenuLeave}>
         <SnoozeSubmenu openLeft={openLeft} onSnooze={(date) => handleAction(() => bulkUpdateTasks(bulkTaskIds, { due_date: date }))} />
       </FlyoutItem>
@@ -188,6 +194,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
       <MenuItem
         icon={<Clipboard size={14} />}
         label="Copy"
+        shortcut="⌘C"
         onClick={() => {
           const titles = bulkTaskIds
             .map((id) => tasks[id]?.title)
@@ -214,72 +221,14 @@ export function BulkContextMenu(): React.JSX.Element | null {
       )}
 
       {/* Delete */}
-      <button
+      <MenuItem
+        danger
+        icon={<Trash2 size={14} />}
+        label="Delete"
+        shortcut="⌫"
         onClick={handleDelete}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-danger transition-colors hover:bg-danger/10"
-        role="menuitem"
-      >
-        <Trash2 size={14} />
-        <span>Delete</span>
-      </button>
+      />
     </div>,
     document.body
-  )
-}
-
-function Divider(): React.JSX.Element {
-  return <div className="my-1 border-t border-border" />
-}
-
-interface MenuItemProps {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-}
-
-function MenuItem({ icon, label, onClick }: MenuItemProps): React.JSX.Element {
-  return (
-    <button
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-      role="menuitem"
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  )
-}
-
-interface FlyoutItemProps {
-  id: SubmenuId
-  icon: React.ReactNode
-  label: string
-  activeSubmenu: SubmenuId
-  children: React.ReactNode
-  onEnter: (id: SubmenuId) => void
-  onLeave: () => void
-}
-
-function FlyoutItem({ id, icon, label, activeSubmenu, children, onEnter, onLeave }: FlyoutItemProps): React.JSX.Element {
-  return (
-    <div
-      className="relative"
-      onMouseEnter={() => onEnter(id)}
-      onMouseLeave={onLeave}
-    >
-      <div
-        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-sm font-light transition-colors ${
-          activeSubmenu === id ? 'bg-foreground/6 text-foreground' : 'text-foreground hover:bg-foreground/6'
-        }`}
-        role="menuitem"
-        aria-haspopup="true"
-        aria-expanded={activeSubmenu === id}
-      >
-        {icon}
-        <span className="flex-1">{label}</span>
-        <ChevronRight size={12} className="text-muted" />
-      </div>
-      {activeSubmenu === id && children}
-    </div>
   )
 }

@@ -221,39 +221,6 @@ export function SnoozeSubmenu({ openLeft, currentDueDate, onSnooze }: SnoozeSubm
   )
 }
 
-// --- Focus Flyout ---
-
-const FOCUS_PRESETS = [
-  { label: 'Deep Work', minutes: 25 },
-  { label: 'Short Sprint', minutes: 15 },
-  { label: 'Quick Fix', minutes: 5 },
-  { label: 'Long Session', minutes: 50 }
-] as const
-
-interface FocusSubmenuProps {
-  openLeft: boolean
-  onFocus: (minutes: number) => void
-}
-
-export function FocusSubmenu({ openLeft, onFocus }: FocusSubmenuProps): React.JSX.Element {
-  return (
-    <SubmenuContainer openLeft={openLeft}>
-      {FOCUS_PRESETS.map((preset) => (
-        <button
-          key={preset.label}
-          onClick={() => onFocus(preset.minutes)}
-          className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
-        >
-          <span>{preset.label}</span>
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-            {preset.minutes}m
-          </span>
-        </button>
-      ))}
-    </SubmenuContainer>
-  )
-}
-
 // --- Status Row ---
 
 interface StatusRowProps {
