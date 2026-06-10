@@ -5,6 +5,7 @@ import { McpServer, StreamableHttpTransport } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import rruleLib from 'npm:rrule@2'
 import { upsertTaskLabel, deleteTaskLabel } from './labelMutations.ts'
+import { upsertProjectLabel, fetchProjectLabels } from './projectLabels.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -475,16 +476,9 @@ class LabelRepo {
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
-    const { data: project } = await this.client.from('projects').select('label_data').eq('id', projectId).single()
-    if (!project?.label_data) return []
-    let labelData: Array<{ name: string; color: string }>
-    try {
-      labelData = typeof project.label_data === 'string' ? JSON.parse(project.label_data) : project.label_data
-    } catch { return [] }
-    if (!Array.isArray(labelData) || labelData.length === 0) return []
-    const names = labelData.map((l: { name: string }) => l.name)
-    const { data: labels } = await this.client.from('user_labels').select('*').eq('user_id', this.userId).in('name', names)
-    return labels ?? []
+    // Junction-based read — the legacy projects.label_data JSON is no longer
+    // consulted (the app stopped writing/reading it in v1.7.0). See projectLabels.ts.
+    return await fetchProjectLabels(this.client, projectId)
   }
   async findByTaskId(taskId: string) {
     const { data: taskLabels } = await this.client.from('task_labels').select('label_id').eq('task_id', taskId)
@@ -509,17 +503,11 @@ class LabelRepo {
     return data
   }
   async addToProject(projectId: string, labelId: string) {
-    const label = await this.findById(labelId)
-    if (!label) return
-    const { data: project } = await this.client.from('projects').select('label_data').eq('id', projectId).single()
-    let labelData: Array<{ name: string; color: string }> = []
-    if (project?.label_data) {
-      try { labelData = typeof project.label_data === 'string' ? JSON.parse(project.label_data) : project.label_data } catch { labelData = [] }
-    }
-    if (!labelData.some((l: { name: string }) => l.name === label.name)) {
-      labelData.push({ name: label.name, color: label.color })
-      await this.client.from('projects').update({ label_data: JSON.stringify(labelData) }).eq('id', projectId)
-    }
+    // Writes the project_labels junction row the app actually reads — NOT the
+    // legacy projects.label_data JSON (dropped entirely; the app ignores it
+    // since v1.7.0). Throws on a silently-dropped upsert (RLS reject / FK
+    // violation) instead of returning success — see projectLabels.ts.
+    await upsertProjectLabel(this.client, projectId, labelId)
   }
 }
 

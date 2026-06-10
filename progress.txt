@@ -140,3 +140,34 @@ immediately. One push either way.
 Tests: +10 TaskBatchSyncManager (markPending idempotent/timer re-arm/30s flush, flush clears+skips-deleted,
 double-flush no-op, flushAll drains, cancelPending disarms). 899 tests green, typecheck clean, dev compiles
 on :5200.
+
+## Story #93 — MCP create_label writes legacy projects.label_data instead of project_labels junction (2026-06-10)
+
+Edge-function-only fix (SCOPE GUARD respected: no deploy, no production SQL, no backfill — those are
+manual user steps). LabelRepo.addToProject now upserts the project_labels junction row
+({project_id, label_id, created_at, deleted_at: null}, onConflict 'project_id,label_id' — same row shape
+as the renderer's pushProjectLabel, deleted_at:null revives tombstoned links); LabelRepo.findByProjectId
+now reads the junction (live links only, .is('deleted_at', null)) and batch-resolves user_labels via one
+.in() query — no user_id filter on purpose, since shared-project junction rows can reference labels owned
+by other members and RLS scopes visibility anyway.
+
+DECISION (fix plan step 3): dropped the legacy projects.label_data write/read ENTIRELY — no
+backwards-compat mirroring. The app stopped reading label_data in v1.7.0 (commit 72097f6) and the renderer
+comment at PersonalSyncService.ts:1190 already declares the junction the sole source of truth. Zero
+label_data references remain in the edge function.
+
+Followed the story-#88 pattern: logic lives in a new dependency-free module
+supabase/functions/mcp/projectLabels.ts (structural client interfaces, no npm:/Deno imports) so it
+unit-tests under vitest while importing cleanly into the Deno function. addToProject also lost its silent
+`if (!label) return` pre-check — an FK violation now throws a clear error instead of fake success
+(story-#88 contract). The old behavior ALSO threw away assignment to projects when label_data parsing
+failed; all of that is gone.
+
+Tests: +10 in projectLabels.test.ts (upsert success/error/targets-project-labels-not-projects/
+tombstone-revive+onConflict; fetch empty/null/filters/batch-.in()/junction-error/labels-error).
+909 tests green (53 files), typecheck clean, dev compiles on :5200 (first launch hit "unable to open
+database file" only because TODOOZY_DEV_DB from ralph.sh doesn't reach tool subshells — clean boot
+confirmed with a fresh ./dev-db.sh feature copy).
+
+USER FOLLOW-UPS for this story (after review): `supabase functions deploy mcp`, then one-time backfill of
+legacy label_data-only links into project_labels (#93 fix plan step 5).
