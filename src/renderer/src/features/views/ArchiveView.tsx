@@ -3,24 +3,87 @@ import { createPortal } from 'react-dom'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { Task, Project } from '../../../../shared/types'
-import { ChevronRight, Trash2, CheckCircle2, RotateCcw } from 'lucide-react'
+import { ChevronRight, Trash2, CheckCircle2, RotateCcw, CalendarClock } from 'lucide-react'
 import { StatusButton } from '../../shared/components/StatusButton'
+import { PriorityBadge } from '../../shared/components/PriorityBadge'
+import { LabelChip } from '../../shared/components/LabelChip'
+import { FilterBar } from '../../shared/components/FilterBar'
 import { useStatusStore } from '../../shared/stores/statusStore'
 import { useProjectStore, selectAllProjects } from '../../shared/stores'
+import {
+  useLabelStore,
+  selectActiveLabelFilters,
+  selectLabelFilterLogic,
+  selectPriorityFilters,
+  selectStatusFilters,
+  selectProjectFilters,
+  selectExcludeLabelFilters,
+  selectExcludePriorityFilters,
+  selectExcludeStatusFilters,
+  selectExcludeProjectFilters,
+  selectDueDatePreset,
+  selectDueDateRange,
+  selectKeyword,
+  selectAllLabels
+} from '../../shared/stores'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
+import { useAuthStore } from '../../shared/stores/authStore'
+import { archiveTaskMatchesFilters, hasAnyArchiveFilter, type ArchiveFilterCriteria } from './archiveFilter'
 
 export function ArchiveView(): React.JSX.Element {
   const allProjects = useProjectStore(selectAllProjects)
   const allTasks = useTaskStore((s) => s.tasks)
   const allStatuses = useStatusStore((s) => s.statuses)
-  const { updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, clearSelection } = useTaskStore()
+  const taskLabels = useTaskStore((s) => s.taskLabels)
+  const { updateTask, deleteTask, setCurrentTask, selectTask, toggleTaskInSelection, selectTaskRange, clearSelection, hydrateAllTaskLabels } = useTaskStore()
   const { unarchiveProject, deleteProject } = useProjectStore()
   const selectedTaskIds = useTaskStore((s) => s.selectedTaskIds)
   const lastSelectedTaskId = useTaskStore((s) => s.lastSelectedTaskId)
   const { addToast } = useToast()
   const containerRef = useRef<HTMLDivElement>(null)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set(allProjects.map((p) => p.id)))
+
+  // ── Filters (shared filter store, same as TaskListView / saved views) ──
+  const currentUserId = useAuthStore((s) => s.currentUser)?.id ?? ''
+  const rawAllLabels = useLabelStore(selectAllLabels)
+  const filterLabels = useMemo(
+    () => deduplicateLabelsByName(rawAllLabels, currentUserId),
+    [rawAllLabels, currentUserId]
+  )
+  const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
+  const priorityFilters = useLabelStore(selectPriorityFilters)
+  const statusFilters = useLabelStore(selectStatusFilters)
+  const projectFilters = useLabelStore(selectProjectFilters)
+  const excludeLabelFilters = useLabelStore(selectExcludeLabelFilters)
+  const excludePriorityFilters = useLabelStore(selectExcludePriorityFilters)
+  const excludeStatusFilters = useLabelStore(selectExcludeStatusFilters)
+  const excludeProjectFilters = useLabelStore(selectExcludeProjectFilters)
+  const dueDatePreset = useLabelStore(selectDueDatePreset)
+  const dueDateRange = useLabelStore(selectDueDateRange)
+  const keyword = useLabelStore(selectKeyword)
+  const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
+
+  const filterCriteria = useMemo<ArchiveFilterCriteria>(
+    () => ({
+      activeLabelFilters,
+      labelFilterLogic,
+      priorityFilters,
+      statusFilters,
+      projectFilters,
+      excludeLabelFilters,
+      excludePriorityFilters,
+      excludeStatusFilters,
+      excludeProjectFilters,
+      dueDatePreset,
+      dueDateRange,
+      keyword
+    }),
+    [activeLabelFilters, labelFilterLogic, priorityFilters, statusFilters, projectFilters, excludeLabelFilters, excludePriorityFilters, excludeStatusFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keyword]
+  )
+  const filtersActive = hasAnyArchiveFilter(filterCriteria)
 
   const toggleProjectCollapse = useCallback((projectId: string) => {
     setCollapsedProjects((prev) => {
@@ -55,9 +118,33 @@ export function ArchiveView(): React.JSX.Element {
     return groups
   }, [allTasks, allProjects])
 
+  // Labels live per-project; hydrate them for every project shown so the row
+  // chips and the label filter have data. SQL has no is_archived filter, so this
+  // returns labels for archived tasks too. Merges into the store (no reload flash).
+  useEffect(() => {
+    for (const g of groupedByProject) hydrateAllTaskLabels(g.project.id)
+  }, [groupedByProject, hydrateAllTaskLabels])
+
+  // Apply the active filters per group. Archived-project headers stay visible
+  // even when all their tasks are filtered out; a non-archived project only
+  // surfaces while it still has at least one matching archived task.
+  const filteredGroupedByProject = useMemo(() => {
+    if (!filtersActive) return groupedByProject
+    const result: { project: Project; tasks: Task[] }[] = []
+    for (const { project, tasks } of groupedByProject) {
+      const tasksMatching = tasks.filter((t) =>
+        archiveTaskMatchesFilters(t, taskLabels[t.id] ?? [], filterCriteria)
+      )
+      if (tasksMatching.length > 0 || project.is_archived === 1) {
+        result.push({ project, tasks: tasksMatching })
+      }
+    }
+    return result
+  }, [groupedByProject, filtersActive, filterCriteria, taskLabels])
+
   const archivedTasks = useMemo(
-    () => groupedByProject.flatMap((g) => g.tasks),
-    [groupedByProject]
+    () => filteredGroupedByProject.flatMap((g) => g.tasks),
+    [filteredGroupedByProject]
   )
 
   const handleSelect = useCallback(
@@ -232,7 +319,7 @@ export function ArchiveView(): React.JSX.Element {
     }
   }, [contextMenu])
 
-  const isEmpty = groupedByProject.length === 0
+  const isEmpty = filteredGroupedByProject.length === 0
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
@@ -261,8 +348,12 @@ export function ArchiveView(): React.JSX.Element {
         </div>,
         document.body
       )}
+      {/* Filter bar — always visible (showProjectFilter). isSavedView suppresses
+          the blur toggle + save-as-view button: the archive always hides
+          non-matching tasks and has its own fixed completed-date sort. */}
+      <FilterBar labels={filterLabels} isSavedView showProjectFilter showSort={false} />
       <div className="flex-1 overflow-y-auto">
-        {groupedByProject.map(({ project, tasks }) => {
+        {filteredGroupedByProject.map(({ project, tasks }) => {
           const projectStatuses = Object.values(allStatuses).filter((s) => s.project_id === project.id)
           const isCollapsed = collapsedProjects.has(project.id)
           const isArchivedProject = project.is_archived === 1
@@ -329,11 +420,32 @@ export function ArchiveView(): React.JSX.Element {
                     }}
                     size={14}
                   />
-                  <span className="flex-1 text-[15px] font-light tracking-tight text-muted">
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-light tracking-tight text-muted">
                     {task.title}
                   </span>
+                  {task.priority > 0 && (
+                    <PriorityBadge priority={task.priority} />
+                  )}
+                  {(taskLabels[task.id] ?? []).length > 0 && (
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      {(taskLabels[task.id] ?? []).map((label) => (
+                        <LabelChip
+                          key={label.id}
+                          name={label.name}
+                          color={label.color}
+                          onClick={() => toggleLabelFilter(label.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {task.due_date && !task.completed_date && (
+                    <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted/60">
+                      <CalendarClock size={10} />
+                      {formatDate(task.due_date, undefined, { omitCurrentYear: true })}
+                    </span>
+                  )}
                   {task.completed_date && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-success/40">
+                    <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-success/40">
                       <CheckCircle2 size={10} />
                       {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
                       {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
@@ -378,9 +490,11 @@ export function ArchiveView(): React.JSX.Element {
         {isEmpty && (
           <div className="flex flex-1 items-center justify-center py-20">
             <div className="text-center">
-              <p className="text-sm font-light text-muted/60">No archived tasks.</p>
+              <p className="text-sm font-light text-muted/60">
+                {filtersActive ? 'No archived tasks match the current filters.' : 'No archived tasks.'}
+              </p>
               <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted/40">
-                Completed tasks will appear here
+                {filtersActive ? 'Adjust or clear the filters above' : 'Completed tasks will appear here'}
               </p>
             </div>
           </div>
