@@ -13,6 +13,8 @@ import { useLabelsByProject } from '../stores/labelStore'
 import { useCreateOrMatchLabel } from '../hooks/useCreateOrMatchLabel'
 import { useToast } from './Toast'
 import { useViewStore } from '../stores/viewStore'
+import { useProjectStore } from '../stores/projectStore'
+import { shouldShowGoToTask } from '../utils/goToTask'
 import { useSettingsStore } from '../stores/settingsStore'
 import { shouldForceDelete } from '../utils/shiftDelete'
 import {
@@ -48,6 +50,9 @@ export function ContextMenu(): React.JSX.Element | null {
   const { addToast } = useToast()
   const currentView = useViewStore((s) => s.currentView)
   const isMyDay = currentView === 'my-day'
+  // "Go to Task" navigates to the task's home project — useful in cross-project
+  // contexts (My Day, Saved Views) but redundant inside a project view.
+  const showGoToTask = shouldShowGoToTask(currentView, task?.project_id)
 
   // Viewport clamp positioning — measure actual menu size after render
   useEffect(() => {
@@ -172,15 +177,21 @@ export function ContextMenu(): React.JSX.Element | null {
           }
         }}
       />
-      {/* Go to Task (My Day only) */}
-      {isMyDay && task.project_id && (
+      {/* Go to Task — cross-project contexts (My Day, Saved Views) */}
+      {showGoToTask && task.project_id && (
         <MenuItem
           icon={<ExternalLink size={14} />}
           label="Go to Task"
           onClick={() => {
             handleAction(() => {
-              useViewStore.getState().setSelectedProject(task.project_id)
+              const projectId = task.project_id
+              if (!projectId || !useProjectStore.getState().projects[projectId]) {
+                addToast({ message: 'Task’s project is no longer available', variant: 'danger' })
+                return
+              }
+              useViewStore.getState().setSelectedProject(projectId)
               useTaskStore.getState().selectTask(task.id)
+              useTaskStore.getState().setPendingScrollTask(task.id)
             })
           }}
         />

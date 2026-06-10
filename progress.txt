@@ -116,3 +116,20 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Tests: extended taskStore.selection.test.ts with a `setPendingScrollTask` describe block
   (default null, set, clear-once-consumed, does-not-touch-selection). Full suite 819 pass,
   typecheck clean, dev build compiles on 5200.
+
+## Story #82 — add "go to task" in views (Saved Views) (2026-06-10)
+- ContextMenu.tsx: broadened the "Go to Task" guard from `isMyDay` to a new
+  `showGoToTask` (My Day OR saved-view, and task has a project_id). Decision logic
+  extracted to a pure helper `shared/utils/goToTask.ts::shouldShowGoToTask(currentView, projectId)`
+  so it's unit-testable without a React/RTL/jsdom stack (the codebase has ZERO component
+  tests and no @testing-library installed — all 44 existing test files are repo/util unit tests).
+- onClick now: (1) guards against a missing/deleted/archived project via
+  `useProjectStore.getState().projects[projectId]` → danger toast + bail if absent;
+  (2) navigates with `setSelectedProject`; (3) `selectTask`; (4) `setPendingScrollTask(task.id)`
+  so the row scrolls into view after navigation (story #81's mechanism, consumed by TaskListView's
+  pendingScrollTaskId effect — the post-nav view is always `project`, so the project consumer handles it).
+- No changes to SavedViewListView.tsx — the shared ContextMenu reads `currentView` from the view store.
+- Tests: new goToTask.test.ts (6 cases: my-day✓, saved-view✓, project✗, archive/templates/calendar/stats✗,
+  null/undefined/'' project✗). Full suite 824 pass / 46 files; typecheck clean; dev build compiles on 5200
+  (runtime DB-open error is env-only, unrelated to this renderer change).
+- ToDoozy task f1f6a8cb → Verifying.
