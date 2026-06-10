@@ -466,7 +466,7 @@ export function FilterBar({ labels, projectId, labelsInFilterMenu, showProjectFi
 
 /* ── Sort Dropdown ─────────────────────────────────────────────── */
 
-const ALL_SORT_FIELDS: SortField[] = ['priority', 'due_date', 'status', 'created_at', 'updated_at', 'title', 'project', 'custom']
+const ALL_SORT_FIELDS: SortField[] = ['priority', 'due_date', 'completed_date', 'status', 'created_at', 'updated_at', 'title', 'project', 'custom']
 
 interface SortDropdownProps {
   rules: SortRule[]

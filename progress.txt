@@ -89,3 +89,11 @@ Started: Wed Jun 10 16:05:59 CEST 2026
 - Learning: vi.mock factory is hoisted above module top-level vars — reference mock fns through vi.hoisted(). Module-level caches persist across tests in a file, so assert on the returned value, not on mock.calls, when the value may already be cached.
 - typecheck clean; full suite 812 pass / 45 files (was 806); npm run build compiles all three processes cleanly.
 - ToDoozy task 4c9e9266 → Verifying.
+
+## Story #80 — sort options for 'done' tasks per project (2026-06-10)
+- sortTasks.ts: `completed_date` added to SortField, compareField case (nulls-last, mirrors due_date), and SORT_FIELD_LABELS ('Completed'). NOTE: this file's changes were already present in the working tree from interrupted iter-11 — kept as-is, they match the spec exactly.
+- FilterBar.tsx: added 'completed_date' to ALL_SORT_FIELDS (after due_date) so "Completed" shows in the sort picker (picker iterates ALL_SORT_FIELDS, not SORT_FIELD_LABELS keys — the spec's "appears automatically" was inaccurate; explicit add required).
+- TaskListView.tsx: new `doneSortFn` memo — under custom sort, done sections auto-sort by completed_date desc (most recent first), falling back to order_index for null completed_date; explicit sort still wins (returns prioritySortFn). Applied per-status in BOTH the render loop and the `flatTasks` memo (keyboard nav order matches render). Done sections get `disableDrag={isDoneSection || !isCustomSort || isOfflineShared}` so StatusSection trusts the parent's pre-sorted order (see debug-learnings "Sort applied at parent but child re-sorts internally").
+- Tests: sortTasks.test.ts +3 cases (completed_date asc nulls-last, desc most-recent-first, two-null tie→order_index) and SORT_FIELD_LABELS.completed_date assertion. 20 pass in file; full suite 815 pass / 45 files.
+- typecheck clean; dev server compiles all three processes on :5200 (runtime DB-open error is env-only — no dev DB in unattended run, unrelated to this renderer-only change).
+- ToDoozy task f0f90144 → Verifying.

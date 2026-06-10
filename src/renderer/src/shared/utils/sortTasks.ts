@@ -1,6 +1,6 @@
 import type { Task } from '../../../../shared/types'
 
-export type SortField = 'priority' | 'due_date' | 'status' | 'created_at' | 'updated_at' | 'title' | 'project' | 'custom'
+export type SortField = 'priority' | 'due_date' | 'status' | 'created_at' | 'updated_at' | 'title' | 'project' | 'completed_date' | 'custom'
 export type SortDirection = 'asc' | 'desc'
 
 export interface SortRule {
@@ -61,6 +61,13 @@ function compareField(
       return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
     case 'project':
       return a.project_id.localeCompare(b.project_id)
+    case 'completed_date': {
+      // Null dates go to the end
+      if (!a.completed_date && !b.completed_date) return 0
+      if (!a.completed_date) return 1
+      if (!b.completed_date) return -1
+      return a.completed_date.localeCompare(b.completed_date)
+    }
     default:
       return 0
   }
@@ -74,6 +81,7 @@ export const SORT_FIELD_LABELS: Record<SortField, string> = {
   updated_at: 'Updated',
   title: 'Title',
   project: 'Project',
+  completed_date: 'Completed',
   custom: 'Custom'
 }
 

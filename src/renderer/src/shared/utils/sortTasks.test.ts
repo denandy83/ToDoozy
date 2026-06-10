@@ -67,6 +67,35 @@ describe('createSortComparator', () => {
     expect(cmp(a, b)).toBeLessThan(0)
   })
 
+  it('sorts by completed_date ascending with nulls at end', () => {
+    const rules: SortRule[] = [{ field: 'completed_date', direction: 'asc' }]
+    const cmp = createSortComparator(rules)
+    const a = makeTask({ id: 'a', completed_date: '2026-01-15T00:00:00Z' })
+    const b = makeTask({ id: 'b', completed_date: '2026-01-10T00:00:00Z' })
+    const c = makeTask({ id: 'c', completed_date: null })
+    expect(cmp(a, b)).toBeGreaterThan(0)
+    expect(cmp(b, a)).toBeLessThan(0)
+    expect(cmp(a, c)).toBeLessThan(0) // non-null before null
+    expect(cmp(c, a)).toBeGreaterThan(0)
+  })
+
+  it('sorts by completed_date descending (most recent first)', () => {
+    const rules: SortRule[] = [{ field: 'completed_date', direction: 'desc' }]
+    const cmp = createSortComparator(rules)
+    const a = makeTask({ id: 'a', completed_date: '2026-01-15T00:00:00Z' })
+    const b = makeTask({ id: 'b', completed_date: '2026-01-10T00:00:00Z' })
+    expect(cmp(a, b)).toBeLessThan(0) // more recent first
+    expect(cmp(b, a)).toBeGreaterThan(0)
+  })
+
+  it('treats two null completed_dates as equal, falling back to order_index', () => {
+    const rules: SortRule[] = [{ field: 'completed_date', direction: 'asc' }]
+    const cmp = createSortComparator(rules)
+    const a = makeTask({ id: 'a', completed_date: null, order_index: 5 })
+    const b = makeTask({ id: 'b', completed_date: null, order_index: 2 })
+    expect(cmp(a, b)).toBeGreaterThan(0) // tie broken by order_index
+  })
+
   it('sorts by title case-insensitively', () => {
     const rules: SortRule[] = [{ field: 'title', direction: 'asc' }]
     const cmp = createSortComparator(rules)
@@ -179,6 +208,7 @@ describe('SORT_FIELD_LABELS', () => {
     expect(SORT_FIELD_LABELS.updated_at).toBe('Updated')
     expect(SORT_FIELD_LABELS.title).toBe('Title')
     expect(SORT_FIELD_LABELS.project).toBe('Project')
+    expect(SORT_FIELD_LABELS.completed_date).toBe('Completed')
     expect(SORT_FIELD_LABELS.custom).toBe('Custom')
   })
 })

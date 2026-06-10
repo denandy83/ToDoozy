@@ -253,6 +253,19 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     return (a: Task, b: Task): number => a.order_index - b.order_index
   }, [sortRules, isCustomSort, statusOrderMap])
 
+  // Done sections: under the default custom sort, auto-sort by completed_date
+  // descending (most recently completed first). An explicit sort still wins.
+  const doneSortFn = useMemo(() => {
+    if (!isCustomSort) return prioritySortFn
+    return (a: Task, b: Task): number => {
+      if (a.completed_date && b.completed_date) {
+        return b.completed_date.localeCompare(a.completed_date)
+      }
+      // Tasks without a completed_date (legacy/sync rows) fall back to order_index
+      return a.order_index - b.order_index
+    }
+  }, [isCustomSort, prioritySortFn])
+
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
     const result: Task[] = []
@@ -262,6 +275,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     const doneStatuses = statuses.filter((s) => s.is_done === 1)
     const sorted = [...defaults, ...middle, ...doneStatuses]
     for (const status of sorted) {
+      const comparator = status.is_done === 1 ? doneSortFn : prioritySortFn
       const statusTasks = filteredTasks
         .filter(
           (t) =>
@@ -270,14 +284,14 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
             t.is_template === 0 &&
             t.parent_id === null
         )
-        .sort(prioritySortFn)
+        .sort(comparator)
 
       const addWithChildren = (task: Task): void => {
         result.push(task)
         if (expandedTaskIds.has(task.id)) {
           const children = filteredTasks
             .filter((t) => t.parent_id === task.id)
-            .sort(prioritySortFn)
+            .sort(comparator)
           for (const child of children) {
             addWithChildren(child)
           }
@@ -289,7 +303,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       }
     }
     return result
-  }, [filteredTasks, statuses, expandedTaskIds, prioritySortFn])
+  }, [filteredTasks, statuses, expandedTaskIds, prioritySortFn, doneSortFn])
 
   const handleAddTask = useCallback(
     async (data: SmartTaskData) => {
@@ -816,9 +830,11 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       ) : (
         <div className="flex-1 overflow-y-auto" role="grid" aria-label="Task list">
           {sortedStatuses.map((status) => {
+            const isDoneSection = status.is_done === 1
+            const comparator = isDoneSection ? doneSortFn : prioritySortFn
             const statusTasks = filteredTasks.filter(
               (t) => t.status_id === status.id && t.is_archived === 0 && t.is_template === 0
-            ).sort(prioritySortFn)
+            ).sort(comparator)
             return (
               <StatusSection
                 key={status.id}
@@ -837,7 +853,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 onRemoveLabel={handleRemoveLabel}
                 onCreateLabel={handleCreateLabel}
                 onOpenDetail={clickOpensDetail === 'false' ? handleOpenDetail : undefined}
-                disableDrag={!isCustomSort || isOfflineShared}
+                disableDrag={isDoneSection || !isCustomSort || isOfflineShared}
                 readOnly={isOfflineShared}
               />
             )
