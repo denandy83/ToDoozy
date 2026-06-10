@@ -1,5 +1,22 @@
 # Scope
 
+## 2026-06-10 — Batch overview/acceptance doc (MOVED INTO RALPH: story #95 in prd.json)
+
+> **Do NOT build this manually.** It is now story #95 in `prd.json` (and `prd-fable.json`) on `ralph/sync-hardening` — the running Fable batch builds it after #90–#94, with checkpointing (`review/checklist.json`) and worktree-based before-shots. The 02:45 resume watcher relaunches it like any other story if a usage limit kills it. Only build manually if ralph gave up (see `resume-245.log` for GIVE UP lines); resume from the checklist, spec below.
+
+User-requested deliverable: a full overview doc of every story shipped in batch 1 (#68–#88, branch `ralph/audit-fixes`) and batch 2 (#89–#94, branch `ralph/sync-hardening`), so the user can verify each fix and move its ToDoozy task from Verifying → Done.
+
+**Per story include:** story id + title, commit hash (`git log --grep "(#NN)"`), category (fix/feature/improvement), what changed (plain language), and a verification path per the story's nature:
+1. **Visually-obvious UI changes** (confirmation-link color #71, project colors #73, tray dots #79, context menu rehaul #83, archive rows #86…): TRUE before/after screenshots — check out the parent commit of the story's commit, run app (`/screenshot` skill, port 5200, dev DB copy via `./dev-db.sh create feature`), capture "before"; capture "after" on HEAD.
+2. **Interaction bugs** (#69 scroll wheel, #70 last-digit delete, #72 'less' click, #75/#76 NLP date chip…): "after" screenshot + step-by-step repro scenario (do X → before: Y happened → now: Z must happen).
+3. **Sync/MCP/auth stories** (#74, #77, #85, #87, #88, all #89–#94): no screenshots; concrete verification scenario instead — exact MCP tool calls, two-window/two-account sync steps, what to check in activity feed / Supabase. Remember the SCOPE GUARD stories (#88, #93, #94) need `supabase functions deploy` by the USER first — flag those entries as "deploy before testing".
+
+**Sources:** `archive/2026-06-10-audit-fixes/prd.json` (batch 1 stories after ralph archives it), `prd-fable.json` (batch 2), `progress.txt`, per-story commits, ToDoozy task descriptions (story headers carry task IDs).
+
+**Output:** HTML report (consult design skills per global CLAUDE.md: impeccable + emil-design-eng + web-design-guidelines + design-taste-frontend + minimalist-ui flavor; ToDoozy monochrome aesthetic) at `review/batch-review-2026-06.html` with screenshots in `review/img/`. Doc doubles as the acceptance checklist — order entries to match the Verifying pile.
+
+**Trigger:** batch 2 ralph (launched by detached `batch2-handoff.sh`, log `batch2-handoff.log`) is NOT a session-tracked task. Either the live session wires a watcher when batch 1's notification arrives, or a fresh session starts here when the user says "build the batch overview doc". Check batch 2 state first: `git log --oneline ralph/sync-hardening` + `jq '[.stories[] | select(.passes == false)] | length' prd.json`.
+
 ## 2026-06-10 — Ralph runbook for the audited backlog (ACTIVE)
 
 Two prepared batches; descriptions in prd files are verbatim copies of the audited ToDoozy task descriptions (each story header carries its ToDoozy task ID for the status lifecycle).
