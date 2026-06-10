@@ -21,3 +21,29 @@ Started: Wed Jun 10 22:17:41 CEST 2026
   Verifying→Done lifecycle instead).
 - Dev-run note: npm run dev compiles clean; runtime "unable to open database file" in dev log is
   environmental (another instance holding the DB) — unrelated to these renderer-only changes.
+
+## Story #90 — offline start → manual Retry no-op + no Realtime after recovery (2026-06-10)
+- Bug 1 (retry ignores result): new authStore action `retrySessionRestore()` — SessionBanner's
+  "Retry now" now calls it; on success isOffline flips false and the banner unmounts. On a failed
+  attempt that reveals a permanently-dead token, it stops the timer and flips the red banner
+  immediately (previously only the next 30s tick did).
+- Bug 2 (no Realtime re-subscribe): DEVIATION from the story's literal snippet — instead of
+  re-subscribe loops with a no-op onChange in SessionBanner + both onRecovered closures (channels
+  subscribed that way would never rehydrate the UI: the debounced flush/pull handlers live inside
+  App.tsx's effect closure), both App.tsx sync effects (shared-projects startup + personal
+  realtime/polling) now key on authStore.isOffline and skip while offline. Recovery (manual OR
+  timer) flips isOffline → effects re-run → full pull + Realtime subscriptions with the REAL
+  flush handlers. This also covers fix-plan step 4 (shared channels via subscribeToProject) and
+  avoids useless 120s polling while in offline-fallback mode.
+- Refactor: both duplicated onRecovered closures in authStore.initAuth extracted into one shared
+  finishSessionRecovery() — also fixes a latent bug where the catch-path closure never called
+  setStatus('synced') after recovery.
+- Comment at PersonalSyncService.ts:2928 corrected (it claimed onRecovered re-runs subscriptions).
+- New tests: authStore.recovery.test.ts (7 tests) — success path (status synced, offline cleared,
+  queue drained, timer stopped), transient failure leaves state untouched, dead-token discovery
+  flips red banner, already-dead fail-fast, getUser-null safety, profile-push retry, queue-drain
+  failure tolerance. Suite: 875 tests / 51 files green. Typecheck clean. Dev compile verified
+  (same environmental "unable to open database file" runtime warning as #89 — DB held by another
+  instance, unrelated).
+- Noticed: prd.json gained story #95 (batch review doc) mid-iteration — left untouched, next
+  iterations will reach it after #91–#94.

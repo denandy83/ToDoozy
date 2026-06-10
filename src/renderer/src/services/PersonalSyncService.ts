@@ -2928,8 +2928,10 @@ export async function subscribeToPersonalProject(
   // Don't pile up zombie channels when running in offline-fallback mode —
   // an unauthenticated channel still joins the WebSocket, but Postgres-side
   // RLS filters every event so we'd be sitting on a dead listener that
-  // confuses the sync state. The recovery timer's onRecovered handler
-  // re-runs the subscription effect once the session is back.
+  // confuses the sync state. Once the session is recovered (30s timer or the
+  // SessionBanner's manual retry), authStore flips isOffline to false, which
+  // re-runs App.tsx's realtime effect and re-subscribes with live handlers
+  // (the personalChannelStates guard above makes repeat calls no-ops).
   if (!(await requireSession())) {
     logEvent('warn', 'sync', 'subscribeToPersonalProject skipped — no session', `project=${projectId}`)
     return

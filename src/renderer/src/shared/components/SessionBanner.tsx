@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useAuthStore, selectIsOffline, selectIsTokenPermanentlyDead } from '../stores/authStore'
 import { useSyncStore, selectConnectionLost } from '../stores/syncStore'
-import { tryRestoreSession } from '../../services/sessionRecovery'
 
 export function SessionBanner(): React.JSX.Element | null {
   const isOffline = useAuthStore(selectIsOffline)
   const isTokenPermanentlyDead = useAuthStore(selectIsTokenPermanentlyDead)
   const connectionLost = useSyncStore(selectConnectionLost)
   const logout = useAuthStore((s) => s.logout)
+  const retrySessionRestore = useAuthStore((s) => s.retrySessionRestore)
   const [retrying, setRetrying] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
 
@@ -87,11 +87,14 @@ export function SessionBanner(): React.JSX.Element | null {
     )
   }
 
+  // On success the store clears isOffline (resuming sync + Realtime via the
+  // App.tsx effects) and this banner unmounts; on failure it simply stays and
+  // the 30s auto-recovery timer keeps trying.
   const handleRetry = async (): Promise<void> => {
     if (retrying) return
     setRetrying(true)
     try {
-      await tryRestoreSession(1)
+      await retrySessionRestore()
     } finally {
       setRetrying(false)
     }

@@ -66,6 +66,13 @@ interface AuthActions {
   initAuth(): Promise<void>
   ensureDefaultProject(userId: string): Promise<void>
   cancelLoading(): void
+  /**
+   * Manual session restore for the SessionBanner's "Retry now" button.
+   * Returns true when the session was recovered (offline flag cleared, sync
+   * resumed); false when the restore failed (banner stays, the 30s auto-retry
+   * timer keeps running) or the token is permanently dead (red banner takes over).
+   */
+  retrySessionRestore(): Promise<boolean>
 }
 
 export type AuthStore = AuthState & AuthActions
@@ -134,6 +141,55 @@ async function offlineFallback(
     console.error('[Auth] Offline fallback failed:', err)
   }
   return null
+}
+
+/**
+ * Shared post-recovery routine — runs after a session restore succeeds, whether
+ * via the 30s recovery timer or the SessionBanner's manual "Retry now" button.
+ * Re-resolves the Supabase user, refreshes the local user row, marks sync as
+ * synced, clears the offline flag — which re-runs the App.tsx sync effects
+ * (they key on isOffline) so the Realtime channels skipped during offline
+ * start get subscribed with their live handlers — drains the sync queue, and
+ * retries any profile push that was queued while offline.
+ *
+ * Returns true when the auth user could be resolved and state was updated.
+ */
+async function finishSessionRecovery(
+  set: (partial: Partial<AuthState>) => void
+): Promise<boolean> {
+  const sb = await getSupabase()
+  const { data: { user } } = await sb.auth.getUser()
+  if (!user) return false
+  await window.api.auth.switchDatabase(user.id, user.email ?? undefined)
+  const localUser = await ensureLocalUser(
+    user.id,
+    user.email ?? '',
+    user.user_metadata?.full_name ?? null,
+    user.user_metadata?.avatar_url ?? null
+  )
+  useSyncStore.getState().setStatus('synced')
+  set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
+  try {
+    const { processSyncQueue } = await import('../../services/SyncService')
+    await processSyncQueue()
+  } catch (e) {
+    console.warn('[Auth] Queue drain after recovery failed:', e)
+  }
+  try {
+    const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
+    if (pending === 'true') {
+      const localUser2 = await window.api.users.findById(user.id)
+      if (localUser2 !== null) {
+        const dn = localUser2.display_name ?? ''
+        const parts = dn.split(' ')
+        await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
+        await window.api.settings.set(user.id, 'profile_sync_pending', '')
+      }
+    }
+  } catch (e) {
+    console.warn('[Auth] Profile sync retry failed:', e)
+  }
+  return true
 }
 
 export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
@@ -218,6 +274,27 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
   cancelLoading(): void {
     authGeneration++
     set({ loading: false, error: null })
+  },
+
+  async retrySessionRestore(): Promise<boolean> {
+    // Already known dead — surface the red "Session expired" banner instead of
+    // spinning a retry that can't succeed.
+    if (isPermanentlyDead()) {
+      set({ isTokenPermanentlyDead: true })
+      return false
+    }
+    const restored = await tryRestoreSession(1)
+    if (!restored) {
+      // The attempt itself may have discovered the token is permanently dead.
+      if (isPermanentlyDead()) {
+        stopRecoveryTimer()
+        set({ isTokenPermanentlyDead: true })
+      }
+      // Transient failure — the 30s auto-recovery timer keeps trying.
+      return false
+    }
+    stopRecoveryTimer()
+    return await finishSessionRecovery(set)
   },
 
   async signInWithEmail(email: string, password: string): Promise<boolean> {
@@ -470,38 +547,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           startRecoveryTimer({
             onPermanentlyDead: () => set({ isTokenPermanentlyDead: true }),
             onRecovered: async () => {
-              const sb = await getSupabase()
-              const { data: { user } } = await sb.auth.getUser()
-              if (!user) return
-              await window.api.auth.switchDatabase(user.id, user.email ?? undefined)
-              const localUser = await ensureLocalUser(
-                user.id,
-                user.email ?? '',
-                user.user_metadata?.full_name ?? null,
-                user.user_metadata?.avatar_url ?? null
-              )
-              useSyncStore.getState().setStatus('synced')
-              set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
-              try {
-                const { processSyncQueue } = await import('../../services/SyncService')
-                await processSyncQueue()
-              } catch (e) {
-                console.warn('[Auth] Queue drain after recovery failed:', e)
-              }
-              try {
-                const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
-                if (pending === 'true') {
-                  const localUser2 = await window.api.users.findById(user.id)
-                  if (localUser2 !== null) {
-                    const dn = localUser2.display_name ?? ''
-                    const parts = dn.split(' ')
-                    await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
-                    await window.api.settings.set(user.id, 'profile_sync_pending', '')
-                  }
-                }
-              } catch (e) {
-                console.warn('[Auth] Profile sync retry failed:', e)
-              }
+              await finishSessionRecovery(set)
             }
           })
         } else {
@@ -534,37 +580,7 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
         startRecoveryTimer({
           onPermanentlyDead: () => set({ isTokenPermanentlyDead: true }),
           onRecovered: async () => {
-            const sb = await getSupabase()
-            const { data: { user } } = await sb.auth.getUser()
-            if (!user) return
-            await window.api.auth.switchDatabase(user.id, user.email ?? undefined)
-            const localUser = await ensureLocalUser(
-              user.id,
-              user.email ?? '',
-              user.user_metadata?.full_name ?? null,
-              user.user_metadata?.avatar_url ?? null
-            )
-            set({ currentUser: localUser, isAuthenticated: true, isOffline: false })
-            try {
-              const { processSyncQueue } = await import('../../services/SyncService')
-              await processSyncQueue()
-            } catch (e) {
-              console.warn('[Auth] Queue drain after recovery failed:', e)
-            }
-            try {
-              const pending = await window.api.settings.get(user.id, 'profile_sync_pending')
-              if (pending === 'true') {
-                const localUser2 = await window.api.users.findById(user.id)
-                if (localUser2 !== null) {
-                  const dn = localUser2.display_name ?? ''
-                  const parts = dn.split(' ')
-                  await sb.auth.updateUser({ data: { display_name: dn || null, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') } })
-                  await window.api.settings.set(user.id, 'profile_sync_pending', '')
-                }
-              }
-            } catch (e) {
-              console.warn('[Auth] Profile sync retry failed:', e)
-            }
+            await finishSessionRecovery(set)
           }
         })
         return

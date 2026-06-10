@@ -19,7 +19,7 @@ import { initPowerListener } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 
 function App(): React.JSX.Element {
-  const { isAuthenticated, loading, currentUser, initAuth } = useAuthStore()
+  const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
   const { hydrateLabels } = useLabelStore()
@@ -56,9 +56,12 @@ function App(): React.JSX.Element {
   // Keyed on the primitive userId — depending on the currentUser object would
   // re-run the effect on every auth-store mutation (token refresh, profile
   // update, etc.) and storm the upload pipeline with parallel initSync calls.
+  // Skipped in offline-fallback mode (no session — every Supabase call would
+  // fail); when the session recovers, isOffline flips false and the effect
+  // re-runs, syncing + subscribing the shared channels that were skipped.
   const startupUserId = currentUser?.id ?? null
   useEffect(() => {
-    if (!isAuthenticated || !startupUserId) return
+    if (!isAuthenticated || !startupUserId || isOffline) return
     const uid = startupUserId
     const syncShared = async (): Promise<void> => {
       try {
@@ -149,7 +152,7 @@ function App(): React.JSX.Element {
       clearTimeout(timeout)
       import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
     }
-  }, [isAuthenticated, startupUserId])
+  }, [isAuthenticated, startupUserId, isOffline])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
@@ -175,9 +178,13 @@ function App(): React.JSX.Element {
   // Supabase Realtime subscriptions + adaptive polling.
   // Keyed on userId (primitive, stable) so we don't re-run on auth-object reshuffles.
   // Hydrate actions called via getState() so they don't need to be in deps.
+  // Skipped in offline-fallback mode — there's no session, so subscriptions
+  // and pulls would all bail anyway. When the session recovers (30s timer or
+  // the SessionBanner's manual retry), isOffline flips false and the effect
+  // re-runs: full pull + Realtime subscriptions with the live flush handlers.
   const userId = currentUser?.id ?? null
   useEffect(() => {
-    if (!userId) return
+    if (!userId || isOffline) return
     realtimeEffectRunCount.current += 1
     logEvent('info', 'realtime', `effect run #${realtimeEffectRunCount.current}`, `user=${userId.slice(0, 8)} online=${navigator.onLine}`)
 
@@ -301,7 +308,7 @@ function App(): React.JSX.Element {
       if (realtimeTimer) clearTimeout(realtimeTimer)
       import('./services/PersonalSyncService').then(({ unsubscribeAllPersonal }) => unsubscribeAllPersonal())
     }
-  }, [userId])
+  }, [userId, isOffline])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)
