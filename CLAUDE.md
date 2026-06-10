@@ -45,6 +45,17 @@ Never run migrations or destructive operations against the production database. 
 - `npm run lint` — ESLint check
 - `npm run dist:mac` — Build macOS distributable (DMG + ZIP in `dist/`)
 
+## Ralph Model Selection
+`ralph.sh` pins the model: `claude --model "${RALPH_MODEL:-claude-opus-4-8}"` (pinned 2026-06-10 so managed-settings or CLI-default changes can't silently swap models; the global template `~/.claude/templates/ralph.sh.tmpl` carries the same pin for new projects).
+
+- **Default: Opus 4.8** at Claude Code's default effort (`xhigh`) — the documented sweet spot for ralph's pattern (full story spec up front, one-shot autonomous implementation). Sufficient for all well-specified UI/feature/bug stories.
+- **Escalate to Fable 5** (`RALPH_MODEL=claude-fable-5 ./ralph.sh --tool claude N`, 2× cost: $10/$50 vs $5/$25 per MTok) for stories with subtle interlocking state where locally-correct changes break distant invariants:
+  - Sync/Realtime architecture (channel coverage, reconnect paths, Supabase performance rules)
+  - Concurrency with silent failure modes (token rotation/auth mutex, sync flush boundaries, LWW races)
+  - Security-critical auth changes and anything touching production data
+- **Never downgrade to Sonnet/Haiku for unattended ralph runs** — ralph runs with `--dangerously-skip-permissions`; a wrong commit costs more human time than the model delta costs in dollars.
+- Batch stories that share a surface (e.g. the sync/recovery code paths) into ONE run on the stronger model — interlocking design decisions come out more coherent than across separate runs.
+
 ## Distribution Build
 `npm run dist:mac` builds and signs with the Developer ID certificate automatically. No manual re-signing needed.
 
