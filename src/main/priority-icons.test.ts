@@ -40,9 +40,14 @@ describe('getPriorityDotIcon', () => {
     }
   })
 
-  it('returns undefined for priority 0 (None)', () => {
-    expect(getPriorityDotIcon(0)).toBeUndefined()
-    expect(createFromBuffer).not.toHaveBeenCalled()
+  it('returns a transparent placeholder NativeImage for priority 0 (None)', () => {
+    // Priority 0 must still occupy the icon slot (an "invisible decimal point")
+    // so menu rows stay aligned — it is no longer undefined.
+    const icon = getPriorityDotIcon(0) as unknown as FakeImage
+    expect(icon).toBeDefined()
+    expect(icon.__isNativeImage).toBe(true)
+    expect(icon.sigHex).toBe('89504e470d0a1a0a') // a real (transparent) PNG
+    expect(icon.scaleFactor).toBe(2.0)
   })
 
   it('returns undefined for unknown / out-of-range priorities', () => {

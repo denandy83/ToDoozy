@@ -157,10 +157,13 @@ function buildLeftClickMenu(): Menu {
       prevBucket = task.bucket
       const statusIcon = STATUS_ICONS[task.bucket]
       const priorityIcon = getPriorityDotIcon(task.priority)
+      const displayTitle = truncateTitle(task.title)
       const item: Electron.MenuItemConstructorOptions = {
-        label: `${statusIcon} ${truncateTitle(task.title)}`,
+        label: `${statusIcon} ${displayTitle}`,
         click: (): void => navigateToTask(task.id)
       }
+      // Reveal the complete (untruncated) title on hover when the label was cut.
+      if (displayTitle !== task.title) item.toolTip = task.title
       if (priorityIcon) item.icon = priorityIcon
       menuItems.push(item)
     }
