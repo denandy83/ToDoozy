@@ -215,8 +215,16 @@ export function createTray(): void {
   const icon = nativeImage.createFromPath(iconPath)
   icon.setTemplateImage(true)
 
+  // NOTE (macOS 26 Tahoe): in dev (`npm run dev`), the OS suppresses status items
+  // from the generic com.github.Electron bundle identity — the tray is created
+  // (bounds report a width) but never gets a menu-bar slot. Packaged builds
+  // (com.todoozy) are unaffected. Verify tray changes with a dist build, not dev.
   tray = new Tray(icon)
   tray.setToolTip('ToDoozy')
+  // Never set an empty title alongside the template icon — on macOS 26 (Sequoia/
+  // Tahoe) an empty string collapses the status item to height 0 (invisible).
+  // A single space keeps the item's dimensions valid. See debug-learnings.md.
+  tray.setTitle(' ')
 
   // Delay single-click menu so double-click can cancel it and open the window instead
   let clickTimer: ReturnType<typeof setTimeout> | null = null
@@ -281,7 +289,7 @@ export function updateTrayBadge(): void {
   } else {
     try {
       const { totalNonDone } = getMyDayTrayData()
-      tray.setTitle(totalNonDone > 0 ? `[${totalNonDone}]` : '')
+      tray.setTitle(totalNonDone > 0 ? `[${totalNonDone}]` : ' ')
     } catch {
       // DB may be locked during startup — skip this refresh
     }

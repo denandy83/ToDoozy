@@ -4,6 +4,25 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 
 ---
 
+## 2026-06-13 · macOS 26 tray icon invisible — TWO real causes (zero-width title + Control Center cache), NOT "bundle-id poison"
+**Symptom**: ToDoozy's menu-bar (tray) icon invisible on macOS 26 (Sequoia/Tahoe). AX reported it parked at `x=-1` (off-screen) or slotted flush-right *behind the clock*. Survived reboots, app reinstall, ControlCenter/SystemUIServer pref resets, LaunchServices rebuilds, and forcing `isAllowed=true`.
+
+**TWO actual root causes (verified):**
+1. **Zero-width title collapse (code).** `tray.setTitle('')` (empty string — the 0-pending-tasks branch) combined with an 18×18 template icon makes newer macOS compute the status-item bounds as **height=0** → icon invisible. **Fix: never set an empty tray title — use a single space `' '`** (keeps height ~22). In `src/main/tray.ts` the 0-task branch now uses `: ' '`, plus `tray.setTitle(' ')` once right after `new Tray(icon)`.
+2. **Control Center `menuItemLocations` cache corruption (system, per-machine).** macOS keeps per-app menu-bar placement in a doubly-encoded `trackedApplications` bplist inside `~/Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist`. Each entry needs **both** `isAllowed=true` **and a valid `menuItemLocations` array**. If `menuItemLocations` is missing/empty (e.g. a script that strips "ghost" entries wipes it), macOS knows the app is allowed but has "forgotten" it's allowed *in the menu bar* → parks it off-screen. **Fix: re-inject the missing `menuItemLocations` array for the affected bundle ids (incl. `com.github.Electron` for dev runs), then restart the daemons.** Do NOT blindly delete entries from that plist — repair/restore `menuItemLocations`, don't remove it. **Runnable fix: `bash fix-tray-menubar-cache.sh`** (in repo root).
+
+**⚠️ THE cfprefsd GOTCHA (why my edits kept "reverting"):** that plist is managed by `cfprefsd`, which caches the domain in memory and **overwrites direct file edits**. You MUST `killall cfprefsd ControlCenter` BEFORE editing the file and again after — otherwise the daemon reverts your write (this is why forcing `isAllowed=true` "wouldn't stick" — it wasn't ControlCenter re-deriving, it was cfprefsd clobbering the file). Editing a cfprefsd-managed plist: kill cfprefsd first, or go through `defaults`/CFPreferences.
+
+**Rule**: `isAllowed=true` is **necessary but NOT sufficient** — the entry also needs a non-empty `menuItemLocations`, AND edits don't persist unless `cfprefsd` is killed first. And never ship an empty tray title.
+
+**Dead ends (verified NOT the cause — don't repeat the 2-day chase)**: notarization/stapling, GlobalProtect VPN, the bundle-id "identity poison" theory, `isAllowed` alone, full Control Center reset, LaunchServices rebuild, reboots, the System Settings → Menu Bar toggle.
+
+**Prevention**: build local/test packages under a separate bundle id so they never register under (or corrupt) production menu-bar state — `npm run pack:dev` / `npm run dist:mac:dev` (appId `com.todoozy.dev`, productName "ToDoozy Dev"). NEVER run `npm run dist:mac` (prod `com.todoozy`) for testing — that's the original poison.
+
+**Dev tray caveat**: `npm run dev`'s own tray icon stays HIDDEN on macOS 26 — it runs as `com.github.Electron` (generic, **unnotarized**), and macOS gates status items on notarization *on top of* the Control Center cache, so it's parked at `x=-1` regardless of `isAllowed`/`menuItemLocations`. The cache fix only rescues **notarized** identities (e.g. the installed `com.todoozy`). To actually *see* the tray during development, build a notarized dev build: `npm run dist:mac:dev` (com.todoozy.dev). Don't chase the `npm run dev` tray — it can't show.
+
+---
+
 ### Don't kill MCP server when restarting dev
 - **Symptoms**: MCP tools become unavailable after restarting the dev server
 - **Root cause**: `pkill -9 -f "Electron.app"` kills the MCP server process too, since it runs as a Node subprocess
@@ -116,3 +135,13 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 - **Root cause**: `isPermanentlyDead` was a module-level variable in `sessionRecovery.ts` — never written to the Zustand authStore, so React components couldn't read it.
 - **Fix**: Add `isTokenPermanentlyDead: boolean` to `AuthState`, set it after `tryRestoreSession` detects a permanent error, add selector, use it in `SessionBanner` to render a different (red, no-retry) variant.
 - **Check first**: Whenever you add error state to a service module, check whether React components need to observe it. If so, add it to the relevant Zustand store, don't leave it as a bare module variable.
+
+## 2026-06-11 · macOS 26.5 suppresses tray icons of non-notarized app bundles — never verify tray features in dev
+**Symptom**: Tray icon (NSStatusItem) invisible in `npm run dev`, while the installed production app shows it. No error anywhere; `tray.getBounds()` reports the item parked off-screen (x=0, y=screenHeight, never slotted into the menu bar).
+**Isolation matrix**: installed notarized app ✅ · dev electron 41.0.3 ❌ · npx electron 41.7.2/42.4.0 ❌ · branch build ad-hoc-signed ❌ · branch build Developer-ID-signed (unnotarized) ❌ · unbundled native Swift NSStatusItem ✅.
+**Root cause**: macOS 26.5 (installed 2026-05-25) silently refuses menu-bar slots to status items from app bundles without notarization provenance. Related public reports: BetterDisplay #5314, Maccy #1224, Apple FB21015611 (acknowledged macOS 26 NSStatusItem regression).
+**Blast-radius warning**: repeatedly launching non-notarized test builds under the production bundle id (com.todoozy) poisoned ControlCenter's in-memory state — afterwards even the notarized production app's icon stayed hidden. No defaults key, no log line; `killall ControlCenter` did NOT clear it. Logout/reboot required.
+**Rules**:
+1. Tray/menu-bar features can only be visually verified in a notarized build (full `dist:mac` + notarize + staple, GlobalProtect OFF for timestamp/notary services).
+2. Don't cycle unsigned/unnotarized builds with the production bundle id while the production app matters to you today.
+3. `tray.getBounds().y === screen height` + zero slot = OS suppression, not a code bug.

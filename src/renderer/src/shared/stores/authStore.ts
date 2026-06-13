@@ -411,7 +411,11 @@ export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
           provider: 'google',
           options: {
             skipBrowserRedirect: true,
-            redirectTo: (await window.api.auth.getSupabaseConfig()).url
+            redirectTo: (await window.api.auth.getSupabaseConfig()).url,
+            // Always show Google's account chooser. Without this, the OS browser's
+            // active Google session is reused silently, so multi-account users get
+            // auto-signed into the wrong account with no way to pick another.
+            queryParams: { prompt: 'select_account' }
           }
         }),
         15_000,

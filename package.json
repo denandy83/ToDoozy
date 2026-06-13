@@ -13,6 +13,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest run",
     "pack": "electron-vite build && electron-builder --dir",
+    "pack:dev": "electron-vite build && electron-builder --dir -c.appId=com.todoozy.dev -c.productName=\"ToDoozy Dev\"",
+    "dist:mac:dev": "electron-vite build && electron-builder --mac -c.appId=com.todoozy.dev -c.productName=\"ToDoozy Dev\"",
     "dist": "electron-vite build && electron-builder",
     "dist:mac": "electron-vite build && electron-builder --mac"
   },
