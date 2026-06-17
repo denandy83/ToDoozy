@@ -1138,7 +1138,7 @@ let _authHandlers: ReturnType<typeof createHandlers> | null = null
 
 // ── MCP Server Setup via mcp-lite ─────────────────────────────────────
 
-const mcp = new McpServer({ name: 'ToDoozy', version: '1.0.0' })
+const mcp = new McpServer({ name: 'ToDoozy', version: '1.0.2' })
 
 // Tool behaviour hints (MCP ToolAnnotations) — let clients (e.g. Claude
 // Desktop) group/label read-only vs mutating tools and flag destructive ones.
