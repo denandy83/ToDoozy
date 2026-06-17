@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   handleRemovePassword,
+  unguessablePassword,
   type RemovePasswordClient,
   type GetUserResult,
   type AdminUpdateResult,
@@ -87,14 +88,40 @@ describe('handleRemovePassword — only-sign-in-method guard', () => {
 })
 
 describe('handleRemovePassword — removal', () => {
-  it('clears the password and the has_password flag for an OAuth user', async () => {
+  it('overwrites the password with a strong random value and clears the has_password flag', async () => {
     const { client, updateUserById } = makeClient({ getUserResult: googleUser() })
     const res = await handleRemovePassword(client, 'Bearer jwt')
     expect(res).toEqual({ status: 200, body: { ok: true } })
-    expect(updateUserById).toHaveBeenNthCalledWith(1, 'user-1', { password: null })
+
+    // Regression guard for the original bug: GoTrue ignores { password: null },
+    // so the password MUST be overwritten with a non-empty unguessable string —
+    // never null, never empty.
+    const [firstUserId, firstAttrs] = updateUserById.mock.calls[0] as [string, { password?: unknown }]
+    expect(firstUserId).toBe('user-1')
+    expect(typeof firstAttrs.password).toBe('string')
+    expect((firstAttrs.password as string).length).toBeGreaterThanOrEqual(32)
+    expect(firstAttrs.password).not.toBeNull()
+
     expect(updateUserById).toHaveBeenNthCalledWith(2, 'user-1', {
       user_metadata: { has_password: false }
     })
+  })
+
+  it('generates a fresh, distinct unguessable password each call', () => {
+    const a = unguessablePassword()
+    const b = unguessablePassword()
+    expect(a).not.toBe(b)
+    expect(a.length).toBeGreaterThanOrEqual(32)
+    // satisfies upper/lower/digit/symbol complexity policies
+    expect(/[A-Z]/.test(a) && /[a-z]/.test(a) && /[0-9]/.test(a) && /[^A-Za-z0-9]/.test(a)).toBe(true)
+  })
+
+  it('stays within GoTrue/bcrypt 72-char password limit', () => {
+    // Regression: 3 UUIDs (112 chars) was rejected by GoTrue → 500 → the
+    // renderer's "something went wrong". Must never exceed 72.
+    for (let i = 0; i < 50; i++) {
+      expect(unguessablePassword().length).toBeLessThanOrEqual(72)
+    }
   })
 
   it('works for a user with both google and email identities', async () => {

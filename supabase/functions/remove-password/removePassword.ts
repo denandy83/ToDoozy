@@ -6,10 +6,19 @@
 // imports here — only a minimal structural client surface (same pattern
 // as mcp/projectLabels.ts, story #93).
 //
-// Why this exists (story #94): Supabase has no client-side API to clear
-// `encrypted_password` — only the admin API can, and the service_role key
-// must never reach the Electron renderer. This function lets an OAuth user
-// who previously added a password revert to OAuth-only sign-in.
+// Why this exists (story #94): the renderer can't change a password without
+// the service_role key, which must never reach the Electron client. This
+// function lets an OAuth user who previously added a password revert to
+// OAuth-only sign-in.
+//
+// IMPORTANT (the bug this file originally shipped with): GoTrue's admin
+// `updateUserById` does NOT clear `encrypted_password` when you pass
+// `{ password: null }` — its handler treats a null/absent password as
+// "leave unchanged", so the old password kept working. There is no admin-API
+// way to NULL the column (that needs a SECURITY DEFINER SQL function). So we
+// instead OVERWRITE the password with a long cryptographically-random value
+// the user never learns. That immediately invalidates the password they set
+// (the actual goal) while `has_password: false` keeps the UI OAuth-only.
 
 /** The slice of a GoTrue identity this handler cares about. */
 export interface UserIdentityLike {
@@ -33,8 +42,23 @@ export interface AdminUpdateResult {
 
 /** Attribute payloads sent to the admin update endpoint. */
 export type AdminUpdateAttributes =
-  | { password: null }
+  | { password: string }
   | { user_metadata: { has_password: boolean } }
+
+/**
+ * An unguessable password used to overwrite (and thereby invalidate) the one
+ * the user set. Never surfaced anywhere — the user signs in with OAuth from
+ * now on. One UUIDv4 (~122 bits of entropy) + a fixed suffix that satisfies
+ * any upper/lower/digit/symbol complexity policy GoTrue may enforce.
+ *
+ * MUST stay <= 72 characters: GoTrue/bcrypt reject longer passwords, which
+ * surfaced as the "something went wrong" 500 when this was 3 UUIDs (112 chars).
+ * 36 (UUID) + 4 (suffix) = 40. Uses the Web Crypto API (available in both Deno
+ * and the Node test runtime, no imports).
+ */
+export function unguessablePassword(): string {
+  return `${crypto.randomUUID()}Aa1!`
+}
 
 /** Minimal Supabase admin-client surface needed to remove a password. */
 export interface RemovePasswordClient {
@@ -78,7 +102,11 @@ export async function handleRemovePassword(
   const hasOAuthIdentity = user.identities?.some((i) => i.provider !== 'email') ?? false
   if (!hasOAuthIdentity) return { status: 200, body: { ok: false, error: 'no_oauth_identity' } }
 
-  const passwordResult = await client.auth.admin.updateUserById(user.id, { password: null })
+  // Overwrite (not null) — see file header. `{ password: null }` is a GoTrue
+  // no-op and leaves the old password working.
+  const passwordResult = await client.auth.admin.updateUserById(user.id, {
+    password: unguessablePassword()
+  })
   if (passwordResult.error) {
     return { status: 500, body: { ok: false, error: passwordResult.error.message } }
   }
