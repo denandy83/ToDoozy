@@ -4,7 +4,7 @@ User-facing changes by date. Most recent first.
 
 ---
 
-## v1.7.1
+## v1.8.0
 
 - **Fix: Labels that vanished from a project are back** — Some labels you'd applied to tasks (often ones added from another device or via the assistant) had silently disappeared from a project's filter bar, label picker, and even the task chips, because the project↔label link was never recorded. ToDoozy now rebuilds those links from your tasks on launch and keeps them in sync from then on, so the labels reappear everywhere they belong.
 - **Filter chips now match the tasks in view** — In Saved Views and projects, the label filter chips show only the labels your visible tasks actually use, instead of every label in your workspace (including ones that matched nothing). In a Saved View the set stays put while you toggle filters and only updates when you re-save the view.
