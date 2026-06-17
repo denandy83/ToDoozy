@@ -65,6 +65,14 @@ interface LabelActions {
   clearExcludeProjectFilters(): void
   clearLabelFilters(): void
   setLabelFilterLogic(logic: 'any' | 'all'): void
+  /**
+   * Set the operator for a group of label keys in one atomic update. Used by the
+   * clickable operator on the active-filter label chip to quickly switch between
+   * "is any of" / "is all of" (include set) and "is not" (exclude set).
+   * - 'any' | 'all': move keys into the include set and set the include logic.
+   * - 'is_not': move keys into the exclude set (include logic untouched).
+   */
+  setLabelGroupOperator(keys: string[], operator: 'any' | 'all' | 'is_not'): void
   setFilterMode(mode: LabelFilterMode): void
   toggleAssigneeFilter(userId: string): void
   togglePriorityFilter(priority: number): void
@@ -501,6 +509,29 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
 
   setLabelFilterLogic(logic: 'any' | 'all'): void {
     set({ labelFilterLogic: logic })
+  },
+
+  setLabelGroupOperator(keys: string[], operator: 'any' | 'all' | 'is_not'): void {
+    set((state) => {
+      const active = new Set(state.activeLabelFilters)
+      const exclude = new Set(state.excludeLabelFilters)
+      for (const raw of keys) {
+        // Resolve UUID input → name key; otherwise treat input as a name key
+        // (chips pass name keys directly; mirrors toggleLabelFilter).
+        const label = Object.values(state.labels).find((l) => l.id === raw)
+        const key = label ? label.name.toLowerCase() : raw.toLowerCase()
+        if (operator === 'is_not') {
+          active.delete(key)
+          exclude.add(key)
+        } else {
+          exclude.delete(key)
+          active.add(key)
+        }
+      }
+      return operator === 'is_not'
+        ? { activeLabelFilters: active, excludeLabelFilters: exclude }
+        : { activeLabelFilters: active, excludeLabelFilters: exclude, labelFilterLogic: operator }
+    })
   },
 
   setFilterMode(mode: LabelFilterMode): void {

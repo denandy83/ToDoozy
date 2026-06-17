@@ -73,6 +73,19 @@ function compareField(
   }
 }
 
+/**
+ * Comparator for tasks in a Done section: most recently completed first.
+ * The Done pile is history — it always sorts chronologically by completion,
+ * independent of whatever sort is active on the open tasks. Rows without a
+ * completed_date (legacy / pre-sync) fall back to their manual order_index.
+ */
+export function compareDoneByCompletion(a: Task, b: Task): number {
+  if (a.completed_date && b.completed_date) {
+    return b.completed_date.localeCompare(a.completed_date)
+  }
+  return a.order_index - b.order_index
+}
+
 export const SORT_FIELD_LABELS: Record<SortField, string> = {
   priority: 'Priority',
   due_date: 'Due Date',

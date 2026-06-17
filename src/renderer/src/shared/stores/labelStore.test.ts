@@ -86,3 +86,77 @@ describe('labelStore.createLabel — pushes project_labels junction (#77)', () =
     expect(pushProjectLabelMock).not.toHaveBeenCalled()
   })
 })
+
+describe('labelStore.setLabelGroupOperator — quick operator switch on the active-filter chip', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', { ...globalThis.window, api: {} })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('all-of → is not: moves the include set into the exclude set, logic untouched', async () => {
+    const { useLabelStore } = await import('./labelStore')
+    useLabelStore.setState({
+      activeLabelFilters: new Set(['urgent', 'work']),
+      excludeLabelFilters: new Set(),
+      labelFilterLogic: 'all'
+    })
+
+    useLabelStore.getState().setLabelGroupOperator(['urgent', 'work'], 'is_not')
+
+    const s = useLabelStore.getState()
+    expect([...s.activeLabelFilters]).toEqual([])
+    expect([...s.excludeLabelFilters].sort()).toEqual(['urgent', 'work'])
+    expect(s.labelFilterLogic).toBe('all') // is_not must not clobber include logic
+  })
+
+  it('all-of → any-of: keeps the include set, flips logic to "any"', async () => {
+    const { useLabelStore } = await import('./labelStore')
+    useLabelStore.setState({
+      activeLabelFilters: new Set(['urgent', 'work']),
+      excludeLabelFilters: new Set(),
+      labelFilterLogic: 'all'
+    })
+
+    useLabelStore.getState().setLabelGroupOperator(['urgent', 'work'], 'any')
+
+    const s = useLabelStore.getState()
+    expect([...s.activeLabelFilters].sort()).toEqual(['urgent', 'work'])
+    expect([...s.excludeLabelFilters]).toEqual([])
+    expect(s.labelFilterLogic).toBe('any')
+  })
+
+  it('is not → any-of: moves the exclude set back into the include set', async () => {
+    const { useLabelStore } = await import('./labelStore')
+    useLabelStore.setState({
+      activeLabelFilters: new Set(),
+      excludeLabelFilters: new Set(['urgent']),
+      labelFilterLogic: 'all'
+    })
+
+    useLabelStore.getState().setLabelGroupOperator(['urgent'], 'any')
+
+    const s = useLabelStore.getState()
+    expect([...s.activeLabelFilters]).toEqual(['urgent'])
+    expect([...s.excludeLabelFilters]).toEqual([])
+    expect(s.labelFilterLogic).toBe('any')
+  })
+
+  it('resolves a label UUID argument to its lowercased name key', async () => {
+    const { useLabelStore } = await import('./labelStore')
+    const label = makeLabel({ id: 'label-xyz', name: 'Work' })
+    useLabelStore.setState({
+      labels: { 'label-xyz': label },
+      activeLabelFilters: new Set(['work']),
+      excludeLabelFilters: new Set(),
+      labelFilterLogic: 'all'
+    })
+
+    useLabelStore.getState().setLabelGroupOperator(['label-xyz'], 'is_not')
+
+    const s = useLabelStore.getState()
+    expect([...s.activeLabelFilters]).toEqual([])
+    expect([...s.excludeLabelFilters]).toEqual(['work'])
+  })
+})

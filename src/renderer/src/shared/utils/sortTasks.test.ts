@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createSortComparator, DEFAULT_SAVED_VIEW_SORT, DEFAULT_PROJECT_SORT, SORT_FIELD_LABELS } from './sortTasks'
+import { createSortComparator, compareDoneByCompletion, DEFAULT_SAVED_VIEW_SORT, DEFAULT_PROJECT_SORT, SORT_FIELD_LABELS } from './sortTasks'
 import type { SortRule } from './sortTasks'
 import type { Task } from '../../../../shared/types'
 
@@ -27,6 +27,29 @@ function makeTask(overrides: Partial<Task>): Task {
     ...overrides
   } as Task
 }
+
+describe('compareDoneByCompletion', () => {
+  it('orders most recently completed first', () => {
+    const older = makeTask({ id: 'older', completed_date: '2026-01-10T09:00:00Z' })
+    const newer = makeTask({ id: 'newer', completed_date: '2026-01-12T09:00:00Z' })
+    expect(compareDoneByCompletion(newer, older)).toBeLessThan(0) // newer sorts first
+    expect(compareDoneByCompletion(older, newer)).toBeGreaterThan(0)
+  })
+
+  it('ignores priority / other fields — only completion date matters', () => {
+    // A low-priority task completed later still beats a high-priority task completed earlier.
+    const highEarlier = makeTask({ id: 'a', priority: 4, completed_date: '2026-01-10T09:00:00Z' })
+    const lowLater = makeTask({ id: 'b', priority: 1, completed_date: '2026-01-11T09:00:00Z' })
+    expect(compareDoneByCompletion(lowLater, highEarlier)).toBeLessThan(0)
+  })
+
+  it('falls back to order_index when completed_date is missing (legacy/sync rows)', () => {
+    const a = makeTask({ id: 'a', completed_date: null, order_index: 2 })
+    const b = makeTask({ id: 'b', completed_date: null, order_index: 5 })
+    expect(compareDoneByCompletion(a, b)).toBeLessThan(0) // 2 - 5
+    expect(compareDoneByCompletion(b, a)).toBeGreaterThan(0)
+  })
+})
 
 describe('createSortComparator', () => {
   it('sorts by priority ascending', () => {

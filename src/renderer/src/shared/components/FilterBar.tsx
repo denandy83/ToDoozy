@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
-import { X, Plus, Search, Save, Minus, Calendar, ArrowUpDown, Trash2 } from 'lucide-react'
+import { X, Plus, Search, Save, Minus, Calendar, ArrowUpDown, Trash2, ChevronDown } from 'lucide-react'
 import {
   useLabelStore,
   selectActiveLabelFilters,
@@ -71,6 +71,7 @@ interface FilterBarProps {
 
 export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, onSave, saveLabel, showCustomSort, showSort = true }: FilterBarProps): React.JSX.Element | null {
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
+  const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const filterMode = useLabelStore(selectFilterMode)
   const priorityFilters = useLabelStore(selectPriorityFilters)
   const statusFilters = useLabelStore(selectStatusFilters)
@@ -238,7 +239,7 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
             return (
               <span
                 key={label.id}
-                className="group/chip inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[9px] font-bold tracking-wider transition-all cursor-pointer"
+                className="group/chip inline-flex items-center rounded-full text-[9px] font-bold tracking-wider transition-all"
                 style={{
                   backgroundColor: isActive ? `${label.color}30` : `${label.color}15`,
                   color: label.color,
@@ -246,17 +247,20 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
                   boxShadow: isActive ? `0 0 0 2px ${label.color}40` : 'none'
                 }}
               >
+                {/* Toggle target carries the padding + cursor so the whole
+                    visible pill is clickable — not just the text glyphs. */}
                 <button
                   onClick={() => toggleLabelFilter(label.id)}
                   aria-pressed={isActive}
                   aria-label={`Filter by ${label.name}`}
+                  className={`cursor-pointer rounded-full py-0.5 pl-2 ${projectId ? 'pr-0.5' : 'pr-2'}`}
                 >
                   {label.name}
                 </button>
                 {projectId && (
                   <button
                     onClick={(e) => handleRemoveLabel(label, e)}
-                    className="rounded-full p-0.5 transition-colors hover:bg-black/10"
+                    className="mr-1 cursor-pointer rounded-full p-0.5 transition-colors hover:bg-black/10"
                     aria-label={`Delete ${label.name} from project`}
                     title="Delete from project"
                   >
@@ -444,6 +448,7 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
       {hasAnyFilter && (
         <div className="flex flex-wrap items-center gap-1.5">
           <ActiveFilterChips
+            labelFilterLogic={labelFilterLogic}
             priorityFilters={priorityFilters}
             statusFilters={statusFilters}
             excludePriorityFilters={excludePriorityFilters}
@@ -471,7 +476,9 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
 
 /* ── Sort Dropdown ─────────────────────────────────────────────── */
 
-const ALL_SORT_FIELDS: SortField[] = ['priority', 'due_date', 'completed_date', 'status', 'created_at', 'updated_at', 'title', 'project', 'custom']
+// 'completed_date' is intentionally omitted: every list view groups by status, so it
+// is a no-op for open tasks, and Done sections always sort by completion date anyway.
+const ALL_SORT_FIELDS: SortField[] = ['priority', 'due_date', 'status', 'created_at', 'updated_at', 'title', 'project', 'custom']
 
 interface SortDropdownProps {
   rules: SortRule[]
@@ -611,6 +618,7 @@ function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dropdownR
 /* ── Active Filter Chips ────────────────────────────────────────── */
 
 interface ActiveFilterChipsProps {
+  labelFilterLogic: 'any' | 'all'
   priorityFilters: Set<number>
   statusFilters: Set<string>
   excludePriorityFilters: Set<number>
@@ -632,39 +640,55 @@ interface ActiveFilterChipsProps {
 }
 
 function ActiveFilterChips({
-  priorityFilters, statusFilters, excludePriorityFilters, excludeStatusFilters,
+  labelFilterLogic, priorityFilters, statusFilters, excludePriorityFilters, excludeStatusFilters,
   dueDatePreset, dueDateRange, keyword,
   projectStatuses, onRemovePriority, onRemoveStatus, onRemoveExcludePriority, onRemoveExcludeStatus,
   onRemoveDueDate, onRemoveKeyword, labelChips, excludeLabelChips, projectChips, excludeProjectChips
 }: ActiveFilterChipsProps): React.JSX.Element | null {
   const chips: React.JSX.Element[] = []
+  const setLabelGroupOperator = useLabelStore((s) => s.setLabelGroupOperator)
 
-  // Label chips — consolidated into a single chip
+  // Label chips — consolidated into a single chip with a clickable operator
   if (labelChips && labelChips.activeIds.size > 0) {
-    const logic = useLabelStore.getState().labelFilterLogic
-    const prefix = labelChips.activeIds.size > 1
-      ? (logic === 'all' ? 'Label is all of' : 'Label is any of')
-      : 'Label'
-    const names = [...labelChips.activeIds]
+    const ids = [...labelChips.activeIds]
+    const names = ids
       .map((nameKey) => labelChips.labels.find((l) => l.name.toLowerCase() === nameKey)?.name ?? nameKey)
       .filter(Boolean)
       .join(', ')
     if (names) {
       chips.push(
-        <GroupFilterChip key="labels" prefix={prefix} names={names} ids={[...labelChips.activeIds]} onRemove={labelChips.onRemove} />
+        <GroupFilterChip
+          key="labels"
+          count={ids.length}
+          operator={labelFilterLogic}
+          names={names}
+          ids={ids}
+          onRemove={labelChips.onRemove}
+          onSetOperator={(op) => setLabelGroupOperator(ids, op)}
+        />
       )
     }
   }
 
-  // Exclude label chips — consolidated
+  // Exclude label chips — consolidated, also operator-switchable ("is not")
   if (excludeLabelChips && excludeLabelChips.activeIds.size > 0) {
-    const names = [...excludeLabelChips.activeIds]
+    const ids = [...excludeLabelChips.activeIds]
+    const names = ids
       .map((nameKey) => excludeLabelChips.labels.find((l) => l.name.toLowerCase() === nameKey)?.name ?? nameKey)
       .filter(Boolean)
       .join(', ')
     if (names) {
       chips.push(
-        <GroupFilterChip key="exclude-labels" prefix="Label is not" names={names} ids={[...excludeLabelChips.activeIds]} onRemove={excludeLabelChips.onRemove} exclude />
+        <GroupFilterChip
+          key="exclude-labels"
+          count={ids.length}
+          operator="is_not"
+          names={names}
+          ids={ids}
+          onRemove={excludeLabelChips.onRemove}
+          onSetOperator={(op) => setLabelGroupOperator(ids, op)}
+          exclude
+        />
       )
     }
   }
@@ -781,28 +805,88 @@ function ExcludeFilterChip({ label, color, prefix, onRemove }: FilterChipProps):
   )
 }
 
-function GroupFilterChip({ prefix, names, ids, onRemove, exclude }: {
-  prefix: string
+type LabelGroupOperator = 'any' | 'all' | 'is_not'
+
+function GroupFilterChip({ count, operator, names, ids, onRemove, onSetOperator, exclude }: {
+  count: number
+  operator: LabelGroupOperator
   names: string
   ids: string[]
   onRemove: (id: string) => void
+  onSetOperator: (op: LabelGroupOperator) => void
   exclude?: boolean
 }): React.JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [menuOpen])
+
+  // With a single label, "any of"/"all of" are equivalent — collapse to "is".
+  const operatorLabel = (op: LabelGroupOperator): string =>
+    count <= 1
+      ? (op === 'is_not' ? 'is not' : 'is')
+      : (op === 'is_not' ? 'is not' : op === 'all' ? 'is all of' : 'is any of')
+  const options: LabelGroupOperator[] = count <= 1 ? ['any', 'is_not'] : ['any', 'all', 'is_not']
+  const current: LabelGroupOperator = count <= 1 && operator !== 'is_not' ? 'any' : operator
+
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${
+      ref={ref}
+      className={`relative inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${
         exclude ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-accent/10 text-accent border border-accent/20'
       }`}
     >
-      <span className="opacity-60">{prefix}:</span>
+      <span className="opacity-60">Label</span>
+      <button
+        onClick={() => setMenuOpen((o) => !o)}
+        className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 transition-colors hover:bg-foreground/10"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title="Change label operator"
+      >
+        {operatorLabel(current)}
+        <ChevronDown size={8} />
+      </button>
+      <span className="opacity-60">:</span>
       {names}
       <button
         onClick={() => ids.forEach((id) => onRemove(id))}
         className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10"
         title="Clear all"
+        aria-label="Clear label filter"
       >
         <X size={8} />
       </button>
+
+      {menuOpen && (
+        <div
+          className="absolute left-0 top-full z-50 mt-1 min-w-[110px] rounded-lg border border-border bg-surface p-1 shadow-lg"
+          role="menu"
+        >
+          {options.map((op) => (
+            <button
+              key={op}
+              role="menuitemradio"
+              aria-checked={op === current}
+              onClick={() => { onSetOperator(op); setMenuOpen(false) }}
+              className={`block w-full rounded px-2 py-1 text-left text-[9px] font-bold uppercase tracking-wider transition-colors hover:bg-foreground/6 ${
+                op === current
+                  ? (op === 'is_not' ? 'text-red-400' : 'text-accent')
+                  : 'text-foreground'
+              }`}
+            >
+              {operatorLabel(op)}
+            </button>
+          ))}
+        </div>
+      )}
     </span>
   )
 }
