@@ -46,17 +46,27 @@ export function BulkContextMenu(): React.JSX.Element | null {
   const allLabels = useLabelsByProject(projectId)
   const createOrMatchLabel = useCreateOrMatchLabel(projectId)
 
+  // Viewport clamp positioning — measure actual menu size after render.
+  // The bulk menu's height varies (header + organize/schedule sections +
+  // archive/delete), so a hardcoded estimate under-clamps and the bottom
+  // items overflow below the viewport. Measure the real size instead.
   useEffect(() => {
     if (!isOpen || !isBulk) return
-    const menuW = 208
-    const menuH = 320
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const x = Math.min(position.x, vw - menuW - 8)
-    const y = Math.min(position.y, vh - menuH - 8)
-    setMenuPos({ x: Math.max(4, x), y: Math.max(4, y) })
-    setOpenLeft(position.x + menuW + 220 > vw)
     setActiveSubmenu(null)
+    // Initial position at click point, then adjust after measuring
+    setMenuPos(position)
+    requestAnimationFrame(() => {
+      const menu = menuRef.current
+      if (!menu) return
+      const menuW = menu.offsetWidth
+      const menuH = menu.offsetHeight
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const x = Math.min(position.x, vw - menuW - 8)
+      const y = Math.min(position.y, vh - menuH - 8)
+      setMenuPos({ x: Math.max(4, x), y: Math.max(4, y) })
+      setOpenLeft(position.x + menuW + 220 > vw)
+    })
   }, [isOpen, isBulk, position])
 
   useEffect(() => {
