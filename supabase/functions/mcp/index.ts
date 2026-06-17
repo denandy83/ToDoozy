@@ -1140,11 +1140,35 @@ let _authHandlers: ReturnType<typeof createHandlers> | null = null
 
 const mcp = new McpServer({ name: 'ToDoozy', version: '1.0.0' })
 
+// Tool behaviour hints (MCP ToolAnnotations) — let clients (e.g. Claude
+// Desktop) group/label read-only vs mutating tools and flag destructive ones.
+// Everything operates only on the caller's own ToDoozy data, so openWorldHint
+// is false for all. Tools not in either set are ordinary writes (readOnlyHint
+// false, non-destructive).
+const READ_ONLY_TOOLS = new Set<string>([
+  'list_tasks', 'get_task', 'list_subtasks', 'list_projects', 'get_project',
+  'list_labels', 'list_statuses', 'search_tasks', 'list_my_day', 'list_templates',
+  'list_areas', 'list_saved_views'
+])
+// Permanent, irreversible removals. archive_task is reversible (unarchive_task)
+// so it is NOT marked destructive.
+const DESTRUCTIVE_TOOLS = new Set<string>([
+  'delete_task', 'delete_project', 'delete_area', 'delete_saved_view'
+])
+
 // Register all tools
 for (const tool of tools) {
+  const readOnly = READ_ONLY_TOOLS.has(tool.name)
+  const annotations: {
+    readOnlyHint: boolean
+    openWorldHint: boolean
+    destructiveHint?: boolean
+  } = { readOnlyHint: readOnly, openWorldHint: false }
+  if (!readOnly && DESTRUCTIVE_TOOLS.has(tool.name)) annotations.destructiveHint = true
   mcp.tool(tool.name, {
     description: tool.description,
     inputSchema: tool.inputSchema,
+    annotations,
     handler: async (args: Record<string, unknown>) => {
       if (!_authHandlers) return { content: [{ type: 'text' as const, text: 'Not authenticated' }], isError: true }
       const handler = _authHandlers[tool.name]
