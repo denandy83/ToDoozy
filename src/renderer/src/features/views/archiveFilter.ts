@@ -1,4 +1,4 @@
-import type { Task, Label } from '../../../../shared/types'
+import type { Task, Label, Project } from '../../../../shared/types'
 import type { DueDateRange } from '../../shared/stores/labelStore'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
 
@@ -85,4 +85,34 @@ export function archiveTaskMatchesFilters(
   }
 
   return true
+}
+
+export interface ArchiveGroup {
+  project: Project
+  tasks: Task[]
+}
+
+/**
+ * Apply active filter criteria to pre-grouped archived tasks, keeping a group
+ * only when at least one of its tasks matches.
+ *
+ * NOTE: This intentionally does NOT have an "archived projects always show"
+ * escape hatch. That rule belongs only to the unfiltered Archive view (so empty
+ * archived projects remain manageable). When a filter is active, surfacing an
+ * archived-project header with zero matching tasks is misleading — it looks like
+ * the filter found that project when it didn't (see #86: filtering by a label
+ * showed only an empty "Reader's Digest" archived-project header). The caller
+ * must skip calling this when no filter is active.
+ */
+export function filterArchiveGroups(
+  groups: ArchiveGroup[],
+  taskLabels: Record<string, Label[]>,
+  c: ArchiveFilterCriteria
+): ArchiveGroup[] {
+  const result: ArchiveGroup[] = []
+  for (const { project, tasks } of groups) {
+    const tasksMatching = tasks.filter((t) => archiveTaskMatchesFilters(t, taskLabels[t.id] ?? [], c))
+    if (tasksMatching.length > 0) result.push({ project, tasks: tasksMatching })
+  }
+  return result
 }

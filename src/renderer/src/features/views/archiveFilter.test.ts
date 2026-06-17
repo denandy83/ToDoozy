@@ -1,6 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import { archiveTaskMatchesFilters, hasAnyArchiveFilter, type ArchiveFilterCriteria } from './archiveFilter'
-import type { Task, Label } from '../../../../shared/types'
+import { archiveTaskMatchesFilters, hasAnyArchiveFilter, filterArchiveGroups, type ArchiveFilterCriteria, type ArchiveGroup } from './archiveFilter'
+import type { Task, Label, Project } from '../../../../shared/types'
+
+function makeProject(overrides: Partial<Project> & { id: string }): Project {
+  return {
+    id: overrides.id,
+    name: overrides.name ?? overrides.id,
+    description: null,
+    color: '#000',
+    icon: '',
+    owner_id: 'u1',
+    is_default: 0,
+    is_shared: 0,
+    sidebar_order: 0,
+    area_id: null,
+    auto_archive_enabled: 0,
+    auto_archive_value: 0,
+    auto_archive_unit: 'days',
+    is_archived: overrides.is_archived ?? 0,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    deleted_at: null
+  }
+}
 
 function makeTask(overrides: Partial<Task> & { id: string }): Task {
   return {
@@ -144,5 +166,41 @@ describe('archiveTaskMatchesFilters', () => {
     const c = criteria({ priorityFilters: new Set([4]), projectFilters: new Set(['proj-a']) })
     expect(archiveTaskMatchesFilters(match, [], c)).toBe(true)
     expect(archiveTaskMatchesFilters(wrongProject, [], c)).toBe(false)
+  })
+})
+
+describe('filterArchiveGroups (#86 — empty archived-project headers suppressed when filtering)', () => {
+  const liveProject = makeProject({ id: 'live', is_archived: 0 })
+  const archivedProject = makeProject({ id: 'rd', name: "Reader's Digest", is_archived: 1 })
+
+  it('keeps a group only when at least one task matches the label filter', () => {
+    const tagged = makeTask({ id: 't1', project_id: 'live' })
+    const untagged = makeTask({ id: 't2', project_id: 'live' })
+    const groups: ArchiveGroup[] = [{ project: liveProject, tasks: [tagged, untagged] }]
+    const taskLabels: Record<string, Label[]> = { t1: [makeLabel('Salesforce')] }
+
+    const result = filterArchiveGroups(groups, taskLabels, criteria({ activeLabelFilters: new Set(['salesforce']) }))
+    expect(result).toHaveLength(1)
+    expect(result[0].tasks.map((t) => t.id)).toEqual(['t1'])
+  })
+
+  it('does NOT surface an archived project whose tasks none match (the #86 bug)', () => {
+    // Reader's Digest is archived but has no task matching "salesforce".
+    const rdTask = makeTask({ id: 't1', project_id: 'rd' })
+    const groups: ArchiveGroup[] = [{ project: archivedProject, tasks: [rdTask] }]
+    const taskLabels: Record<string, Label[]> = { t1: [makeLabel('Other')] }
+
+    const result = filterArchiveGroups(groups, taskLabels, criteria({ activeLabelFilters: new Set(['salesforce']) }))
+    expect(result).toHaveLength(0)
+  })
+
+  it('still surfaces an archived project when one of its tasks DOES match', () => {
+    const rdTask = makeTask({ id: 't1', project_id: 'rd' })
+    const groups: ArchiveGroup[] = [{ project: archivedProject, tasks: [rdTask] }]
+    const taskLabels: Record<string, Label[]> = { t1: [makeLabel('Salesforce')] }
+
+    const result = filterArchiveGroups(groups, taskLabels, criteria({ activeLabelFilters: new Set(['salesforce']) }))
+    expect(result).toHaveLength(1)
+    expect(result[0].tasks.map((t) => t.id)).toEqual(['t1'])
   })
 })

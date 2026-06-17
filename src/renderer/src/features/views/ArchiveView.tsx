@@ -28,9 +28,9 @@ import {
 } from '../../shared/stores'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
-import { deduplicateLabelsByName } from '../../shared/utils/labelUtils'
+import { getLabelsInUse } from '../../shared/utils/labelUtils'
 import { useAuthStore } from '../../shared/stores/authStore'
-import { archiveTaskMatchesFilters, hasAnyArchiveFilter, type ArchiveFilterCriteria } from './archiveFilter'
+import { filterArchiveGroups, hasAnyArchiveFilter, type ArchiveFilterCriteria } from './archiveFilter'
 
 export function ArchiveView(): React.JSX.Element {
   const allProjects = useProjectStore(selectAllProjects)
@@ -48,10 +48,6 @@ export function ArchiveView(): React.JSX.Element {
   // ── Filters (shared filter store, same as TaskListView / saved views) ──
   const currentUserId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const rawAllLabels = useLabelStore(selectAllLabels)
-  const filterLabels = useMemo(
-    () => deduplicateLabelsByName(rawAllLabels, currentUserId),
-    [rawAllLabels, currentUserId]
-  )
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
   const priorityFilters = useLabelStore(selectPriorityFilters)
@@ -118,6 +114,21 @@ export function ArchiveView(): React.JSX.Element {
     return groups
   }, [allTasks, allProjects])
 
+  // The filter-bar label row must only offer labels that actually appear on
+  // archived tasks — not every label in the workspace. Otherwise a label used
+  // solely on live tasks (e.g. "Salesforce") is selectable here but matches
+  // nothing, which reads as a broken filter (#86). Same "labels in use" pattern
+  // as My Day / Saved Views. Computed from the full archived set so selecting
+  // one label never prunes the others.
+  const archivedTaskIds = useMemo(
+    () => groupedByProject.flatMap((g) => g.tasks.map((t) => t.id)),
+    [groupedByProject]
+  )
+  const filterLabels = useMemo(
+    () => getLabelsInUse(archivedTaskIds, taskLabels, rawAllLabels, currentUserId),
+    [archivedTaskIds, taskLabels, rawAllLabels, currentUserId]
+  )
+
   // Labels live per-project; hydrate them for every project shown so the row
   // chips and the label filter have data. SQL has no is_archived filter, so this
   // returns labels for archived tasks too. Merges into the store (no reload flash).
@@ -125,21 +136,15 @@ export function ArchiveView(): React.JSX.Element {
     for (const g of groupedByProject) hydrateAllTaskLabels(g.project.id)
   }, [groupedByProject, hydrateAllTaskLabels])
 
-  // Apply the active filters per group. Archived-project headers stay visible
-  // even when all their tasks are filtered out; a non-archived project only
-  // surfaces while it still has at least one matching archived task.
+  // Apply the active filters per group. When NO filter is active we show every
+  // group as-is — including empty archived-project headers, so they stay
+  // manageable. When a filter IS active, a group only surfaces while it has at
+  // least one matching task; empty archived-project headers are suppressed (see
+  // #86 — filtering by a label otherwise showed only an empty archived-project
+  // header, looking like the filter was broken).
   const filteredGroupedByProject = useMemo(() => {
     if (!filtersActive) return groupedByProject
-    const result: { project: Project; tasks: Task[] }[] = []
-    for (const { project, tasks } of groupedByProject) {
-      const tasksMatching = tasks.filter((t) =>
-        archiveTaskMatchesFilters(t, taskLabels[t.id] ?? [], filterCriteria)
-      )
-      if (tasksMatching.length > 0 || project.is_archived === 1) {
-        result.push({ project, tasks: tasksMatching })
-      }
-    }
-    return result
+    return filterArchiveGroups(groupedByProject, taskLabels, filterCriteria)
   }, [groupedByProject, filtersActive, filterCriteria, taskLabels])
 
   const archivedTasks = useMemo(
