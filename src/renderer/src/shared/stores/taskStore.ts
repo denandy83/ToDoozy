@@ -22,6 +22,36 @@ function getUserId(): string {
   return useAuthStore.getState().currentUser?.id ?? ''
 }
 
+/**
+ * Per-user label invariant (#d5b138b1): a task_labels row a user creates must
+ * point at a label that user OWNS — never another member's label id. When
+ * applying a label owned by someone else (picked from a shared project's
+ * palette, or the cross-user display remap fell back to the foreign row),
+ * resolve to the current user's OWN same-name label, materializing it (copying
+ * the color) if they don't have one yet. Returns the label id to actually link.
+ * Mine-already / legacy-null-owner / unknown ids pass through unchanged.
+ */
+async function resolveLabelForCurrentUser(taskId: string, labelId: string): Promise<string> {
+  const userId = getUserId()
+  if (!userId) return labelId
+  const label = await window.api.labels.findById(labelId).catch(() => null)
+  if (!label || label.user_id === userId || label.user_id == null) return labelId
+  const projectId = useTaskStore.getState().tasks[taskId]?.project_id
+  const mine = await window.api.labels.findByName(userId, label.name).catch(() => null)
+  if (mine) {
+    if (projectId) await window.api.labels.addToProject(projectId, mine.id).catch(() => {})
+    return mine.id
+  }
+  const created = await useLabelStore.getState().createLabel({
+    id: crypto.randomUUID(),
+    user_id: userId,
+    name: label.name,
+    color: label.color,
+    project_id: projectId
+  })
+  return created.id
+}
+
 function logTaskActivity(taskId: string, action: string, oldValue: string | null, newValue: string | null): void {
   const userId = getUserId()
   if (!userId) return
@@ -669,16 +699,19 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async addLabel(taskId: string, labelId: string): Promise<void> {
     try {
-      console.log('[addLabel] start', { taskId, labelId })
-      await window.api.tasks.addLabel(taskId, labelId)
+      // Resolve to the current user's own same-name label before linking, so
+      // we never attach another member's label id to this user's task (#d5b138b1).
+      const linkId = await resolveLabelForCurrentUser(taskId, labelId)
+      console.log('[addLabel] start', { taskId, labelId, linkId })
+      await window.api.tasks.addLabel(taskId, linkId)
       console.log('[addLabel] sqlite insert done')
       await get().hydrateTaskLabels(taskId)
       const labels = get().taskLabels[taskId] ?? []
       console.log('[addLabel] post-hydrate', {
         labels: labels.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
       })
-      const added = labels.find((l) => l.id === labelId)
-      logTaskActivity(taskId, 'label_added', null, added?.name ?? labelId)
+      const added = labels.find((l) => l.id === linkId)
+      logTaskActivity(taskId, 'label_added', null, added?.name ?? linkId)
       const task = get().tasks[taskId]
       if (task) {
         const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
