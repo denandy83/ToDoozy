@@ -489,20 +489,19 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(labelsDescriptor.toRemote(local))
     if (error) {
-      // Detect (user_id, lower(name)) collision with a same-named label
-      // (typically MCP-created with a new UUID). Match permissively across
-      // the fields supabase-js exposes for Postgres 23505.
-      const e = error as { code?: string; message?: string; details?: string }
-      const code = e.code ?? ''
-      const msg = e.message ?? ''
-      const details = e.details ?? ''
-      const looksLikeUniqueViolation =
-        code === '23505' ||
-        msg.includes('user_name_unique') ||
-        msg.includes('duplicate key') ||
-        details.includes('user_name_unique') ||
-        details.includes('already exists')
-      if (looksLikeUniqueViolation && local.user_id) {
+      // Any upsert error is a consolidation candidate when we have a same-name
+      // canonical remote row under this user. Two distinct collisions land here:
+      //   1. (user_id, lower(name)) UNIQUE violation (23505) — a same-name label
+      //      created with a different UUID (typically by MCP) before we pushed.
+      //   2. The local id matches a remote row owned by ANOTHER account (the
+      //      user's alt) — the upsert's ON CONFLICT(id) tries to overwrite that
+      //      foreign row and fails on RLS (NOT a 23505). This is the divergence
+      //      in task d5b138b1, and the old unique-only gate left it as a
+      //      permanent `failed=N`. consolidateLocalLabel resolves both: it
+      //      looks up the user's OWN canonical by name and, if a different id
+      //      exists, collapses the local row onto it. When no such canonical
+      //      exists it returns false and we surface the original error.
+      if (local.user_id) {
         const consolidated = await consolidateLocalLabel(local.id, local.user_id, local.name)
         if (consolidated) return
       }

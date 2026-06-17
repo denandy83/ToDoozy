@@ -346,6 +346,13 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(
+    'labels:adopt',
+    (_e, userId: string, foreignLabel: Parameters<Repositories['labels']['adopt']>[1]) => {
+      return getRepos().labels.adopt(userId, foreignLabel)
+    }
+  )
+
+  ipcMain.handle(
     'labels:create',
     (_e, input: Parameters<Repositories['labels']['create']>[0]) => {
       return getRepos().labels.create(input)

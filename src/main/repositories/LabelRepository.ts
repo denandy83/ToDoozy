@@ -76,6 +76,31 @@ export class LabelRepository {
   }
 
   /**
+   * Ensure `userId` OWNS a same-name label, returning it. Used to adopt a label
+   * a different account created (e.g. a foreign member's label in a shared
+   * project, or the user's own alt-account label leaked onto their tasks).
+   *
+   * If the user already has a same-name label, that row is returned. Otherwise
+   * a NEW row is minted with a FRESH UUID — never the foreign label's id. This
+   * is the invariant that prevents identity divergence: the local row's id is
+   * the user's own, so it can never collide with (and be flipped by) the
+   * foreign cloud row that shares the foreign id. Project linkage is the
+   * caller's responsibility (this method only guarantees ownership).
+   */
+  adopt(userId: string, foreignLabel: Label): Label {
+    const existing = this.findByName(userId, foreignLabel.name)
+    if (existing) return existing
+
+    const newLabel: CreateLabelInput = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      name: foreignLabel.name,
+      color: foreignLabel.color
+    }
+    return this.create(newLabel)
+  }
+
+  /**
    * Sync-layer list. Returns ALL rows for a user, optionally including tombstones.
    */
   findAllByUser(
@@ -164,6 +189,18 @@ export class LabelRepository {
     if (existing && existing.updated_at >= remote.updated_at) {
       return existing
     }
+    // Sticky ownership (LWW guard): a label row's owner never legitimately
+    // changes in this app. If a newer remote row carries a DIFFERENT non-null
+    // user_id than the local row already has, keep the local owner — only let
+    // the remote refresh name/color/etc. This prevents a stale cloud row whose
+    // same id is owned by another account (the user's alt) from flipping a
+    // local user-owned label to foreign ownership, which would make it vanish
+    // from the user's own views (the divergence in task d5b138b1). A legacy
+    // NULL-owner local row is still allowed to adopt the remote's user_id.
+    const effectiveUserId =
+      existing && existing.user_id != null && remote.user_id != null && existing.user_id !== remote.user_id
+        ? existing.user_id
+        : remote.user_id
     try {
       this.db
         .prepare(
@@ -180,7 +217,7 @@ export class LabelRepository {
         )
         .run(
           remote.id,
-          remote.user_id,
+          effectiveUserId,
           remote.name,
           remote.color,
           remote.order_index,

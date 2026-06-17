@@ -1,5 +1,36 @@
 # Scope
 
+## 2026-06-17 — Task d5b138b1: label-identity divergence (ACTIVE)
+
+**Invariant (user-confirmed):** every user's labels must be rows THEY own. In a shared project, a member missing a same-name label gets their OWN copy created (them as owner). Per-member same-name label rows all link to the shared project via `project_labels`.
+
+**Confirmed facts (prod, read-only):**
+- `dcfe5ded` = andycassiers@gmail.com = the user's ALT account (primary `4cf29d6b` = andy.cassiers@gmail.com). Alt is "sometimes used to test" → STILL ACTIVE → remap-only, never delete alt-owned label rows.
+- Alt owns its own Personal project + is a member of shared `Todoozy Bugs` + `Crewlounge` (legit per-member, do NOT touch).
+- Cloud divergence on the PRIMARY's Personal project (`1b8d1825`): task_labels point at ALT-owned labels though primary owns a clean same-name canonical: Todoozy `6a1b5cad`→`82cc13d9` (141), Grilled `22d70eea`→`387eb298` (12), Later `a6b01488`→`b44bb105` (9), Obsidian Vault `98b78ed7`→`e491d19b` (2).
+- Local "healed" those same alt ids to primary ownership → same id, different owner local vs cloud.
+- `labels_user_name_unique` = `(user_id, LOWER(name)) WHERE user_id IS NOT NULL` (NOT partial on deleted_at → tombstones occupy the slot).
+
+**Root cause of `failed=N`:** labels reconcile pushes local `6a1b5cad` (user=primary) → cloud upsert hits the alt-owned cloud row of same id → fails with RLS/non-unique error → `consolidateLocalLabel` (which only fired on detected UNIQUE violations) never triggers → re-counts as failed every pass.
+
+**Already shipped (prior sessions):** `LabelRepository.consolidate()` (+IPC/preload/tests), `consolidateLocalLabel`/`consolidateLabelOnRemote`, render-time `remapLabelsToCurrentUser`/`deduplicateLabelsByName`, apply-time `resolveLabelForCurrentUser` (cddff11). Broken uncommitted change: `adopt()` calling non-existent `window.api.labels.adopt`.
+
+**Plan — code + tests this session; USER runs the prod heal:**
+1. `LabelRepository.applyRemote`: sticky-ownership guard — a newer remote may update name/color/etc. but must NOT flip an existing row's non-null `user_id` to a different non-null user (LWW #3). Labels never legitimately change owner.
+2. `ensureLabelsExistLocally(labelIds, projectId)`: stop creating divergence. own-label → `applyRemote` (preserve id); foreign/null-owner → resolve to current user's own same-name label (`adopt`: findByName or create new UUID) + `addToProject` + remap. Thread projectId from both callers (`pullTaskLabelsForTask`, `pullNewTasks`). Remove broken `adopt` IPC call by WIRING `adopt` through ipc/preload/d.ts.
+3. Push self-heal: in labels `remoteUpsert` (syncTables) + `pushLabel` (PersonalSyncService), on ANY upsert error (not just detected unique-violation) attempt `consolidateLocalLabel`/`consolidateLabelOnRemote` when `local.user_id` is set; only re-throw if consolidation didn't apply. This drives the LOCAL divergence to converge (`failed→0`) on next reconcile.
+4. Wire `labels.adopt` through `ipc-handlers.ts` + `preload/index.ts` + `preload/index.d.ts`.
+5. Cloud heal (USER runs): committed, previewable, idempotent SQL `supabase/heal/2026-06-17-label-ownership.sql` — for the user's SOLO (single-member, owned) projects only, ensure canonical task_label present then delete the alt-owned dup; never delete alt label rows; never touch shared (>1 member) projects.
+6. Tests: `adopt` (reuse/create), `applyRemote` sticky-ownership, `consolidate` divergent-owner convergence.
+
+**Verify:** Vitest (deterministic) for repo logic; dev-DB copy for local self-heal; cloud SQL is preview-first + scoped + idempotent.
+
+**STATUS 2026-06-17 — code shipped (commit pending), USER runs heal:**
+- DONE 1–4: applyRemote sticky-ownership guard; ensureLabelsExistLocally adopt/preserve + projectId; push self-heal broadened (syncTables.remoteUpsert + PersonalSyncService.pushLabel); adopt wired (ipc/preload/d.ts). Typecheck + build + 963 Vitest green (incl. new adopt/sticky-ownership/divergence tests).
+- DONE 5: cloud heal `supabase/heal/2026-06-17-label-ownership.sql` (preview→apply→verify). Read-only prod preview confirmed it captures all 10 divergent names (~212 links, all with a clean primary canonical, has_canonical=true) and excludes shared projects.
+- PENDING (user): (a) sign in on a test/dev build, confirm `Reconcile: labels … failed=0` after the local self-heal converges; (b) run the cloud heal SQL STEP 0→1→2 in the Supabase SQL editor; (c) confirm chips render correctly. Then move task d5b138b1 Verifying→Done.
+- Note: `dcfe5ded` is the user's alt (still used) → heal NEVER deletes alt label rows, only remaps the primary's solo-project task links + soft-deletes the stray cloud links.
+
 ## 2026-06-10 — Batch overview/acceptance doc (MOVED INTO RALPH: story #95 in prd.json)
 
 > **Do NOT build this manually.** It is now story #95 in `prd.json` (and `prd-fable.json`) on `ralph/sync-hardening` — the running Fable batch builds it after #90–#94, with checkpointing (`review/checklist.json`) and worktree-based before-shots. The 02:45 resume watcher relaunches it like any other story if a usage limit kills it. Only build manually if ralph gave up (see `resume-245.log` for GIVE UP lines); resume from the checklist, spec below.

@@ -213,6 +213,57 @@ describe('LabelRepository — soft-delete', () => {
   })
 })
 
+function seedUser(db: DatabaseSync, id: string, email: string): void {
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO users (id, email, display_name, avatar_url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, email, null, null, now, now)
+}
+
+describe('LabelRepository — adopt', () => {
+  let db: DatabaseSync
+  let repo: LabelRepository
+  let userId: string
+
+  function foreign(id: string, name: string, ownerId: string): Label {
+    const now = new Date().toISOString()
+    return { id, user_id: ownerId, name, color: '#abcdef', order_index: 0, created_at: now, updated_at: now, deleted_at: null }
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    userId = fx.userId
+    seedUser(db, 'alt-user', 'alt@example.com')
+    repo = new LabelRepository(db)
+  })
+
+  it('mints a NEW id — never reuses the foreign label id', () => {
+    const adopted = repo.adopt(userId, foreign('foreign-id', 'Todoozy', 'alt-user'))
+    expect(adopted.id).not.toBe('foreign-id')
+    expect(adopted.user_id).toBe(userId)
+    expect(adopted.name).toBe('Todoozy')
+    // The foreign id must not have been created under our ownership.
+    expect(repo.findById('foreign-id')).toBeUndefined()
+  })
+
+  it('returns the existing same-name label instead of creating a duplicate', () => {
+    const mine = repo.create({ id: 'mine', user_id: userId, name: 'Later', color: '#111111' })
+    const adopted = repo.adopt(userId, foreign('alt-later', 'later', 'alt-user'))
+    expect(adopted.id).toBe(mine.id)
+    // No second 'Later' row created for this user.
+    const rows = db.prepare('SELECT id FROM labels WHERE user_id = ? AND LOWER(name) = ?').all(userId, 'later')
+    expect(rows).toHaveLength(1)
+  })
+
+  it('is case-insensitive when matching an existing same-name label', () => {
+    const mine = repo.create({ id: 'mine', user_id: userId, name: 'Grilled' })
+    const adopted = repo.adopt(userId, foreign('alt', 'GRILLED', 'alt-user'))
+    expect(adopted.id).toBe(mine.id)
+  })
+})
+
 describe('LabelRepository — applyRemote', () => {
   let db: DatabaseSync
   let repo: LabelRepository
@@ -222,6 +273,7 @@ describe('LabelRepository — applyRemote', () => {
     db = createTestDb()
     const fx = seedFixtures(db)
     userId = fx.userId
+    seedUser(db, 'alt-user', 'alt@example.com')
     repo = new LabelRepository(db)
   })
 
@@ -284,6 +336,59 @@ describe('LabelRepository — applyRemote', () => {
     const local = repo.findById('r4')!
     expect(local.name).toBe('Updated remote')
     expect(local.updated_at).toBe(fresh.updated_at)
+  })
+
+  it('sticky ownership: a newer remote does NOT flip an existing row to a different owner', () => {
+    // The divergence scenario (d5b138b1): local row owned by the current user,
+    // a newer cloud row of the SAME id owned by the alt account. Applying it
+    // must keep our ownership (else the label vanishes from our views).
+    const lab = repo.create({ id: 'shared-id', user_id: userId, name: 'Todoozy', color: '#ef4444' })
+    const altOwned: Label = {
+      ...lab,
+      user_id: 'alt-user',
+      color: '#00ff00',
+      updated_at: new Date(new Date(lab.updated_at).getTime() + 60_000).toISOString()
+    }
+    repo.applyRemote(altOwned)
+    const local = repo.findById('shared-id')!
+    expect(local.user_id).toBe(userId) // owner preserved
+    expect(local.color).toBe('#00ff00') // other fields still refreshed
+  })
+
+  it('legacy NULL-owner row still adopts the remote user_id', () => {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES ('legacy', NULL, 'Legacy', '#888', 0, ?, ?)`
+    ).run(now, now)
+    const remote: Label = {
+      id: 'legacy',
+      user_id: userId,
+      name: 'Legacy',
+      color: '#888',
+      order_index: 0,
+      created_at: now,
+      updated_at: new Date(Date.now() + 60_000).toISOString(),
+      deleted_at: null
+    }
+    repo.applyRemote(remote)
+    expect(repo.findById('legacy')!.user_id).toBe(userId)
+  })
+
+  it('new remote-only foreign label is stored with its own owner (shared-project rendering)', () => {
+    const now = new Date().toISOString()
+    const foreign: Label = {
+      id: 'foreign-1',
+      user_id: 'alt-user',
+      name: 'MemberLabel',
+      color: '#123456',
+      order_index: 0,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null
+    }
+    repo.applyRemote(foreign)
+    expect(repo.findById('foreign-1')!.user_id).toBe('alt-user')
   })
 })
 
@@ -380,5 +485,29 @@ describe('LabelRepository — consolidate', () => {
     expect(result.taskRemaps).toBe(0)
     expect(result.projectRemaps).toBe(0)
     expect(repo.findById('L_remote')).toBeDefined()
+  })
+
+  it('converges the divergence: collapses the stray same-name id onto the cloud canonical id', () => {
+    // Mirrors prod (d5b138b1): locally the (user_id, lower(name)) unique index
+    // means the user holds the "Todoozy" name under exactly ONE id — the stray
+    // alt-account id `6a1b5cad` that carries all the task links. The cloud
+    // canonical `82cc13d9` is not yet local. Consolidating must pull the
+    // canonical in, remap every link, drop the stray, and leave one row owning
+    // the name.
+    seedTask(db, 't1', projectId, userId)
+    seedTask(db, 't2', projectId, userId)
+    repo.create({ id: 'alt-todoozy', user_id: userId, name: 'Todoozy' })
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t1', 'alt-todoozy')
+    db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t2', 'alt-todoozy')
+
+    const result = repo.consolidate('alt-todoozy', canonical('canon-todoozy', 'Todoozy'))
+
+    expect(result.taskRemaps).toBe(2)
+    expect(repo.findById('alt-todoozy')).toBeUndefined()
+    expect(repo.findById('canon-todoozy')).toBeDefined()
+    const links = db.prepare('SELECT label_id FROM task_labels WHERE task_id IN (?, ?)').all('t1', 't2') as Array<{ label_id: string }>
+    expect(links.every((l) => l.label_id === 'canon-todoozy')).toBe(true)
+    const todoozyRows = db.prepare('SELECT id FROM labels WHERE user_id = ? AND LOWER(name) = ?').all(userId, 'todoozy')
+    expect(todoozyRows.map((r) => (r as { id: string }).id)).toEqual(['canon-todoozy'])
   })
 })

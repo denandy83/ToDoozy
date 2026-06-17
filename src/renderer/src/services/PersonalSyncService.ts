@@ -350,23 +350,15 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
     if (error) {
-      // Detect (user_id, lower(name)) collision permissively — supabase-js
-      // surfaces the same Postgres error across `code`, `details`, and
-      // `message` in different versions; match any of them.
-      const e = error as { code?: string; message?: string; details?: string }
-      const code = e.code ?? ''
-      const msg = e.message ?? ''
-      const details = e.details ?? ''
-      const looksLikeUniqueViolation =
-        code === '23505' ||
-        msg.includes('user_name_unique') ||
-        msg.includes('duplicate key') ||
-        details.includes('user_name_unique') ||
-        details.includes('already exists')
-      if (looksLikeUniqueViolation) {
-        const consolidated = await consolidateLabelOnRemote(label, userId)
-        if (consolidated) return
-      }
+      // Any upsert error is a consolidation candidate (see syncTables
+      // remoteUpsert for the two collision shapes): a (user_id, lower(name))
+      // UNIQUE violation, OR an ON CONFLICT(id) overwrite of a row owned by the
+      // user's alt account that fails on RLS (the task d5b138b1 divergence —
+      // not a 23505). consolidateLabelOnRemote collapses the local row onto the
+      // user's OWN canonical by name when one exists; otherwise it returns
+      // false and we report the original push failure.
+      const consolidated = await consolidateLabelOnRemote(label, userId)
+      if (consolidated) return
       await reportPushFailure('pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
     } else {
       markSynced()
@@ -1772,34 +1764,74 @@ export async function pullStatuses(projectId: string): Promise<number> {
  * remote id to the canonical local id so task_labels inserts don't reference
  * a non-existent local row.
  */
-async function ensureLabelsExistLocally(labelIds: string[]): Promise<Map<string, string>> {
+/**
+ * Resolve a set of remote label ids to the LOCAL label ids that should carry
+ * them on the current user's tasks, enforcing the ownership invariant: a label
+ * on the current user's task must be a row the current user OWNS.
+ *
+ * Returns a remap (remote id → local id); ids absent from the map resolve to
+ * themselves.
+ *
+ *  - Own label (remote.user_id === current user): apply it as-is, preserving
+ *    its id. Minting a fresh id here would create a NEW divergence for the
+ *    user's own label (local newid vs cloud remoteid).
+ *  - Foreign / null-owner label (e.g. another member's label in a shared
+ *    project, or the user's alt-account label leaked onto their tasks): the
+ *    current user adopts their OWN same-name label (existing one, or a freshly
+ *    minted UUID) and we link it to the task's project. The foreign id is never
+ *    stored under the current user's ownership — that mismatch is exactly the
+ *    label-identity divergence (task d5b138b1).
+ *  - Not signed in: store the remote row faithfully (id + owner) so nothing is
+ *    lost; ownership is reconciled once a user is present.
+ */
+async function ensureLabelsExistLocally(
+  labelIds: string[],
+  projectId: string | null
+): Promise<Map<string, string>> {
   const remap = new Map<string, string>()
   if (labelIds.length === 0) return remap
   const supabase = await getSupabase()
   const { useAuthStore } = await import('../shared/stores/authStore')
   const ownerId = useAuthStore.getState().currentUser?.id ?? null
+
+  const link = async (labelId: string): Promise<void> => {
+    if (projectId) await window.api.labels.addToProject(projectId, labelId).catch(() => {})
+  }
+
   for (const labelId of labelIds) {
     const localLabel = await window.api.labels.findById(labelId)
-    if (localLabel) continue
+    if (localLabel) {
+      // Already present. Own it (or legacy NULL-owner) → use as-is. A
+      // foreign-owned local row (rare in a single-user DB) → adopt to our own.
+      if (!ownerId || localLabel.user_id === ownerId || localLabel.user_id == null) {
+        await link(localLabel.id)
+      } else {
+        const own = await window.api.labels.adopt(ownerId, localLabel)
+        await link(own.id)
+        if (own.id !== labelId) remap.set(labelId, own.id)
+      }
+      continue
+    }
+
     const { data: remoteLabel } = await supabase
       .from('user_labels')
       .select('*')
       .eq('id', labelId)
       .single()
     if (!remoteLabel) continue
-    const ownerForLabel = ownerId ?? remoteLabel.user_id ?? null
-    if (!ownerForLabel) continue
-    const sameName = await window.api.labels.findByName(ownerForLabel, remoteLabel.name)
-    if (sameName) {
-      remap.set(labelId, sameName.id)
-    } else {
-      await window.api.labels.create({
-        id: remoteLabel.id,
-        user_id: ownerForLabel,
-        name: remoteLabel.name,
-        color: remoteLabel.color
-      }).catch(() => {})
+
+    if (!ownerId || remoteLabel.user_id === ownerId) {
+      // Our own label (from another device), or no signed-in user to enforce
+      // ownership: store the remote row faithfully, preserving its id.
+      await window.api.labels.applyRemote(remoteLabel as Label).catch(() => {})
+      await link(labelId)
+      continue
     }
+
+    // Foreign / null-owner label → current user must own a same-name copy.
+    const own = await window.api.labels.adopt(ownerId, remoteLabel as Label)
+    await link(own.id)
+    if (own.id !== labelId) remap.set(labelId, own.id)
   }
   return remap
 }
@@ -1823,7 +1855,8 @@ export async function pullTaskLabelsForTask(taskId: string): Promise<number> {
       .eq('task_id', taskId)
     if (error || !pairs || pairs.length === 0) return 0
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
-    const remap = await ensureLabelsExistLocally(labelIds)
+    const task = await window.api.tasks.findById(taskId).catch(() => null)
+    const remap = await ensureLabelsExistLocally(labelIds, task?.project_id ?? null)
     const resolved = [...new Set(labelIds.map((id) => remap.get(id) ?? id))]
     return await window.api.tasks.applyRemoteTaskLabels(taskId, resolved)
   } catch (err) {
@@ -1956,7 +1989,7 @@ export async function pullNewTasks(projectId: string): Promise<number> {
 
         if (remoteTaskLabels && remoteTaskLabels.length > 0) {
           const labelIds = [...new Set(remoteTaskLabels.map((tl) => tl.label_id))]
-          const remap = await ensureLabelsExistLocally(labelIds)
+          const remap = await ensureLabelsExistLocally(labelIds, projectId)
           for (const tl of remoteTaskLabels) {
             const localLabelId = remap.get(tl.label_id) ?? tl.label_id
             await window.api.tasks.addLabel(tl.task_id, localLabelId).catch(() => {})
