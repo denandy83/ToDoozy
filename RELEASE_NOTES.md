@@ -6,6 +6,12 @@ User-facing changes by date. Most recent first.
 
 ## v1.7.1
 
+- **Fix: Labels that vanished from a project are back** — Some labels you'd applied to tasks (often ones added from another device or via the assistant) had silently disappeared from a project's filter bar, label picker, and even the task chips, because the project↔label link was never recorded. ToDoozy now rebuilds those links from your tasks on launch and keeps them in sync from then on, so the labels reappear everywhere they belong.
+- **Filter chips now match the tasks in view** — In Saved Views and projects, the label filter chips show only the labels your visible tasks actually use, instead of every label in your workspace (including ones that matched nothing). In a Saved View the set stays put while you toggle filters and only updates when you re-save the view.
+- **Switch label filters between "any / all / is not"** — The active label-filter chip now has an inline menu to flip between "is any of", "is all of", and "is not" without rebuilding the filter — and the whole chip is clickable now, not just the text.
+- **Archive view gained a filter bar** — Filter archived tasks by label, priority, and due date, with those details shown on each row.
+- **Fix: Removing password login actually disables the password** — "Remove Password Login" (Settings → Profile) previously left your old password still working. It now properly invalidates it, so after removing you can only sign in with Google.
+- **Fix: Bulk action menu no longer runs off the bottom of the screen** — Right-clicking a multi-task selection near the bottom edge used to push the menu's lower options out of view; it now stays fully on-screen.
 - **Fix: Sign-in can no longer trap you on the splash screen** — If a Supabase auth call hung (which happened during a `us-east-1` AZ outage), the TD-logo splash had no escape and you had to Force Quit the app. Now: a "Cancel" link appears below the progress bar after 5 seconds; sign-in attempts time out automatically (30 seconds for email/password, 15 seconds for Google) with a clear "auth server may be unreachable" message; and a hung cold-start drops you into offline mode after 20 seconds instead of freezing.
 - **Fix: Scrolling no longer changes your number settings** — In Settings, scrolling the mouse wheel while the cursor sat over a number field (auto-archive threshold, timer durations) used to nudge the value up or down without you noticing. Those fields now ignore the scroll wheel, so scrolling the page leaves your settings untouched.
 
