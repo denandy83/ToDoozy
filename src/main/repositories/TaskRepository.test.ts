@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
 import { TaskRepository } from './TaskRepository'
+import { LabelRepository } from './LabelRepository'
 import type { Task } from '../../shared/types'
 
 function createTestDb(): DatabaseSync {
@@ -274,5 +275,78 @@ describe('TaskRepository — applyRemoteTask', () => {
     expect(after.deleted_at).not.toBeNull()
     expect(after.title).toBe('remote zombie')
     expect(repo.findByProjectId(projectId).map((x) => x.id)).not.toContain(t.id)
+  })
+})
+
+describe('TaskRepository — project_labels junction guarantee', () => {
+  let db: DatabaseSync
+  let repo: TaskRepository
+  let labels: LabelRepository
+  let projectId: string
+  let userId: string
+  let statusId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    projectId = fx.projectId
+    userId = fx.userId
+    statusId = fx.statusId
+    // findByTaskId / findByProjectId scope by project membership — seed it.
+    db.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`
+    ).run(projectId, userId, 'owner', new Date().toISOString())
+    repo = new TaskRepository(db)
+    labels = new LabelRepository(db)
+  })
+
+  function insertLabel(id: string, name: string): void {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    ).run(id, userId, name, '#888888', now, now)
+  }
+
+  function junction(labelId: string): { deleted_at: string | null } | undefined {
+    return db
+      .prepare('SELECT deleted_at FROM project_labels WHERE project_id = ? AND label_id = ?')
+      .get(projectId, labelId) as { deleted_at: string | null } | undefined
+  }
+
+  it('addLabel() links the label to the task’s project so every read path renders it', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    insertLabel('L1', 'Later') // label exists but is NOT linked to the project
+    expect(labels.findByProjectId(projectId)).toEqual([])
+
+    repo.addLabel(t.id, 'L1')
+
+    expect(junction('L1')?.deleted_at).toBeNull()
+    // The read paths INNER JOIN project_labels; without the link these were []
+    expect(labels.findByTaskId(t.id).map((l) => l.id)).toEqual(['L1'])
+    expect(labels.findByProjectId(projectId).map((l) => l.id)).toEqual(['L1'])
+  })
+
+  it('addLabel() revives a tombstoned project_labels link', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    insertLabel('L1', 'Later')
+    db.prepare(
+      `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at) VALUES (?, ?, datetime('now'), ?)`
+    ).run(projectId, 'L1', new Date().toISOString())
+
+    repo.addLabel(t.id, 'L1')
+
+    expect(junction('L1')?.deleted_at).toBeNull()
+  })
+
+  it('applyRemoteTaskLabels() links pulled labels to the project (sync-pull drift guard)', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    insertLabel('L1', 'Later')
+
+    const added = repo.applyRemoteTaskLabels(t.id, ['L1'])
+
+    expect(added).toBe(1)
+    expect(junction('L1')?.deleted_at).toBeNull()
+    expect(labels.findByTaskId(t.id).map((l) => l.id)).toEqual(['L1'])
   })
 })

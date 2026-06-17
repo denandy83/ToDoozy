@@ -326,6 +326,29 @@ export class TaskRepository {
          ON CONFLICT(task_id, label_id) DO UPDATE SET deleted_at = NULL`
       )
       .run(taskId, labelId)
+    this.ensureProjectLabel(taskId, labelId)
+  }
+
+  /**
+   * Ensure the label is linked to the task's project via the project_labels
+   * junction. Every task-label read path (LabelRepository.findByTaskId /
+   * findTaskLabelsByProject) INNER JOINs project_labels, so a task_labels row
+   * whose project lacks a matching junction row renders as if the label weren't
+   * there at all. This is the single chokepoint that keeps the junction in
+   * lockstep with task_labels — called by both the user-facing addLabel and the
+   * sync-pull applyRemoteTaskLabels, so no add path (renderer, duplicate,
+   * template, MCP echo, reconcile) can leave a label orphaned from its project.
+   * Revives a tombstoned link (DO UPDATE SET deleted_at = NULL): if a label is
+   * actively on a task, it belongs in that project's palette.
+   */
+  private ensureProjectLabel(taskId: string, labelId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
+         SELECT t.project_id, ?, datetime('now'), NULL FROM tasks t WHERE t.id = ?
+         ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL`
+      )
+      .run(labelId, taskId)
   }
 
   /**
@@ -356,6 +379,11 @@ export class TaskRepository {
       this.db
         .prepare('INSERT INTO task_labels (task_id, label_id, deleted_at) VALUES (?, ?, NULL)')
         .run(taskId, labelId)
+      // Keep the junction in lockstep: a remote task_labels row may arrive
+      // without a remote project_labels row (the original drift source), which
+      // would render the label invisible locally. ensureProjectLabel guarantees
+      // the link exists so the pulled label actually shows.
+      this.ensureProjectLabel(taskId, labelId)
       added++
     }
     return added

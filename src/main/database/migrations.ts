@@ -671,4 +671,40 @@ const migration_24: Migration = (db) => {
   db.exec(`ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0;`)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24]
+const migration_25: Migration = (db) => {
+  // Backfill the project_labels junction from actual task_labels usage.
+  //
+  // Every task-label read path (LabelRepository.findByTaskId /
+  // findTaskLabelsByProject) INNER JOINs project_labels, so a label applied to
+  // a task whose project has no matching junction row renders as if the label
+  // weren't there at all — it vanishes from the task chips, the project filter
+  // bar, and the label picker. This drift was introduced by label-apply paths
+  // (notably the MCP server before commit 309204b, and any cross-project add)
+  // that wrote task_labels without the junction row. Go-forward writes now
+  // ensure the junction (TaskRepository.addLabel / applyRemoteTaskLabels); this
+  // heals the rows that predate that fix.
+  //
+  // Insert ONLY where no junction row exists at all (active or tombstoned) — a
+  // tombstoned row means the label was deliberately removed from the project,
+  // and we must not resurrect it. Idempotent: the (project_id, label_id) unique
+  // constraint plus NOT EXISTS make a re-run a no-op. Archived-but-not-deleted
+  // tasks count: the label still belongs to that project's palette. The next
+  // sync reconcile pushes the new rows to Supabase (getProjectLabelsForOwner /
+  // getProjectLabelsForSharedProjects diff).
+  db.exec(`
+    INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
+    SELECT DISTINCT t.project_id, tl.label_id, datetime('now'), NULL
+    FROM task_labels tl
+    INNER JOIN tasks t ON t.id = tl.task_id
+    INNER JOIN labels l ON l.id = tl.label_id
+    WHERE tl.deleted_at IS NULL
+      AND t.deleted_at IS NULL
+      AND l.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM project_labels pl
+        WHERE pl.project_id = t.project_id AND pl.label_id = tl.label_id
+      );
+  `)
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25]
