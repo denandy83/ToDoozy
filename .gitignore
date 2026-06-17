@@ -7,3 +7,6 @@ out/
 *.db-journal
 .DS_Store
 .claude/worktrees/
+
+# Supabase backup (PII + auth secrets — never commit)
+backup-supabase-*/

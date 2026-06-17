@@ -354,6 +354,14 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+[functions.mcp]
+# The MCP edge function authenticates via a custom API key passed as the
+# Authorization bearer (looked up in the api_keys table). The Supabase gateway
+# must NOT enforce JWT verification, or it rejects the non-JWT bearer with
+# 401 "Invalid JWT" before the function runs — breaking every MCP client.
+# Keep this false; a deploy without it defaults to verify_jwt = true and breaks auth.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
