@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deduplicateLabelsByName, getLabelsInUse } from './labelUtils'
+import { deduplicateLabelsByName, getLabelsInUse, filterTaskIdsByLabelKeys } from './labelUtils'
 import type { Label } from '../../../../shared/types'
 
 function makeLabel(overrides: Partial<Label> & { id: string; name: string; user_id: string | null }): Label {
@@ -130,5 +130,48 @@ describe('getLabelsInUse', () => {
     const taskLabels: Record<string, Label[]> = { t1: [chore, bug, feature] }
     const out = getLabelsInUse(['t1'], taskLabels, allLabels, 'u1')
     expect(out.map((l) => l.id)).toEqual(['bug', 'feat', 'chore'])
+  })
+})
+
+describe('filterTaskIdsByLabelKeys', () => {
+  const bug = makeLabel({ id: 'bug', name: 'Bug', user_id: 'u1' })
+  const feature = makeLabel({ id: 'feat', name: 'Feature', user_id: 'u1' })
+  const urgent = makeLabel({ id: 'urgent', name: 'Urgent', user_id: 'u1' })
+  const taskLabels: Record<string, Label[]> = {
+    t1: [bug],
+    t2: [bug, urgent],
+    t3: [feature],
+    t4: [] // no labels
+  }
+  const ids = ['t1', 't2', 't3', 't4']
+
+  it('returns all ids unchanged when no keys are given', () => {
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, [], 'all')).toEqual(ids)
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, [], 'any')).toEqual(ids)
+  })
+
+  it('keeps only tasks carrying the label (single key)', () => {
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, ['bug'], 'all')).toEqual(['t1', 't2'])
+  })
+
+  it('matches label name keys case-insensitively', () => {
+    // keys are expected lowercased; the task labels are matched lowercased too
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, ['urgent'], 'all')).toEqual(['t2'])
+  })
+
+  it('requires every key with "all" logic', () => {
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, ['bug', 'urgent'], 'all')).toEqual(['t2'])
+  })
+
+  it('requires any key with "any" logic', () => {
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, ['bug', 'feature'], 'any')).toEqual(['t1', 't2', 't3'])
+  })
+
+  it('returns an empty array when no task matches', () => {
+    expect(filterTaskIdsByLabelKeys(ids, taskLabels, ['nonexistent'], 'all')).toEqual([])
+  })
+
+  it('treats task ids missing from the map as label-less', () => {
+    expect(filterTaskIdsByLabelKeys(['missing'], taskLabels, ['bug'], 'all')).toEqual([])
   })
 })

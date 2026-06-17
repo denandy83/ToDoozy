@@ -37,14 +37,14 @@ import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
-import { deduplicateLabelsByName, remapLabelsToCurrentUser } from '../../shared/utils/labelUtils'
+import { deduplicateLabelsByName, remapLabelsToCurrentUser, getLabelsInUse } from '../../shared/utils/labelUtils'
 import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from './AddTaskInput'
 import { StatusSection } from './StatusSection'
 import { KanbanView } from './KanbanView'
 import type { Task } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import type { SortRule } from '../../shared/utils/sortTasks'
-import { createSortComparator } from '../../shared/utils/sortTasks'
+import { createSortComparator, compareDoneByCompletion } from '../../shared/utils/sortTasks'
 import type { DropIndicator } from './useDragAndDrop'
 
 interface TaskListViewProps {
@@ -86,6 +86,24 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       : deduplicateLabelsByName(rawLabels, currentUserId),
     [rawLabels, currentUserId, isSharedProject, allStoredLabels]
   )
+  // Labels actually present on this project's tasks — used for the FilterBar
+  // chip row only. The project_labels junction (rawLabels above) is the label
+  // *palette* for adding labels to tasks, but it can drift from reality: a
+  // label applied to tasks may be missing from the junction (so it never shows
+  // as a filter), and a junction row can linger for a label no task uses (so it
+  // shows but filters to nothing). Deriving the filter chips from the tasks
+  // themselves keeps the bar honest and consistent with My Day / saved views:
+  // it shows exactly the labels you can meaningfully filter by. Archived and
+  // template rows are excluded (they aren't listed in this view).
+  const filterLabels = useMemo(() => {
+    const taskIds = tasks
+      .filter((t) => t.is_archived === 0 && t.is_template === 0)
+      .map((t) => t.id)
+    const inUse = getLabelsInUse(taskIds, taskLabels, Object.values(allStoredLabels), currentUserId)
+    return isSharedProject
+      ? remapLabelsToCurrentUser(inUse, allStoredLabels, currentUserId)
+      : inUse
+  }, [tasks, taskLabels, allStoredLabels, currentUserId, isSharedProject])
   const activeLabelFilters = useLabelStore(selectActiveLabelFilters)
   const hasActiveFilters = useLabelStore(selectHasActiveLabelFilters)
   const labelFilterLogic = useLabelStore(selectLabelFilterLogic)
@@ -254,18 +272,10 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     return (a: Task, b: Task): number => a.order_index - b.order_index
   }, [sortRules, isCustomSort, statusOrderMap])
 
-  // Done sections: under the default custom sort, auto-sort by completed_date
-  // descending (most recently completed first). An explicit sort still wins.
-  const doneSortFn = useMemo(() => {
-    if (!isCustomSort) return prioritySortFn
-    return (a: Task, b: Task): number => {
-      if (a.completed_date && b.completed_date) {
-        return b.completed_date.localeCompare(a.completed_date)
-      }
-      // Tasks without a completed_date (legacy/sync rows) fall back to order_index
-      return a.order_index - b.order_index
-    }
-  }, [isCustomSort, prioritySortFn])
+  // Done sections ALWAYS sort by completion date, most recently completed first —
+  // regardless of the active sort on the open tasks. The Done pile is history and
+  // stays chronological no matter how you've sorted your in-progress work.
+  const doneSortFn = compareDoneByCompletion
 
   // Build flat ordered list of visible tasks (respecting expand/collapse) for keyboard nav
   const flatTasks = useMemo(() => {
@@ -834,7 +844,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       )}
       <AddTaskInput ref={addInputRef} viewName={projectName} onSubmit={handleAddTask} labels={allLabels} projectId={projectId} disabled={isOfflineShared} />
 
-      <FilterBar labels={allLabels} projectId={projectId} showSort showCustomSort />
+      <FilterBar labels={filterLabels} projectId={projectId} showSort showCustomSort />
 
       {layoutMode === 'kanban' ? (
         <KanbanView

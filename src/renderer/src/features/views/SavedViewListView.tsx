@@ -19,7 +19,7 @@ import { useSetting } from '../../shared/stores/settingsStore'
 import { useCreateOrMatchLabel } from '../../shared/hooks/useCreateOrMatchLabel'
 import { FilterBar } from '../../shared/components/FilterBar'
 import { matchesDueDateFilter } from '../../shared/utils/dueDateFilter'
-import { deduplicateLabelsByName, getLabelsInUse } from '../../shared/utils/labelUtils'
+import { deduplicateLabelsByName, getLabelsInUse, filterTaskIdsByLabelKeys } from '../../shared/utils/labelUtils'
 import { TaskRow } from '../tasks/TaskRow'
 import type { Status } from '../../../../shared/types'
 import type { SortRule } from '../../shared/utils/sortTasks'
@@ -242,27 +242,24 @@ export function SavedViewListView(): React.JSX.Element {
   const dueDateRange = useLabelStore((s) => s.dueDateRange)
   const keywordFilter = useLabelStore((s) => s.keyword)
 
-  const matchingTasks = useMemo(() => {
+  // Tasks matching every active filter EXCEPT the inline label-include toggles.
+  // The label-chip row (labelsInView) is derived from this set, NOT from
+  // matchingTasks, so that pressing one label chip narrows the task list without
+  // making the *other* label chips vanish. Deriving the chips from the
+  // post-label-filter set would be a self-pruning facet: it breaks "is any of"
+  // multi-select (the sibling chip you'd click is gone) and re-broadening, and
+  // is inconsistent with MyDayView, whose chip row stays stable.
+  const baseTasks = useMemo(() => {
     const doneStatusIds = new Set(Object.values(allStatusesRecord).filter((s) => s.is_done === 1).map((s) => s.id))
     const all = Object.values(allTasks).filter((t) => !t.is_archived && !t.is_template && !t.parent_id && !doneStatusIds.has(t.status_id))
-    const filtered = !hasAnyFilter ? all : all.filter((task) => {
+    return !hasAnyFilter ? all : all.filter((task) => {
       const labels = taskLabels[task.id] ?? []
       const labelNames = new Set(labels.map((l) => l.name.toLowerCase()))
-      // Include filters
-      if (hasActiveFilters) {
-        if (labelFilterLogic === 'all') {
-          if (![...activeLabelFilters].every((fid) => labelNames.has(fid))) return false
-        } else {
-          if (![...activeLabelFilters].some((fid) => labelNames.has(fid))) return false
-        }
-      }
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
       if (hasProjectFilters && !projectFilters.has(task.project_id)) return false
       // Exclusion filters
-      if (hasExcludeLabelFilters) {
-        if ([...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
-      }
+      if (hasExcludeLabelFilters && [...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
       if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
       if (hasExcludeStatusFilters && excludeStatusFilters.has(task.status_id)) return false
       if (hasExcludeProjectFilters && excludeProjectFilters.has(task.project_id)) return false
@@ -273,20 +270,57 @@ export function SavedViewListView(): React.JSX.Element {
       }
       return true
     })
+  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter])
+
+  const matchingTasks = useMemo(() => {
+    const filtered = !hasActiveFilters ? baseTasks : baseTasks.filter((task) => {
+      const labelNames = new Set((taskLabels[task.id] ?? []).map((l) => l.name.toLowerCase()))
+      return labelFilterLogic === 'all'
+        ? [...activeLabelFilters].every((fid) => labelNames.has(fid))
+        : [...activeLabelFilters].some((fid) => labelNames.has(fid))
+    })
 
     // Apply sort
     const effectiveRules = sortRules.length > 0 ? sortRules : DEFAULT_SAVED_VIEW_SORT
     const comparator = createSortComparator(effectiveRules, statusOrderMap)
     return [...filtered].sort(comparator)
-  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasActiveFilters, activeLabelFilters, labelFilterLogic, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter, sortRules, statusOrderMap])
+  }, [baseTasks, taskLabels, hasActiveFilters, activeLabelFilters, labelFilterLogic, sortRules, statusOrderMap])
 
-  // Labels present on the currently visible tasks — rendered as inline filter
-  // chips. Filters from the raw label set then dedups (matches MyDayView), so a
-  // cross-project same-name label whose canonical row was dropped still surfaces.
-  const labelsInView = useMemo(
-    () => getLabelsInUse(matchingTasks.map((t) => t.id), taskLabels, rawAllLabels, userId),
-    [matchingTasks, taskLabels, rawAllLabels, userId]
-  )
+  // The view's saved label-include filter, resolved to lowercased label NAME
+  // keys (+ logic). Read from the SAVED config rather than the live filter
+  // store so the inline label palette stays put while the user toggles label
+  // chips and only changes when the view is re-saved. Handles both current
+  // configs (name keys) and legacy configs that stored label UUIDs.
+  const savedLabelFilter = useMemo<{ keys: string[]; logic: 'any' | 'all' }>(() => {
+    if (!currentView) return { keys: [], logic: 'all' }
+    try {
+      const cfg = JSON.parse(currentView.filter_config) as FilterConfig
+      const keys = (cfg.labelIds ?? []).map((idOrKey) => {
+        const byId = rawAllLabels.find((l) => l.id === idOrKey)
+        return (byId ? byId.name : idOrKey).toLowerCase()
+      })
+      return { keys, logic: cfg.labelLogic ?? 'all' }
+    } catch {
+      return { keys: [], logic: 'all' }
+    }
+  }, [currentView?.id, currentView?.filter_config, rawAllLabels])
+
+  // Labels present on the tasks the saved view actually contains — baseTasks
+  // narrowed by the view's SAVED label-include filter — rendered as the inline
+  // filter-chip palette. Scoping to this set (rather than every baseTask) means
+  // a label-defined view shows only the labels its own tasks carry, not every
+  // label in the workspace. Still derived from baseTasks (not matchingTasks) so
+  // pressing one chip narrows the list without making the sibling chips vanish,
+  // and the palette only shifts when the saved label filter changes (on save).
+  const labelsInView = useMemo(() => {
+    const ids = filterTaskIdsByLabelKeys(
+      baseTasks.map((t) => t.id),
+      taskLabels,
+      savedLabelFilter.keys,
+      savedLabelFilter.logic
+    )
+    return getLabelsInUse(ids, taskLabels, rawAllLabels, userId)
+  }, [baseTasks, taskLabels, savedLabelFilter, rawAllLabels, userId])
 
   // Keep sidebar count in sync with actual matching tasks
   useEffect(() => {

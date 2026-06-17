@@ -37,6 +37,29 @@ export function getLabelsInUse(
 }
 
 /**
+ * From a list of task ids, keep only those whose labels satisfy a saved
+ * label-include filter, expressed as lowercased label NAME keys plus any/all
+ * logic (matching how the filter store keys labels). Used to scope a saved
+ * view's inline "labels in view" chip palette to the view's own tasks: a view
+ * defined by "Label: bug" should offer the labels carried by its bug tasks, not
+ * every label in the workspace. An empty key set is a no-op (returns all ids).
+ */
+export function filterTaskIdsByLabelKeys(
+  taskIds: string[],
+  taskLabels: Record<string, Label[]>,
+  labelKeys: string[],
+  logic: 'any' | 'all'
+): string[] {
+  if (labelKeys.length === 0) return taskIds
+  return taskIds.filter((taskId) => {
+    const names = new Set((taskLabels[taskId] ?? []).map((l) => l.name.toLowerCase()))
+    return logic === 'all'
+      ? labelKeys.every((k) => names.has(k))
+      : labelKeys.some((k) => names.has(k))
+  })
+}
+
+/**
  * Remap each label in `labels` to the viewer's own same-name label when one
  * exists, then deduplicate. Used for task chips: if User A tagged a task
  * with their red "testlabel" and User B (the viewer) has a yellow "testLABEL"
