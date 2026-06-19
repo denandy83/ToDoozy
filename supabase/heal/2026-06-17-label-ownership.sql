@@ -86,7 +86,7 @@ divergent AS (
 )
 -- 1a. Ensure the canonical link exists & is active (revive a tombstone).
 INSERT INTO task_labels (task_id, label_id, deleted_at)
-SELECT DISTINCT task_id, canonical_id, NULL FROM divergent
+SELECT DISTINCT task_id, canonical_id, NULL::timestamptz FROM divergent
 ON CONFLICT (task_id, label_id) DO UPDATE SET deleted_at = NULL;
 
 WITH params AS (SELECT '4cf29d6b-c208-4230-af6a-358a1e46c56e'::uuid AS primary_id),
