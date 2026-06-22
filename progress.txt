@@ -252,3 +252,40 @@ copy; logged as ToDoozy task 938c848d (Personal, Todoozy+Bug labels).
 Verification: typecheck exit 0 (no app source touched); all 27 entries present with commit+id+path (grep
 count 27, all referenced images exist); doc rendered in headless Chrome in both color schemes. No Vitest
 additions (no new app code, per the story). No ToDoozy task lifecycle for #95 (story says none exists).
+
+## Task d5b138b1 — Label-identity divergence → per-user ownership + convergence (2026-06-17, commit 88040c7)
+
+Investigation (read-only prod SELECTs): `dcfe5ded` = andycassiers@gmail.com = the user's ALT account
+(primary `4cf29d6b` = andy.cassiers@gmail.com), still used for testing. Cloud divergence: ~212
+task_labels on the primary's SOLO projects point at ALT-owned labels (10 names: Todoozy 6a1b5cad→82cc13d9 ×141,
+Case Timeline LWC ×39, Grilled ×12, Later ×9, YUMMY ×5, Obsidian Vault ×2, Portal/newlabel/newest/Techlog ×1),
+each with a clean primary same-name canonical. Locally those alt ids were "healed" to primary ownership →
+same id, different owner local vs cloud. `failed=N` = labels reconcile push of the local stray id hits the
+cloud row owned by the alt → RLS error (NOT 23505) → the unique-only consolidation gate never fired.
+
+INVARIANT (user-confirmed): every user's labels must be rows THEY own; in a shared project a member missing a
+same-name label gets their OWN copy (them as owner). Alt still used → remap-only, never delete alt label rows.
+
+Code (go-forward + convergence):
+- LabelRepository.applyRemote: sticky-ownership guard (newer remote refreshes fields but can't flip an
+  existing non-null user_id to a different non-null owner; legacy NULL still adopts remote owner).
+- ensureLabelsExistLocally(labelIds, projectId): own→applyRemote (preserve id); foreign/null→adopt to the
+  current user's own same-name label (existing or FRESH uuid, never the foreign id) + addToProject + remap.
+  Threaded projectId through pullTaskLabelsForTask (task.project_id) + pullNewTasks (projectId param).
+- Push self-heal: syncTables.remoteUpsert + PersonalSyncService.pushLabel now attempt consolidation on ANY
+  upsert error (not just detected 23505) when local.user_id is set; re-throw only if no canonical exists.
+- adopt() wired through ipc-handlers + preload/index.ts + index.d.ts. (Removed the broken uncommitted
+  `window.api.labels.adopt` call that had no preload binding.)
+
+Heal (USER runs — scope decision "Code + tests now, I run the heal"): supabase/heal/2026-06-17-label-ownership.sql
+— preview→apply→verify, idempotent, scoped to the user's SOLO projects (single-member, owned), name-keyed
+dynamic mapping, soft-deletes the stray cloud links, NEVER deletes alt label rows. Read-only prod preview
+confirmed it captures exactly the 10 names / ~212 links and excludes shared projects (Todoozy Bugs, Crewlounge).
+
+Tests: +adopt (mint-new-id/reuse-by-name/case-insensitive), +applyRemote sticky-ownership
+(no-flip/legacy-NULL-adopt/foreign-row-stored), +consolidate divergence convergence. 963 Vitest green;
+typecheck + build clean. NOTE: `npm run lint` is broken by a pre-existing ESLint 10 flat-config error
+(Unexpected key "config") — logged to ToDoozy, unrelated to this change.
+
+Task d5b138b1 → Verifying. PENDING user: run the heal SQL + a test sign-in, confirm `failed=0` + chips render,
+then → Done.
