@@ -25,7 +25,7 @@ let channels: Map<string, SharedChannelState> = new Map()
 let onChangeCallback: RealtimeCallback | null = null
 let isOnline = true
 
-const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 900_000]
 const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 function getReconnectDelay(attempt: number): number {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
@@ -147,15 +147,18 @@ function scheduleSharedReconnect(projectId: string): void {
   if (state.attempt >= MAX_RECONNECT_ATTEMPTS) {
     logEvent('warn', 'realtime', `Reconnect gave up after ${state.attempt} attempts`, reconnPName)
     useSyncStore.getState().setConnectionLost(true)
+    useSyncStore.getState().setNextReconnectAt(null)
     return
   }
 
   const delay = getReconnectDelay(state.attempt)
   state.attempt += 1
   logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, reconnPName)
+  useSyncStore.getState().setNextReconnectAt(Date.now() + delay)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
+    useSyncStore.getState().setNextReconnectAt(null)
     if (state.cancelled) return
     if (isSuspended() || !navigator.onLine) {
       logEvent('info', 'realtime', `Reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`, reconnPName)

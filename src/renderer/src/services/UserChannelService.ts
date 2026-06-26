@@ -57,7 +57,7 @@ interface UserChannelState {
 
 let userChannelState: UserChannelState | null = null
 
-const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 900_000]
 const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 
 /** Guard against concurrent pulls of the same membership INSERT. */
@@ -285,15 +285,18 @@ function scheduleUserChannelReconnect(): void {
   if (state.attempt >= MAX_RECONNECT_ATTEMPTS) {
     logEvent('warn', 'realtime', `User-channel reconnect gave up after ${state.attempt} attempts`)
     useSyncStore.getState().setConnectionLost(true)
+    useSyncStore.getState().setNextReconnectAt(null)
     return
   }
 
   const delay = RECONNECT_DELAYS_MS[Math.min(state.attempt, RECONNECT_DELAYS_MS.length - 1)]
   state.attempt += 1
   logEvent('info', 'realtime', `User-channel reconnect in ${delay / 1000}s (attempt ${state.attempt})`)
+  useSyncStore.getState().setNextReconnectAt(Date.now() + delay)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
+    useSyncStore.getState().setNextReconnectAt(null)
     if (state.cancelled) return
     if (isSuspended() || !navigator.onLine) {
       logEvent('info', 'realtime', `User-channel reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`)

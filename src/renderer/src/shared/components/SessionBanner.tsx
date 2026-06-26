@@ -1,15 +1,30 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore, selectIsOffline, selectIsTokenPermanentlyDead } from '../stores/authStore'
-import { useSyncStore, selectConnectionLost } from '../stores/syncStore'
+import { useSyncStore, selectConnectionLost, selectNextReconnectAt } from '../stores/syncStore'
 
 export function SessionBanner(): React.JSX.Element | null {
   const isOffline = useAuthStore(selectIsOffline)
   const isTokenPermanentlyDead = useAuthStore(selectIsTokenPermanentlyDead)
   const connectionLost = useSyncStore(selectConnectionLost)
+  const nextReconnectAt = useSyncStore(selectNextReconnectAt)
   const logout = useAuthStore((s) => s.logout)
   const retrySessionRestore = useAuthStore((s) => s.retrySessionRestore)
   const [retrying, setRetrying] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (nextReconnectAt === null) {
+      setSecondsLeft(null)
+      return
+    }
+    const update = (): void => {
+      setSecondsLeft(Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000)))
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [nextReconnectAt])
 
   // Connection-lost banner takes priority over auth-offline banner: if the WS
   // gave up retrying, the user can recover with a click without re-auth.
@@ -46,14 +61,21 @@ export function SessionBanner(): React.JSX.Element | null {
             We can't reach the sync server. Your changes are saved locally.
           </span>
         </div>
-        <button
-          type="button"
-          onClick={handleReconnect}
-          disabled={reconnecting}
-          className="rounded-md border border-white/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white/10 disabled:opacity-50"
-        >
-          {reconnecting ? 'Retrying…' : 'Retry now'}
-        </button>
+        <div className="flex items-center gap-3">
+          {secondsLeft !== null && secondsLeft > 0 && !reconnecting && (
+            <span className="text-[10px] font-light tracking-wide text-white/70">
+              Auto reconnect in {secondsLeft}s
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleReconnect}
+            disabled={reconnecting}
+            className="rounded-md border border-white/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white/10 disabled:opacity-50"
+          >
+            {reconnecting ? 'Retrying…' : 'Retry now'}
+          </button>
+        </div>
       </div>
     )
   }

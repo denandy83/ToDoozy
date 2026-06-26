@@ -2868,7 +2868,7 @@ const personalChannelStates: Map<string, PersonalChannelState> = new Map()
 // Exponential backoff with give-up. After MAX_ATTEMPTS, surface a banner so the
 // user can manually retry instead of looping forever (which floods logs +
 // notifications during sleep / hotel-WiFi flake).
-const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]
+const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 900_000]
 const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 function getReconnectDelay(attempt: number): number {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
@@ -2998,15 +2998,18 @@ function schedulePersonalReconnect(projectId: string): void {
   if (state.attempt >= MAX_RECONNECT_ATTEMPTS) {
     logEvent('warn', 'realtime', `Reconnect gave up after ${state.attempt} attempts`, pName)
     useSyncStore.getState().setConnectionLost(true)
+    useSyncStore.getState().setNextReconnectAt(null)
     return
   }
 
   const delay = getReconnectDelay(state.attempt)
   state.attempt += 1
   logEvent('info', 'realtime', `Reconnect in ${delay / 1000}s (attempt ${state.attempt})`, pName)
+  useSyncStore.getState().setNextReconnectAt(Date.now() + delay)
 
   state.reconnectTimer = setTimeout(async () => {
     state.reconnectTimer = null
+    useSyncStore.getState().setNextReconnectAt(null)
     if (state.cancelled) return
     if (isSuspended() || !navigator.onLine) {
       logEvent('info', 'realtime', `Reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`, pName)

@@ -17,6 +17,8 @@ interface SyncState {
   realtimeConnected: boolean
   /** True when reconnect attempts have given up after max retries — surfaces a banner so the user can manually retry. */
   connectionLost: boolean
+  /** Unix ms timestamp of the next scheduled auto-reconnect attempt, or null when not scheduled. */
+  nextReconnectAt: number | null
 }
 
 interface SyncActions {
@@ -34,6 +36,7 @@ interface SyncActions {
   setError(message: string | null): void
   setRealtimeConnected(connected: boolean): void
   setConnectionLost(lost: boolean): void
+  setNextReconnectAt(ts: number | null): void
   hydrate(): Promise<void>
   /** Re-read sync_queue count from SQLite and update pendingCount. */
   refreshPendingCount(): Promise<void>
@@ -51,6 +54,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     errorMessage: null,
     realtimeConnected: false,
     connectionLost: false,
+    nextReconnectAt: null,
 
     setStatus: (status) => set({ status, errorMessage: status !== 'error' ? null : undefined }),
     setPendingCount: (count) => set({ pendingCount: count }),
@@ -66,7 +70,8 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     setFirstSyncProgress: (progress) => set({ firstSyncProgress: progress }),
     setError: (message) => set({ errorMessage: message, status: message ? 'error' : 'synced' }),
     setRealtimeConnected: (connected) => set({ realtimeConnected: connected }),
-    setConnectionLost: (lost) => set({ connectionLost: lost }),
+    setConnectionLost: (lost) => set({ connectionLost: lost, ...(!lost && { nextReconnectAt: null }) }),
+    setNextReconnectAt: (ts) => set({ nextReconnectAt: ts }),
 
     hydrate: async () => {
       try {
@@ -99,3 +104,4 @@ export const selectIsFirstSync = (state: SyncState): boolean => state.isFirstSyn
 export const selectFirstSyncProgress = (state: SyncState): number => state.firstSyncProgress
 export const selectRealtimeConnected = (state: SyncState): boolean => state.realtimeConnected
 export const selectConnectionLost = (state: SyncState): boolean => state.connectionLost
+export const selectNextReconnectAt = (state: SyncState): number | null => state.nextReconnectAt
