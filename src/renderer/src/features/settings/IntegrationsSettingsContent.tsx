@@ -6,6 +6,7 @@ import { useSetting, useSettingsStore } from '../../shared/stores/settingsStore'
 import { useToast } from '../../shared/components/Toast'
 import { getSupabase } from '../../lib/supabase'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
+import { hashApiKey } from '../../../../shared/hashApiKey'
 import { McpSettingsContent } from './McpSettingsContent'
 
 const SUPABASE_URL = 'https://znmgsyjkaftbnhtlcxrm.supabase.co'
@@ -45,16 +46,10 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
             if (row.value) await window.api.settings.set(userId, row.key, row.value)
           }
         }
-        // Pull API key from api_keys table
-        const { data: keyData } = await supabase
-          .from('api_keys')
-          .select('key')
-          .eq('user_id', userId)
-          .limit(1)
-          .single()
-        if (keyData?.key) {
-          await window.api.settings.set(userId, 'api_key', keyData.key)
-        }
+        // API keys are stored as SHA-256 hashes only (story #98) — the plaintext
+        // is never persisted server-side, so it cannot be pulled back here. The
+        // raw key is surfaced once at generation and kept in this device's local
+        // `api_key` setting; other devices must generate their own key.
         hydrateSettings()
       } catch (err) { console.warn('[Integrations] Failed to pull settings from Supabase:', err) }
     }
@@ -120,12 +115,15 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
   // ── API Key handlers ──
   const handleGenerateApiKey = useCallback(async () => {
     const key = crypto.randomUUID()
+    // Surface the plaintext to the user once (kept only in this device's local
+    // settings); persist ONLY its SHA-256 hash server-side (story #98).
     setSetting('api_key', key)
     try {
       const supabase = await getSupabase()
       if (userId) {
-        const { error } = await supabase.from('api_keys').upsert({ user_id: userId, key, name: 'Default' })
-        if (error) console.error('[Integrations] api_keys upsert failed:', error.message, error.code, error.details)
+        const keyHash = await hashApiKey(key)
+        const { error } = await supabase.from('api_keys').insert({ user_id: userId, key_hash: keyHash, name: 'Default' })
+        if (error) console.error('[Integrations] api_keys insert failed:', error.message, error.code, error.details)
       }
     } catch (err) { console.error('[Integrations] Generate API key failed:', err) }
     addToast({
@@ -138,7 +136,9 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
     try {
       const supabase = await getSupabase()
       if (userId && apiKey) {
-        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key', apiKey)
+        // Match on the stored hash — the plaintext column no longer exists (story #98).
+        const keyHash = await hashApiKey(apiKey)
+        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key_hash', keyHash)
       }
     } catch { /* offline */ }
   }, [setSetting, userId, apiKey])

@@ -33,6 +33,7 @@ import {
   type ToolCallResult
 } from './requestContext.ts'
 import { ProjectScope } from './scoping.ts'
+import { hashApiKey } from './hash.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -1342,6 +1343,11 @@ async function authenticateRequest(
   if (!authHeader?.startsWith('Bearer ')) return null
   const apiKey = authHeader.slice(7)
 
+  // Keys are stored as SHA-256 hashes only (story #98) — never plaintext. Hash
+  // the presented key and match on `key_hash`. Existing keys keep working
+  // because the backfill migration stored hash(plaintext) with the same digest.
+  const keyHash = await hashApiKey(apiKey)
+
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const adminClient = createClient(supabaseUrl, serviceRoleKey)
@@ -1349,7 +1355,7 @@ async function authenticateRequest(
   const { data: keyData } = await adminClient
     .from('api_keys')
     .select('user_id')
-    .eq('key', apiKey)
+    .eq('key_hash', keyHash)
     .single()
 
   if (!keyData) return null
@@ -1358,7 +1364,7 @@ async function authenticateRequest(
   adminClient
     .from('api_keys')
     .update({ last_used_at: new Date().toISOString() })
-    .eq('key', apiKey)
+    .eq('key_hash', keyHash)
     .then(() => {})
 
   return { userId: keyData.user_id, client: adminClient, apiKey }
