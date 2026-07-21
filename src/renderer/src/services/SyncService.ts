@@ -752,6 +752,19 @@ export async function declineInvite(token: string): Promise<void> {
 }
 
 /**
+ * Count project_members rows grouped by project_id.
+ * Pure helper extracted for testability — replaces the previous per-project
+ * N+1 count queries with a single client-side grouping over one batched query.
+ */
+export function countMembersByProject(rows: { project_id: string }[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const row of rows) {
+    counts.set(row.project_id, (counts.get(row.project_id) ?? 0) + 1)
+  }
+  return counts
+}
+
+/**
  * Discover shared projects the user is a member of in Supabase
  * but doesn't have locally. Returns project IDs to sync down.
  */
@@ -771,14 +784,17 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
   const idsToSync: string[] = []
   const projectIds = memberships.map((m) => m.project_id)
 
-  // Get member counts for all projects to detect truly shared ones
-  const memberCounts = new Map<string, number>()
-  for (const pid of projectIds) {
-    const { count } = await supabase
+  // Get member counts for all projects to detect truly shared ones.
+  // Batched: a single .in() query across all candidate project ids (was N+1 —
+  // one count query per project). Group and count client-side. RLS visibility
+  // is identical to the old per-project count query, so per-project counts match.
+  let memberCounts = new Map<string, number>()
+  if (projectIds.length > 0) {
+    const { data: allMembers } = await supabase
       .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('project_id', pid)
-    memberCounts.set(pid, count ?? 0)
+      .select('project_id')
+      .in('project_id', projectIds)
+    memberCounts = countMembersByProject(allMembers ?? [])
   }
 
   for (const m of memberships) {
