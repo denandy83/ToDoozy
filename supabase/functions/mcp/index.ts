@@ -1,11 +1,27 @@
 // ToDoozy MCP Server — Supabase Edge Function
 // Streamable HTTP transport with API key authentication via mcp-lite
+//
+// CONCURRENCY CONTRACT (story #96): a single Deno isolate serves many requests
+// concurrently. NO per-request state (userId, Supabase client, repositories,
+// tool handlers, or anything derived from the caller's identity) may live in
+// module scope. Per-request auth context is built inside `Deno.serve` and
+// threaded explicitly through mcp-lite's per-request `AuthInfo.extra` channel;
+// tool handlers resolve it via `unpackRequestContext(ctx.authInfo?.extra)` and
+// dispatch through the pure `dispatchTool`. See requestContext.ts for the full
+// rationale — the old module-level `_authUserId/_authClient/_authRepos/
+// _authHandlers` globals let one request observe another user's data.
 
-import { McpServer, StreamableHttpTransport } from 'mcp-lite'
+import { McpServer, StreamableHttpTransport, type Ctx } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import rruleLib from 'npm:rrule@2'
 import { upsertTaskLabel, deleteTaskLabel } from './labelMutations.ts'
 import { upsertProjectLabel, fetchProjectLabels } from './projectLabels.ts'
+import {
+  packRequestContext,
+  unpackRequestContext,
+  dispatchTool,
+  type ToolCallResult
+} from './requestContext.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -1129,12 +1145,17 @@ function createHandlers(repos: Repos, userId: string) {
   return handlers
 }
 
-// ── Auth Context (set per-request before tool handlers run) ────────────
+// ── Per-request Auth Context ───────────────────────────────────────────
+// Built fresh for every request inside Deno.serve and passed down explicitly
+// via mcp-lite's AuthInfo.extra channel. NEVER stored in module scope — doing
+// so reintroduces the story #96 cross-request data-leak. See requestContext.ts.
 
-let _authUserId: string | null = null
-let _authClient: SupabaseClient | null = null
-let _authRepos: Repos | null = null
-let _authHandlers: ReturnType<typeof createHandlers> | null = null
+interface RequestContext {
+  userId: string
+  client: SupabaseClient
+  repos: Repos
+  handlers: ReturnType<typeof createHandlers>
+}
 
 // ── MCP Server Setup via mcp-lite ─────────────────────────────────────
 
@@ -1169,16 +1190,11 @@ for (const tool of tools) {
     description: tool.description,
     inputSchema: tool.inputSchema,
     annotations,
-    handler: async (args: Record<string, unknown>) => {
-      if (!_authHandlers) return { content: [{ type: 'text' as const, text: 'Not authenticated' }], isError: true }
-      const handler = _authHandlers[tool.name]
-      if (!handler) return { content: [{ type: 'text' as const, text: `Unknown tool: ${tool.name}` }], isError: true }
-      try {
-        const result = await handler(args)
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }], isError: true }
-      }
+    handler: async (args: Record<string, unknown>, context: Ctx): Promise<ToolCallResult> => {
+      // Resolve the caller's context from THIS request's auth info — never a
+      // module global. dispatchTool is pure in the context it is handed.
+      const requestContext = unpackRequestContext<RequestContext>(context.authInfo?.extra)
+      return await dispatchTool(tool.name, args, requestContext)
     }
   })
 }
@@ -1197,7 +1213,9 @@ const CORS_HEADERS: Record<string, string> = {
 
 // ── Auth ───────────────────────────────────────────────────────────────
 
-async function authenticateRequest(req: Request): Promise<{ userId: string; client: SupabaseClient } | null> {
+async function authenticateRequest(
+  req: Request
+): Promise<{ userId: string; client: SupabaseClient; apiKey: string } | null> {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
   const apiKey = authHeader.slice(7)
@@ -1221,7 +1239,7 @@ async function authenticateRequest(req: Request): Promise<{ userId: string; clie
     .eq('key', apiKey)
     .then(() => {})
 
-  return { userId: keyData.user_id, client: adminClient }
+  return { userId: keyData.user_id, client: adminClient, apiKey }
 }
 
 // ── Request Handler ────────────────────────────────────────────────────
@@ -1241,14 +1259,25 @@ Deno.serve(async (req: Request) => {
     })
   }
 
-  // Set auth context for tool handlers
-  _authUserId = auth.userId
-  _authClient = auth.client
-  _authRepos = createRepos(auth.client, auth.userId)
-  _authHandlers = createHandlers(_authRepos, auth.userId)
+  // Build a per-request context and thread it explicitly through mcp-lite's
+  // AuthInfo.extra channel. Nothing is written to module scope, so concurrent
+  // requests can never observe each other's identity or repositories.
+  const repos = createRepos(auth.client, auth.userId)
+  const handlers = createHandlers(repos, auth.userId)
+  const requestContext: RequestContext = {
+    userId: auth.userId,
+    client: auth.client,
+    repos,
+    handlers
+  }
+  const authInfo = {
+    token: auth.apiKey,
+    scopes: [],
+    extra: packRequestContext(requestContext)
+  }
 
-  // Delegate to mcp-lite handler
-  const response = await httpHandler(req)
+  // Delegate to mcp-lite handler with this request's isolated auth context
+  const response = await httpHandler(req, { authInfo })
 
   // Add CORS headers to response
   const headers = new Headers(response.headers)
