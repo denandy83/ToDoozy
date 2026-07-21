@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { countMembersByProject } from './SyncService'
+import { countMembersByProject, buildTaskLabelData } from './SyncService'
 
 describe('countMembersByProject', () => {
   it('returns an empty map for no rows', () => {
@@ -41,5 +41,42 @@ describe('countMembersByProject', () => {
     const counts = countMembersByProject([{ project_id: 'a' }])
     expect(counts.get('missing')).toBeUndefined()
     expect(counts.get('missing') ?? 0).toBe(0)
+  })
+})
+
+describe('buildTaskLabelData', () => {
+  const labelById = new Map<string, { name: string; color: string }>([
+    ['l1', { name: 'Bug', color: '#f00' }],
+    ['l2', { name: 'Feature', color: '#0f0' }],
+    ['l3', { name: 'Chore', color: '#00f' }]
+  ])
+
+  it('returns an empty array for no label ids', () => {
+    expect(buildTaskLabelData([], labelById)).toEqual([])
+  })
+
+  it('resolves ids to {name, color} in the given order', () => {
+    expect(buildTaskLabelData(['l2', 'l1'], labelById)).toEqual([
+      { name: 'Feature', color: '#0f0' },
+      { name: 'Bug', color: '#f00' }
+    ])
+  })
+
+  it('skips ids missing from the map (mirrors the per-label if(label) guard)', () => {
+    expect(buildTaskLabelData(['l1', 'missing', 'l3'], labelById)).toEqual([
+      { name: 'Bug', color: '#f00' },
+      { name: 'Chore', color: '#00f' }
+    ])
+  })
+
+  it('returns empty when no id resolves', () => {
+    expect(buildTaskLabelData(['x', 'y'], labelById)).toEqual([])
+  })
+
+  it('preserves duplicate ids (one output row per input id)', () => {
+    expect(buildTaskLabelData(['l1', 'l1'], labelById)).toEqual([
+      { name: 'Bug', color: '#f00' },
+      { name: 'Bug', color: '#f00' }
+    ])
   })
 })

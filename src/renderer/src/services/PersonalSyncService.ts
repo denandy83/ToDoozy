@@ -167,6 +167,20 @@ export function getCachedProjectName(id: string): string | null {
   return projectNameCache.get(id) ?? null
 }
 
+/**
+ * Split an array into fixed-size chunks. Pure helper extracted for testability —
+ * used to batch task_labels upserts within Supabase's per-request row limits
+ * instead of one round-trip per row. A non-positive size yields a single chunk.
+ */
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return items.length > 0 ? [items] : []
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+  return chunks
+}
+
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
 async function ensureProjectInSupabase(projectId: string): Promise<void> {
   if (confirmedProjects.has(projectId)) return
@@ -1268,22 +1282,27 @@ export async function fullUpload(userId: string): Promise<void> {
       }
     } catch { /* themes might not exist */ }
 
-    // 7. Push task_labels (junction table)
+    // 7. Push task_labels (junction table) — collect every (task_id, label_id)
+    // pair across all projects, then batch-upsert in chunks instead of one
+    // request per row (was O(rows) round-trips). Identical rows (same active
+    // tasks via findByProjectId) and identical conflict target (composite PK
+    // task_id,label_id) as the previous per-row upserts; mirrors the chunked
+    // upsert the reconcile path already uses.
+    const taskLabelRows: Array<{ task_id: string; label_id: string }> = []
     for (const project of projects) {
       const tasks = await window.api.tasks.findByProjectId(project.id)
       for (const task of tasks) {
         const taskLabels = await window.api.tasks.getLabels(task.id)
-        if (taskLabels.length > 0) {
-          for (const tl of taskLabels) {
-            await supabase.from('task_labels').upsert({
-              task_id: tl.task_id,
-              label_id: tl.label_id
-            }).then(({ error }) => {
-              if (error) console.error('[PersonalSync] pushTaskLabel error:', error.message)
-            })
-          }
+        for (const tl of taskLabels) {
+          taskLabelRows.push({ task_id: tl.task_id, label_id: tl.label_id })
         }
       }
+    }
+    for (const chunk of chunkArray(taskLabelRows, 500)) {
+      const { error: tlErr } = await supabase
+        .from('task_labels')
+        .upsert(chunk, { onConflict: 'task_id,label_id' })
+      if (tlErr) console.error('[PersonalSync] pushTaskLabel error:', tlErr.message)
     }
 
     // Verify sync by checking counts

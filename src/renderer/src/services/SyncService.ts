@@ -331,17 +331,51 @@ export async function uploadProjectToSupabase(
   const allLabelData = projectLabels.map((l) => ({ name: l.name, color: l.color }))
   await supabase.from('projects').update({ label_data: JSON.stringify(allLabelData) }).eq('id', projectId)
 
-  // Upload tasks with label names+colors (resolve IDs for cross-user sync)
+  // Upload tasks with label names+colors (resolve IDs for cross-user sync).
+  // Gather every task's label ids first, resolve them all in ONE batched local
+  // query (was a per-label findById → N+1 label resolution), then build each
+  // task's label data from the in-memory map. Same rows as before — only fewer
+  // round-trips. getLabels filters tombstoned task_labels and label soft-delete
+  // cascades to task_labels, so findByIds (which filters deleted_at) resolves
+  // the identical set the per-label findById did.
   const tasks = await window.api.tasks.findByProjectId(projectId)
+  const labelIdsByTask = new Map<string, string[]>()
+  const allLabelIds = new Set<string>()
   for (const task of tasks) {
     const taskLabels = await window.api.tasks.getLabels(task.id)
-    const labelData: Array<{ name: string; color: string }> = []
-    for (const tl of taskLabels) {
-      const label = await window.api.labels.findById(tl.label_id)
-      if (label) labelData.push({ name: label.name, color: label.color })
-    }
+    const ids = taskLabels.map((tl) => tl.label_id)
+    labelIdsByTask.set(task.id, ids)
+    for (const id of ids) allLabelIds.add(id)
+  }
+  const labels = allLabelIds.size > 0
+    ? await window.api.labels.findByIds([...allLabelIds])
+    : []
+  const labelById = new Map<string, { name: string; color: string }>(
+    labels.map((l) => [l.id, { name: l.name, color: l.color }])
+  )
+  for (const task of tasks) {
+    const labelData = buildTaskLabelData(labelIdsByTask.get(task.id) ?? [], labelById)
     await syncTaskToSupabase(supabase, task, labelData)
   }
+}
+
+/**
+ * Resolve an ordered list of label ids to their {name, color} for upload,
+ * skipping ids missing from the map. Pure helper extracted for testability —
+ * replaces the previous per-label findById N+1 with an in-memory lookup over a
+ * single batched fetch. Preserves the original getLabels order and drops
+ * unresolved ids exactly as the per-label `if (label)` guard did.
+ */
+export function buildTaskLabelData(
+  labelIds: string[],
+  labelById: Map<string, { name: string; color: string }>
+): Array<{ name: string; color: string }> {
+  const labelData: Array<{ name: string; color: string }> = []
+  for (const id of labelIds) {
+    const label = labelById.get(id)
+    if (label) labelData.push({ name: label.name, color: label.color })
+  }
+  return labelData
 }
 
 /**
