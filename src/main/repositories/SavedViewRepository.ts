@@ -186,7 +186,7 @@ export class SavedViewRepository {
     try {
       const config = JSON.parse(filterConfig) as Record<string, unknown>
       let sql = 'SELECT COUNT(DISTINCT t.id) as count FROM tasks t'
-      const conditions: string[] = ['t.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
+      const conditions: string[] = ['t.deleted_at IS NULL', 't.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
       const params: (string | number)[] = []
 
       // Label filters are stored as lowercased label NAMES (the filter store keys
@@ -202,13 +202,13 @@ export class SavedViewRepository {
         if (labelLogic === 'all') {
           conditions.push(
             `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-              ` WHERE LOWER(l.name) IN (${placeholders})` +
+              ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders})` +
               ` GROUP BY tl.task_id HAVING COUNT(DISTINCT LOWER(l.name)) = ${names.length})`
           )
         } else {
           conditions.push(
             `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-              ` WHERE LOWER(l.name) IN (${placeholders}))`
+              ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders}))`
           )
         }
         params.push(...names)
@@ -250,7 +250,7 @@ export class SavedViewRepository {
         const placeholders = names.map(() => '?').join(', ')
         conditions.push(
           `t.id NOT IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-            ` WHERE LOWER(l.name) IN (${placeholders}))`
+            ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders}))`
         )
         params.push(...names)
       }
