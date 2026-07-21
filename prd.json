@@ -4,42 +4,6 @@
   "schema": 2,
   "stories": [
     {
-      "id": 99,
-      "title": "[Medium] Security: session tokens written plaintext when safeStorage unavailable \u2014 src/main/ipc-handlers.ts:41",
-      "status": "pending",
-      "risk": "security-migration",
-      "file": "stories/099-session-plaintext-fallback.md",
-      "passes": false,
-      "tested": false
-    },
-    {
-      "id": 100,
-      "title": "[Medium] Bug: saved-view match count includes soft-deleted tasks/labels \u2014 src/main/repositories/SavedViewRepository.ts:189",
-      "status": "pending",
-      "risk": "shared-logic",
-      "file": "stories/100-savedview-tombstone-counts.md",
-      "passes": false,
-      "tested": false
-    },
-    {
-      "id": 101,
-      "title": "[Medium] Bug: task search label filters ignore task_labels tombstones \u2014 src/main/repositories/TaskRepository.ts:579",
-      "status": "pending",
-      "risk": "shared-logic",
-      "file": "stories/101-search-label-tombstones.md",
-      "passes": false,
-      "tested": false
-    },
-    {
-      "id": 102,
-      "title": "[Medium] Bug: applyRemote LWW guards string-compare ISO timestamps \u2014 src/main/repositories/TaskRepository.ts:227",
-      "status": "pending",
-      "risk": "data-writing",
-      "file": "stories/102-lww-timestamp-compare.md",
-      "passes": false,
-      "tested": false
-    },
-    {
       "id": 103,
       "title": "[Medium] Performance: WAL-mtime poll rehydrates all stores on own writes \u2014 src/main/index.ts:306",
       "status": "pending",
@@ -144,6 +108,15 @@
       "status": "pending",
       "risk": "security-migration",
       "file": "stories/114-plaintext-apikey-usersettings.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 115,
+      "title": "Normalize sync timestamps so incremental high-water queries do not miss rows",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/115-normalize-sync-timestamps.md",
       "passes": false,
       "tested": false
     }
