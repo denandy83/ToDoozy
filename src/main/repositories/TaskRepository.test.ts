@@ -350,3 +350,64 @@ describe('TaskRepository — project_labels junction guarantee', () => {
     expect(labels.findByTaskId(t.id).map((l) => l.id)).toEqual(['L1'])
   })
 })
+
+describe('TaskRepository — search ignores task_labels tombstones', () => {
+  let db: DatabaseSync
+  let repo: TaskRepository
+  let projectId: string
+  let userId: string
+  let statusId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    projectId = fx.projectId
+    userId = fx.userId
+    statusId = fx.statusId
+    repo = new TaskRepository(db)
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    ).run('L1', userId, 'Later', '#888888', now, now)
+  })
+
+  it('include filter (label_id) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    // Sanity: matches while the link is live.
+    expect(repo.search({ label_id: 'L1' }).map((r) => r.id)).toEqual(['t1'])
+
+    repo.removeLabel(t.id, 'L1') // soft-delete the link
+
+    expect(repo.search({ label_id: 'L1' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('include filter (label_ids OR) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    repo.removeLabel(t.id, 'L1')
+
+    expect(repo.search({ label_ids: ['L1'], label_logic: 'any' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('include filter (label_ids ALL) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    repo.removeLabel(t.id, 'L1')
+
+    expect(repo.search({ label_ids: ['L1'], label_logic: 'all' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('exclude filter (exclude_label_ids) does not wrongly exclude a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    // Sanity: while the link is live the task IS excluded.
+    expect(repo.search({ exclude_label_ids: ['L1'] }).map((r) => r.id)).toEqual([])
+
+    repo.removeLabel(t.id, 'L1') // soft-delete the link
+
+    // Tombstoned link must no longer cause exclusion — the task reappears.
+    expect(repo.search({ exclude_label_ids: ['L1'] }).map((r) => r.id)).toEqual(['t1'])
+  })
+})

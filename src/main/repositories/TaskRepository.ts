@@ -570,6 +570,7 @@ export class TaskRepository {
         conditions.push(`t.id IN (
           SELECT task_id FROM task_labels
           WHERE label_id IN (${placeholders})
+          AND deleted_at IS NULL
           GROUP BY task_id
           HAVING COUNT(DISTINCT label_id) = ?
         )`)
@@ -578,12 +579,12 @@ export class TaskRepository {
         // OR (default): task must have ANY selected label
         sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
         const placeholders = filters.label_ids.map(() => '?').join(', ')
-        conditions.push(`tl.label_id IN (${placeholders})`)
+        conditions.push(`tl.label_id IN (${placeholders}) AND tl.deleted_at IS NULL`)
         params.push(...filters.label_ids)
       }
     } else if (filters.label_id) {
       sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
-      conditions.push('tl.label_id = ?')
+      conditions.push('tl.label_id = ? AND tl.deleted_at IS NULL')
       params.push(filters.label_id)
     }
 
@@ -655,7 +656,9 @@ export class TaskRepository {
     // Exclusion filters
     if (filters.exclude_label_ids && filters.exclude_label_ids.length > 0) {
       const placeholders = filters.exclude_label_ids.map(() => '?').join(', ')
-      conditions.push(`t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}))`)
+      conditions.push(
+        `t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}) AND deleted_at IS NULL)`
+      )
       params.push(...filters.exclude_label_ids)
     }
 
