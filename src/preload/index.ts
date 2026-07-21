@@ -434,6 +434,14 @@ const api: TodoozyAPI = {
     return () => {
       ipcRenderer.removeListener('invite:received', handler)
     }
+  },
+
+  onSessionNotPersisted: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('auth:session-not-persisted', handler)
+    return () => {
+      ipcRenderer.removeListener('auth:session-not-persisted', handler)
+    }
   }
 }
 

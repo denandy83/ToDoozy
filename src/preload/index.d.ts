@@ -518,6 +518,7 @@ export interface TodoozyAPI {
   power: PowerAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void
+  onSessionNotPersisted(callback: () => void): () => void
 }
 
 declare global {

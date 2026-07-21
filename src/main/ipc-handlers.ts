@@ -12,6 +12,12 @@ import { getReservedShortcutName } from '../shared/shortcut-utils'
 import { setTrayUserId, refreshTray, setTimerState, clearTimerState } from './tray'
 import { getMainWindow } from './index'
 import type { TimerTrayState } from '../preload/index.d'
+import {
+  storeSession as storeSessionToDisk,
+  loadSession as loadSessionFromDisk,
+  clearSession as clearSessionFromDisk,
+  type SessionStoreDeps
+} from './auth/sessionStore'
 
 let repos: Repositories | null = null
 
@@ -34,36 +40,44 @@ const getSavedEmailPath = (): string => {
 }
 const KEYTAR_SERVICE = 'ToDoozy'
 
+// Only warn the renderer once per session that the OS keychain is unavailable.
+let sessionNotPersistedWarned = false
+
+function sessionStoreDeps(): SessionStoreDeps {
+  return {
+    safeStorage,
+    fs: { existsSync, readFileSync, writeFileSync, unlinkSync },
+    tokenPath: getTokenPath(),
+    logger: {
+      warn: (message) => console.warn(message),
+      error: (message, err) => console.error(message, err)
+    }
+  }
+}
+
+/** Notify the renderer (once) that the session will not persist across restarts. */
+function warnSessionNotPersisted(): void {
+  if (sessionNotPersistedWarned) return
+  sessionNotPersistedWarned = true
+  const win = getMainWindow()
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('auth:session-not-persisted')
+  }
+}
+
 function storeEncryptedSession(sessionJson: string): void {
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(sessionJson)
-    writeFileSync(getTokenPath(), encrypted)
-  } else {
-    // Fallback: store as plain text (less secure, but functional)
-    writeFileSync(getTokenPath(), sessionJson, 'utf-8')
+  const result = storeSessionToDisk(sessionJson, sessionStoreDeps())
+  if (result.encryptionUnavailable) {
+    warnSessionNotPersisted()
   }
 }
 
 function getEncryptedSession(): string | null {
-  const tokenPath = getTokenPath()
-  if (!existsSync(tokenPath)) return null
-  try {
-    const data = readFileSync(tokenPath)
-    if (safeStorage.isEncryptionAvailable()) {
-      return safeStorage.decryptString(data)
-    }
-    return data.toString('utf-8')
-  } catch (err) {
-    console.error('Failed to read stored session:', err)
-    return null
-  }
+  return loadSessionFromDisk(sessionStoreDeps())
 }
 
 function clearEncryptedSession(): void {
-  const tokenPath = getTokenPath()
-  if (existsSync(tokenPath)) {
-    unlinkSync(tokenPath)
-  }
+  clearSessionFromDisk(sessionStoreDeps())
 }
 
 
