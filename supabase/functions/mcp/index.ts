@@ -10,6 +10,16 @@
 // dispatch through the pure `dispatchTool`. See requestContext.ts for the full
 // rationale — the old module-level `_authUserId/_authClient/_authRepos/
 // _authHandlers` globals let one request observe another user's data.
+//
+// RLS SCOPING CONTRACT (story #97): the per-request Supabase client is the
+// SUPABASE_SERVICE_ROLE_KEY client (needed to read `api_keys`), which BYPASSES
+// Row Level Security. Every repo method reachable from a tool call must
+// therefore re-impose access control BY HAND: project entities (tasks,
+// projects, statuses, project_labels, activity_log) are gated on the caller's
+// `project_members` membership via the per-request `ProjectScope`; user
+// entities (user_labels, user_settings, user_saved_views, user_project_areas)
+// are gated on `user_id = ctx.userId`. See scoping.ts. A crafted id for
+// another user's row must return not-found/forbidden, never the row.
 
 import { McpServer, StreamableHttpTransport, type Ctx } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
@@ -22,6 +32,7 @@ import {
   dispatchTool,
   type ToolCallResult
 } from './requestContext.ts'
+import { ProjectScope } from './scoping.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -197,20 +208,32 @@ function getNextOccurrence(rule: string, fromDate: Date): Date | null {
 // ── Repository Classes ─────────────────────────────────────────────────
 
 class TaskRepo {
-  constructor(private client: SupabaseClient, private _userId: string) {}
+  // scope gates every project-scoped query to the caller's member projects —
+  // the service-role client bypasses RLS, so this is the ONLY thing stopping a
+  // crafted id from returning another user's task (story #97).
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
 
   async findById(id: string) {
-    const { data } = await this.client.from('tasks').select('*').eq('id', id).single()
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('tasks').select('*')
+      .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_archived', 0).eq('is_template', 0)
       .is('parent_id', null).order('order_index')
     return data ?? []
   }
   async findSubtasks(parentId: string) {
-    const { data } = await this.client.from('tasks').select('*').eq('parent_id', parentId).order('order_index')
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('tasks').select('*')
+      .eq('parent_id', parentId).in('project_id', projectIds).order('order_index')
     return data ?? []
   }
   async findMyDay(userId: string) {
@@ -219,11 +242,13 @@ class TaskRepo {
     return data ?? []
   }
   async findArchived(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_archived', 1).order('updated_at', { ascending: false })
     return data ?? []
   }
   async findTemplates(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_template', 1).order('created_at', { ascending: false })
     return data ?? []
@@ -234,9 +259,15 @@ class TaskRepo {
     return data ?? []
   }
   async create(input: Record<string, unknown>) {
+    // A task may only be created in a project the caller is a member of, and
+    // always owned by the caller — never an attacker-supplied owner_id.
+    const projectId = input.project_id as string
+    if (!(await this.scope.isMember(projectId))) {
+      throw new Error(`Project not found: ${projectId}`)
+    }
     const now = new Date().toISOString()
     const record = {
-      id: input.id, project_id: input.project_id, owner_id: input.owner_id,
+      id: input.id, project_id: input.project_id, owner_id: input.owner_id ?? this.userId,
       title: input.title, status_id: input.status_id,
       assigned_to: input.assigned_to ?? null, description: input.description ?? null,
       priority: input.priority ?? 0, due_date: input.due_date ?? null,
@@ -255,13 +286,23 @@ class TaskRepo {
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (col in input) updates[col] = input[col]
     }
-    const { data, error } = await this.client.from('tasks').update(updates).eq('id', id).select().single()
-    if (error) return undefined
+    // If the caller wants to move the task, the destination must also be a
+    // project they belong to.
+    if ('project_id' in updates && !(await this.scope.isMember(updates.project_id as string))) {
+      return undefined
+    }
+    const projectIds = await this.scope.idArray()
+    const { data, error } = await this.client.from('tasks').update(updates)
+      .eq('id', id).in('project_id', projectIds).select().maybeSingle()
+    if (error || !data) return undefined
     return data
   }
   async delete(id: string) {
-    const { error } = await this.client.from('tasks').delete().eq('id', id)
-    return !error
+    const projectIds = await this.scope.idArray()
+    const { data, error } = await this.client.from('tasks').delete()
+      .eq('id', id).in('project_id', projectIds).select('id')
+    // Report success only when a row the caller could access was actually removed.
+    return !error && Array.isArray(data) && data.length > 0
   }
   async duplicate(id: string, newId: string) {
     const original = await this.findById(id)
@@ -315,26 +356,46 @@ class TaskRepo {
     return template
   }
   async reorder(taskIds: string[]) {
+    const projectIds = await this.scope.idArray()
     for (let i = 0; i < taskIds.length; i++) {
-      await this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() }).eq('id', taskIds[i])
+      await this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() })
+        .eq('id', taskIds[i]).in('project_id', projectIds)
     }
   }
   async addLabel(taskId: string, labelId: string) {
+    // task_labels has no project_id, so it cannot be filtered directly; gate on
+    // the task being one the caller can access and the label being their own.
+    await this.assertTaskAccessible(taskId)
+    await this.assertLabelOwned(labelId)
     // Throws on a silently-dropped upsert (RLS reject / FK violation) — see labelMutations.ts.
     await upsertTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
   }
   async removeLabel(taskId: string, labelId: string) {
+    await this.assertTaskAccessible(taskId)
     // Throws on error rather than returning false, so callers can't ignore a failed delete.
     await deleteTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
   }
   async getLabels(taskId: string) {
+    if (!(await this.findById(taskId))) return []
     const { data } = await this.client.from('task_labels').select('task_id, label_id').eq('task_id', taskId)
     return data ?? []
   }
+  /** Throw unless `taskId` belongs to a project the caller is a member of. */
+  private async assertTaskAccessible(taskId: string) {
+    if (!(await this.findById(taskId))) throw new Error(`Task not found: ${taskId}`)
+  }
+  /** Throw unless `labelId` is a label owned by the caller (user_labels.user_id). */
+  private async assertLabelOwned(labelId: string) {
+    const { data } = await this.client.from('user_labels').select('id')
+      .eq('id', labelId).eq('user_id', this.userId).maybeSingle()
+    if (!data) throw new Error(`Label not found: ${labelId}`)
+  }
   async search(filters: Record<string, unknown>) {
-    let query = this.client.from('tasks').select('*').eq('is_template', 0)
+    // Base scope: only tasks in the caller's member projects are ever searchable.
+    const projectIds = await this.scope.idArray()
+    let query = this.client.from('tasks').select('*').eq('is_template', 0).in('project_id', projectIds)
     if (filters.is_archived !== undefined) query = query.eq('is_archived', filters.is_archived as number)
     else query = query.eq('is_archived', 0)
     if (filters.project_id) query = query.eq('project_id', filters.project_id as string)
@@ -407,16 +468,21 @@ class TaskRepo {
 }
 
 class ProjectRepo {
-  constructor(private client: SupabaseClient, private userId: string) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async list() {
-    const { data: memberships } = await this.client.from('project_members').select('project_id').eq('user_id', this.userId)
-    if (!memberships || memberships.length === 0) return []
-    const ids = memberships.map(m => m.project_id)
+    const ids = await this.scope.idArray()
+    if (ids.length === 0) return []
     const { data } = await this.client.from('projects').select('*').in('id', ids).order('created_at')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('projects').select('*').eq('id', id).single()
+    // A project is visible only to its members.
+    if (!(await this.scope.isMember(id))) return undefined
+    const { data } = await this.client.from('projects').select('*').eq('id', id).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -436,15 +502,20 @@ class ProjectRepo {
     return project
   }
   async update(id: string, input: Record<string, unknown>) {
+    if (!(await this.scope.isMember(id))) return undefined
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const k of ['name', 'description', 'color', 'icon', 'sidebar_order', 'is_default', 'is_shared']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('projects').update(updates).eq('id', id).select().single()
-    if (error) return undefined
+    const { data, error } = await this.client.from('projects').update(updates)
+      .eq('id', id).in('id', await this.scope.idArray()).select().maybeSingle()
+    if (error || !data) return undefined
     return data
   }
   async delete(id: string) {
+    // Refuse to cascade-delete a project (tasks, statuses, members) the caller
+    // is not a member of — this is the most destructive path in the whole API.
+    if (!(await this.scope.isMember(id))) return false
     await this.client.from('tasks').delete().eq('project_id', id)
     await this.client.from('statuses').delete().eq('project_id', id)
     await this.client.from('project_members').delete().eq('project_id', id)
@@ -454,24 +525,32 @@ class ProjectRepo {
 }
 
 class StatusRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(private client: SupabaseClient, private scope: ProjectScope) {}
   async findByProjectId(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).order('order_index')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('id', id).single()
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('statuses').select('*')
+      .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findDefault(projectId: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_default', 1).single()
+    if (!(await this.scope.isMember(projectId))) return undefined
+    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_default', 1).maybeSingle()
     return data ?? undefined
   }
   async findDone(projectId: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_done', 1).single()
+    if (!(await this.scope.isMember(projectId))) return undefined
+    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_done', 1).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
+    if (!(await this.scope.isMember(input.project_id as string))) {
+      throw new Error(`Project not found: ${input.project_id}`)
+    }
     const now = new Date().toISOString()
     const record = {
       id: input.id, project_id: input.project_id, name: input.name,
@@ -486,17 +565,29 @@ class StatusRepo {
 }
 
 class LabelRepo {
-  constructor(private client: SupabaseClient, private userId: string) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async findById(id: string) {
-    const { data } = await this.client.from('user_labels').select('*').eq('id', id).single()
+    // user_labels are user-owned; only the caller's own labels are visible.
+    const { data } = await this.client.from('user_labels').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
     // Junction-based read — the legacy projects.label_data JSON is no longer
     // consulted (the app stopped writing/reading it in v1.7.0). See projectLabels.ts.
+    if (!(await this.scope.isMember(projectId))) return []
     return await fetchProjectLabels(this.client, projectId)
   }
   async findByTaskId(taskId: string) {
+    // Only resolve labels for a task the caller can access.
+    const projectIds = await this.scope.idArray()
+    const { data: task } = await this.client.from('tasks').select('id')
+      .eq('id', taskId).in('project_id', projectIds).maybeSingle()
+    if (!task) return []
     const { data: taskLabels } = await this.client.from('task_labels').select('label_id').eq('task_id', taskId)
     if (!taskLabels || taskLabels.length === 0) return []
     const labelIds = taskLabels.map((tl: { label_id: string }) => tl.label_id)
@@ -508,6 +599,11 @@ class LabelRepo {
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
+    // Reject a foreign target project before writing anything, so a crafted
+    // project_id can't leave an orphaned label behind.
+    if (input.project_id && !(await this.scope.isMember(input.project_id as string))) {
+      throw new Error(`Project not found: ${input.project_id}`)
+    }
     const now = new Date().toISOString()
     const record = {
       id: input.id, user_id: this.userId, name: input.name,
@@ -519,6 +615,9 @@ class LabelRepo {
     return data
   }
   async addToProject(projectId: string, labelId: string) {
+    // Only link the caller's own label into a project they belong to.
+    if (!(await this.scope.isMember(projectId))) throw new Error(`Project not found: ${projectId}`)
+    if (!(await this.findById(labelId))) throw new Error(`Label not found: ${labelId}`)
     // Writes the project_labels junction row the app actually reads — NOT the
     // legacy projects.label_data JSON (dropped entirely; the app ignores it
     // since v1.7.0). Throws on a silently-dropped upsert (RLS reject / FK
@@ -560,13 +659,15 @@ class SettingsRepo {
 }
 
 class SavedViewRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(private client: SupabaseClient, private userId: string) {}
   async findByUserId(userId: string) {
     const { data } = await this.client.from('user_saved_views').select('*').eq('user_id', userId).order('sidebar_order')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('user_saved_views').select('*').eq('id', id).single()
+    // Saved views are user-owned.
+    const { data } = await this.client.from('user_saved_views').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -582,19 +683,26 @@ class SavedViewRepo {
     return data
   }
   async delete(id: string) {
-    const { error } = await this.client.from('user_saved_views').delete().eq('id', id)
-    return !error
+    const { data, error } = await this.client.from('user_saved_views').delete()
+      .eq('id', id).eq('user_id', this.userId).select('id')
+    return !error && Array.isArray(data) && data.length > 0
   }
 }
 
 class ProjectAreaRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async findByUserId(userId: string) {
     const { data } = await this.client.from('user_project_areas').select('*').eq('user_id', userId).order('sidebar_order')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('user_project_areas').select('*').eq('id', id).single()
+    // Project areas are user-owned.
+    const { data } = await this.client.from('user_project_areas').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -614,17 +722,28 @@ class ProjectAreaRepo {
     for (const k of ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('user_project_areas').update(updates).eq('id', id).select().single()
-    if (error) return null
+    const { data, error } = await this.client.from('user_project_areas').update(updates)
+      .eq('id', id).eq('user_id', this.userId).select().maybeSingle()
+    if (error || !data) return null
     return data
   }
   async delete(id: string) {
-    await this.client.from('projects').update({ area_id: null }).eq('area_id', id)
-    const { error } = await this.client.from('user_project_areas').delete().eq('id', id)
+    // Only the owner may delete an area. Clearing area_id is limited to the
+    // caller's member projects so it can't touch other users' projects.
+    if (!(await this.findById(id))) return false
+    const memberIds = await this.scope.idArray()
+    await this.client.from('projects').update({ area_id: null }).eq('area_id', id).in('id', memberIds)
+    const { error } = await this.client.from('user_project_areas').delete()
+      .eq('id', id).eq('user_id', this.userId)
     return !error
   }
   async assignProject(projectId: string, areaId: string | null) {
-    await this.client.from('projects').update({ area_id: areaId }).eq('id', projectId)
+    // The project must be one the caller belongs to, and any target area must be
+    // one they own.
+    if (!(await this.scope.isMember(projectId))) throw new Error(`Project not found: ${projectId}`)
+    if (areaId !== null && !(await this.findById(areaId))) throw new Error(`Area not found: ${areaId}`)
+    await this.client.from('projects').update({ area_id: areaId })
+      .eq('id', projectId).in('id', await this.scope.idArray())
   }
 }
 
@@ -642,15 +761,18 @@ interface Repos {
 }
 
 function createRepos(client: SupabaseClient, userId: string): Repos {
+  // One membership cache per request, shared by every project-scoped repo, so
+  // the caller's `project_members` set is loaded at most once per tool call.
+  const scope = new ProjectScope(client, userId)
   return {
-    tasks: new TaskRepo(client, userId),
-    projects: new ProjectRepo(client, userId),
-    statuses: new StatusRepo(client),
-    labels: new LabelRepo(client, userId),
+    tasks: new TaskRepo(client, userId, scope),
+    projects: new ProjectRepo(client, userId, scope),
+    statuses: new StatusRepo(client, scope),
+    labels: new LabelRepo(client, userId, scope),
     activityLog: new ActivityLogRepo(client),
     settings: new SettingsRepo(client),
-    savedViews: new SavedViewRepo(client),
-    projectAreas: new ProjectAreaRepo(client),
+    savedViews: new SavedViewRepo(client, userId),
+    projectAreas: new ProjectAreaRepo(client, userId, scope),
   }
 }
 
