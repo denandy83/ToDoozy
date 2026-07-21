@@ -1,18 +1,72 @@
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, copyFileSync, unlinkSync, readdirSync } from 'fs'
 import { migrations } from './migrations'
 import { withTransaction } from './transaction'
+import { markLocalWrite, isMutatingExec } from './writeTracker'
 
 let db: DatabaseSync | null = null
+let wrappedDb: DatabaseSync | null = null
 let currentDbPath: string | null = null
+
+/**
+ * Wrap a StatementSync so `.run()` (always a mutation in this codebase — reads
+ * use `.get()`/`.all()`) records a local write AFTER it completes. Everything
+ * else is forwarded verbatim, bound to the real statement.
+ */
+function wrapStatement(stmt: StatementSync): StatementSync {
+  return new Proxy(stmt, {
+    get(target, prop, receiver) {
+      if (prop === 'run') {
+        return (...args: Parameters<StatementSync['run']>): ReturnType<StatementSync['run']> => {
+          const result = target.run(...args)
+          markLocalWrite()
+          return result
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  }) as StatementSync
+}
+
+/**
+ * Story #103 — write-attribution choke point. Wrap the DatabaseSync so every
+ * mutating statement made by THIS process records a local write via
+ * {@link markLocalWrite}. The WAL-mtime poll then skips its rehydrate broadcast
+ * for our own writes, while external writes (local MCP server, other processes
+ * sharing the DB file) still advance the WAL past our mark and trigger it.
+ *
+ * `.run()` and mutating `.exec()` (incl. COMMIT, where a batched transaction's
+ * WAL mtime actually advances) mark after completing; pure reads never do.
+ */
+function wrapDatabaseForWriteTracking(raw: DatabaseSync): DatabaseSync {
+  return new Proxy(raw, {
+    get(target, prop, receiver) {
+      if (prop === 'prepare') {
+        return (sql: string): StatementSync => wrapStatement(target.prepare(sql))
+      }
+      if (prop === 'exec') {
+        return (sql: string): void => {
+          target.exec(sql)
+          if (isMutatingExec(sql)) markLocalWrite()
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  }) as DatabaseSync
+}
 
 export function getDatabase(): DatabaseSync {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.')
   }
-  return db
+  if (!wrappedDb) {
+    wrappedDb = wrapDatabaseForWriteTracking(db)
+  }
+  return wrappedDb
 }
 
 export function getDatabasePath(): string {
@@ -41,6 +95,7 @@ function openDatabase(dbPath: string): DatabaseSync {
 }
 
 export function initDatabase(): DatabaseSync {
+  wrappedDb = null
   if (process.env.TODOOZY_DEV_DB) {
     db = openDatabase(process.env.TODOOZY_DEV_DB)
   } else {
@@ -130,6 +185,7 @@ export function switchDatabase(userId: string, email?: string): DatabaseSync {
   if (db) {
     db.close()
     db = null
+    wrappedDb = null
   }
 
   // One-time migration: if per-user DB doesn't exist, copy the legacy todoozy.db
@@ -187,5 +243,6 @@ export function closeDatabase(): void {
   if (db) {
     db.close()
     db = null
+    wrappedDb = null
   }
 }
