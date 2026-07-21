@@ -2854,3 +2854,59 @@ Before marking passes: true: read ui-reference.md and debug-learnings.md. Write 
   - npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass.
 - **Passes:** true
 - **Implemented:** 2026-06-10
+
+### #89 — setAuth storm causes refresh_token_already_used → self-inflicted logout
+- **Description:** ToDoozy task ID: b1ee3217-a382-4f92-b7e1-fa73d6252840 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #90 — started todoozy offline, then went online, clicked retry, connection stayed 'offline'
+- **Description:** ToDoozy task ID: 1827d14e-aa3c-4c7c-9f2e-b3d4f9eccd55 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #91 — Expand Realtime coverage: per-user channel + activity_log on personal projects
+- **Description:** ToDoozy task ID: 4c89a910-b3a8-48ea-b1f4-0847ad4e6028 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #92 — Batch task-detail edits — sync only when switching tasks / closing panel / blurring app
+- **Description:** ToDoozy task ID: d174ec02-9041-4e5c-a065-c83e41c5565c — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #93 — MCP create_label writes legacy projects.label_data instead of project_labels junction — label invisible in app
+- **Description:** ToDoozy task ID: 2d4282aa-89dc-425f-911c-1ce498c9f78d — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #94 — Allow removing password login for OAuth users (Edge Function with service_role)
+- **Description:** ToDoozy task ID: 6a8adf77-7733-4c61-be46-4ee3ae1c5628 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #95 — Batch review doc — before/after screenshots + repro scenarios for stories #68-#94
+- **Description:** No ToDoozy task exists for this story — SKIP the ToDoozy status lifecycle entirely.
+- **Spec Section:** n/a — process/documentation story; spec is fully contained in the description
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---

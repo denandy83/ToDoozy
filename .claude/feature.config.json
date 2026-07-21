@@ -1,0 +1,31 @@
+{
+  "project_name": "ToDoozy",
+  "tech_stack": "Electron (main/preload/renderer) + TypeScript strict + React + Zustand + SQLite (node:sqlite, versioned migrations) + Supabase (Postgres/Realtime/GoTrue), electron-vite, Tailwind, Vitest",
+  "pipeline": "orchestrate",
+  "harness": "claude",
+  "parallelism": 2,
+  "test_command": "npm run test",
+  "typecheck_command": "npm run typecheck",
+  "reference_files": [
+    "CLAUDE.md",
+    "AUDIT_CONTEXT.md",
+    "debug-learnings.md",
+    "scope.md",
+    "ui-learnings.md"
+  ],
+  "docs_to_update": [
+    "pending-changes.md",
+    "DEVLOG.md"
+  ],
+  "models": {
+    "builder_default": "claude-sonnet-5",
+    "builder_heavy": "claude-opus-4-8",
+    "verifier": "claude-sonnet-5",
+    "admin": "claude-haiku-4-5-20251001"
+  },
+  "risk_overrides": {
+    "src/renderer/src/services/**": "data-writing",
+    "src/main/database/**": "data-writing",
+    "supabase/**": "security-migration"
+  }
+}
