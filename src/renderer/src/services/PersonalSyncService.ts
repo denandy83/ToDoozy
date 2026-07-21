@@ -1154,10 +1154,13 @@ export async function fullUpload(userId: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('No authenticated session')
 
-    // Sentinel: claim last_sync_at up-front so a concurrent initSync caller
-    // sees it and skips fullUpload instead of starting a parallel upload.
-    // The real timestamp is written at the end of this function.
-    await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
+    // NOTE: last_sync_at is written ONLY on successful completion (end of this
+    // function). It must never be claimed up-front as an in-flight sentinel —
+    // if the upload throws midway, a set last_sync_at makes the next initSync
+    // (which treats any truthy last_sync_at as "already fully synced") skip the
+    // retry, stranding the account partially uploaded. Concurrency is instead
+    // guarded by initSyncInFlight (single shared promise per process) plus the
+    // Electron single-instance lock — so no parallel fullUpload can start.
 
     // Count total items for progress — only sync projects owned by this user
     const allProjects = await window.api.projects.getProjectsForUser(userId)
@@ -2809,7 +2812,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
 /**
  * Check if this is a new device (no last_sync_at) and initiate appropriate sync.
  * Concurrent callers share the same in-flight promise so we never start two
- * parallel fullUploads (which would push every task N times).
+ * parallel fullUploads (which would push every task N times) — this is the
+ * SOLE concurrency guard now that fullUpload no longer claims last_sync_at as
+ * an up-front sentinel. last_sync_at is written only on a *successful* full
+ * upload/pull, so a failed run leaves it falsy here and this path retries.
  */
 let initSyncInFlight: Promise<void> | null = null
 export async function initSync(userId: string): Promise<void> {
