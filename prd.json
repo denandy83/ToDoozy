@@ -1,6 +1,160 @@
 {
   "project": "ToDoozy",
-  "branchName": "ralph/sync-hardening",
+  "branchName": "ralph/audit-fixes-all-2026-07-21",
   "schema": 2,
-  "stories": []
+  "stories": [
+    {
+      "id": 96,
+      "title": "[Critical] Security: MCP edge function stores per-request auth in module globals \u2014 supabase/functions/mcp/index.ts:1245",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/096-mcp-auth-globals.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 97,
+      "title": "[High] Security: MCP tools run on service-role client, RLS bypassed \u2014 supabase/functions/mcp/index.ts:1207",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/097-mcp-rls-bypass.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 98,
+      "title": "[Medium] Security: API keys stored/compared in plaintext \u2014 supabase/migrations/003_create_api_keys.sql:2",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/098-api-key-hashing.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 99,
+      "title": "[Medium] Security: session tokens written plaintext when safeStorage unavailable \u2014 src/main/ipc-handlers.ts:41",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/099-session-plaintext-fallback.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 100,
+      "title": "[Medium] Bug: saved-view match count includes soft-deleted tasks/labels \u2014 src/main/repositories/SavedViewRepository.ts:189",
+      "status": "pending",
+      "risk": "shared-logic",
+      "file": "stories/100-savedview-tombstone-counts.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 101,
+      "title": "[Medium] Bug: task search label filters ignore task_labels tombstones \u2014 src/main/repositories/TaskRepository.ts:579",
+      "status": "pending",
+      "risk": "shared-logic",
+      "file": "stories/101-search-label-tombstones.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 102,
+      "title": "[Medium] Bug: applyRemote LWW guards string-compare ISO timestamps \u2014 src/main/repositories/TaskRepository.ts:227",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/102-lww-timestamp-compare.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 103,
+      "title": "[Medium] Performance: WAL-mtime poll rehydrates all stores on own writes \u2014 src/main/index.ts:306",
+      "status": "pending",
+      "risk": "shared-logic",
+      "file": "stories/103-wal-poll-own-writes.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 104,
+      "title": "[Medium] Performance: N+1 Supabase queries in discoverRemoteMemberships \u2014 src/renderer/src/services/SyncService.ts:776",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/104-batch-membership-discovery.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 105,
+      "title": "[Medium] Performance: N+1 label resolution + row-by-row task_labels upserts on upload \u2014 src/renderer/src/services/SyncService.ts:336",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/105-batch-label-upload.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 106,
+      "title": "[Medium] Bug: fullUpload leaves last_sync_at sentinel set on failure \u2014 src/renderer/src/services/PersonalSyncService.ts:1146",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/106-fullupload-sentinel-reset.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 107,
+      "title": "[Medium] Inconsistency: many components exceed 150-line rule \u2014 src/renderer/src/AppLayout.tsx:1",
+      "status": "pending",
+      "risk": "ui-logic",
+      "file": "stories/107-component-size-refactor.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 108,
+      "title": "[Low] Security: dev osascript notification injectable via task title \u2014 src/main/notifications.ts:87",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/108-osascript-escaping.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 109,
+      "title": "[Low] Bug: sentNotifications set grows unbounded \u2014 src/main/notifications.ts:11",
+      "status": "pending",
+      "risk": "shared-logic",
+      "file": "stories/109-sentnotifications-eviction.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 110,
+      "title": "[Low] Performance: findMyDay performs repair UPDATE on every read \u2014 src/main/repositories/TaskRepository.ts:77",
+      "status": "pending",
+      "risk": "data-writing",
+      "file": "stories/110-findmyday-write-on-read.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 111,
+      "title": "[Low] Security: shell:openExternal accepts arbitrary URL schemes \u2014 src/main/ipc-handlers.ts:974",
+      "status": "pending",
+      "risk": "security-migration",
+      "file": "stories/111-openexternal-allowlist.md",
+      "passes": false,
+      "tested": false
+    },
+    {
+      "id": 112,
+      "title": "[Low] Maintainability: debug console.log in hot label store paths \u2014 src/renderer/src/shared/stores/taskStore.ts:705",
+      "status": "pending",
+      "risk": "ui-logic",
+      "file": "stories/112-remove-debug-logs.md",
+      "passes": false,
+      "tested": false
+    }
+  ]
 }
