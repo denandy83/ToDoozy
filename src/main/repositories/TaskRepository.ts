@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer } from './lww'
 import { parseRecurrence, getNextOccurrence, parseDateLocal } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {
@@ -224,7 +225,10 @@ export class TaskRepository {
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
     const existing = this.findById(task.id)
-    if (existing && existing.updated_at >= task.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, task.updated_at)) {
       return existing
     }
     this.db

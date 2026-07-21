@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer } from './lww'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
 
 export class ThemeRepository {
@@ -120,7 +121,10 @@ export class ThemeRepository {
   applyRemote(remote: Theme): Theme {
     const existing = this.findById(remote.id)
     if (existing && existing.is_builtin === 1) return existing
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db

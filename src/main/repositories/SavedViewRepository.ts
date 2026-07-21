@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { SavedView, CreateSavedViewInput, UpdateSavedViewInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer } from './lww'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'filter_config', 'project_id'] as const
 
@@ -146,7 +147,10 @@ export class SavedViewRepository {
    */
   applyRemote(remote: SavedView): SavedView {
     const existing = this.findById(remote.id)
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db
