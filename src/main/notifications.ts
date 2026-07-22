@@ -4,12 +4,17 @@ import { getDatabase } from './database'
 import { createRepositories } from './repositories'
 import { getMainWindow } from './index'
 import { buildDevNotificationCommand } from './notification-command'
+import { shouldEvictNotification } from './notification-eviction'
 import type { Task } from '../shared/types'
 
 const isDev = !app.isPackaged
 
-// Track sent notifications to avoid duplicates: "taskId:leadMinutes"
-const sentNotifications = new Set<string>()
+// Track sent notifications to avoid duplicates. Key = "taskId:leadKey", value = the
+// task's due instant (epoch ms) at the time it fired. The value lets the sweep evict
+// entries whose due instant is safely past (see shouldEvictNotification) so the map stays
+// bounded across the process lifetime instead of leaking, and a task later rescheduled to
+// a reused key can re-notify once its old entry is evicted.
+const sentNotifications = new Map<string, number>()
 
 let checkInterval: ReturnType<typeof setInterval> | null = null
 
@@ -34,6 +39,17 @@ export function stopNotificationChecker(): void {
 
 function checkAndSendNotifications(): void {
   try {
+    const now = Date.now()
+
+    // Evict dedup entries whose due instant is safely (>24h) in the past. Runs every sweep,
+    // before the enabled/lead-time gates, so the map stays bounded even while notifications
+    // are disabled. Deleting during Map iteration is well-defined in JS.
+    for (const [key, dueTime] of sentNotifications) {
+      if (shouldEvictNotification(dueTime, now)) {
+        sentNotifications.delete(key)
+      }
+    }
+
     const db = getDatabase()
     const repos = createRepositories(db)
 
@@ -48,8 +64,6 @@ function checkAndSendNotifications(): void {
     const maxMinutes = Math.max(leadMinutes, 1) + 1
     const upcomingTasks = repos.tasks.findWithUpcomingDueTimes(maxMinutes)
 
-    const now = Date.now()
-
     for (const task of upcomingTasks) {
       if (!task.due_date || !task.due_date.includes('T')) continue
 
@@ -60,12 +74,12 @@ function checkAndSendNotifications(): void {
 
       // Lead time notification
       if (minutesUntilDue <= leadMinutes && minutesUntilDue > 1) {
-        sendNotification(task, minutesUntilDue, leadMinutes)
+        sendNotification(task, minutesUntilDue, leadMinutes, dueTime)
       }
 
       // 1-minute warning notification
       if (minutesUntilDue <= 1 && minutesUntilDue >= 0) {
-        sendNotification(task, minutesUntilDue, 1)
+        sendNotification(task, minutesUntilDue, 1, dueTime)
       }
     }
   } catch (err) {
@@ -73,10 +87,15 @@ function checkAndSendNotifications(): void {
   }
 }
 
-function sendNotification(task: Task, minutesUntilDue: number, leadKey: number): void {
+function sendNotification(
+  task: Task,
+  minutesUntilDue: number,
+  leadKey: number,
+  dueTime: number
+): void {
   const key = `${task.id}:${leadKey}`
   if (sentNotifications.has(key)) return
-  sentNotifications.add(key)
+  sentNotifications.set(key, dueTime)
 
   const body = minutesUntilDue <= 1 ? 'Due in 1 minute' : `Due in ${minutesUntilDue} minutes`
 
