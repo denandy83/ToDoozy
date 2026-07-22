@@ -34,6 +34,7 @@ import {
 } from './requestContext.ts'
 import { ProjectScope } from './scoping.ts'
 import { hashApiKey } from './hash.ts'
+import { buildStatusRecord, computeNextOrderIndex } from './statusMutations.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -549,16 +550,22 @@ class StatusRepo {
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
+    // Never trust the caller's project_id: the service-role client bypasses RLS,
+    // so gate on membership by hand before writing (story #97).
     if (!(await this.scope.isMember(input.project_id as string))) {
       throw new Error(`Project not found: ${input.project_id}`)
     }
-    const now = new Date().toISOString()
-    const record = {
-      id: input.id, project_id: input.project_id, name: input.name,
-      color: input.color ?? '#888888', icon: input.icon ?? 'circle',
-      order_index: input.order_index ?? 0, is_done: input.is_done ?? 0,
-      is_default: input.is_default ?? 0, created_at: now, updated_at: now
-    }
+    // Defaults + flag coercion live in the pure, unit-tested statusMutations module.
+    const record = buildStatusRecord({
+      id: input.id as string,
+      project_id: input.project_id as string,
+      name: input.name as string,
+      color: input.color as string | null | undefined,
+      icon: input.icon as string | null | undefined,
+      order_index: input.order_index as number | null | undefined,
+      is_done: input.is_done as number | boolean | null | undefined,
+      is_default: input.is_default as number | boolean | null | undefined
+    }, new Date().toISOString())
     const { data, error } = await this.client.from('statuses').insert(record).select().single()
     if (error) throw new Error(`Failed to create status: ${error.message}`)
     return data
@@ -809,11 +816,18 @@ function optNum(args: Record<string, unknown>, key: string): number | undefined 
   return val !== undefined && val !== null ? Number(val) : undefined
 }
 
+function optBool(args: Record<string, unknown>, key: string): boolean | undefined {
+  const val = args[key]
+  if (val === undefined || val === null) return undefined
+  return val === true || val === 1 || val === 'true'
+}
+
 // ── Schema Helpers ─────────────────────────────────────────────────────
 
 interface SchemaProp { type: string; description: string; enum?: (string | number)[]; items?: { type: string } }
 function str(description: string): SchemaProp { return { type: 'string', description } }
 function num(description: string): SchemaProp { return { type: 'number', description } }
+function bool(description: string): SchemaProp { return { type: 'boolean', description } }
 interface InputSchema { type: 'object'; properties: Record<string, SchemaProp>; required?: string[] }
 interface ToolDef { name: string; description: string; inputSchema: InputSchema }
 
@@ -852,6 +866,7 @@ const tools: ToolDef[] = [
   { name: 'assign_label_to_task', description: 'Assign a label to a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
   { name: 'remove_label_from_task', description: 'Remove a label from a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
   { name: 'list_statuses', description: 'List all statuses for a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID') }, required: ['project_id'] } },
+  { name: 'create_status', description: 'Create a new status in a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), name: str('Status name'), color: str('Status color (hex, e.g. "#22c55e"). Defaults to #888888'), icon: str('Status icon name (e.g. "circle", "check-circle-2"). Defaults to "circle"'), order_index: num('Sort position; defaults to last (max existing + 1)'), is_done: bool('Whether this status marks a task as done (default false)') }, required: ['project_id', 'name'] } },
   { name: 'search_tasks', description: 'Search tasks with filters. All filters are optional and combined with AND.', inputSchema: { type: 'object', properties: { project_id: str('Filter by project ID'), status_id: str('Filter by status ID'), priority: num('Filter by exact priority (0-4)'), label_id: str('Filter by label ID'), due_before: str('Tasks due before this date (ISO 8601)'), due_after: str('Tasks due after this date (ISO 8601)'), keyword: str('Search keyword (matches title and description)'), label_logic: str('Label filter logic: "any" (OR, default) or "all" (AND)'), exclude_label_id: str('Exclude tasks with this label'), exclude_status_id: str('Exclude tasks with this status'), exclude_priority: num('Exclude tasks with this priority (0-4)') } } },
   { name: 'list_my_day', description: 'List tasks in the My Day view (tasks marked for today or due today)', inputSchema: { type: 'object', properties: {} } },
   { name: 'list_templates', description: 'List all task templates and project templates', inputSchema: { type: 'object', properties: {} } },
@@ -1148,6 +1163,26 @@ function createHandlers(repos: Repos, userId: string) {
       return { removed: true, task_id: taskId, label_id: labelId }
     },
     async list_statuses(args) { return await repos.statuses.findByProjectId(requireStr(args, 'project_id')) },
+    async create_status(args) {
+      const projectId = requireStr(args, 'project_id')
+      const name = requireStr(args, 'name')
+      let orderIndex = optNum(args, 'order_index')
+      if (orderIndex === undefined) {
+        // findByProjectId returns [] for a project the caller is not a member of,
+        // so this yields 0 — but the authorization rejection still happens inside
+        // repos.statuses.create (scope.isMember), so no row is ever written for a
+        // foreign project. When authorized, this sorts the new status last.
+        const existing = await repos.statuses.findByProjectId(projectId)
+        orderIndex = computeNextOrderIndex(existing)
+      }
+      // repos.statuses.create re-checks membership and rejects with the same typed
+      // "Project not found" error convention used by the other scoped write tools.
+      return await repos.statuses.create({
+        id: crypto.randomUUID(), project_id: projectId, name,
+        color: optStr(args, 'color'), icon: optStr(args, 'icon'),
+        order_index: orderIndex, is_done: optBool(args, 'is_done')
+      })
+    },
     async search_tasks(args) {
       const excludeLabelId = optStr(args, 'exclude_label_id')
       const excludeStatusId = optStr(args, 'exclude_status_id')
