@@ -19,6 +19,12 @@
 -- ##  backfill, so hash-based auth still resolves the user.                  ##
 -- ############################################################################
 
+-- Defensive: drop the legacy 2-arg signature in case this migration is ever
+-- applied against a DB where #98 hasn't already removed it. After #98 runs, the
+-- 2-arg overload is gone and this is a harmless no-op; without it, a stray 2-arg
+-- function would make quick-add calls ambiguous (PostgREST PGRST203).
+DROP FUNCTION IF EXISTS public.quick_add_task(text, text);
+
 CREATE OR REPLACE FUNCTION public.quick_add_task(
   p_api_key TEXT,
   p_title TEXT,

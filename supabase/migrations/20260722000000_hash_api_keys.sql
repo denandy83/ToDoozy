@@ -47,12 +47,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
 -- 5. Remove the plaintext column entirely (also drops its UNIQUE constraint).
 ALTER TABLE api_keys DROP COLUMN IF EXISTS key;
 
-COMMIT;
-
 -- 6. Recompile quick_add_task (iOS Shortcut / Telegram quick-add) to look the
---    caller up by hash instead of the now-removed plaintext column. Signature
---    and behavior are otherwise unchanged. The user_settings legacy fallback is
---    left intact — that separate plaintext store is out of scope for this story.
+--    caller up by hash instead of the now-removed plaintext column.
+--    IMPORTANT: the LIVE function is the 2-arg overload quick_add_task(p_api_key,
+--    p_title); this migration installs a 3-arg version (adds p_project_name
+--    DEFAULT NULL). CREATE OR REPLACE only matches an identical signature, so
+--    without dropping the 2-arg first we'd leave TWO overloads and a 2-arg call
+--    (the iOS Shortcut) becomes ambiguous → PostgREST PGRST203, quick-add down.
+--    Drop the old signature explicitly, and keep the whole thing INSIDE the
+--    transaction so the function swap is atomic with the column drop. The
+--    user_settings legacy fallback is left intact here (removed by companion #114).
+DROP FUNCTION IF EXISTS public.quick_add_task(text, text);
 CREATE OR REPLACE FUNCTION public.quick_add_task(
   p_api_key TEXT,
   p_title TEXT,
@@ -181,3 +186,5 @@ BEGIN
   );
 END;
 $$;
+
+COMMIT;
