@@ -95,5 +95,6 @@ export function isMutatingExec(sql: string): boolean {
   if (head.startsWith('SELECT')) return false
   if (head.startsWith('EXPLAIN')) return false
   if (head.startsWith('PRAGMA')) return false
+  if (head.startsWith('ROLLBACK') || head.startsWith('BEGIN')) return false
   return true
 }

@@ -755,6 +755,7 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
   },
 
   async localApplyRemote(remote) {
+    if (isSettingSyncExcluded(settingsDescriptor.fromRemote(remote).key)) return
     await window.api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 
