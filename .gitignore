@@ -10,3 +10,7 @@ out/
 
 # Supabase backup (PII + auth secrets — never commit)
 backup-supabase-*/
+.env.bak*
+
+# Local DB backups — personal data, never commit/push
+backups/
