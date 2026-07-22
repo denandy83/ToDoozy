@@ -1572,6 +1572,12 @@ export async function fullPull(userId: string): Promise<void> {
 
     if (remoteSettings) {
       for (const setting of remoteSettings) {
+        // Never import a device-local secret (api_key) onto this device under the
+        // real user_id. A leaked plaintext row may still exist remotely if it was
+        // synced by a pre-#114 build and not yet purged; pulling it here would
+        // re-establish the very leak #114 closed. Filter through the same
+        // single-sourced exclusion list the push paths use.
+        if (isSettingSyncExcluded(setting.key)) continue
         await window.api.settings.set(userId, setting.key, setting.value)
       }
     }
@@ -2817,6 +2823,37 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
 }
 
 /**
+ * One-time cleanup (#114): a pre-#114 build leaked the *plaintext* api_key into
+ * the cloud `user_settings` table via the debounced push. That key is a bearer
+ * secret which must live device-local only (under user_id='') and reach the
+ * cloud solely as a SHA-256 hash in `api_keys`. Purge any lingering leaked row
+ * at sync-init so it can never be re-imported by fullPull on a fresh device —
+ * independent of whether the user ever opens Settings → Integrations.
+ *
+ * Read-path safe: probe with a single SELECT and DELETE only when a row is
+ * actually present, so steady-state launches issue no write. Offline-tolerant —
+ * a failed probe is logged and swallowed so it never blocks sync init.
+ */
+export async function purgeLeakedApiKeySetting(userId: string): Promise<void> {
+  try {
+    const supabase = await getSupabase()
+    const { data: leaked } = await supabase
+      .from('user_settings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('key', 'api_key')
+      .maybeSingle()
+    if (leaked) {
+      await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
+      logEvent('info', 'sync', 'Purged leaked plaintext api_key from cloud user_settings (#114)')
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn('[PersonalSync] api_key purge probe failed (offline?):', msg)
+  }
+}
+
+/**
  * Check if this is a new device (no last_sync_at) and initiate appropriate sync.
  * Concurrent callers share the same in-flight promise so we never start two
  * parallel fullUploads (which would push every task N times) — this is the
@@ -2828,6 +2865,10 @@ let initSyncInFlight: Promise<void> | null = null
 export async function initSync(userId: string): Promise<void> {
   if (initSyncInFlight) return initSyncInFlight
   initSyncInFlight = (async () => {
+    // Always clean up a pre-#114 leaked plaintext api_key before any pull path,
+    // so fullPull on a fresh/empty-local device can never re-absorb the secret.
+    await purgeLeakedApiKeySetting(userId)
+
     const lastSyncAt = await window.api.settings.get(userId, 'last_sync_at')
     const syncStore = useSyncStore.getState()
 

@@ -9,7 +9,7 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
-import { chunkArray, fullUpload, initSync, pushSetting } from './PersonalSyncService'
+import { chunkArray, fullPull, fullUpload, initSync, pushSetting } from './PersonalSyncService'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
 
@@ -207,6 +207,74 @@ describe('pushSetting api_key exclusion (#114)', () => {
     const settingsUpserts = records.filter((r) => r.table === 'user_settings')
     expect(settingsUpserts).toHaveLength(1)
     expect(settingsUpserts[0].payload).toMatchObject({ key: 'telegram_user_id', value: '123456' })
+  })
+})
+
+// ── fullPull never imports a remote api_key into local settings (#114) ──
+//
+// A pre-#114 build could leak the raw API key into the cloud user_settings
+// table (the debounced push had no exclusion). fullPull runs for any new /
+// empty-local device via initSync and did an UNFILTERED read of user_settings,
+// writing every row back under the REAL user_id — re-absorbing the leaked
+// secret and violating the device-local-only invariant. This asserts the pull
+// path drops `api_key` (via the shared isSettingSyncExcluded list) while still
+// importing ordinary settings.
+
+/**
+ * Supabase double for fullPull: every table read resolves to an empty list
+ * except user_settings, which returns the supplied rows. Awaitable and
+ * chainable so fullPull's SELECT/eq/in chains resolve without a network.
+ */
+function makePullSupabase(
+  userSettingsRows: Array<{ key: string; value: string }>
+): SupabaseClient {
+  const make = (table: string): Record<string, unknown> => {
+    const result = {
+      data: table === 'user_settings' ? userSettingsRows : [],
+      error: null,
+      count: 0
+    }
+    const chain: Record<string, unknown> = {}
+    for (const m of [
+      'select', 'eq', 'neq', 'in', 'is', 'order', 'limit', 'filter', 'match',
+      'update', 'delete', 'insert', 'upsert'
+    ]) {
+      chain[m] = (): Record<string, unknown> => chain
+    }
+    chain.single = (): Promise<typeof result> => Promise.resolve(result)
+    chain.maybeSingle = (): Promise<typeof result> => Promise.resolve(result)
+    chain.then = (resolve: (v: typeof result) => unknown): unknown => resolve(result)
+    return chain
+  }
+  return { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+}
+
+describe('fullPull api_key exclusion (#114)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: USER_ID } } as unknown as Session)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('never imports a remote api_key row into local settings under the real user_id', async () => {
+    const h = installApi({ hasProject: false })
+    vi.mocked(getSupabase).mockResolvedValue(
+      makePullSupabase([
+        { key: 'api_key', value: 'leaked-plaintext-key' },
+        { key: 'theme', value: 'dark' }
+      ])
+    )
+
+    await fullPull(USER_ID)
+
+    // The leaked bearer secret must NOT land in local settings under user_id…
+    expect(h.settings.has('api_key')).toBe(false)
+    expect(h.settingsSet).not.toHaveBeenCalledWith(USER_ID, 'api_key', expect.anything())
+    // …while ordinary settings still import as before.
+    expect(h.settings.get('theme')).toBe('dark')
   })
 })
 
