@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
 
 export class ThemeRepository {
@@ -147,9 +147,9 @@ export class ThemeRepository {
         remote.config,
         remote.is_builtin ?? 0,
         remote.owner_id,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Setting } from '../../shared/types'
 
 export class SettingsRepository {
@@ -156,8 +156,8 @@ export class SettingsRepository {
         remote.user_id,
         remote.key,
         remote.value,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findRaw(remote.user_id, remote.key)!
   }

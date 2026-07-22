@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { ProjectArea, CreateProjectAreaInput, UpdateProjectAreaInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed'] as const
 
@@ -187,9 +187,9 @@ export class ProjectAreaRepository {
         remote.icon,
         remote.sidebar_order,
         remote.is_collapsed,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }

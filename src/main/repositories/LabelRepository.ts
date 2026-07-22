@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Label, CreateLabelInput, UpdateLabelInput, TaskLabelMapping, LabelUsageInfo } from '../../shared/types'
 
 export class LabelRepository {
@@ -225,9 +225,9 @@ export class LabelRepository {
           remote.name,
           remote.color,
           remote.order_index,
-          remote.created_at,
-          remote.updated_at,
-          remote.deleted_at ?? null
+          toCanonicalIso(remote.created_at),
+          toCanonicalIso(remote.updated_at),
+          toCanonicalIso(remote.deleted_at ?? null)
         )
       return this.findById(remote.id)!
     } catch (err: unknown) {
@@ -592,8 +592,8 @@ export class LabelRepository {
       .run(
         remote.project_id,
         remote.label_id,
-        remote.created_at ?? new Date().toISOString(),
-        remote.deleted_at
+        toCanonicalIso(remote.created_at) ?? new Date().toISOString(),
+        toCanonicalIso(remote.deleted_at)
       )
   }
 

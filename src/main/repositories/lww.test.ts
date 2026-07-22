@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import { StatusRepository } from './StatusRepository'
 import type { Status } from '../../shared/types'
 
@@ -34,6 +34,45 @@ describe('isRemoteNewer', () => {
   it('is symmetric in format: identical epochs regardless of Z vs +00:00', () => {
     expect(isRemoteNewer(Z, Z)).toBe(false)
     expect(isRemoteNewer(PLUS, PLUS)).toBe(false)
+  })
+})
+
+describe('toCanonicalIso (Story #115)', () => {
+  it('converts PostgREST `+00:00` form to canonical `…Z` (same instant)', () => {
+    expect(toCanonicalIso('2026-07-21T10:00:00.000+00:00')).toBe('2026-07-21T10:00:00.000Z')
+    // No fractional part in the input still yields the millisecond `.000Z` form.
+    expect(toCanonicalIso('2026-07-21T10:00:00+00:00')).toBe('2026-07-21T10:00:00.000Z')
+  })
+
+  it('leaves an already-canonical `…Z` value byte-for-byte unchanged', () => {
+    expect(toCanonicalIso('2026-07-21T10:00:00.000Z')).toBe('2026-07-21T10:00:00.000Z')
+  })
+
+  it('normalizes a non-UTC offset to the equivalent UTC `…Z` instant', () => {
+    // 15:00 at +05:00 is 10:00 UTC.
+    expect(toCanonicalIso('2026-07-21T15:00:00.000+05:00')).toBe('2026-07-21T10:00:00.000Z')
+  })
+
+  it('truncates sub-millisecond precision to milliseconds, matching toISOString()', () => {
+    const input = '2026-07-21T10:00:00.123456+00:00'
+    expect(toCanonicalIso(input)).toBe('2026-07-21T10:00:00.123Z')
+    expect(toCanonicalIso(input)).toBe(new Date(input).toISOString())
+  })
+
+  it('is null/undefined/empty safe — passes those through unchanged', () => {
+    expect(toCanonicalIso(null)).toBeNull()
+    expect(toCanonicalIso(undefined)).toBeUndefined()
+    expect(toCanonicalIso('')).toBe('')
+  })
+
+  it('preserves an unparseable value rather than corrupting it to Invalid Date', () => {
+    expect(toCanonicalIso('not-a-timestamp')).toBe('not-a-timestamp')
+  })
+
+  it('preserves the input type: a nullable column stays nullable', () => {
+    const deletedAt: string | null = null
+    const result: string | null = toCanonicalIso(deletedAt)
+    expect(result).toBeNull()
   })
 })
 

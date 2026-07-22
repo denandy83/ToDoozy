@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import { parseRecurrence, getNextOccurrence, parseDateLocal } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {
@@ -325,9 +325,9 @@ export class TaskRepository {
         task.recurrence_rule ?? null,
         task.reference_url ?? null,
         task.my_day_dismissed_date ?? null,
-        task.created_at,
-        task.updated_at,
-        task.deleted_at ?? null
+        toCanonicalIso(task.created_at),
+        toCanonicalIso(task.updated_at),
+        toCanonicalIso(task.deleted_at ?? null)
       )
     return this.findById(task.id)!
   }

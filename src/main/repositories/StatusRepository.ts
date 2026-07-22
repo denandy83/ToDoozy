@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
-import { isRemoteNewer } from './lww'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
 
 export class StatusRepository {
@@ -152,9 +152,9 @@ export class StatusRepository {
         remote.order_index,
         remote.is_done,
         remote.is_default,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }
