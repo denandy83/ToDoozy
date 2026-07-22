@@ -702,14 +702,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       // Resolve to the current user's own same-name label before linking, so
       // we never attach another member's label id to this user's task (#d5b138b1).
       const linkId = await resolveLabelForCurrentUser(taskId, labelId)
-      console.log('[addLabel] start', { taskId, labelId, linkId })
       await window.api.tasks.addLabel(taskId, linkId)
-      console.log('[addLabel] sqlite insert done')
       await get().hydrateTaskLabels(taskId)
       const labels = get().taskLabels[taskId] ?? []
-      console.log('[addLabel] post-hydrate', {
-        labels: labels.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
-      })
       const added = labels.find((l) => l.id === linkId)
       logTaskActivity(taskId, 'label_added', null, added?.name ?? linkId)
       const task = get().tasks[taskId]
@@ -730,48 +725,24 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   async removeLabel(taskId: string, labelId: string): Promise<boolean> {
     try {
       const labels = get().taskLabels[taskId] ?? []
-      console.log('[removeLabel] start', {
-        taskId,
-        labelId,
-        currentTaskLabels: labels.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
-      })
       let passedLabel: Label | undefined =
         labels.find((l) => l.id === labelId)
         ?? useLabelStore.getState().labels[labelId]
-      console.log('[removeLabel] store lookup', {
-        foundOnTask: !!labels.find((l) => l.id === labelId),
-        foundInLabelStore: !!useLabelStore.getState().labels[labelId]
-      })
       if (!passedLabel) {
         const fetched = await window.api.labels.findById(labelId).catch(() => null)
-        console.log('[removeLabel] IPC fallback', { fetched })
         if (fetched) passedLabel = fetched
       }
       const targetName = passedLabel?.name.toLowerCase() ?? null
       const toRemove = targetName
         ? labels.filter((l) => l.name.toLowerCase() === targetName)
         : labels.filter((l) => l.id === labelId)
-      console.log('[removeLabel] resolved', {
-        passedLabel,
-        targetName,
-        toRemove: toRemove.map((l) => ({ id: l.id, name: l.name, user_id: l.user_id }))
-      })
 
       let anyRemoved = false
       for (const l of toRemove) {
         const result = await window.api.tasks.removeLabel(taskId, l.id)
-        console.log('[removeLabel] window.api.tasks.removeLabel result', {
-          taskId,
-          labelId: l.id,
-          result
-        })
         if (result) anyRemoved = true
       }
       await get().hydrateTaskLabels(taskId)
-      console.log('[removeLabel] post-hydrate', {
-        anyRemoved,
-        newTaskLabels: (get().taskLabels[taskId] ?? []).map((l) => ({ id: l.id, name: l.name }))
-      })
       if (anyRemoved) {
         logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null)
         const task = get().tasks[taskId]
