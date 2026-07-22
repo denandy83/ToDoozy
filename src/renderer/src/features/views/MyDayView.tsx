@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
 import { useToast } from '../../shared/components/Toast'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore } from '../../shared/stores'
@@ -40,8 +39,9 @@ import { AddTaskInput, type AddTaskInputHandle, type SmartTaskData } from '../ta
 import { StatusSection } from '../tasks/StatusSection'
 import { KanbanView } from '../tasks/KanbanView'
 import type { Task, Label, Project } from '../../../../shared/types'
-import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import type { DropIndicator } from '../tasks/useDragAndDrop'
+import { MyDayProjectSelector } from './my-day/MyDayProjectSelector'
+import { useMyDayKeyboardNav } from './my-day/useMyDayKeyboardNav'
 import {
   MY_DAY_BUCKETS,
   getBucketForTask,
@@ -539,244 +539,25 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
     [createOrMatchLabel, addTaskProject]
   )
 
-  // Keyboard navigation
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const scrollTaskIntoView = (taskId: string): void => {
-      requestAnimationFrame(() => {
-        const el = container.querySelector(`[data-task-id="${taskId}"]`)
-        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-      })
-    }
-
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      const currentTaskId = selectedTaskIds.size === 1 ? [...selectedTaskIds][0] : null
-      const currentIndex = currentTaskId
-        ? flatTasks.findIndex((t) => t.id === currentTaskId)
-        : -1
-
-      // Cmd+A = select all visible tasks
-      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
-        e.preventDefault()
-        selectAllTasks(flatTasks.map((t) => t.id))
-        return
-      }
-
-      // Cmd+C = copy selected task titles
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        if (selectedTaskIds.size > 0) {
-          e.preventDefault()
-          copySelectedTasks(flatTasks)
-        }
-        return
-      }
-
-      // Escape: close panel first (keeps selection), then clear selection on second press
-      if (e.key === 'Escape') {
-        // If a date/time picker dropdown is open (or was just closed), don't close panel
-        if (document.querySelector('.react-datepicker-popper')) return
-        if ((e as KeyboardEvent & { _popupHandled?: boolean })._popupHandled) return
-        const { showDetailPanel: panelOpen } = useTaskStore.getState()
-        if (panelOpen) {
-          e.preventDefault()
-          useTaskStore.setState({ showDetailPanel: false })
-          return
-        }
-        if (selectedTaskIds.size > 0) {
-          e.preventDefault()
-          clearSelection()
-          return
-        }
-      }
-
-      switch (e.key) {
-        case 'ArrowDown': {
-          e.preventDefault()
-          const nextIndex = Math.min(currentIndex + 1, flatTasks.length - 1)
-          if (flatTasks[nextIndex]) {
-            const id = flatTasks[nextIndex].id
-            setCurrentTask(id)
-            scrollTaskIntoView(id)
-          }
-          break
-        }
-        case 'ArrowUp': {
-          e.preventDefault()
-          if (currentIndex <= 0) {
-            setCurrentTask(null)
-            addInputRef.current?.focus()
-          } else {
-            const id = flatTasks[currentIndex - 1].id
-            setCurrentTask(id)
-            scrollTaskIntoView(id)
-          }
-          break
-        }
-        case 'Enter': {
-          e.preventDefault()
-          if (currentTaskId) {
-            setCurrentTask(currentTaskId)
-            requestAnimationFrame(() => {
-              const titleEl = document.querySelector<HTMLElement>('[data-detail-title]')
-              titleEl?.focus()
-            })
-          } else {
-            addInputRef.current?.focus()
-          }
-          break
-        }
-        case ' ': {
-          if (!(e.target instanceof HTMLInputElement)) {
-            e.preventDefault()
-            const tasksToUpdate = selectedTaskIds.size > 0 ? [...selectedTaskIds] : currentTaskId ? [currentTaskId] : []
-            if (tasksToUpdate.length > 0) {
-              const anchorId = currentTaskId ?? tasksToUpdate[0]
-              for (const taskId of tasksToUpdate) {
-                const task = allTasks[taskId]
-                if (task) {
-                  const taskStatuses = Object.values(allStatuses)
-                    .filter((s) => s.project_id === task.project_id)
-                    .sort((a, b) => {
-                      if (a.is_default === 1 && b.is_default !== 1) return -1
-                      if (b.is_default === 1 && a.is_default !== 1) return 1
-                      if (a.is_done === 1 && b.is_done !== 1) return 1
-                      if (b.is_done === 1 && a.is_done !== 1) return -1
-                      return a.order_index - b.order_index
-                    })
-                  const idx = taskStatuses.findIndex((s) => s.id === task.status_id)
-                  const nextStatus = taskStatuses[(idx + 1) % taskStatuses.length]
-                  if (nextStatus) handleStatusChange(taskId, nextStatus.id)
-                }
-              }
-              // Re-focus container and scroll anchor task into view after DOM update
-              requestAnimationFrame(() => {
-                containerRef.current?.focus()
-                if (anchorId) scrollTaskIntoView(anchorId)
-              })
-            }
-          }
-          break
-        }
-        case 'ArrowRight': {
-          if (currentTaskId) {
-            e.preventDefault()
-            const hasSubtasks = Object.values(allTasks).some((t) => t.parent_id === currentTaskId)
-            if (hasSubtasks) setExpanded(currentTaskId, true)
-          }
-          break
-        }
-        case 'ArrowLeft': {
-          if (currentTaskId) {
-            e.preventDefault()
-            const task = allTasks[currentTaskId]
-            if (expandedTaskIds.has(currentTaskId)) {
-              setExpanded(currentTaskId, false)
-            } else if (task?.parent_id) {
-              navigateTask(task.parent_id)
-            }
-          }
-          break
-        }
-        case 'Delete':
-        case 'Backspace': {
-          if (!(e.target instanceof HTMLInputElement)) {
-            if (shouldForceDelete(e)) {
-              e.preventDefault()
-              if (selectedTaskIds.size > 1) {
-                const ids = [...selectedTaskIds]
-                clearSelection()
-                for (const id of ids) deleteTask(id)
-              } else if (currentTaskId) {
-                const nextIndex =
-                  currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
-                const nextTask = flatTasks[nextIndex]
-                deleteTask(currentTaskId)
-                setCurrentTask(nextTask?.id ?? null)
-              }
-            } else if (selectedTaskIds.size > 1) {
-              e.preventDefault()
-              useTaskStore.getState().setPendingBulkDeleteTasks([...selectedTaskIds])
-            } else if (currentTaskId) {
-              e.preventDefault()
-              const nextIndex =
-                currentIndex + 1 < flatTasks.length ? currentIndex + 1 : currentIndex - 1
-              const nextTask = flatTasks[nextIndex]
-              handleDeleteTask(currentTaskId)
-              setCurrentTask(nextTask?.id ?? null)
-            }
-          }
-          break
-        }
-      }
-    }
-
-    container.addEventListener('keydown', handleKeyDown)
-    return () => container.removeEventListener('keydown', handleKeyDown)
-  }, [
+  useMyDayKeyboardNav({
+    containerRef,
+    addInputRef,
     selectedTaskIds,
     flatTasks,
+    allTasks,
+    allStatuses,
+    expandedTaskIds,
     setCurrentTask,
     navigateTask,
     selectAllTasks,
     clearSelection,
-    allTasks,
-    allStatuses,
+    setExpanded,
+    toggleExpanded,
+    deleteTask,
     handleStatusChange,
     handleDeleteTask,
-    copySelectedTasks,
-    toggleExpanded,
-    setExpanded,
-    expandedTaskIds
-  ])
-
-  // Auto-select first task (without opening detail panel) when My Day mounts or selection is cleared
-  const hasSelection = selectedTaskIds.size > 0
-  useEffect(() => {
-    if (hasSelection) return
-    requestAnimationFrame(() => {
-      if (flatTasks.length > 0) {
-        useTaskStore.setState({
-          selectedTaskIds: new Set([flatTasks[0].id]),
-          lastSelectedTaskId: flatTasks[0].id,
-          showDetailPanel: false
-        })
-      }
-      containerRef.current?.focus()
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasSelection])
-
-  // Tab navigation: intercept Tab globally when My Day is the active view.
-  // Skips text inputs and rich-text editors; everything else (header buttons, project
-  // filter chips, sidebar items) should not consume Tab — tasks should.
-  useEffect(() => {
-    const handleTab = (e: KeyboardEvent): void => {
-      if (e.key !== 'Tab') return
-      const container = containerRef.current
-      if (!container) return
-      // Only handle when focus is inside this container (not on body, detail panel, or popups)
-      if (!container.contains(document.activeElement)) return
-      // Let Tab work normally inside text inputs and textareas
-      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
-      // If no tasks, nothing to cycle — let browser handle it
-      const tasks = flatTasks
-      if (tasks.length === 0) return
-      e.preventDefault()
-      const selectedId = useTaskStore.getState().selectedTaskIds.values().next().value as string | undefined
-      const idx = selectedId ? tasks.findIndex((t) => t.id === selectedId) : -1
-      const nextId = e.shiftKey
-        ? tasks[idx <= 0 ? tasks.length - 1 : idx - 1].id
-        : tasks[idx >= tasks.length - 1 ? 0 : idx + 1].id
-      navigateTask(nextId)
-      requestAnimationFrame(() => {
-        container.querySelector<HTMLElement>(`[data-task-id="${nextId}"]`)?.focus()
-      })
-    }
-    document.addEventListener('keydown', handleTab, { capture: true })
-    return () => document.removeEventListener('keydown', handleTab, { capture: true })
-  }, [flatTasks, navigateTask])
+    copySelectedTasks
+  })
 
   // Handle status changes in My Day — map bucket IDs or cross-project statuses to correct project status
   const handleMyDayStatusChange = useCallback(
@@ -933,86 +714,6 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
               </p>
             </div>
           )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface MyDayProjectSelectorProps {
-  projects: Project[]
-  selectedProjectId: string
-  onSelect: (projectId: string) => void
-}
-
-function MyDayProjectSelector({
-  projects,
-  selectedProjectId,
-  onSelect
-}: MyDayProjectSelectorProps): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const selected = projects.find((p) => p.id === selectedProjectId)
-
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    const handleKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', handleClick)
-    window.addEventListener('keydown', handleKey)
-    return () => {
-      window.removeEventListener('mousedown', handleClick)
-      window.removeEventListener('keydown', handleKey)
-    }
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative flex-shrink-0 pl-4 pr-1 py-2.5">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-foreground/6"
-        title="Select project for new task"
-      >
-        <div
-          className="h-2 w-2 rounded-full"
-          style={{ backgroundColor: selected?.color ?? '#888' }}
-        />
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted max-w-[80px] truncate">
-          {selected?.name ?? 'Project'}
-        </span>
-        <ChevronDown size={10} className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100">
-          <div className="max-h-48 overflow-y-auto py-1">
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => {
-                  onSelect(p.id)
-                  setOpen(false)
-                }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-foreground/6 ${
-                  p.id === selectedProjectId ? 'bg-accent/12' : ''
-                }`}
-              >
-                <div
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: p.color }}
-                />
-                <span className="text-[11px] font-light text-foreground truncate">
-                  {p.name}
-                </span>
-              </button>
-            ))}
-          </div>
         </div>
       )}
     </div>
