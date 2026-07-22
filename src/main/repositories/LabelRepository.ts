@@ -263,9 +263,9 @@ export class LabelRepository {
     const nameParam = String(canonical.name ?? '')
     const colorParam = String(canonical.color ?? '#888888')
     const orderIndexParam = Number(canonical.order_index ?? 0)
-    const createdAtParam = String(canonical.created_at ?? new Date().toISOString())
-    const updatedAtParam = String(canonical.updated_at ?? new Date().toISOString())
-    const deletedAtParam = canonical.deleted_at ? String(canonical.deleted_at) : null
+    const createdAtParam = toCanonicalIso(String(canonical.created_at ?? new Date().toISOString()))
+    const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
+    const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
 
     return withTransaction(this.db, () => {
       let taskRemaps = 0
