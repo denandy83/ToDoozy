@@ -1,8 +1,9 @@
 import { Notification, app } from 'electron'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { getDatabase } from './database'
 import { createRepositories } from './repositories'
 import { getMainWindow } from './index'
+import { buildDevNotificationCommand } from './notification-command'
 import type { Task } from '../shared/types'
 
 const isDev = !app.isPackaged
@@ -80,12 +81,19 @@ function sendNotification(task: Task, minutesUntilDue: number, leadKey: number):
   const body = minutesUntilDue <= 1 ? 'Due in 1 minute' : `Due in ${minutesUntilDue} minutes`
 
   if (isDev) {
-    // In dev mode, Electron notifications are unreliable on macOS — use osascript instead
-    const escapedTitle = task.title.replace(/'/g, "'\\''")
-    const escapedBody = body.replace(/'/g, "'\\''")
+    // In dev mode, Electron notifications are unreliable on macOS — use osascript instead.
+    // Title/body are passed via argv (execFileSync spawns osascript directly, no shell), so
+    // they reach AppleScript as inert `argv` data and can never inject shell or AppleScript
+    // code — even for a hostile title from a synced shared project or MCP write. See
+    // buildDevNotificationCommand + notification-command.test.ts.
+    const { command, args } = buildDevNotificationCommand(task.title, body)
     try {
-      execSync(`osascript -e 'display notification "${escapedBody}" with title "${escapedTitle}"'`)
-    } catch { /* ignore osascript failures */ }
+      execFileSync(command, args)
+    } catch (err) {
+      // osascript can legitimately fail (e.g. notifications disabled at the OS level); log,
+      // never crash the checker. An empty catch would violate the project's error-handling rule.
+      console.error('Dev osascript notification failed:', err)
+    }
     // Still handle click-to-navigate for when the app is focused
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
