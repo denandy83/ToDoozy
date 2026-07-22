@@ -18,6 +18,7 @@ import {
   clearSession as clearSessionFromDisk,
   type SessionStoreDeps
 } from './auth/sessionStore'
+import { validateExternalUrl } from './shell-url'
 
 let repos: Repositories | null = null
 
@@ -985,8 +986,15 @@ export function registerIpcHandlers(): void {
 
   // ── Shell ────────────────────────────────────────────────────────────
 
-  ipcMain.handle('shell:openExternal', (_e, url: string) => {
-    return shell.openExternal(url)
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    // Enforce a scheme allowlist in the MAIN process — never trust the renderer.
+    const validation = validateExternalUrl(url)
+    if (!validation.ok) {
+      console.warn(`[shell:openExternal] rejected external URL: ${validation.reason}`)
+      return { ok: false as const, error: validation.reason }
+    }
+    await shell.openExternal(validation.url)
+    return { ok: true as const }
   })
 
   // ── Launch at Login ─────────────────────────────────────────────────
