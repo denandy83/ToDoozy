@@ -9,7 +9,7 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
-import { chunkArray, fullUpload, initSync } from './PersonalSyncService'
+import { chunkArray, fullUpload, initSync, pushSetting } from './PersonalSyncService'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
 
@@ -140,6 +140,75 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
   vi.stubGlobal('window', { api })
   return { settings, labelsFindAll, statusesFindByProjectId, projectsGetProjectsForUser, settingsSet }
 }
+
+// ── pushSetting never emits the plaintext api_key to user_settings (#114) ──
+//
+// A prior build synced the raw API key into user_settings.value (5s debounce)
+// because pushSetting had no exclusion for `api_key`. The key is a bearer secret
+// — it must stay device-local and only ever reach the cloud as a SHA-256 hash in
+// api_keys. This asserts the debounced push path drops `api_key` and still
+// forwards ordinary settings.
+
+interface UpsertRecord {
+  table: string
+  payload: unknown
+}
+
+/** Supabase double that records every from(table).upsert(payload) call. */
+function makeRecordingSupabase(records: UpsertRecord[]): SupabaseClient {
+  const ok = { error: null, data: [], count: 0 }
+  const make = (table: string): Record<string, unknown> => {
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'in', 'is', 'order', 'limit', 'update', 'delete', 'insert']) {
+      chain[m] = (): Record<string, unknown> => chain
+    }
+    chain.upsert = (payload: unknown): Promise<typeof ok> => {
+      records.push({ table, payload })
+      return Promise.resolve(ok)
+    }
+    chain.single = (): Promise<typeof ok> => Promise.resolve(ok)
+    chain.maybeSingle = (): Promise<typeof ok> => Promise.resolve(ok)
+    chain.then = (resolve: (v: typeof ok) => unknown): unknown => resolve(ok)
+    return chain
+  }
+  return { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+}
+
+describe('pushSetting api_key exclusion (#114)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: USER_ID } } as unknown as Session)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('never upserts api_key to user_settings, even after the debounce flushes', async () => {
+    const records: UpsertRecord[] = []
+    vi.mocked(getSupabase).mockResolvedValue(makeRecordingSupabase(records))
+
+    pushSetting('api_key', 'super-secret-plaintext', USER_ID)
+    // Advance past the 5s debounce and drain the async flush.
+    await vi.advanceTimersByTimeAsync(6_000)
+
+    const settingsUpserts = records.filter((r) => r.table === 'user_settings')
+    expect(settingsUpserts).toHaveLength(0)
+  })
+
+  it('still forwards ordinary integration settings through the debounced push', async () => {
+    const records: UpsertRecord[] = []
+    vi.mocked(getSupabase).mockResolvedValue(makeRecordingSupabase(records))
+
+    pushSetting('telegram_user_id', '123456', USER_ID)
+    await vi.advanceTimersByTimeAsync(6_000)
+
+    const settingsUpserts = records.filter((r) => r.table === 'user_settings')
+    expect(settingsUpserts).toHaveLength(1)
+    expect(settingsUpserts[0].payload).toMatchObject({ key: 'telegram_user_id', value: '123456' })
+  })
+})
 
 describe('fullUpload / initSync last_sync_at handling (#106)', () => {
   beforeEach(() => {

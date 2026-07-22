@@ -15,6 +15,7 @@ import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
+import { isSettingSyncExcluded } from './settingsSyncPolicy'
 
 /**
  * Returns true if a live Supabase session exists. All push/delete functions
@@ -643,6 +644,9 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
  * Push a setting to user_settings in Supabase (immediate, no debounce).
  */
 async function pushSettingImmediate(key: string, value: string, userId: string): Promise<void> {
+  // Never let a bearer secret (api_key) reach the cloud user_settings table —
+  // covers the first-time fullUpload path and the debounced flush (#98/#114).
+  if (isSettingSyncExcluded(key)) return
   const id = `${userId}:${key}`
   const payload = {
     id,
@@ -669,6 +673,9 @@ async function pushSettingImmediate(key: string, value: string, userId: string):
  * Push a setting to Supabase with 5s debounce to batch rapid changes.
  */
 export function pushSetting(key: string, value: string, userId: string): void {
+  // Defense-in-depth: excluded keys (api_key) are device-local secrets and must
+  // never be buffered/flushed to Supabase user_settings (#98/#114).
+  if (isSettingSyncExcluded(key)) return
   pendingSettings.set(`${userId}:${key}`, { key, value, userId })
   if (settingsFlushTimer) clearTimeout(settingsFlushTimer)
   settingsFlushTimer = setTimeout(flushSettingsBuffer, 5_000)

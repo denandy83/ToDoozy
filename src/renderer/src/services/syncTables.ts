@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/types'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
+import { isSettingSyncExcluded } from './settingsSyncPolicy'
 
 export type { SyncTableName }
 
@@ -740,7 +741,11 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
   remoteScopeColumn: 'user_id',
 
   async localList(userId, includeTombstones) {
-    return window.api.settings.findAllByUser(userId, { includeTombstones })
+    const rows = await window.api.settings.findAllByUser(userId, { includeTombstones })
+    // api_key is a device-local bearer secret — never reconcile it up to the
+    // cloud user_settings table, even if a legacy per-user row exists locally
+    // (e.g. an upgrade from a build that leaked it). See settingsSyncPolicy (#114).
+    return rows.filter((row) => !isSettingSyncExcluded(row.key))
   },
 
   async localGetById() {

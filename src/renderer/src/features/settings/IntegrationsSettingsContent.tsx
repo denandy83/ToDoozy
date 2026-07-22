@@ -46,10 +46,32 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
             if (row.value) await window.api.settings.set(userId, row.key, row.value)
           }
         }
-        // API keys are stored as SHA-256 hashes only (story #98) — the plaintext
-        // is never persisted server-side, so it cannot be pulled back here. The
-        // raw key is surfaced once at generation and kept in this device's local
-        // `api_key` setting; other devices must generate their own key.
+        // The plaintext API key is DEVICE-LOCAL only — persisted under user_id=''
+        // (the same convention as whats_new) and excluded from every sync path,
+        // so it never enters personal sync (#114). Server-side, only its SHA-256
+        // hash lives in the api_keys table (#98) — there is nothing to pull back
+        // here, and each device generates its own key.
+        //
+        // One-time cleanup (#114): a prior build leaked the *plaintext* key into
+        // the cloud user_settings table. Probe with a SELECT (read-path safe —
+        // no unconditional write) and hard-delete it so the leaked key can't
+        // linger. Then migrate any legacy per-user local row to the device-local
+        // (user_id='') store so the existing key keeps working AND can no longer
+        // be re-pushed by reconcile.
+        const { data: leakedKey } = await supabase
+          .from('user_settings')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('key', 'api_key')
+          .maybeSingle()
+        if (leakedKey) {
+          await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
+        }
+        const rawKey = await window.api.settings.findRaw(userId, 'api_key')
+        if (rawKey && !rawKey.deleted_at && rawKey.value) {
+          await window.api.settings.set('', 'api_key', rawKey.value)
+          await window.api.settings.delete(userId, 'api_key')
+        }
         hydrateSettings()
       } catch (err) { console.warn('[Integrations] Failed to pull settings from Supabase:', err) }
     }
@@ -115,33 +137,49 @@ export function IntegrationsSettingsContent(): React.JSX.Element {
   // ── API Key handlers ──
   const handleGenerateApiKey = useCallback(async () => {
     const key = crypto.randomUUID()
-    // Surface the plaintext to the user once (kept only in this device's local
-    // settings); persist ONLY its SHA-256 hash server-side (story #98).
-    setSetting('api_key', key)
+    // Persist the plaintext DEVICE-LOCAL only — under user_id='' (the same
+    // convention as whats_new) so it never enters personal sync (#114). Do NOT
+    // use setSetting() here: that writes under the real user_id and would queue
+    // a cloud push. Only the SHA-256 hash is stored server-side in api_keys (#98).
+    await window.api.settings.set('', 'api_key', key)
+    // Tombstone any legacy per-user local row so the new device-local value is
+    // the one that surfaces (getAll prefers a live per-user row over the '' default).
+    if (userId) await window.api.settings.delete(userId, 'api_key').catch(() => {})
     try {
       const supabase = await getSupabase()
       if (userId) {
+        // Purge any plaintext key a prior build leaked to the cloud user_settings.
+        await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
         const keyHash = await hashApiKey(key)
         const { error } = await supabase.from('api_keys').insert({ user_id: userId, key_hash: keyHash, name: 'Default' })
         if (error) console.error('[Integrations] api_keys insert failed:', error.message, error.code, error.details)
       }
     } catch (err) { console.error('[Integrations] Generate API key failed:', err) }
+    await hydrateSettings()
     addToast({
       message: 'New API key generated — update it in your iOS Shortcut and MCP clients'
     })
-  }, [setSetting, userId, addToast])
+  }, [userId, addToast, hydrateSettings])
 
   const doRevokeApiKey = useCallback(async () => {
-    setSetting('api_key', null)
+    const revoked = apiKey
+    // Clear the device-local plaintext (user_id='') and any legacy per-user row.
+    await window.api.settings.delete('', 'api_key').catch(() => {})
+    if (userId) await window.api.settings.delete(userId, 'api_key').catch(() => {})
+    await hydrateSettings()
     try {
       const supabase = await getSupabase()
-      if (userId && apiKey) {
-        // Match on the stored hash — the plaintext column no longer exists (story #98).
-        const keyHash = await hashApiKey(apiKey)
-        await supabase.from('api_keys').delete().eq('user_id', userId).eq('key_hash', keyHash)
+      if (userId) {
+        // Purge any plaintext key a prior build leaked to the cloud user_settings.
+        await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
+        if (revoked) {
+          // Match on the stored hash — the plaintext column no longer exists (story #98).
+          const keyHash = await hashApiKey(revoked)
+          await supabase.from('api_keys').delete().eq('user_id', userId).eq('key_hash', keyHash)
+        }
       }
     } catch { /* offline */ }
-  }, [setSetting, userId, apiKey])
+  }, [userId, apiKey, hydrateSettings])
 
   const handleRevokeApiKey = useCallback((e: React.MouseEvent) => {
     if (!apiKey) return
