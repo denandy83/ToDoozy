@@ -77,12 +77,10 @@ describe('markLocalWrite / getLastLocalWriteAt', () => {
 })
 
 describe('isMutatingExec', () => {
-  it('marks writes and transaction control (WAL advances)', () => {
+  it('marks writes and COMMIT/END (these advance the WAL)', () => {
     for (const sql of [
-      'BEGIN',
       'COMMIT',
       'END',
-      'ROLLBACK',
       "INSERT INTO tasks VALUES ('x')",
       'UPDATE tasks SET title = ?',
       'DELETE FROM tasks WHERE id = ?',
@@ -93,12 +91,14 @@ describe('isMutatingExec', () => {
     }
   })
 
-  it('does not mark pure reads (they never advance the WAL)', () => {
+  it('does not mark reads, BEGIN, or ROLLBACK (none advance the WAL)', () => {
     for (const sql of [
       'SELECT 1',
       '  select * from tasks',
       'PRAGMA foreign_keys = ON',
-      'EXPLAIN QUERY PLAN SELECT 1'
+      'EXPLAIN QUERY PLAN SELECT 1',
+      'BEGIN',
+      'ROLLBACK'
     ]) {
       expect(isMutatingExec(sql)).toBe(false)
     }
