@@ -18,6 +18,7 @@ import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, c
 import { initPowerListener } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 import { flushAll as flushBatchedTaskEdits } from './services/TaskBatchSyncManager'
+import { useToast } from './shared/components/Toast'
 
 function App(): React.JSX.Element {
   const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
@@ -27,11 +28,24 @@ function App(): React.JSX.Element {
   const { hydrateAllForProject } = useTaskStore()
   const { setUserId: setSettingsUserId, hydrateSettings, hydrateThemes } = useSettingsStore()
   const { hydrateProjectTemplates } = useTemplateStore()
+  const { addToast } = useToast()
 
   useEffect(() => {
     initAuth()
     initPowerListener()
   }, [initAuth])
+
+  // Warn once when the OS keychain is unavailable and the session won't persist.
+  useEffect(() => {
+    return window.api.onSessionNotPersisted(() => {
+      addToast({
+        message:
+          "Session won't persist across restarts — the OS keychain is unavailable, so you'll need to sign in again next launch.",
+        variant: 'danger',
+        duration: 10000
+      })
+    })
+  }, [addToast])
 
   // Initialize updater (app-level, not per-user)
   useEffect(() => {

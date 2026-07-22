@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
+import { toCanonicalIso } from './lww'
 import type {
   Project,
   ProjectMember,
@@ -217,9 +218,9 @@ export class ProjectRepository {
         remote.auto_archive_enabled,
         remote.auto_archive_value,
         remote.auto_archive_unit,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }

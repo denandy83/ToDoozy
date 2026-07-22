@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { SavedView, CreateSavedViewInput, UpdateSavedViewInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'filter_config', 'project_id'] as const
 
@@ -146,7 +147,10 @@ export class SavedViewRepository {
    */
   applyRemote(remote: SavedView): SavedView {
     const existing = this.findById(remote.id)
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db
@@ -173,9 +177,9 @@ export class SavedViewRepository {
         remote.icon,
         remote.sidebar_order,
         remote.filter_config,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }
@@ -186,7 +190,7 @@ export class SavedViewRepository {
     try {
       const config = JSON.parse(filterConfig) as Record<string, unknown>
       let sql = 'SELECT COUNT(DISTINCT t.id) as count FROM tasks t'
-      const conditions: string[] = ['t.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
+      const conditions: string[] = ['t.deleted_at IS NULL', 't.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
       const params: (string | number)[] = []
 
       // Label filters are stored as lowercased label NAMES (the filter store keys
@@ -202,13 +206,13 @@ export class SavedViewRepository {
         if (labelLogic === 'all') {
           conditions.push(
             `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-              ` WHERE LOWER(l.name) IN (${placeholders})` +
+              ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders})` +
               ` GROUP BY tl.task_id HAVING COUNT(DISTINCT LOWER(l.name)) = ${names.length})`
           )
         } else {
           conditions.push(
             `t.id IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-              ` WHERE LOWER(l.name) IN (${placeholders}))`
+              ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders}))`
           )
         }
         params.push(...names)
@@ -250,7 +254,7 @@ export class SavedViewRepository {
         const placeholders = names.map(() => '?').join(', ')
         conditions.push(
           `t.id NOT IN (SELECT tl.task_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id` +
-            ` WHERE LOWER(l.name) IN (${placeholders}))`
+            ` WHERE tl.deleted_at IS NULL AND l.deleted_at IS NULL AND LOWER(l.name) IN (${placeholders}))`
         )
         params.push(...names)
       }

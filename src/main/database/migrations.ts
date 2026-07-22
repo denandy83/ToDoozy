@@ -707,4 +707,49 @@ const migration_25: Migration = (db) => {
   `)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25]
+const migration_26: Migration = (db) => {
+  // Story #115 — converge legacy remote-origin timestamps to canonical `…Z` form.
+  //
+  // Rows pulled from Supabase via PostgREST before #115 were stored in the
+  // `…+00:00` offset form, while app-written rows use the `…Z` form
+  // (`new Date().toISOString()`). The incremental-sync high-water reads compare
+  // `updated_at` as SQLite TEXT (`WHERE updated_at > ?`, `MAX(updated_at)`), and a
+  // column mixing the two forms sorts wrong (ASCII 'Z' 0x5A vs '+' 0x2B), so the
+  // high-water mark can skip a legitimately-newer row or re-pull an old one.
+  // Going forward every applyRemote* write is normalized via toCanonicalIso();
+  // this heals the rows that predate that fix so the whole column is single-format.
+  //
+  // strftime('%Y-%m-%dT%H:%M:%fZ', ts) reproduces `new Date(ts).toISOString()`
+  // exactly for the `+00:00` inputs PostgREST emits (verified: millisecond
+  // precision, `Z` suffix). Only rows ending in `+00:00` are touched; `…Z` and
+  // legacy `datetime('now')` (space-separated) values are left alone. COALESCE
+  // keeps the original value if strftime ever returns NULL for an unexpected
+  // shape, so a row can never be corrupted to NULL. Idempotent — a re-run finds
+  // no `+00:00` rows left to convert. Table/column names are a fixed in-code
+  // whitelist (no user input), satisfying the SQL-injection column-whitelist rule.
+  const targets: Array<{ table: string; columns: string[] }> = [
+    { table: 'tasks', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'projects', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'statuses', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'labels', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'themes', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'settings', columns: ['updated_at', 'deleted_at'] },
+    { table: 'saved_views', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'project_areas', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'project_templates', columns: ['created_at', 'updated_at', 'deleted_at'] },
+    { table: 'project_labels', columns: ['created_at', 'deleted_at'] },
+    { table: 'task_labels', columns: ['deleted_at'] },
+    { table: 'activity_log', columns: ['created_at'] }
+  ]
+  for (const { table, columns } of targets) {
+    for (const col of columns) {
+      db.exec(
+        `UPDATE ${table}
+         SET ${col} = COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', ${col}), ${col})
+         WHERE ${col} LIKE '%+00:00'`
+      )
+    }
+  }
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26]

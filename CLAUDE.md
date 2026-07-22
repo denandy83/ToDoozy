@@ -207,3 +207,5 @@ When the user asks for "ToDoozy bugs", "todoozy bugs", "list the bugs", or any e
 Group the output by source (shared project vs cross-project labels) and show: id (short), title, status, project, priority. Dedupe by id when a task qualifies under both. Default to open tasks only; include Done/archived only if the user asks.
 
 Use `search_tasks` with `label_ids` (returns OR, so filter in jq for both labels present) plus `list_tasks` on the shared project, merge, dedupe.
+
+See AGENTS.md for the orchestrate build contract.

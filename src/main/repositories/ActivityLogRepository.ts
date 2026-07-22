@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { ActivityLogEntry, CreateActivityLogInput } from '../../shared/types'
 import { placeholderEmail } from '../../shared/placeholderUser'
+import { toCanonicalIso } from './lww'
 
 /** Result of applying a remote activity_log row. `missing-task` means the
  * referenced task isn't local yet — callers may retry after the task pull. */
@@ -79,7 +80,7 @@ export class ActivityLogRepository {
         input.action,
         input.old_value ?? null,
         input.new_value ?? null,
-        input.created_at
+        toCanonicalIso(input.created_at)
       )
     return Number(result.changes) > 0 ? 'applied' : 'duplicate'
   }

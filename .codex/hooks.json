@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/andy.cassiers/Documents/Claude/todoozy/.codex/hooks/docs-session-start.sh'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/turnend-guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

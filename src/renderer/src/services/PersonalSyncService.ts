@@ -15,6 +15,7 @@ import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
+import { isSettingSyncExcluded } from './settingsSyncPolicy'
 
 /**
  * Returns true if a live Supabase session exists. All push/delete functions
@@ -165,6 +166,20 @@ export function cacheProjectNames(projects: Array<{ id: string; name: string }>)
 /** Lookup a cached project name; returns the id back unchanged when unknown. */
 export function getCachedProjectName(id: string): string | null {
   return projectNameCache.get(id) ?? null
+}
+
+/**
+ * Split an array into fixed-size chunks. Pure helper extracted for testability —
+ * used to batch task_labels upserts within Supabase's per-request row limits
+ * instead of one round-trip per row. A non-positive size yields a single chunk.
+ */
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return items.length > 0 ? [items] : []
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+  return chunks
 }
 
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
@@ -629,6 +644,9 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
  * Push a setting to user_settings in Supabase (immediate, no debounce).
  */
 async function pushSettingImmediate(key: string, value: string, userId: string): Promise<void> {
+  // Never let a bearer secret (api_key) reach the cloud user_settings table —
+  // covers the first-time fullUpload path and the debounced flush (#98/#114).
+  if (isSettingSyncExcluded(key)) return
   const id = `${userId}:${key}`
   const payload = {
     id,
@@ -655,6 +673,9 @@ async function pushSettingImmediate(key: string, value: string, userId: string):
  * Push a setting to Supabase with 5s debounce to batch rapid changes.
  */
 export function pushSetting(key: string, value: string, userId: string): void {
+  // Defense-in-depth: excluded keys (api_key) are device-local secrets and must
+  // never be buffered/flushed to Supabase user_settings (#98/#114).
+  if (isSettingSyncExcluded(key)) return
   pendingSettings.set(`${userId}:${key}`, { key, value, userId })
   if (settingsFlushTimer) clearTimeout(settingsFlushTimer)
   settingsFlushTimer = setTimeout(flushSettingsBuffer, 5_000)
@@ -1140,10 +1161,13 @@ export async function fullUpload(userId: string): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('No authenticated session')
 
-    // Sentinel: claim last_sync_at up-front so a concurrent initSync caller
-    // sees it and skips fullUpload instead of starting a parallel upload.
-    // The real timestamp is written at the end of this function.
-    await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
+    // NOTE: last_sync_at is written ONLY on successful completion (end of this
+    // function). It must never be claimed up-front as an in-flight sentinel —
+    // if the upload throws midway, a set last_sync_at makes the next initSync
+    // (which treats any truthy last_sync_at as "already fully synced") skip the
+    // retry, stranding the account partially uploaded. Concurrency is instead
+    // guarded by initSyncInFlight (single shared promise per process) plus the
+    // Electron single-instance lock — so no parallel fullUpload can start.
 
     // Count total items for progress — only sync projects owned by this user
     const allProjects = await window.api.projects.getProjectsForUser(userId)
@@ -1268,22 +1292,27 @@ export async function fullUpload(userId: string): Promise<void> {
       }
     } catch { /* themes might not exist */ }
 
-    // 7. Push task_labels (junction table)
+    // 7. Push task_labels (junction table) — collect every (task_id, label_id)
+    // pair across all projects, then batch-upsert in chunks instead of one
+    // request per row (was O(rows) round-trips). Identical rows (same active
+    // tasks via findByProjectId) and identical conflict target (composite PK
+    // task_id,label_id) as the previous per-row upserts; mirrors the chunked
+    // upsert the reconcile path already uses.
+    const taskLabelRows: Array<{ task_id: string; label_id: string }> = []
     for (const project of projects) {
       const tasks = await window.api.tasks.findByProjectId(project.id)
       for (const task of tasks) {
         const taskLabels = await window.api.tasks.getLabels(task.id)
-        if (taskLabels.length > 0) {
-          for (const tl of taskLabels) {
-            await supabase.from('task_labels').upsert({
-              task_id: tl.task_id,
-              label_id: tl.label_id
-            }).then(({ error }) => {
-              if (error) console.error('[PersonalSync] pushTaskLabel error:', error.message)
-            })
-          }
+        for (const tl of taskLabels) {
+          taskLabelRows.push({ task_id: tl.task_id, label_id: tl.label_id })
         }
       }
+    }
+    for (const chunk of chunkArray(taskLabelRows, 500)) {
+      const { error: tlErr } = await supabase
+        .from('task_labels')
+        .upsert(chunk, { onConflict: 'task_id,label_id' })
+      if (tlErr) console.error('[PersonalSync] pushTaskLabel error:', tlErr.message)
     }
 
     // Verify sync by checking counts
@@ -1543,6 +1572,12 @@ export async function fullPull(userId: string): Promise<void> {
 
     if (remoteSettings) {
       for (const setting of remoteSettings) {
+        // Never import a device-local secret (api_key) onto this device under the
+        // real user_id. A leaked plaintext row may still exist remotely if it was
+        // synced by a pre-#114 build and not yet purged; pulling it here would
+        // re-establish the very leak #114 closed. Filter through the same
+        // single-sourced exclusion list the push paths use.
+        if (isSettingSyncExcluded(setting.key)) continue
         await window.api.settings.set(userId, setting.key, setting.value)
       }
     }
@@ -2788,14 +2823,52 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
 }
 
 /**
+ * One-time cleanup (#114): a pre-#114 build leaked the *plaintext* api_key into
+ * the cloud `user_settings` table via the debounced push. That key is a bearer
+ * secret which must live device-local only (under user_id='') and reach the
+ * cloud solely as a SHA-256 hash in `api_keys`. Purge any lingering leaked row
+ * at sync-init so it can never be re-imported by fullPull on a fresh device —
+ * independent of whether the user ever opens Settings → Integrations.
+ *
+ * Read-path safe: probe with a single SELECT and DELETE only when a row is
+ * actually present, so steady-state launches issue no write. Offline-tolerant —
+ * a failed probe is logged and swallowed so it never blocks sync init.
+ */
+export async function purgeLeakedApiKeySetting(userId: string): Promise<void> {
+  try {
+    const supabase = await getSupabase()
+    const { data: leaked } = await supabase
+      .from('user_settings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('key', 'api_key')
+      .maybeSingle()
+    if (leaked) {
+      await supabase.from('user_settings').delete().eq('user_id', userId).eq('key', 'api_key')
+      logEvent('info', 'sync', 'Purged leaked plaintext api_key from cloud user_settings (#114)')
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn('[PersonalSync] api_key purge probe failed (offline?):', msg)
+  }
+}
+
+/**
  * Check if this is a new device (no last_sync_at) and initiate appropriate sync.
  * Concurrent callers share the same in-flight promise so we never start two
- * parallel fullUploads (which would push every task N times).
+ * parallel fullUploads (which would push every task N times) — this is the
+ * SOLE concurrency guard now that fullUpload no longer claims last_sync_at as
+ * an up-front sentinel. last_sync_at is written only on a *successful* full
+ * upload/pull, so a failed run leaves it falsy here and this path retries.
  */
 let initSyncInFlight: Promise<void> | null = null
 export async function initSync(userId: string): Promise<void> {
   if (initSyncInFlight) return initSyncInFlight
   initSyncInFlight = (async () => {
+    // Always clean up a pre-#114 leaked plaintext api_key before any pull path,
+    // so fullPull on a fresh/empty-local device can never re-absorb the secret.
+    await purgeLeakedApiKeySetting(userId)
+
     const lastSyncAt = await window.api.settings.get(userId, 'last_sync_at')
     const syncStore = useSyncStore.getState()
 

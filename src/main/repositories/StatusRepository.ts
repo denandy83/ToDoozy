@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
 
 export class StatusRepository {
@@ -120,7 +121,10 @@ export class StatusRepository {
    */
   applyRemote(remote: Status): Status {
     const existing = this.findById(remote.id)
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db
@@ -148,9 +152,9 @@ export class StatusRepository {
         remote.order_index,
         remote.is_done,
         remote.is_default,
-        remote.created_at,
-        remote.updated_at,
-        remote.deleted_at ?? null
+        toCanonicalIso(remote.created_at),
+        toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findById(remote.id)!
   }

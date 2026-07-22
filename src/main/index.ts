@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { app, shell, BrowserWindow, globalShortcut, ipcMain, powerMonitor } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase, getDatabasePath } from './database'
+import { isLocalWrite, getLastLocalWriteAt } from './database/writeTracker'
 import { registerIpcHandlers } from './ipc-handlers'
 import { showQuickAddWindow } from './quick-add'
 import { createTray, destroyTray } from './tray'
@@ -315,9 +316,17 @@ app.whenReady().then(() => {
       const mtime = statSync(walPath).mtimeMs
       if (mtime > lastMtime) {
         lastMtime = mtime
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed()) {
-            win.webContents.send('tasks-changed')
+        // Story #103: skip the (heavy) full-store rehydrate broadcast when the
+        // WAL advance is attributable to THIS process's own writes — otherwise
+        // active local editing triggered a rehydrate cascade up to once/second.
+        // Only EXTERNAL writes (local MCP server, other processes sharing the
+        // DB file) advance the WAL past our last local write and broadcast.
+        // Conservative by design: any doubt broadcasts (correctness over savings).
+        if (!isLocalWrite(mtime, getLastLocalWriteAt())) {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+              win.webContents.send('tasks-changed')
+            }
           }
         }
       }

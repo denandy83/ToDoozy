@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Label, CreateLabelInput, UpdateLabelInput, TaskLabelMapping, LabelUsageInfo } from '../../shared/types'
 
 export class LabelRepository {
@@ -186,7 +187,10 @@ export class LabelRepository {
    */
   applyRemote(remote: Label): Label {
     const existing = this.findById(remote.id)
-    if (existing && existing.updated_at >= remote.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     // Sticky ownership (LWW guard): a label row's owner never legitimately
@@ -221,9 +225,9 @@ export class LabelRepository {
           remote.name,
           remote.color,
           remote.order_index,
-          remote.created_at,
-          remote.updated_at,
-          remote.deleted_at ?? null
+          toCanonicalIso(remote.created_at),
+          toCanonicalIso(remote.updated_at),
+          toCanonicalIso(remote.deleted_at ?? null)
         )
       return this.findById(remote.id)!
     } catch (err: unknown) {
@@ -259,9 +263,9 @@ export class LabelRepository {
     const nameParam = String(canonical.name ?? '')
     const colorParam = String(canonical.color ?? '#888888')
     const orderIndexParam = Number(canonical.order_index ?? 0)
-    const createdAtParam = String(canonical.created_at ?? new Date().toISOString())
-    const updatedAtParam = String(canonical.updated_at ?? new Date().toISOString())
-    const deletedAtParam = canonical.deleted_at ? String(canonical.deleted_at) : null
+    const createdAtParam = toCanonicalIso(String(canonical.created_at ?? new Date().toISOString()))
+    const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
+    const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
 
     return withTransaction(this.db, () => {
       let taskRemaps = 0
@@ -588,8 +592,8 @@ export class LabelRepository {
       .run(
         remote.project_id,
         remote.label_id,
-        remote.created_at ?? new Date().toISOString(),
-        remote.deleted_at
+        toCanonicalIso(remote.created_at) ?? new Date().toISOString(),
+        toCanonicalIso(remote.deleted_at)
       )
   }
 

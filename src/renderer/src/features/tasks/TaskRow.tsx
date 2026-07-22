@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, ChevronRight, Plus, Sun, Calendar, CheckCircle2, ExternalLink, Repeat, UserCircle } from 'lucide-react'
+import { Trash2, ChevronRight, Plus, Calendar, CheckCircle2, ExternalLink, Repeat } from 'lucide-react'
 import { describeRecurrence } from '../../../../shared/recurrenceUtils'
-import { useMemberDisplay, useProjectMemberDisplays } from '../../shared/hooks/useMemberDisplay'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { StatusButton } from '../../shared/components/StatusButton'
@@ -23,6 +22,13 @@ import type { Task, Status, Label, Project } from '../../../../shared/types'
 import { shouldForceDelete } from '../../shared/utils/shiftDelete'
 import { TimerPlayButton } from '../../shared/components/TimerPlayButton'
 import type { DropIndicator } from './useDragAndDrop'
+import { SubtaskBadge } from './task-row/SubtaskBadge'
+import { LabelOverflowBadge } from './task-row/LabelOverflowBadge'
+import { MyDayIndicator } from './task-row/MyDayIndicator'
+import { ProjectIndicator } from './task-row/ProjectIndicator'
+import { InlineAssignee } from './task-row/InlineAssignee'
+import { useTaskRowLabelOverflow } from './task-row/useTaskRowLabelOverflow'
+import { useInlineTitleEdit } from './task-row/useInlineTitleEdit'
 
 interface TaskRowProps {
   task: Task
@@ -77,15 +83,11 @@ export function TaskRow({
   disableDrag,
   readOnly
 }: TaskRowProps): React.JSX.Element {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState(task.title)
+  const { isEditing, setIsEditing, editValue, inputRef, saveTitle, handleEditKeyDown, handleEditChange } =
+    useInlineTitleEdit(task, onTitleChange)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addLabelBtnRef = useRef<HTMLButtonElement>(null)
-  const titleRef = useRef<HTMLSpanElement>(null)
-  const [maxVisibleLabels, setMaxVisibleLabels] = useState(Infinity)
 
   const taskProject = useProjectStore((s) => s.projects[task.project_id])
   const isSharedProject = taskProject?.is_shared === 1
@@ -93,6 +95,7 @@ export function TaskRow({
   const childCount = useChildCount(task.id)
   const hasChildren = childCount.total > 0
   const taskLabels = useTaskLabelsHook(task.id)
+  const { rowRef, titleRef, maxVisibleLabels } = useTaskRowLabelOverflow(taskLabels.length, task.title)
   const toggleLabelFilter = useLabelStore((s) => s.toggleLabelFilter)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const openBulkContextMenu = useContextMenuStore((s) => s.openBulk)
@@ -139,68 +142,6 @@ export function TaskRow({
         opacity: isDragging ? 0.2 : undefined
       }
 
-  useEffect(() => {
-    if (!isEditing) setEditValue(task.title)
-  }, [task.title, isEditing])
-
-  useEffect(() => {
-    if (isEditing) inputRef.current?.focus()
-  }, [isEditing])
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [])
-
-  // Dynamically adjust visible labels based on row width.
-  // When the title is truncated, progressively hide labels.
-  // Reset to show all when row resizes wider (e.g. fullscreen).
-  const rowRef = useRef<HTMLDivElement>(null)
-  const lastRowWidth = useRef(0)
-  useEffect(() => {
-    const row = rowRef.current
-    const el = titleRef.current
-    if (!row || !el || taskLabels.length === 0) {
-      setMaxVisibleLabels(Infinity)
-      return
-    }
-    let settling = false
-    const observer = new ResizeObserver(() => {
-      if (settling) return
-      const currentWidth = row.clientWidth
-      const grewWider = currentWidth > lastRowWidth.current + 20
-      lastRowWidth.current = currentWidth
-
-      if (grewWider) {
-        // Row got wider — try showing all labels again
-        setMaxVisibleLabels(Infinity)
-        return
-      }
-
-      const isTruncated = el.scrollWidth > el.clientWidth + 2
-      if (isTruncated) {
-        settling = true
-        setMaxVisibleLabels((prev) => {
-          const next = Math.max(0, (prev === Infinity ? taskLabels.length : prev) - 1)
-          // Let the layout settle before observing again
-          requestAnimationFrame(() => { settling = false })
-          return next
-        })
-      }
-    })
-    observer.observe(row)
-    lastRowWidth.current = row.clientWidth
-    // Initial check
-    const isTruncated = el.scrollWidth > el.clientWidth + 2
-    if (isTruncated) {
-      setMaxVisibleLabels(Math.min(3, taskLabels.length))
-    } else {
-      setMaxVisibleLabels(Infinity)
-    }
-    return () => observer.disconnect()
-  }, [taskLabels.length, task.title])
-
   const handleDoubleClick = useCallback(() => {
     if (onOpenDetail) {
       onOpenDetail(task.id)
@@ -208,46 +149,6 @@ export function TaskRow({
       setIsEditing(true)
     }
   }, [onOpenDetail, task.id, readOnly])
-
-  const saveTitle = useCallback(() => {
-    const trimmed = editValue.trim()
-    if (trimmed && trimmed !== task.title) {
-      onTitleChange(task.id, trimmed)
-    } else {
-      setEditValue(task.title)
-    }
-    setIsEditing(false)
-  }, [editValue, task.id, task.title, onTitleChange])
-
-  const handleEditKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        saveTitle()
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setEditValue(task.title)
-        setIsEditing(false)
-      }
-    },
-    [saveTitle, task.title]
-  )
-
-  const handleEditChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = e.target.value
-      setEditValue(val)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        const trimmed = val.trim()
-        if (trimmed && trimmed !== task.title) {
-          onTitleChange(task.id, trimmed)
-        }
-      }, 1000)
-    },
-    [task.id, task.title, onTitleChange]
-  )
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -649,28 +550,6 @@ export function TaskRow({
   )
 }
 
-interface SubtaskBadgeProps {
-  done: number
-  total: number
-}
-
-function SubtaskBadge({ done, total }: SubtaskBadgeProps): React.JSX.Element {
-  const pct = total > 0 ? (done / total) * 100 : 0
-  return (
-    <div className="flex flex-shrink-0 items-center gap-1.5">
-      <div className="h-1 w-8 overflow-hidden rounded-full bg-foreground/10">
-        <div
-          className="h-full rounded-full bg-accent transition-all motion-safe:duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
-        {done}/{total}
-      </span>
-    </div>
-  )
-}
-
 interface SubtaskListProps {
   parentId: string
   projectId: string
@@ -823,165 +702,5 @@ function SubtaskList({
         />
       ))}
     </>
-  )
-}
-
-function LabelOverflowBadge({ labels }: { labels: Label[] }): React.JSX.Element {
-  const [hovered, setHovered] = useState(false)
-  const ref = useRef<HTMLSpanElement>(null)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-
-  const handleMouseEnter = useCallback(() => {
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      setPos({ top: rect.top, left: rect.left + rect.width / 2 })
-    }
-    setHovered(true)
-  }, [])
-
-  return (
-    <>
-      <span
-        ref={ref}
-        className="text-[9px] font-bold tabular-nums text-muted cursor-default"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setHovered(false)}
-      >
-        +{labels.length}
-      </span>
-      {hovered && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] flex flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2 shadow-xl"
-          style={{ top: pos.top - 8, left: pos.left, transform: 'translate(-50%, -100%)' }}
-        >
-          {labels.map((l) => (
-            <span key={l.id} className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
-              <span className="text-[9px] font-bold uppercase tracking-wider text-foreground">{l.name}</span>
-            </span>
-          ))}
-        </div>,
-        document.body
-      )}
-    </>
-  )
-}
-
-function MyDayIndicator({ visible, onToggle }: { visible: boolean; onToggle?: () => void }): React.JSX.Element {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onToggle?.() }}
-      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
-        visible ? 'bg-accent/15 hover:bg-accent/25' : 'opacity-0 group-hover:opacity-100 hover:bg-accent/10'
-      }`}
-      title={visible ? 'Remove from My Day' : 'Add to My Day'}
-      aria-label={visible ? 'Remove from My Day' : 'Add to My Day'}
-    >
-      <Sun size={10} className={visible ? 'text-accent' : 'text-accent/60'} />
-    </button>
-  )
-}
-
-
-function getProjectInitials(name: string): string {
-  const words = name.trim().split(/\s+/)
-  if (words.length >= 2) {
-    return (words[0][0] + words[1][0]).toUpperCase()
-  }
-  return name.slice(0, 2).toUpperCase()
-}
-
-function ProjectIndicator({ project }: { project: Project }): React.JSX.Element {
-  return (
-    <div
-      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full"
-      style={{ backgroundColor: project.color }}
-      title={project.name}
-    >
-      <span className="text-[7px] font-bold leading-none text-white">
-        {getProjectInitials(project.name)}
-      </span>
-    </div>
-  )
-}
-
-
-function InlineAssignee({ taskId, assignedTo, projectId }: { taskId: string; assignedTo: string | null; projectId: string }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const assignedDisplay = useMemberDisplay(projectId, assignedTo ?? '')
-  const allDisplays = useProjectMemberDisplays(projectId)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) }
-    }
-    window.addEventListener('keydown', handler, true)
-    return () => window.removeEventListener('keydown', handler, true)
-  }, [open])
-
-  const handleAssign = (userId: string | null): void => {
-    useTaskStore.getState().updateTask(taskId, { assigned_to: userId })
-    setOpen(false)
-  }
-
-  return (
-    <div className="relative flex-shrink-0" ref={ref}>
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-        className="flex h-4 w-4 items-center justify-center rounded-full transition-opacity hover:opacity-80"
-        title={assignedTo ? `Assigned to ${assignedDisplay.display_name ?? assignedDisplay.email}` : 'Assign'}
-      >
-        {assignedTo ? (
-          <div
-            className="flex h-4 w-4 items-center justify-center rounded-full text-[7px] font-bold uppercase text-white"
-            style={{ backgroundColor: assignedDisplay.color }}
-          >
-            {assignedDisplay.initials}
-          </div>
-        ) : (
-          <div className="flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-muted/20 group-hover:border-muted/40">
-            <UserCircle size={8} className="text-muted/0 group-hover:text-muted/40" />
-          </div>
-        )}
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-surface py-1 shadow-xl">
-          {assignedTo && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleAssign(null) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] font-light text-muted transition-colors hover:bg-foreground/6"
-            >
-              Unassign
-            </button>
-          )}
-          {Array.from(allDisplays.entries()).map(([userId, d]) => (
-            <button
-              key={userId}
-              onClick={(e) => { e.stopPropagation(); handleAssign(userId) }}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-foreground/6 ${userId === assignedTo ? 'bg-accent/8' : ''}`}
-            >
-              <div
-                className="flex h-5 w-5 items-center justify-center rounded-full text-[7px] font-bold uppercase text-white"
-                style={{ backgroundColor: d.color }}
-              >
-                {d.initials}
-              </div>
-              <span className="truncate text-[12px] font-light text-foreground">{d.display_name ?? d.email}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }

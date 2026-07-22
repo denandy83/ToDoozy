@@ -462,11 +462,11 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 - Standalone MCP server using stdio transport (`@modelcontextprotocol/sdk`)
 - Connect any MCP-compatible AI client (Claude Desktop, etc.)
-- Tools: create/update/delete/list tasks and subtasks, manage projects/labels/statuses, search, My Day management, templates, reorder tasks
+- Tools: create/update/delete/list tasks and subtasks, manage projects/labels/statuses/areas/saved views, search, My Day management, templates, reorder tasks
 - Enable/disable in Settings > MCP; copy config to clipboard
-- **Activity logging:** All 22 mutating MCP tools (create/update/delete for tasks, subtasks, projects, labels, statuses, etc.) create activity log entries so AI-made changes appear in the activity timeline alongside user actions
+- **Activity logging:** All 34 mutating MCP tools (create/update/delete for tasks, subtasks, projects, labels, statuses, areas, saved views, etc.) create activity log entries so AI-made changes appear in the activity timeline alongside user actions
 - **Remote MCP server:** A Supabase Edge Function proxies MCP tool calls, enabling AI clients to manage tasks remotely without needing local access to the Electron app. Connects to the same Supabase backend for full read/write capability.
-- **Status:** Complete (updated 2026-04-11, Story #59)
+- **Status:** Complete (updated 2026-07-22, Story #113)
 
 ---
 

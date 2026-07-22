@@ -1,11 +1,40 @@
 // ToDoozy MCP Server — Supabase Edge Function
 // Streamable HTTP transport with API key authentication via mcp-lite
+//
+// CONCURRENCY CONTRACT (story #96): a single Deno isolate serves many requests
+// concurrently. NO per-request state (userId, Supabase client, repositories,
+// tool handlers, or anything derived from the caller's identity) may live in
+// module scope. Per-request auth context is built inside `Deno.serve` and
+// threaded explicitly through mcp-lite's per-request `AuthInfo.extra` channel;
+// tool handlers resolve it via `unpackRequestContext(ctx.authInfo?.extra)` and
+// dispatch through the pure `dispatchTool`. See requestContext.ts for the full
+// rationale — the old module-level `_authUserId/_authClient/_authRepos/
+// _authHandlers` globals let one request observe another user's data.
+//
+// RLS SCOPING CONTRACT (story #97): the per-request Supabase client is the
+// SUPABASE_SERVICE_ROLE_KEY client (needed to read `api_keys`), which BYPASSES
+// Row Level Security. Every repo method reachable from a tool call must
+// therefore re-impose access control BY HAND: project entities (tasks,
+// projects, statuses, project_labels, activity_log) are gated on the caller's
+// `project_members` membership via the per-request `ProjectScope`; user
+// entities (user_labels, user_settings, user_saved_views, user_project_areas)
+// are gated on `user_id = ctx.userId`. See scoping.ts. A crafted id for
+// another user's row must return not-found/forbidden, never the row.
 
-import { McpServer, StreamableHttpTransport } from 'mcp-lite'
+import { McpServer, StreamableHttpTransport, type Ctx } from 'mcp-lite'
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import rruleLib from 'npm:rrule@2'
 import { upsertTaskLabel, deleteTaskLabel } from './labelMutations.ts'
 import { upsertProjectLabel, fetchProjectLabels } from './projectLabels.ts'
+import {
+  packRequestContext,
+  unpackRequestContext,
+  dispatchTool,
+  type ToolCallResult
+} from './requestContext.ts'
+import { ProjectScope } from './scoping.ts'
+import { hashApiKey } from './hash.ts'
+import { buildStatusRecord, computeNextOrderIndex } from './statusMutations.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -181,20 +210,32 @@ function getNextOccurrence(rule: string, fromDate: Date): Date | null {
 // ── Repository Classes ─────────────────────────────────────────────────
 
 class TaskRepo {
-  constructor(private client: SupabaseClient, private _userId: string) {}
+  // scope gates every project-scoped query to the caller's member projects —
+  // the service-role client bypasses RLS, so this is the ONLY thing stopping a
+  // crafted id from returning another user's task (story #97).
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
 
   async findById(id: string) {
-    const { data } = await this.client.from('tasks').select('*').eq('id', id).single()
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('tasks').select('*')
+      .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_archived', 0).eq('is_template', 0)
       .is('parent_id', null).order('order_index')
     return data ?? []
   }
   async findSubtasks(parentId: string) {
-    const { data } = await this.client.from('tasks').select('*').eq('parent_id', parentId).order('order_index')
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('tasks').select('*')
+      .eq('parent_id', parentId).in('project_id', projectIds).order('order_index')
     return data ?? []
   }
   async findMyDay(userId: string) {
@@ -203,11 +244,13 @@ class TaskRepo {
     return data ?? []
   }
   async findArchived(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_archived', 1).order('updated_at', { ascending: false })
     return data ?? []
   }
   async findTemplates(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('tasks').select('*')
       .eq('project_id', projectId).eq('is_template', 1).order('created_at', { ascending: false })
     return data ?? []
@@ -218,9 +261,15 @@ class TaskRepo {
     return data ?? []
   }
   async create(input: Record<string, unknown>) {
+    // A task may only be created in a project the caller is a member of, and
+    // always owned by the caller — never an attacker-supplied owner_id.
+    const projectId = input.project_id as string
+    if (!(await this.scope.isMember(projectId))) {
+      throw new Error(`Project not found: ${projectId}`)
+    }
     const now = new Date().toISOString()
     const record = {
-      id: input.id, project_id: input.project_id, owner_id: input.owner_id,
+      id: input.id, project_id: input.project_id, owner_id: input.owner_id ?? this.userId,
       title: input.title, status_id: input.status_id,
       assigned_to: input.assigned_to ?? null, description: input.description ?? null,
       priority: input.priority ?? 0, due_date: input.due_date ?? null,
@@ -239,13 +288,23 @@ class TaskRepo {
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (col in input) updates[col] = input[col]
     }
-    const { data, error } = await this.client.from('tasks').update(updates).eq('id', id).select().single()
-    if (error) return undefined
+    // If the caller wants to move the task, the destination must also be a
+    // project they belong to.
+    if ('project_id' in updates && !(await this.scope.isMember(updates.project_id as string))) {
+      return undefined
+    }
+    const projectIds = await this.scope.idArray()
+    const { data, error } = await this.client.from('tasks').update(updates)
+      .eq('id', id).in('project_id', projectIds).select().maybeSingle()
+    if (error || !data) return undefined
     return data
   }
   async delete(id: string) {
-    const { error } = await this.client.from('tasks').delete().eq('id', id)
-    return !error
+    const projectIds = await this.scope.idArray()
+    const { data, error } = await this.client.from('tasks').delete()
+      .eq('id', id).in('project_id', projectIds).select('id')
+    // Report success only when a row the caller could access was actually removed.
+    return !error && Array.isArray(data) && data.length > 0
   }
   async duplicate(id: string, newId: string) {
     const original = await this.findById(id)
@@ -299,26 +358,46 @@ class TaskRepo {
     return template
   }
   async reorder(taskIds: string[]) {
+    const projectIds = await this.scope.idArray()
     for (let i = 0; i < taskIds.length; i++) {
-      await this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() }).eq('id', taskIds[i])
+      await this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() })
+        .eq('id', taskIds[i]).in('project_id', projectIds)
     }
   }
   async addLabel(taskId: string, labelId: string) {
+    // task_labels has no project_id, so it cannot be filtered directly; gate on
+    // the task being one the caller can access and the label being their own.
+    await this.assertTaskAccessible(taskId)
+    await this.assertLabelOwned(labelId)
     // Throws on a silently-dropped upsert (RLS reject / FK violation) — see labelMutations.ts.
     await upsertTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
   }
   async removeLabel(taskId: string, labelId: string) {
+    await this.assertTaskAccessible(taskId)
     // Throws on error rather than returning false, so callers can't ignore a failed delete.
     await deleteTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
   }
   async getLabels(taskId: string) {
+    if (!(await this.findById(taskId))) return []
     const { data } = await this.client.from('task_labels').select('task_id, label_id').eq('task_id', taskId)
     return data ?? []
   }
+  /** Throw unless `taskId` belongs to a project the caller is a member of. */
+  private async assertTaskAccessible(taskId: string) {
+    if (!(await this.findById(taskId))) throw new Error(`Task not found: ${taskId}`)
+  }
+  /** Throw unless `labelId` is a label owned by the caller (user_labels.user_id). */
+  private async assertLabelOwned(labelId: string) {
+    const { data } = await this.client.from('user_labels').select('id')
+      .eq('id', labelId).eq('user_id', this.userId).maybeSingle()
+    if (!data) throw new Error(`Label not found: ${labelId}`)
+  }
   async search(filters: Record<string, unknown>) {
-    let query = this.client.from('tasks').select('*').eq('is_template', 0)
+    // Base scope: only tasks in the caller's member projects are ever searchable.
+    const projectIds = await this.scope.idArray()
+    let query = this.client.from('tasks').select('*').eq('is_template', 0).in('project_id', projectIds)
     if (filters.is_archived !== undefined) query = query.eq('is_archived', filters.is_archived as number)
     else query = query.eq('is_archived', 0)
     if (filters.project_id) query = query.eq('project_id', filters.project_id as string)
@@ -391,16 +470,21 @@ class TaskRepo {
 }
 
 class ProjectRepo {
-  constructor(private client: SupabaseClient, private userId: string) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async list() {
-    const { data: memberships } = await this.client.from('project_members').select('project_id').eq('user_id', this.userId)
-    if (!memberships || memberships.length === 0) return []
-    const ids = memberships.map(m => m.project_id)
+    const ids = await this.scope.idArray()
+    if (ids.length === 0) return []
     const { data } = await this.client.from('projects').select('*').in('id', ids).order('created_at')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('projects').select('*').eq('id', id).single()
+    // A project is visible only to its members.
+    if (!(await this.scope.isMember(id))) return undefined
+    const { data } = await this.client.from('projects').select('*').eq('id', id).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -420,15 +504,20 @@ class ProjectRepo {
     return project
   }
   async update(id: string, input: Record<string, unknown>) {
+    if (!(await this.scope.isMember(id))) return undefined
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const k of ['name', 'description', 'color', 'icon', 'sidebar_order', 'is_default', 'is_shared']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('projects').update(updates).eq('id', id).select().single()
-    if (error) return undefined
+    const { data, error } = await this.client.from('projects').update(updates)
+      .eq('id', id).in('id', await this.scope.idArray()).select().maybeSingle()
+    if (error || !data) return undefined
     return data
   }
   async delete(id: string) {
+    // Refuse to cascade-delete a project (tasks, statuses, members) the caller
+    // is not a member of — this is the most destructive path in the whole API.
+    if (!(await this.scope.isMember(id))) return false
     await this.client.from('tasks').delete().eq('project_id', id)
     await this.client.from('statuses').delete().eq('project_id', id)
     await this.client.from('project_members').delete().eq('project_id', id)
@@ -438,31 +527,45 @@ class ProjectRepo {
 }
 
 class StatusRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(private client: SupabaseClient, private scope: ProjectScope) {}
   async findByProjectId(projectId: string) {
+    if (!(await this.scope.isMember(projectId))) return []
     const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).order('order_index')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('id', id).single()
+    const projectIds = await this.scope.idArray()
+    const { data } = await this.client.from('statuses').select('*')
+      .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findDefault(projectId: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_default', 1).single()
+    if (!(await this.scope.isMember(projectId))) return undefined
+    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_default', 1).maybeSingle()
     return data ?? undefined
   }
   async findDone(projectId: string) {
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_done', 1).single()
+    if (!(await this.scope.isMember(projectId))) return undefined
+    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_done', 1).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
-    const now = new Date().toISOString()
-    const record = {
-      id: input.id, project_id: input.project_id, name: input.name,
-      color: input.color ?? '#888888', icon: input.icon ?? 'circle',
-      order_index: input.order_index ?? 0, is_done: input.is_done ?? 0,
-      is_default: input.is_default ?? 0, created_at: now, updated_at: now
+    // Never trust the caller's project_id: the service-role client bypasses RLS,
+    // so gate on membership by hand before writing (story #97).
+    if (!(await this.scope.isMember(input.project_id as string))) {
+      throw new Error(`Project not found: ${input.project_id}`)
     }
+    // Defaults + flag coercion live in the pure, unit-tested statusMutations module.
+    const record = buildStatusRecord({
+      id: input.id as string,
+      project_id: input.project_id as string,
+      name: input.name as string,
+      color: input.color as string | null | undefined,
+      icon: input.icon as string | null | undefined,
+      order_index: input.order_index as number | null | undefined,
+      is_done: input.is_done as number | boolean | null | undefined,
+      is_default: input.is_default as number | boolean | null | undefined
+    }, new Date().toISOString())
     const { data, error } = await this.client.from('statuses').insert(record).select().single()
     if (error) throw new Error(`Failed to create status: ${error.message}`)
     return data
@@ -470,17 +573,29 @@ class StatusRepo {
 }
 
 class LabelRepo {
-  constructor(private client: SupabaseClient, private userId: string) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async findById(id: string) {
-    const { data } = await this.client.from('user_labels').select('*').eq('id', id).single()
+    // user_labels are user-owned; only the caller's own labels are visible.
+    const { data } = await this.client.from('user_labels').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
     // Junction-based read — the legacy projects.label_data JSON is no longer
     // consulted (the app stopped writing/reading it in v1.7.0). See projectLabels.ts.
+    if (!(await this.scope.isMember(projectId))) return []
     return await fetchProjectLabels(this.client, projectId)
   }
   async findByTaskId(taskId: string) {
+    // Only resolve labels for a task the caller can access.
+    const projectIds = await this.scope.idArray()
+    const { data: task } = await this.client.from('tasks').select('id')
+      .eq('id', taskId).in('project_id', projectIds).maybeSingle()
+    if (!task) return []
     const { data: taskLabels } = await this.client.from('task_labels').select('label_id').eq('task_id', taskId)
     if (!taskLabels || taskLabels.length === 0) return []
     const labelIds = taskLabels.map((tl: { label_id: string }) => tl.label_id)
@@ -492,6 +607,11 @@ class LabelRepo {
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
+    // Reject a foreign target project before writing anything, so a crafted
+    // project_id can't leave an orphaned label behind.
+    if (input.project_id && !(await this.scope.isMember(input.project_id as string))) {
+      throw new Error(`Project not found: ${input.project_id}`)
+    }
     const now = new Date().toISOString()
     const record = {
       id: input.id, user_id: this.userId, name: input.name,
@@ -503,6 +623,9 @@ class LabelRepo {
     return data
   }
   async addToProject(projectId: string, labelId: string) {
+    // Only link the caller's own label into a project they belong to.
+    if (!(await this.scope.isMember(projectId))) throw new Error(`Project not found: ${projectId}`)
+    if (!(await this.findById(labelId))) throw new Error(`Label not found: ${labelId}`)
     // Writes the project_labels junction row the app actually reads — NOT the
     // legacy projects.label_data JSON (dropped entirely; the app ignores it
     // since v1.7.0). Throws on a silently-dropped upsert (RLS reject / FK
@@ -544,13 +667,15 @@ class SettingsRepo {
 }
 
 class SavedViewRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(private client: SupabaseClient, private userId: string) {}
   async findByUserId(userId: string) {
     const { data } = await this.client.from('user_saved_views').select('*').eq('user_id', userId).order('sidebar_order')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('user_saved_views').select('*').eq('id', id).single()
+    // Saved views are user-owned.
+    const { data } = await this.client.from('user_saved_views').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -566,19 +691,26 @@ class SavedViewRepo {
     return data
   }
   async delete(id: string) {
-    const { error } = await this.client.from('user_saved_views').delete().eq('id', id)
-    return !error
+    const { data, error } = await this.client.from('user_saved_views').delete()
+      .eq('id', id).eq('user_id', this.userId).select('id')
+    return !error && Array.isArray(data) && data.length > 0
   }
 }
 
 class ProjectAreaRepo {
-  constructor(private client: SupabaseClient) {}
+  constructor(
+    private client: SupabaseClient,
+    private userId: string,
+    private scope: ProjectScope
+  ) {}
   async findByUserId(userId: string) {
     const { data } = await this.client.from('user_project_areas').select('*').eq('user_id', userId).order('sidebar_order')
     return data ?? []
   }
   async findById(id: string) {
-    const { data } = await this.client.from('user_project_areas').select('*').eq('id', id).single()
+    // Project areas are user-owned.
+    const { data } = await this.client.from('user_project_areas').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle()
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -598,17 +730,28 @@ class ProjectAreaRepo {
     for (const k of ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('user_project_areas').update(updates).eq('id', id).select().single()
-    if (error) return null
+    const { data, error } = await this.client.from('user_project_areas').update(updates)
+      .eq('id', id).eq('user_id', this.userId).select().maybeSingle()
+    if (error || !data) return null
     return data
   }
   async delete(id: string) {
-    await this.client.from('projects').update({ area_id: null }).eq('area_id', id)
-    const { error } = await this.client.from('user_project_areas').delete().eq('id', id)
+    // Only the owner may delete an area. Clearing area_id is limited to the
+    // caller's member projects so it can't touch other users' projects.
+    if (!(await this.findById(id))) return false
+    const memberIds = await this.scope.idArray()
+    await this.client.from('projects').update({ area_id: null }).eq('area_id', id).in('id', memberIds)
+    const { error } = await this.client.from('user_project_areas').delete()
+      .eq('id', id).eq('user_id', this.userId)
     return !error
   }
   async assignProject(projectId: string, areaId: string | null) {
-    await this.client.from('projects').update({ area_id: areaId }).eq('id', projectId)
+    // The project must be one the caller belongs to, and any target area must be
+    // one they own.
+    if (!(await this.scope.isMember(projectId))) throw new Error(`Project not found: ${projectId}`)
+    if (areaId !== null && !(await this.findById(areaId))) throw new Error(`Area not found: ${areaId}`)
+    await this.client.from('projects').update({ area_id: areaId })
+      .eq('id', projectId).in('id', await this.scope.idArray())
   }
 }
 
@@ -626,15 +769,18 @@ interface Repos {
 }
 
 function createRepos(client: SupabaseClient, userId: string): Repos {
+  // One membership cache per request, shared by every project-scoped repo, so
+  // the caller's `project_members` set is loaded at most once per tool call.
+  const scope = new ProjectScope(client, userId)
   return {
-    tasks: new TaskRepo(client, userId),
-    projects: new ProjectRepo(client, userId),
-    statuses: new StatusRepo(client),
-    labels: new LabelRepo(client, userId),
+    tasks: new TaskRepo(client, userId, scope),
+    projects: new ProjectRepo(client, userId, scope),
+    statuses: new StatusRepo(client, scope),
+    labels: new LabelRepo(client, userId, scope),
     activityLog: new ActivityLogRepo(client),
     settings: new SettingsRepo(client),
-    savedViews: new SavedViewRepo(client),
-    projectAreas: new ProjectAreaRepo(client),
+    savedViews: new SavedViewRepo(client, userId),
+    projectAreas: new ProjectAreaRepo(client, userId, scope),
   }
 }
 
@@ -670,11 +816,18 @@ function optNum(args: Record<string, unknown>, key: string): number | undefined 
   return val !== undefined && val !== null ? Number(val) : undefined
 }
 
+function optBool(args: Record<string, unknown>, key: string): boolean | undefined {
+  const val = args[key]
+  if (val === undefined || val === null) return undefined
+  return val === true || val === 1 || val === 'true'
+}
+
 // ── Schema Helpers ─────────────────────────────────────────────────────
 
 interface SchemaProp { type: string; description: string; enum?: (string | number)[]; items?: { type: string } }
 function str(description: string): SchemaProp { return { type: 'string', description } }
 function num(description: string): SchemaProp { return { type: 'number', description } }
+function bool(description: string): SchemaProp { return { type: 'boolean', description } }
 interface InputSchema { type: 'object'; properties: Record<string, SchemaProp>; required?: string[] }
 interface ToolDef { name: string; description: string; inputSchema: InputSchema }
 
@@ -713,6 +866,7 @@ const tools: ToolDef[] = [
   { name: 'assign_label_to_task', description: 'Assign a label to a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
   { name: 'remove_label_from_task', description: 'Remove a label from a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
   { name: 'list_statuses', description: 'List all statuses for a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID') }, required: ['project_id'] } },
+  { name: 'create_status', description: 'Create a new status in a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), name: str('Status name'), color: str('Status color (hex, e.g. "#22c55e"). Defaults to #888888'), icon: str('Status icon name (e.g. "circle", "check-circle-2"). Defaults to "circle"'), order_index: num('Sort position; defaults to last (max existing + 1)'), is_done: bool('Whether this status marks a task as done (default false)') }, required: ['project_id', 'name'] } },
   { name: 'search_tasks', description: 'Search tasks with filters. All filters are optional and combined with AND.', inputSchema: { type: 'object', properties: { project_id: str('Filter by project ID'), status_id: str('Filter by status ID'), priority: num('Filter by exact priority (0-4)'), label_id: str('Filter by label ID'), due_before: str('Tasks due before this date (ISO 8601)'), due_after: str('Tasks due after this date (ISO 8601)'), keyword: str('Search keyword (matches title and description)'), label_logic: str('Label filter logic: "any" (OR, default) or "all" (AND)'), exclude_label_id: str('Exclude tasks with this label'), exclude_status_id: str('Exclude tasks with this status'), exclude_priority: num('Exclude tasks with this priority (0-4)') } } },
   { name: 'list_my_day', description: 'List tasks in the My Day view (tasks marked for today or due today)', inputSchema: { type: 'object', properties: {} } },
   { name: 'list_templates', description: 'List all task templates and project templates', inputSchema: { type: 'object', properties: {} } },
@@ -1009,6 +1163,26 @@ function createHandlers(repos: Repos, userId: string) {
       return { removed: true, task_id: taskId, label_id: labelId }
     },
     async list_statuses(args) { return await repos.statuses.findByProjectId(requireStr(args, 'project_id')) },
+    async create_status(args) {
+      const projectId = requireStr(args, 'project_id')
+      const name = requireStr(args, 'name')
+      let orderIndex = optNum(args, 'order_index')
+      if (orderIndex === undefined) {
+        // findByProjectId returns [] for a project the caller is not a member of,
+        // so this yields 0 — but the authorization rejection still happens inside
+        // repos.statuses.create (scope.isMember), so no row is ever written for a
+        // foreign project. When authorized, this sorts the new status last.
+        const existing = await repos.statuses.findByProjectId(projectId)
+        orderIndex = computeNextOrderIndex(existing)
+      }
+      // repos.statuses.create re-checks membership and rejects with the same typed
+      // "Project not found" error convention used by the other scoped write tools.
+      return await repos.statuses.create({
+        id: crypto.randomUUID(), project_id: projectId, name,
+        color: optStr(args, 'color'), icon: optStr(args, 'icon'),
+        order_index: orderIndex, is_done: optBool(args, 'is_done')
+      })
+    },
     async search_tasks(args) {
       const excludeLabelId = optStr(args, 'exclude_label_id')
       const excludeStatusId = optStr(args, 'exclude_status_id')
@@ -1129,12 +1303,17 @@ function createHandlers(repos: Repos, userId: string) {
   return handlers
 }
 
-// ── Auth Context (set per-request before tool handlers run) ────────────
+// ── Per-request Auth Context ───────────────────────────────────────────
+// Built fresh for every request inside Deno.serve and passed down explicitly
+// via mcp-lite's AuthInfo.extra channel. NEVER stored in module scope — doing
+// so reintroduces the story #96 cross-request data-leak. See requestContext.ts.
 
-let _authUserId: string | null = null
-let _authClient: SupabaseClient | null = null
-let _authRepos: Repos | null = null
-let _authHandlers: ReturnType<typeof createHandlers> | null = null
+interface RequestContext {
+  userId: string
+  client: SupabaseClient
+  repos: Repos
+  handlers: ReturnType<typeof createHandlers>
+}
 
 // ── MCP Server Setup via mcp-lite ─────────────────────────────────────
 
@@ -1169,16 +1348,11 @@ for (const tool of tools) {
     description: tool.description,
     inputSchema: tool.inputSchema,
     annotations,
-    handler: async (args: Record<string, unknown>) => {
-      if (!_authHandlers) return { content: [{ type: 'text' as const, text: 'Not authenticated' }], isError: true }
-      const handler = _authHandlers[tool.name]
-      if (!handler) return { content: [{ type: 'text' as const, text: `Unknown tool: ${tool.name}` }], isError: true }
-      try {
-        const result = await handler(args)
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }], isError: true }
-      }
+    handler: async (args: Record<string, unknown>, context: Ctx): Promise<ToolCallResult> => {
+      // Resolve the caller's context from THIS request's auth info — never a
+      // module global. dispatchTool is pure in the context it is handed.
+      const requestContext = unpackRequestContext<RequestContext>(context.authInfo?.extra)
+      return await dispatchTool(tool.name, args, requestContext)
     }
   })
 }
@@ -1197,10 +1371,17 @@ const CORS_HEADERS: Record<string, string> = {
 
 // ── Auth ───────────────────────────────────────────────────────────────
 
-async function authenticateRequest(req: Request): Promise<{ userId: string; client: SupabaseClient } | null> {
+async function authenticateRequest(
+  req: Request
+): Promise<{ userId: string; client: SupabaseClient; apiKey: string } | null> {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
   const apiKey = authHeader.slice(7)
+
+  // Keys are stored as SHA-256 hashes only (story #98) — never plaintext. Hash
+  // the presented key and match on `key_hash`. Existing keys keep working
+  // because the backfill migration stored hash(plaintext) with the same digest.
+  const keyHash = await hashApiKey(apiKey)
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -1209,7 +1390,7 @@ async function authenticateRequest(req: Request): Promise<{ userId: string; clie
   const { data: keyData } = await adminClient
     .from('api_keys')
     .select('user_id')
-    .eq('key', apiKey)
+    .eq('key_hash', keyHash)
     .single()
 
   if (!keyData) return null
@@ -1218,10 +1399,10 @@ async function authenticateRequest(req: Request): Promise<{ userId: string; clie
   adminClient
     .from('api_keys')
     .update({ last_used_at: new Date().toISOString() })
-    .eq('key', apiKey)
+    .eq('key_hash', keyHash)
     .then(() => {})
 
-  return { userId: keyData.user_id, client: adminClient }
+  return { userId: keyData.user_id, client: adminClient, apiKey }
 }
 
 // ── Request Handler ────────────────────────────────────────────────────
@@ -1241,14 +1422,25 @@ Deno.serve(async (req: Request) => {
     })
   }
 
-  // Set auth context for tool handlers
-  _authUserId = auth.userId
-  _authClient = auth.client
-  _authRepos = createRepos(auth.client, auth.userId)
-  _authHandlers = createHandlers(_authRepos, auth.userId)
+  // Build a per-request context and thread it explicitly through mcp-lite's
+  // AuthInfo.extra channel. Nothing is written to module scope, so concurrent
+  // requests can never observe each other's identity or repositories.
+  const repos = createRepos(auth.client, auth.userId)
+  const handlers = createHandlers(repos, auth.userId)
+  const requestContext: RequestContext = {
+    userId: auth.userId,
+    client: auth.client,
+    repos,
+    handlers
+  }
+  const authInfo = {
+    token: auth.apiKey,
+    scopes: [],
+    extra: packRequestContext(requestContext)
+  }
 
-  // Delegate to mcp-lite handler
-  const response = await httpHandler(req)
+  // Delegate to mcp-lite handler with this request's isolated auth context
+  const response = await httpHandler(req, { authInfo })
 
   // Add CORS headers to response
   const headers = new Headers(response.headers)

@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
+import { isRemoteNewer, toCanonicalIso } from './lww'
 import { parseRecurrence, getNextOccurrence, parseDateLocal } from '../../shared/recurrenceUtils'
 
 export interface TaskSearchFilters {
@@ -35,17 +36,42 @@ export class TaskRepository {
   /**
    * Resets any tasks in the given project whose status_id doesn't match
    * a valid status for that project back to the project's default status.
+   *
+   * Called from read paths (findByProjectId), so it must be write-free in the
+   * steady state: a cheap `SELECT EXISTS(...)` probe short-circuits before the
+   * repair UPDATE, which now only runs when an orphan actually exists (story
+   * #110). Without the guard the UPDATE ran on every read and, when it touched
+   * rows, bumped updated_at → redundant sync re-pushes on every hydration.
+   *
+   * updated_at is intentionally NOT bumped by the repair. This is purely LOCAL
+   * hygiene: the fix is deterministic and idempotent (every client independently
+   * heals an orphan to the same project default), so re-syncing the row adds only
+   * noise. The sync-worthy case — deleting a status — already reassigns tasks and
+   * bumps updated_at atomically in StatusRepository.delete. Bumping updated_at
+   * here on a read path would also risk LWW-clobbering a genuinely-newer remote
+   * edit to the same task.
    */
   repairOrphanedStatuses(projectId: string): number {
+    const probe = this.db
+      .prepare(
+        `SELECT EXISTS(
+           SELECT 1 FROM tasks
+           WHERE project_id = ? AND is_template = 0 AND deleted_at IS NULL
+           AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)
+         ) AS has_orphan`
+      )
+      .get(projectId, projectId) as { has_orphan: number }
+    if (!probe.has_orphan) return 0
+
     const result = this.db
       .prepare(
         `UPDATE tasks SET status_id = (
            SELECT id FROM statuses WHERE project_id = ? AND is_default = 1 LIMIT 1
-         ), updated_at = ?
+         )
          WHERE project_id = ? AND is_template = 0 AND deleted_at IS NULL
          AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)`
       )
-      .run(projectId, new Date().toISOString(), projectId, projectId)
+      .run(projectId, projectId, projectId)
     return Number(result.changes)
   }
 
@@ -73,16 +99,38 @@ export class TaskRepository {
   }
 
   findMyDay(userId: string): Task[] {
-    // Repair orphaned statuses across all user's projects before querying
-    this.db
+    // Repair orphaned statuses across all the user's projects before querying,
+    // but keep this read path write-free in the steady state. A cheap
+    // `SELECT EXISTS(...)` probe (mirroring the repair's WHERE clause) short-
+    // circuits before the UPDATE, which now only runs when an orphan actually
+    // exists (story #110). Previously the UPDATE ran on every My Day load and,
+    // when it touched rows, bumped updated_at → redundant sync re-pushes.
+    //
+    // updated_at is intentionally NOT bumped: the repair is purely LOCAL hygiene
+    // — deterministic and idempotent, so re-syncing the row adds only noise, and
+    // bumping updated_at on a read path could LWW-clobber a newer remote edit.
+    // See repairOrphanedStatuses for the full rationale.
+    const probe = this.db
       .prepare(
-        `UPDATE tasks SET status_id = (
-           SELECT s.id FROM statuses s WHERE s.project_id = tasks.project_id AND s.is_default = 1 LIMIT 1
-         ), updated_at = ?
-         WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
-         AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)`
+        `SELECT EXISTS(
+           SELECT 1 FROM tasks
+           WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
+           AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)
+         ) AS has_orphan`
       )
-      .run(new Date().toISOString(), userId)
+      .get(userId) as { has_orphan: number }
+
+    if (probe.has_orphan) {
+      this.db
+        .prepare(
+          `UPDATE tasks SET status_id = (
+             SELECT s.id FROM statuses s WHERE s.project_id = tasks.project_id AND s.is_default = 1 LIMIT 1
+           )
+           WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
+           AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)`
+        )
+        .run(userId)
+    }
 
     return this.db
       .prepare(
@@ -224,7 +272,10 @@ export class TaskRepository {
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
     const existing = this.findById(task.id)
-    if (existing && existing.updated_at >= task.updated_at) {
+    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
+    // the same instant but do not string-compare reliably. Skip when the local
+    // row is newer or equal (remote not strictly newer).
+    if (existing && !isRemoteNewer(existing.updated_at, task.updated_at)) {
       return existing
     }
     this.db
@@ -274,9 +325,9 @@ export class TaskRepository {
         task.recurrence_rule ?? null,
         task.reference_url ?? null,
         task.my_day_dismissed_date ?? null,
-        task.created_at,
-        task.updated_at,
-        task.deleted_at ?? null
+        toCanonicalIso(task.created_at),
+        toCanonicalIso(task.updated_at),
+        toCanonicalIso(task.deleted_at ?? null)
       )
     return this.findById(task.id)!
   }
@@ -570,6 +621,7 @@ export class TaskRepository {
         conditions.push(`t.id IN (
           SELECT task_id FROM task_labels
           WHERE label_id IN (${placeholders})
+          AND deleted_at IS NULL
           GROUP BY task_id
           HAVING COUNT(DISTINCT label_id) = ?
         )`)
@@ -578,12 +630,12 @@ export class TaskRepository {
         // OR (default): task must have ANY selected label
         sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
         const placeholders = filters.label_ids.map(() => '?').join(', ')
-        conditions.push(`tl.label_id IN (${placeholders})`)
+        conditions.push(`tl.label_id IN (${placeholders}) AND tl.deleted_at IS NULL`)
         params.push(...filters.label_ids)
       }
     } else if (filters.label_id) {
       sql += ' INNER JOIN task_labels tl ON tl.task_id = t.id'
-      conditions.push('tl.label_id = ?')
+      conditions.push('tl.label_id = ? AND tl.deleted_at IS NULL')
       params.push(filters.label_id)
     }
 
@@ -655,7 +707,9 @@ export class TaskRepository {
     // Exclusion filters
     if (filters.exclude_label_ids && filters.exclude_label_ids.length > 0) {
       const placeholders = filters.exclude_label_ids.map(() => '?').join(', ')
-      conditions.push(`t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}))`)
+      conditions.push(
+        `t.id NOT IN (SELECT task_id FROM task_labels WHERE label_id IN (${placeholders}) AND deleted_at IS NULL)`
+      )
       params.push(...filters.exclude_label_ids)
     }
 

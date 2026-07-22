@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
 import { TaskRepository } from './TaskRepository'
@@ -348,5 +348,196 @@ describe('TaskRepository — project_labels junction guarantee', () => {
     expect(added).toBe(1)
     expect(junction('L1')?.deleted_at).toBeNull()
     expect(labels.findByTaskId(t.id).map((l) => l.id)).toEqual(['L1'])
+  })
+})
+
+describe('TaskRepository — search ignores task_labels tombstones', () => {
+  let db: DatabaseSync
+  let repo: TaskRepository
+  let projectId: string
+  let userId: string
+  let statusId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    projectId = fx.projectId
+    userId = fx.userId
+    statusId = fx.statusId
+    repo = new TaskRepository(db)
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    ).run('L1', userId, 'Later', '#888888', now, now)
+  })
+
+  it('include filter (label_id) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    // Sanity: matches while the link is live.
+    expect(repo.search({ label_id: 'L1' }).map((r) => r.id)).toEqual(['t1'])
+
+    repo.removeLabel(t.id, 'L1') // soft-delete the link
+
+    expect(repo.search({ label_id: 'L1' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('include filter (label_ids OR) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    repo.removeLabel(t.id, 'L1')
+
+    expect(repo.search({ label_ids: ['L1'], label_logic: 'any' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('include filter (label_ids ALL) does not match a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    repo.removeLabel(t.id, 'L1')
+
+    expect(repo.search({ label_ids: ['L1'], label_logic: 'all' }).map((r) => r.id)).toEqual([])
+  })
+
+  it('exclude filter (exclude_label_ids) does not wrongly exclude a task whose label link is tombstoned', () => {
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    repo.addLabel(t.id, 'L1')
+    // Sanity: while the link is live the task IS excluded.
+    expect(repo.search({ exclude_label_ids: ['L1'] }).map((r) => r.id)).toEqual([])
+
+    repo.removeLabel(t.id, 'L1') // soft-delete the link
+
+    // Tombstoned link must no longer cause exclusion — the task reappears.
+    expect(repo.search({ exclude_label_ids: ['L1'] }).map((r) => r.id)).toEqual(['t1'])
+  })
+})
+
+describe('TaskRepository — orphaned-status repair is write-free in steady state (#110)', () => {
+  let db: DatabaseSync
+  let repo: TaskRepository
+  let projectId: string
+  let userId: string
+  let statusId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    const fx = seedFixtures(db)
+    projectId = fx.projectId
+    userId = fx.userId
+    statusId = fx.statusId
+    repo = new TaskRepository(db)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // Wrap db.prepare so we record the SQL of every statement that actually
+  // EXECUTES a write (.run). The orphan probe uses .get and the list query uses
+  // .all, so neither is recorded — only real writes land in the returned array.
+  function trackWrites(): string[] {
+    const executed: string[] = []
+    const realPrepare = db.prepare.bind(db)
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      const stmt = realPrepare(sql)
+      const realRun = stmt.run.bind(stmt) as (...params: unknown[]) => unknown
+      stmt.run = ((...params: unknown[]) => {
+        executed.push(sql)
+        return realRun(...params)
+      }) as typeof stmt.run
+      return stmt
+    })
+    return executed
+  }
+
+  const isTasksUpdate = (sql: string): boolean => /update\s+tasks\s+set\s+status_id/i.test(sql)
+
+  // A status belonging to a DIFFERENT project. Assigning it to a proj-1 task
+  // orphans that task relative to proj-1 (its status_id is not among proj-1's
+  // statuses) while keeping the tasks.status_id FK valid.
+  function seedForeignStatus(): string {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO projects (id, owner_id, name, description, color, icon, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run('proj-2', userId, 'Other', null, null, null, now, now)
+    db.prepare(
+      `INSERT INTO statuses (id, project_id, name, color, icon, order_index, is_done, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run('status-2', 'proj-2', 'Foreign', null, null, 0, 0, 1, now, now)
+    return 'status-2'
+  }
+
+  it('findByProjectId executes ZERO UPDATEs when data is clean', () => {
+    makeTask(repo, projectId, userId, statusId, 't1')
+    const executed = trackWrites()
+
+    repo.findByProjectId(projectId)
+
+    expect(executed.filter(isTasksUpdate)).toEqual([])
+  })
+
+  it('findMyDay executes ZERO UPDATEs when data is clean', () => {
+    makeTask(repo, projectId, userId, statusId, 't1')
+    const executed = trackWrites()
+
+    repo.findMyDay(userId)
+
+    expect(executed.filter(isTasksUpdate)).toEqual([])
+  })
+
+  it('findByProjectId repairs an orphan exactly once, preserves updated_at, and is write-free on the next read', () => {
+    const foreign = seedForeignStatus()
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    // Orphan it against proj-1 and pin a fixed old updated_at so a re-sync bump
+    // would be unmistakable.
+    db.prepare('UPDATE tasks SET status_id = ?, updated_at = ? WHERE id = ?').run(
+      foreign,
+      '2026-01-01T00:00:00.000Z',
+      t.id
+    )
+    const before = repo.findById(t.id)!
+    expect(before.status_id).toBe(foreign)
+
+    const executed = trackWrites()
+
+    // First read repairs the orphan back to the project default.
+    const list = repo.findByProjectId(projectId)
+    expect(list.find((x) => x.id === t.id)?.status_id).toBe(statusId)
+    expect(executed.filter(isTasksUpdate).length).toBe(1)
+
+    const afterRepair = repo.findById(t.id)!
+    expect(afterRepair.status_id).toBe(statusId)
+    // Purely local hygiene: updated_at is intentionally NOT bumped → no re-push.
+    expect(afterRepair.updated_at).toBe('2026-01-01T00:00:00.000Z')
+
+    // Subsequent read touches nothing.
+    const mark = executed.length
+    repo.findByProjectId(projectId)
+    expect(executed.slice(mark).filter(isTasksUpdate)).toEqual([])
+  })
+
+  it('findMyDay repairs an orphan exactly once, preserves updated_at, and is write-free on the next read', () => {
+    const foreign = seedForeignStatus()
+    const t = makeTask(repo, projectId, userId, statusId, 't1')
+    db.prepare('UPDATE tasks SET status_id = ?, updated_at = ?, is_in_my_day = 1 WHERE id = ?').run(
+      foreign,
+      '2026-01-01T00:00:00.000Z',
+      t.id
+    )
+
+    const executed = trackWrites()
+
+    const list = repo.findMyDay(userId)
+    expect(list.find((x) => x.id === t.id)?.status_id).toBe(statusId)
+    expect(executed.filter(isTasksUpdate).length).toBe(1)
+
+    const afterRepair = repo.findById(t.id)!
+    expect(afterRepair.status_id).toBe(statusId)
+    expect(afterRepair.updated_at).toBe('2026-01-01T00:00:00.000Z')
+
+    const mark = executed.length
+    repo.findMyDay(userId)
+    expect(executed.slice(mark).filter(isTasksUpdate)).toEqual([])
   })
 })

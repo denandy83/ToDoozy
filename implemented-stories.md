@@ -2854,3 +2854,159 @@ Before marking passes: true: read ui-reference.md and debug-learnings.md. Write 
   - npm run typecheck passes with zero errors. Vitest tests for archiveWithTasks and unarchiveWithTasks pass.
 - **Passes:** true
 - **Implemented:** 2026-06-10
+
+### #89 — setAuth storm causes refresh_token_already_used → self-inflicted logout
+- **Description:** ToDoozy task ID: b1ee3217-a382-4f92-b7e1-fa73d6252840 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #90 — started todoozy offline, then went online, clicked retry, connection stayed 'offline'
+- **Description:** ToDoozy task ID: 1827d14e-aa3c-4c7c-9f2e-b3d4f9eccd55 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #91 — Expand Realtime coverage: per-user channel + activity_log on personal projects
+- **Description:** ToDoozy task ID: 4c89a910-b3a8-48ea-b1f4-0847ad4e6028 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #92 — Batch task-detail edits — sync only when switching tasks / closing panel / blurring app
+- **Description:** ToDoozy task ID: d174ec02-9041-4e5c-a065-c83e41c5565c — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #93 — MCP create_label writes legacy projects.label_data instead of project_labels junction — label invisible in app
+- **Description:** ToDoozy task ID: 2d4282aa-89dc-425f-911c-1ce498c9f78d — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #94 — Allow removing password login for OAuth users (Edge Function with service_role)
+- **Description:** ToDoozy task ID: 6a8adf77-7733-4c61-be46-4ee3ae1c5628 — a corresponding ToDoozy task exists; follow the CLAUDE.md ToDoozy task lifecycle for this story (In Progress when starting, Testing while running tests, Verifying when tests pass).
+- **Spec Section:** N/A
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+
+### #95 — Batch review doc — before/after screenshots + repro scenarios for stories #68-#94
+- **Description:** No ToDoozy task exists for this story — SKIP the ToDoozy status lifecycle entirely.
+- **Spec Section:** n/a — process/documentation story; spec is fully contained in the description
+- **Passes:** true
+- **Implemented:** 2026-06-10
+
+---
+---
+### #96 — [Critical] Security: MCP edge function stores per-request auth in module globals — supabase/functions/mcp/index.ts:1245
+- **Passes:** true
+- **Implemented:** 2026-07-21
+- **Spec:** stories/archive/096-mcp-auth-globals.md
+---
+### #97 — [High] Security: MCP tools run on service-role client, RLS bypassed — supabase/functions/mcp/index.ts:1207
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/097-mcp-rls-bypass.md
+---
+### #98 — [Medium] Security: API keys stored/compared in plaintext — supabase/migrations/003_create_api_keys.sql:2
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/098-api-key-hashing.md
+---
+### #99 — [Medium] Security: session tokens written plaintext when safeStorage unavailable — src/main/ipc-handlers.ts:41
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/099-session-plaintext-fallback.md
+---
+### #100 — [Medium] Bug: saved-view match count includes soft-deleted tasks/labels — src/main/repositories/SavedViewRepository.ts:189
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/100-savedview-tombstone-counts.md
+---
+### #101 — [Medium] Bug: task search label filters ignore task_labels tombstones — src/main/repositories/TaskRepository.ts:579
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/101-search-label-tombstones.md
+---
+### #102 — [Medium] Bug: applyRemote LWW guards string-compare ISO timestamps — src/main/repositories/TaskRepository.ts:227
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/102-lww-timestamp-compare.md
+---
+### #103 — [Medium] Performance: WAL-mtime poll rehydrates all stores on own writes — src/main/index.ts:306
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/103-wal-poll-own-writes.md
+---
+### #104 — [Medium] Performance: N+1 Supabase queries in discoverRemoteMemberships — src/renderer/src/services/SyncService.ts:776
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/104-batch-membership-discovery.md
+---
+### #105 — [Medium] Performance: N+1 label resolution + row-by-row task_labels upserts on upload — src/renderer/src/services/SyncService.ts:336
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/105-batch-label-upload.md
+---
+### #106 — [Medium] Bug: fullUpload leaves last_sync_at sentinel set on failure — src/renderer/src/services/PersonalSyncService.ts:1146
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/106-fullupload-sentinel-reset.md
+---
+### #107 — [Medium] Inconsistency: many components exceed 150-line rule — src/renderer/src/AppLayout.tsx:1
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/107-component-size-refactor.md
+---
+### #108 — [Low] Security: dev osascript notification injectable via task title — src/main/notifications.ts:87
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/108-osascript-escaping.md
+---
+### #109 — [Low] Bug: sentNotifications set grows unbounded — src/main/notifications.ts:11
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/109-sentnotifications-eviction.md
+---
+### #110 — [Low] Performance: findMyDay performs repair UPDATE on every read — src/main/repositories/TaskRepository.ts:77
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/110-findmyday-write-on-read.md
+---
+### #111 — [Low] Security: shell:openExternal accepts arbitrary URL schemes — src/main/ipc-handlers.ts:974
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/111-openexternal-allowlist.md
+---
+### #112 — [Low] Maintainability: debug console.log in hot label store paths — src/renderer/src/shared/stores/taskStore.ts:705
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/112-remove-debug-logs.md
+---
+### #113 — MCP create_status tool: let the MCP server create project statuses
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/113-mcp-create-status.md
+---
+### #114 — Stop syncing the plaintext API key to Supabase user_settings
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/114-plaintext-apikey-usersettings.md
+---
+### #115 — Normalize sync timestamps so incremental high-water queries do not miss rows
+- **Passes:** true
+- **Implemented:** 2026-07-22
+- **Spec:** stories/archive/115-normalize-sync-timestamps.md

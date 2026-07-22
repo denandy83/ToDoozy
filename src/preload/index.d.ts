@@ -392,8 +392,12 @@ export interface SyncMetaAPI {
   clearAll(userId: string): Promise<number>
 }
 
+/** Result of a `shell:openExternal` invocation. Rejected URLs return `ok: false`
+ *  with the reason the main-process scheme allowlist blocked them. */
+export type OpenExternalResult = { ok: true } | { ok: false; error: string }
+
 export interface ShellAPI {
-  openExternal(url: string): Promise<void>
+  openExternal(url: string): Promise<OpenExternalResult>
 }
 
 export interface PowerAPI {
@@ -518,6 +522,7 @@ export interface TodoozyAPI {
   power: PowerAPI
   onTasksChanged(callback: () => void): () => void
   onInviteReceived(callback: (token: string) => void): () => void
+  onSessionNotPersisted(callback: () => void): () => void
 }
 
 declare global {

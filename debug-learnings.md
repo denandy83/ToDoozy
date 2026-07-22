@@ -145,3 +145,8 @@ Patterns and pitfalls discovered during debugging. Read this at the start of eve
 1. Tray/menu-bar features can only be visually verified in a notarized build (full `dist:mac` + notarize + staple, GlobalProtect OFF for timestamp/notary services).
 2. Don't cycle unsigned/unnotarized builds with the production bundle id while the production app matters to you today.
 3. `tray.getBounds().y === screen height` + zero slot = OS suppression, not a code bug.
+
+## 2026-07-21 — Deno edge functions are outside local typecheck (story #96)
+`supabase/functions/**/*.ts` (Deno runtime) are excluded from `npm run typecheck`'s tsconfigs, and Deno is not installed locally, so `index.ts` itself cannot be `deno check`'d in this environment — only Node/web configs are validated. For `supabase/**` (security-migration) stories, make the concurrency/logic contract unit-testable by extracting pure, dependency-free helpers into a sibling `.ts` covered by vitest (as done here with `requestContext.ts` + `requestContext.test.ts`), rather than relying on typecheck to catch edge-function regressions. Verifier must review the edge-function wiring by hand.
+
+[2026-07-22T05:55:01Z] #114 (security): story spec enumerated the 3 cloud PUSH paths for the plaintext api_key but not the mirror PULL/import path (fullPull, new-device onboarding). Opus builder faithfully covered exactly the 3 named paths; the independent-verifier caught the 4th (fullPull imported an unfiltered leaked api_key onto a fresh device). Learning: when excluding a value from sync, audit BOTH directions — push and pull — and single-source the exclusion helper so every path shares it. Fixed in 1 round.

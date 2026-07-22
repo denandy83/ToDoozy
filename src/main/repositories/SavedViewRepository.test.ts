@@ -267,6 +267,48 @@ describe('SavedViewRepository — countMatchingTasks', () => {
   it('returns 0 for an unknown label name', () => {
     expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['nonexistent'] }), userId)).toBe(0)
   })
+
+  it('excludes soft-deleted tasks from label counts', () => {
+    // Baseline: t1, t2 carry Bug and are active → 2
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(2)
+    // Soft-delete t1 → count drops to 1 (only t2 remains)
+    db.prepare('UPDATE tasks SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), 't1')
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(1)
+  })
+
+  it('excludes soft-deleted tasks from unfiltered (status-only) counts', () => {
+    // t1..t4 are active, non-done, non-archived, top-level → 4
+    expect(repo.countMatchingTasks(JSON.stringify({}), userId)).toBe(4)
+    db.prepare('UPDATE tasks SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), 't4')
+    expect(repo.countMatchingTasks(JSON.stringify({}), userId)).toBe(3)
+  })
+
+  it('drops tasks whose matching label link is tombstoned', () => {
+    // Baseline: t1, t2 carry Bug → 2
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(2)
+    // Tombstone t1's Bug link (soft-remove) → t1 no longer matches → 1
+    db.prepare(
+      'UPDATE task_labels SET deleted_at = ? WHERE task_id = ? AND label_id = ?'
+    ).run(new Date().toISOString(), 't1', BUG)
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(1)
+  })
+
+  it('ignores a tombstoned label definition in label counts', () => {
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(2)
+    // Soft-delete the Bug label itself → no task matches by that name → 0
+    db.prepare('UPDATE labels SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), BUG)
+    expect(repo.countMatchingTasks(JSON.stringify({ labelIds: ['bug'] }), userId)).toBe(0)
+  })
+
+  it('a tombstoned label link no longer excludes a task in excludeLabelIds', () => {
+    // Baseline: excluding Bug leaves t3, t4 → 2
+    expect(repo.countMatchingTasks(JSON.stringify({ excludeLabelIds: ['bug'] }), userId)).toBe(2)
+    // Tombstone t1's Bug link → t1 is no longer excluded → t1, t3, t4 → 3
+    db.prepare(
+      'UPDATE task_labels SET deleted_at = ? WHERE task_id = ? AND label_id = ?'
+    ).run(new Date().toISOString(), 't1', BUG)
+    expect(repo.countMatchingTasks(JSON.stringify({ excludeLabelIds: ['bug'] }), userId)).toBe(3)
+  })
 })
 
 describe('SavedViewRepository — applyRemote', () => {
