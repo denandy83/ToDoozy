@@ -7,6 +7,8 @@ export interface SyncContext {
   api: TodoozyAPI
   client: SupabaseClient
   assertCurrent(): void
+  isCurrent(): Promise<boolean>
+  scope: string
 }
 
 export function captureSyncProducer() {
@@ -29,6 +31,7 @@ export function captureSyncProducer() {
       get: (_, method: string) => async (...args: unknown[]) => {
         const origin = await database
         assertCurrent()
+        if (origin.userId !== userId) throw new Error('Sync database changed')
         return window.api.sync.invokeContext(origin, `${namespace}:${method}`, args)
       }
     })
@@ -47,7 +50,8 @@ export function captureSyncProducer() {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     })
   })()
-  return { api, client, assertCurrent, isCurrent, userId }
+  const scope = async (): Promise<string> => { const origin = await database; return `${origin.userId}:${origin.generation}` }
+  return { api, client, assertCurrent, isCurrent, userId, scope }
 }
 
 export type SyncProducer = ReturnType<typeof captureSyncProducer>
@@ -62,5 +66,5 @@ export async function captureSyncContext(): Promise<SyncContext> {
   const origin = captureSyncProducer()
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
-  return { api: origin.api, client, assertCurrent: origin.assertCurrent }
+  return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
 }

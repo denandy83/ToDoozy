@@ -5,8 +5,8 @@ import { migrations } from '../../../main/database/migrations'
 import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { requireSession } from './sessionRecovery'
-import { pushProjectArchive } from './PersonalSyncService'
-import { processSyncQueue, setOnlineStatus } from './SyncService'
+import { pushProjectArchive, pullNewTasks } from './PersonalSyncService'
+import { processSyncQueue, setOnlineStatus, syncProjectDown } from './SyncService'
 
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { network.token = options.accessToken; return network.client }) }))
@@ -16,8 +16,34 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>
 let remote: Record<string, Array<Record<string, unknown>>>
-const t10 = '2026-01-01T10:00:00.000Z', t20 = '2026-01-01T20:00:00.000Z', t30 = '2026-01-02T06:00:00.000Z', t40 = '2026-01-02T16:00:00.000Z'
+let batches: Array<{ patch: Record<string, unknown>; ids: unknown[] }>
+let reads: number
+let failBatch: number
+let generation = 0
+let onProjectWrite: (() => Promise<void>) | null
+const t0 = '2026-01-01T00:00:00.000Z', t5 = '2026-01-01T05:00:00.000Z', t10 = '2026-01-01T10:00:00.000Z', t20 = '2026-01-01T20:00:00.000Z', t30 = '2026-01-02T06:00:00.000Z'
+function split(value: string): string[] {
+  let depth = 0, quoted = false, start = 0
+  const result: string[] = []
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] === '"') quoted = !quoted
+    if (quoted) continue
+    if (value[index] === '(') depth++
+    if (value[index] === ')') depth--
+    if (value[index] === ',' && !depth) { result.push(value.slice(start, index)); start = index + 1 }
+  }
+  return [...result, value.slice(start)]
+}
+function matches(row: Record<string, unknown>, filter: string): boolean {
+  if (filter.startsWith('and(')) return split(filter.slice(4, -1)).every((part) => matches(row, part))
+  const [, key, op, encoded] = filter.match(/^([^.]+)\.(eq|gt)\.(.*)$/)!
+  const value = JSON.parse(encoded)
+  return op === 'eq' ? row[key] === value : String(row[key]) > String(value)
+}
 beforeEach(() => {
+  generation++
+  vi.stubGlobal('navigator', { onLine: true })
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(t0)
   db = new DatabaseSync(':memory:')
   db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
   for (const migrate of migrations) migrate(db)
@@ -25,70 +51,138 @@ beforeEach(() => {
   repo.users.create({ id: 'u', email: 'u@example.invalid', display_name: null, avatar_url: null })
   repo.projects.create({ id: 'p', name: 'Project', owner_id: 'u' })
   repo.statuses.create({ id: 's', project_id: 'p', name: 'Open' })
-  for (const id of ['normal', 'divergent', 'newer-remote']) repo.tasks.create({ id, project_id: 'p', owner_id: 'u', status_id: 's', title: id })
   useAuthStore.setState({ currentUser: { id: 'u' } as never })
   vi.mocked(requireSession).mockResolvedValue({ user: { id: 'u' }, access_token: 'synthetic-u' } as Session)
   setOnlineStatus(true)
+  batches = []; reads = 0; failBatch = 0; onProjectWrite = null
+  remote = { projects: [{ ...repo.projects.findById('p'), updated_at: t5 }], statuses: [{ ...repo.statuses.findById('s') }], tasks: [] }
   vi.stubGlobal('window', { api: {
     auth: { getSupabaseConfig: async () => ({ url: 'https://example.invalid', anonKey: 'synthetic' }) },
     sync: {
-      captureContext: async () => ({ userId: 'u', generation: 1 }), count: async () => repo.syncQueue.count(),
+      captureContext: async () => ({ userId: 'u', generation }), count: async () => repo.syncQueue.count(),
       invokeContext: async (_context: unknown, channel: string, args: unknown[]) => {
         const [namespace, method] = channel.split(':')
         const target = namespace === 'sync' ? repo.syncQueue : repo[namespace as keyof typeof repo]
-        const mapped = namespace === 'sync' && method === 'getQueue' ? 'findAll' : method
+        const mapped = namespace === 'sync' && method === 'getQueue' ? 'findAll' : namespace === 'tasks' && method === 'applyRemote' ? 'applyRemoteTask' : method
         return (target as unknown as Record<string, (...args: unknown[]) => unknown>)[mapped](...args)
       }
     }
   } })
   network.client = { from(table: string) {
-    let patch: Record<string, unknown> = {}
+    let patch: Record<string, unknown> | null = null, limit = 1000, columns = '*'
+    let ids: unknown[] = []
+    const orders: string[] = []
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
+    const execute = async () => {
+      await network.token!()
+      if (table === 'projects' && patch && onProjectWrite) { const hook = onProjectWrite; onProjectWrite = null; await hook() }
+      if (table === 'tasks' && !patch) reads++
+      if (table === 'tasks' && patch) {
+        batches.push({ patch: { ...patch }, ids })
+        if (failBatch === batches.length) return { data: null, error: { message: 'synthetic batch failure' } }
+      }
+      const data = (remote[table] ?? []).filter((row) => filters.every((filter) => filter(row)))
+        .sort((a, b) => { for (const key of orders) if (a[key] !== b[key]) return String(a[key]) < String(b[key]) ? -1 : 1; return 0 })
+        .slice(0, limit)
+      if (patch) for (const row of data) {
+        const archive = row.archive_updated_at && Date.parse(String(row.archive_updated_at)) >= Date.parse(String(patch.archive_updated_at))
+          ? { is_archived: row.is_archived, archive_updated_at: row.archive_updated_at } : {}
+        Object.assign(row, patch, table === 'projects' ? archive : {})
+      }
+      return { data: data.map((row) => columns === '*' ? { ...row } : Object.fromEntries(columns.split(',').map((key) => [key.trim(), row[key.trim()]]))), error: null }
+    }
     const chain = {
       update(value: Record<string, unknown>) { patch = value; return chain },
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return chain },
       is(key: string, value: unknown) { filters.push((row) => (row[key] ?? null) === value); return chain },
       lte(key: string, value: unknown) { filters.push((row) => String(row[key]) <= String(value)); return chain },
-      select() { return chain },
-      order() { return chain },
-      limit() { return chain },
-      then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
-        return (async () => {
-          await network.token!()
-          const data = remote[table].filter((row) => filters.every((filter) => filter(row)))
-          for (const row of data) Object.assign(row, patch)
-          return { data, error: null }
-        })().then(resolve, reject)
-      }
+      gt(key: string, value: unknown) { filters.push((row) => String(row[key]) > String(value)); return chain },
+      in(key: string, values: unknown[]) { ids = values; filters.push((row) => values.includes(row[key])); return chain },
+      select(value = '*') { columns = value; return chain },
+      order(key: string) { orders.push(key); return chain },
+      limit(value: number) { limit = Math.min(1000, value); return chain },
+      or(value: string) { filters.push((row) => split(value).some((part) => matches(row, part))); return chain },
+      single: async () => { const value = await execute(); return { ...value, data: value.data?.[0] ?? null } },
+      then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) { return execute().then(resolve, reject) }
     }
     return chain
-  } } as unknown as SupabaseClient
+  }, rpc: async () => ({ data: [], error: null }) } as unknown as SupabaseClient
 })
-afterEach(() => { db.close(); vi.unstubAllGlobals() })
+afterEach(() => { db.close(); vi.unstubAllGlobals(); vi.useRealTimers() })
+function task(id: string, archived: number, stamp: string) {
+  return { id, project_id: 'p', owner_id: 'u', status_id: 's', title: id, is_archived: archived, created_at: t0, updated_at: stamp, deleted_at: null }
+}
+function action(archived: number) {
+  if (archived) repo.projects.archiveWithTasks('p')
+  else repo.projects.unarchiveWithTasks('p')
+}
 it.each([0, 1].flatMap((archived) => ['immediate', 'queue'].map((path) => ({ archived, path }))))(
-  'preserves task intent at T20 after cascade T10 and rename T30: $archived/$path', async ({ archived, path }) => {
-    if (archived) repo.projects.archiveWithTasks('p')
-    else repo.projects.unarchiveWithTasks('p')
-    db.prepare('UPDATE tasks SET updated_at=?').run(t10)
-    repo.tasks.update('divergent', { is_archived: archived ? 0 : 1 })
-    db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(t20, 'divergent')
-    repo.projects.update('p', { name: 'Renamed' })
-    db.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(t30, 'p')
-    remote = { projects: [{ id: 'p', is_archived: archived ? 0 : 1, updated_at: t10 }], tasks: [
-      { id: 'normal', project_id: 'p', is_archived: archived ? 0 : 1, updated_at: t10 },
-      { id: 'divergent', project_id: 'p', is_archived: archived ? 0 : 1, updated_at: t20 },
-      { id: 'newer-remote', project_id: 'p', is_archived: archived ? 0 : 1, updated_at: t40 },
-      { id: 'cloud-only', project_id: 'p', is_archived: archived ? 0 : 1, updated_at: t10 }
-    ] }
-    if (path === 'queue') {
-      repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
-      expect(await processSyncQueue()).toBe(1)
-      expect(repo.syncQueue.count()).toBe(0)
-    } else await pushProjectArchive('p', archived)
-    expect(remote.projects[0]).toMatchObject({ is_archived: archived, updated_at: t30 })
-    expect(remote.tasks.find((row) => row.id === 'cloud-only')).toMatchObject({ is_archived: archived, updated_at: t30 })
-    expect(remote.tasks.find((row) => row.id === 'normal')).toMatchObject({ is_archived: archived, updated_at: t10 })
-    expect(remote.tasks.find((row) => row.id === 'divergent')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
-    expect(remote.tasks.find((row) => row.id === 'newer-remote')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t40 })
+  'R9/F1: preserves later local and remote-only choices across rename: $archived/$path', async ({ archived, path }) => {
+    repo.tasks.create({ id: 'local', project_id: 'p', owner_id: 'u', status_id: 's', title: 'Local' })
+    vi.setSystemTime(t10); action(archived)
+    vi.setSystemTime(t20); repo.tasks.update('local', { is_archived: archived ? 0 : 1 })
+    vi.setSystemTime(t30); repo.projects.update('p', { name: 'Renamed' })
+    remote.tasks = [task('old-cloud', archived ? 0 : 1, t5), task('later-cloud', archived ? 0 : 1, t20), task('local', archived ? 0 : 1, t20)]
+    expect(repo.projects.findById('p')?.archive_updated_at).toBe(t10)
+    if (path === 'queue') expect(await processSyncQueue()).toBe(1)
+    else await pushProjectArchive()
+    expect(repo.syncQueue.count()).toBe(0)
+    expect(remote.tasks.find((row) => row.id === 'old-cloud')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    for (const id of ['later-cloud', 'local']) expect(remote.tasks.find((row) => row.id === id)).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
   }
 )
+it.each([0, 1].flatMap((archived) => ['pull', 'startup'].map((path) => ({ archived, path }))))(
+  'F2: older unseen rows imported during pending cascade inherit its version: $archived/$path', async ({ archived, path }) => {
+    vi.setSystemTime(t10); action(archived)
+    remote.tasks = [task('unseen', archived ? 0 : 1, t5), task('later-choice', archived ? 0 : 1, t20)]
+    if (path === 'pull') expect(await pullNewTasks('p')).toBe(2)
+    else await syncProjectDown('p', 'u')
+    expect(repo.tasks.findById('unseen')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    expect(repo.tasks.findById('later-choice')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
+    expect(await processSyncQueue()).toBe(1)
+    expect(remote.tasks.find((row) => row.id === 'unseen')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    expect(remote.tasks.find((row) => row.id === 'later-choice')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
+  }
+)
+it.each([0, 1])('pages and batches 1101 rows, preserving intent through a partial failure/retry: %s', async (archived) => {
+  vi.setSystemTime(t10); action(archived)
+  remote.tasks = Array.from({ length: 1101 }, (_, index) => task(`task-${String(index).padStart(4, '0')}`, archived ? 0 : 1, t5))
+  failBatch = 2
+  expect(await processSyncQueue()).toBe(0)
+  expect(repo.syncQueue.count()).toBe(1)
+  expect(batches[0].ids).toHaveLength(200)
+  failBatch = 0
+  expect(await processSyncQueue()).toBe(1)
+  expect(remote.tasks.every((row) => row.is_archived === archived && row.updated_at === t10)).toBe(true)
+  expect(batches).toHaveLength(8)
+  expect(batches.every((batch) => batch.ids.length <= 200)).toBe(true)
+  expect(reads).toBe(6)
+})
+it('rechecks a new action racing a queued write and ignores delayed older producer delivery', async () => {
+  vi.setSystemTime(t10); action(0)
+  remote.tasks = [task('unseen', 1, t5)]
+  onProjectWrite = async () => { vi.setSystemTime(t20); action(1); vi.setSystemTime(t30); repo.projects.update('p', { name: 'Renamed' }) }
+  expect(await processSyncQueue()).toBe(1)
+  expect(remote.tasks[0]).toMatchObject({ is_archived: 1, updated_at: t20 })
+  expect(repo.syncQueue.count()).toBe(1)
+  expect(await processSyncQueue()).toBe(1)
+  const written = batches.length
+  await pushProjectArchive()
+  expect(batches).toHaveLength(written)
+  expect(repo.syncQueue.count()).toBe(0)
+})
+it('adopts a newer remote owner action instead of replaying an older local command', async () => {
+  vi.setSystemTime(t10); action(0)
+  remote.projects[0] = { ...remote.projects[0], is_archived: 1, archive_updated_at: t20, updated_at: t20 }
+  remote.tasks = [task('unseen', 1, t20)]
+  expect(await processSyncQueue()).toBe(1)
+  expect(repo.projects.findById('p')).toMatchObject({ is_archived: 1, archive_updated_at: t20 })
+  expect(remote.tasks[0]).toMatchObject({ is_archived: 1, updated_at: t20 })
+})
+it('owner denial stops before task reads or writes', async () => {
+  vi.setSystemTime(t10); action(1); remote.projects = []
+  expect(await processSyncQueue()).toBe(0)
+  expect(reads).toBe(0)
+  expect(batches).toHaveLength(0)
+  expect(repo.syncQueue.count()).toBe(1)
+})

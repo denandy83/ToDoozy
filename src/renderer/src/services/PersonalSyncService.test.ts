@@ -91,6 +91,7 @@ function makeSupabase(): SupabaseClient {
     from: (): Record<string, unknown> => chain,
     rpc: (): Promise<QueryResult> => Promise.resolve(result)
   }
+  pinnedProducer.client = supabase
   return supabase as unknown as SupabaseClient
 }
 

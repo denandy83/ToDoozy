@@ -53,7 +53,7 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
   localList(scopeId: string, includeTombstones: boolean): Promise<TLocal[]>
   localGetById(id: string, api?: typeof window.api): Promise<TLocal | null>
   /** Upsert with the remote's `updated_at` and `deleted_at` preserved (no NOW() bump). */
-  localApplyRemote(remote: TRemote): Promise<void>
+  localApplyRemote(remote: TRemote, api?: typeof window.api): Promise<void>
   /** Returns max(updated_at) on local active rows, or null if empty. */
   localMaxUpdatedAt(scopeId: string): Promise<string | null>
 
@@ -120,8 +120,8 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
     return api.tasks.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.tasks.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.tasks.applyRemote(remote)
   },
 
   async localMaxUpdatedAt(projectId) {
@@ -235,8 +235,8 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
     return api.statuses.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.statuses.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.statuses.applyRemote(remote)
   },
 
   async localMaxUpdatedAt(projectId) {
@@ -312,8 +312,8 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
     return api.projects.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projects.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.projects.applyRemote(remote)
   },
 
   async localMaxUpdatedAt(ownerId) {
@@ -468,8 +468,8 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     return api.labels.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.labels.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.labels.applyRemote(remote)
   },
 
   async localMaxUpdatedAt(userId) {
@@ -619,8 +619,8 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     return api.themes.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.themes.applyRemote(themesDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.themes.applyRemote(themesDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(ownerId) {
@@ -757,9 +757,9 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     return isSettingSyncExcluded(key) ? null : rows.find((row) => row.key === key) ?? null
   },
 
-  async localApplyRemote(remote) {
+  async localApplyRemote(remote, api = window.api) {
     if (isSettingSyncExcluded(settingsDescriptor.fromRemote(remote).key)) return
-    await window.api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
+    await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(userId) {
@@ -860,8 +860,8 @@ const savedViewsDescriptor: SyncTableDescriptor<SavedView, RemoteSavedView> = {
     return view ?? null
   },
 
-  async localApplyRemote(remote) {
-    await window.api.savedViews.applyRemote(savedViewsDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.savedViews.applyRemote(savedViewsDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(userId) {
@@ -973,8 +973,8 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
     return api.projectAreas.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projectAreas.applyRemote(projectAreasDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.projectAreas.applyRemote(projectAreasDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(userId) {
@@ -1073,8 +1073,8 @@ const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTe
     return (await api.projectTemplates.findById(id)) ?? null
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projectTemplates.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.projectTemplates.applyRemote(remote)
   },
 
   async localMaxUpdatedAt(ownerId) {

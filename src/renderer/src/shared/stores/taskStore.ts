@@ -1,3 +1,5 @@
+import { withSyncProducer } from '../../services/syncContext'
+import { reportPushFailure } from '../../services/syncFeedback'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { sortSubtasksForDisplay } from '../utils/sortTasks'
@@ -12,8 +14,6 @@ import type {
 } from '../../../../shared/types'
 import { useSettingsStore } from './settingsStore'
 import { useAuthStore } from './authStore'
-import { logEvent } from './logStore'
-import { useSyncStore } from './syncStore'
 import { useLabelStore } from './labelStore'
 import { useProjectStore } from './projectStore'
 import { useStatusStore } from './statusStore'
@@ -86,8 +86,9 @@ function scheduleSavedViewRecount(): void {
 // Exported for TaskBatchSyncManager, which flushes batched detail-panel
 // edits through the same shared/personal routing (story #92).
 export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
+  return withSyncProducer(async (origin) => {
   try {
-    const project = await window.api.projects.findById(task.project_id)
+    const project = await origin.api.projects.findById(task.project_id)
     if (!project) return
 
     if (project.is_shared === 1) {
@@ -95,37 +96,27 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
       const { syncTaskChange } = await import('../../services/SyncService')
       let labelData: Array<{ name: string; color: string }> | undefined
       if (operation !== 'DELETE') {
-        const taskLabels = await window.api.tasks.getLabels(task.id)
+        const taskLabels = await origin.api.tasks.getLabels(task.id)
         labelData = []
         for (const tl of taskLabels) {
-          const label = await window.api.labels.findById(tl.label_id)
+          const label = await origin.api.labels.findById(tl.label_id)
           if (label) labelData.push({ name: label.name, color: label.color })
         }
       }
-      await syncTaskChange(task, operation, labelData)
+      await syncTaskChange(task, operation, labelData, origin)
     } else {
       // Personal project — push to Supabase via PersonalSyncService
       const { pushTask, deleteTaskFromSupabase } = await import('../../services/PersonalSyncService')
       if (operation === 'DELETE') {
-        await deleteTaskFromSupabase(task.id)
+        await deleteTaskFromSupabase(task.id, origin)
       } else {
-        await pushTask(task)
+        await pushTask(task, origin)
       }
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'unknown error'
-    console.error('[TaskStore] Failed to sync task to Supabase:', err)
-    // Inner push functions normally route their own failures, but if anything
-    // bubbles up here (e.g., project lookup threw), make sure the user sees it.
-    logEvent('error', 'sync', `syncIfShared (${operation}) failed: ${msg}`, `task=${task.id} project=${task.project_id}`)
-    try {
-      await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
-      void useSyncStore.getState().refreshPendingCount()
-    } catch (e) {
-      console.error('[TaskStore] Failed to enqueue:', e)
-    }
-    useSyncStore.getState().setError(msg)
+    await reportPushFailure(origin, 'syncIfShared', err, 'tasks', task.id, JSON.stringify(task), operation)
   }
+  })
 }
 
 /**

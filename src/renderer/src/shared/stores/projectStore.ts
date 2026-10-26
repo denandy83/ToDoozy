@@ -1,3 +1,4 @@
+import { captureSyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { useAuthStore } from './authStore'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -168,42 +169,50 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async archiveProject(id: string): Promise<Project | null> {
+    const origin = captureSyncProducer()
     try {
-      const current = get().projects[id] ?? await window.api.projects.findById(id)
+      const current = get().projects[id] ?? await origin.api.projects.findById(id)
       if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
         throw new Error('Only the project owner can archive or restore this project')
       }
-      const project = await window.api.projects.archiveWithTasks(id)
-      if (project) {
+      const project = await origin.api.projects.archiveWithTasks(id)
+      if (project && await origin.isCurrent()) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
+        if (!await origin.isCurrent()) return null
         await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
-        await pushProjectArchive(id, 1)
+        if (!await origin.isCurrent()) return null
+        await pushProjectArchive()
       }
       return project ?? null
     } catch (err) {
+      if (!await origin.isCurrent()) return null
       set({ error: err instanceof Error ? err.message : 'Failed to archive project' })
       throw err
     }
   },
 
   async unarchiveProject(id: string): Promise<Project | null> {
+    const origin = captureSyncProducer()
     try {
-      const current = get().projects[id] ?? await window.api.projects.findById(id)
+      const current = get().projects[id] ?? await origin.api.projects.findById(id)
       if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
         throw new Error('Only the project owner can archive or restore this project')
       }
-      const project = await window.api.projects.unarchiveWithTasks(id)
-      if (project) {
+      const project = await origin.api.projects.unarchiveWithTasks(id)
+      if (project && await origin.isCurrent()) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
+        if (!await origin.isCurrent()) return null
         await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
-        await pushProjectArchive(id, 0)
+        if (!await origin.isCurrent()) return null
+        await pushProjectArchive()
       }
       return project ?? null
     } catch (err) {
+      if (!await origin.isCurrent()) return null
       set({ error: err instanceof Error ? err.message : 'Failed to unarchive project' })
       throw err
     }

@@ -1,7 +1,8 @@
+import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext } from './syncContext'
+import { captureSyncContext, captureSyncProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -39,9 +40,7 @@ function getReconnectDelay(attempt: number): number {
 }
 
 /** Mark a successful push in the sync store */
-function markSynced(): void {
-  useSyncStore.getState().setLastSynced()
-}
+
 
 export function setOnlineStatus(online: boolean): void {
   isOnline = online
@@ -405,34 +404,6 @@ export function buildTaskLabelData(
   return labelData
 }
 
-/**
- * Route a sync push failure through every channel a user/operator might watch.
- * Mirrors PersonalSyncService.reportPushFailure; lives here so SyncService
- * stays self-contained (no cross-service imports).
- */
-async function reportPushFailure(
-  context: string,
-  error: { message?: string; code?: string; details?: string } | unknown,
-  table: string,
-  rowId: string,
-  payload: string,
-  operation: SyncOperation = 'UPDATE'
-): Promise<void> {
-  const err = error as { message?: string; code?: string; details?: string }
-  const msg = err?.message ?? (typeof error === 'string' ? error : 'unknown error')
-  const code = err?.code ?? ''
-  const details = err?.details ?? ''
-  console.error(`[SyncService] ${context} error:`, msg, code, details, `id=${rowId}`)
-  logEvent('error', 'sync', `${context} failed: ${msg}`, `table=${table} id=${rowId} code=${code} details=${details}`)
-  try {
-    await window.api.sync.enqueue(table, rowId, operation, payload)
-  } catch (e) {
-    console.error('[SyncService] Failed to enqueue after push error:', e)
-  }
-  useSyncStore.getState().setError(msg || `${context} failed`)
-  void useSyncStore.getState().refreshPendingCount()
-}
-
 async function syncTaskToSupabase(
   supabase: SupabaseClient,
   task: Task,
@@ -468,35 +439,39 @@ async function syncTaskToSupabase(
 export async function syncTaskChange(
   task: Task,
   operation: SyncOperation,
-  labelData?: Array<{ name: string; color: string }>
+  labelData?: Array<{ name: string; color: string }>,
+  producer?: SyncProducer
 ): Promise<void> {
-  if (!isOnline) {
-    await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
-    void useSyncStore.getState().refreshPendingCount()
-    return
-  }
-
-  const supabase = await getSupabase()
-
-  try {
-    if (operation === 'DELETE') {
-      const now = new Date().toISOString()
-      const { error } = await supabase
-        .from('tasks')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', task.id)
-      if (error) {
-        await reportPushFailure('syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
-        return
-      }
-    } else {
-      // syncTaskToSupabase throws on error; the catch routes it.
-      await syncTaskToSupabase(supabase, task, labelData ?? [])
+  return withSyncProducer(async (origin) => {
+    try {
+    if (!isOnline) {
+      await origin.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
+      await refreshProducerPending(origin)
+      return
     }
-    markSynced()
-  } catch (err) {
-    await reportPushFailure('syncTaskChange', err, 'tasks', task.id, JSON.stringify(task), operation)
-  }
+
+    const supabase = await origin.client()
+      if (!supabase) { await origin.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task)); await refreshProducerPending(origin); return }
+
+      if (operation === 'DELETE') {
+        const now = new Date().toISOString()
+        const { error } = await supabase
+          .from('tasks')
+          .update({ deleted_at: now, updated_at: now })
+          .eq('id', task.id)
+        if (error) {
+          await reportPushFailure(origin, 'syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
+          return
+        }
+      } else {
+        // syncTaskToSupabase throws on error; the catch routes it.
+        await syncTaskToSupabase(supabase, task, labelData ?? [])
+      }
+      await markSynced(origin)
+    } catch (err) {
+      await reportPushFailure(origin, 'syncTaskChange', err, 'tasks', task.id, JSON.stringify(task), operation)
+    }
+  }, producer)
 }
 
 /**
@@ -504,68 +479,71 @@ export async function syncTaskChange(
  */
 export async function syncStatusChange(
   status: Status,
-  operation: SyncOperation
+  operation: SyncOperation,
+  producer?: SyncProducer
 ): Promise<void> {
-  if (!isOnline) {
-    await window.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
-    void useSyncStore.getState().refreshPendingCount()
-    return
-  }
-
-  const supabase = await getSupabase()
-
-  try {
-    if (operation === 'DELETE') {
-      // Soft-delete: set deleted_at, keep the row. Hard-DELETE is reserved for the 30-day purge.
-      const now = new Date().toISOString()
-      const { error } = await supabase
-        .from('statuses')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', status.id)
-      if (error) {
-        await reportPushFailure('syncStatusChange:SOFT_DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id, deleted_at: now }), 'UPDATE')
-        return
-      }
-    } else {
-      const { error } = await supabase.from('statuses').upsert({
-        id: status.id,
-        project_id: status.project_id,
-        name: status.name,
-        color: status.color,
-        icon: status.icon,
-        order_index: status.order_index,
-        is_done: status.is_done,
-        is_default: status.is_default,
-        created_at: status.created_at,
-        updated_at: status.updated_at,
-        deleted_at: status.deleted_at ?? null
-      })
-      if (error) {
-        await reportPushFailure('syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
-        return
-      }
+  return withSyncProducer(async (origin) => {
+    try {
+    if (!isOnline) {
+      await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
+      await refreshProducerPending(origin)
+      return
     }
-    markSynced()
-  } catch (err) {
-    await reportPushFailure('syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
-  }
+
+    const supabase = await origin.client()
+      if (!supabase) { await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status)); await refreshProducerPending(origin); return }
+
+      if (operation === 'DELETE') {
+        // Soft-delete: set deleted_at, keep the row. Hard-DELETE is reserved for the 30-day purge.
+        const now = new Date().toISOString()
+        const { error } = await supabase
+          .from('statuses')
+          .update({ deleted_at: now, updated_at: now })
+          .eq('id', status.id)
+        if (error) {
+          await reportPushFailure(origin, 'syncStatusChange:SOFT_DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id, deleted_at: now }), 'UPDATE')
+          return
+        }
+      } else {
+        const { error } = await supabase.from('statuses').upsert({
+          id: status.id,
+          project_id: status.project_id,
+          name: status.name,
+          color: status.color,
+          icon: status.icon,
+          order_index: status.order_index,
+          is_done: status.is_done,
+          is_default: status.is_default,
+          created_at: status.created_at,
+          updated_at: status.updated_at,
+          deleted_at: status.deleted_at ?? null
+        })
+        if (error) {
+          await reportPushFailure(origin, 'syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
+          return
+        }
+      }
+      await markSynced(origin)
+    } catch (err) {
+      await reportPushFailure(origin, 'syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
+    }
+  }, producer)
 }
 
 /**
  * Process queued offline changes.
  */
 let queueDrain: Promise<number> | null = null
-export function processSyncQueue(): Promise<number> {
-  if (!queueDrain) queueDrain = drainSyncQueue().finally(() => { queueDrain = null })
+export function processSyncQueue(context?: SyncContext): Promise<number> {
+  if (!queueDrain) queueDrain = drainSyncQueue(context).finally(() => { queueDrain = null })
   return queueDrain
 }
 
-async function drainSyncQueue(): Promise<number> {
+async function drainSyncQueue(context?: SyncContext): Promise<number> {
   let processed = 0
-  let context: Awaited<ReturnType<typeof captureSyncContext>>
-  const userId = useAuthStore.getState().currentUser?.id
-  try { context = await captureSyncContext() } catch {
-    if (useAuthStore.getState().currentUser?.id === userId) useSyncStore.getState().setStatus('offline')
+  const origin = context ?? captureSyncProducer()
+  try { context ??= await captureSyncContext() } catch {
+    if (await origin.isCurrent()) useSyncStore.getState().setStatus('offline')
     return 0
   }
   const { api, client: supabase, assertCurrent } = context
@@ -622,7 +600,9 @@ async function drainSyncQueue(): Promise<number> {
       }
     }
     assertCurrent()
-    await useSyncStore.getState().refreshPendingCount()
+    const pendingCount = await api.sync.count()
+    if (!await context.isCurrent()) return processed
+    useSyncStore.setState({ pendingCount })
     assertCurrent()
     if (useSyncStore.getState().pendingCount > 0) useSyncStore.getState().setError(failure ?? 'Changes are still waiting to sync')
     else {
@@ -836,16 +816,16 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
  * Discover shared projects the user is a member of in Supabase
  * but doesn't have locally. Returns project IDs to sync down.
  */
-export async function discoverRemoteMemberships(_userId: string): Promise<string[]> {
+export async function discoverRemoteMemberships(userId: string): Promise<string[]> {
   if (!navigator.onLine) return []
-  const supabase = await getSupabase()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return []
+  const context = await captureSyncContext()
+  if (useAuthStore.getState().currentUser?.id !== userId) return []
+  const { api, client: supabase } = context
 
   const { data: memberships, error } = await supabase
     .from('project_members')
     .select('project_id')
-    .eq('user_id', session.user.id)
+    .eq('user_id', userId)
 
   if (error || !memberships) return []
 
@@ -866,16 +846,16 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
   }
 
   for (const m of memberships) {
-    const local = await window.api.projects.findById(m.project_id)
+    const local = await api.projects.findById(m.project_id)
     if (!local) {
       // Project doesn't exist locally — sync it down
       idsToSync.push(m.project_id)
     } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
       // Project exists locally but isn't marked shared — just mark it and sync members
       // Do NOT call syncProjectDown which would delete/overwrite local tasks
-      await window.api.projects.update(m.project_id, { is_shared: 1 })
+      await api.projects.update(m.project_id, { is_shared: 1 })
       logEvent('warn', 'sync', `Repaired mis-flagged shared project "${local.name}"`, `project=${m.project_id} members=${memberCounts.get(m.project_id)}`)
-      await syncMembersDown(m.project_id)
+      await syncMembersDown(m.project_id, context)
     }
   }
   // Deduplicate
@@ -886,8 +866,8 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
  * Sync only project members from Supabase (without overwriting tasks/statuses).
  * Used when a local project is discovered to be shared.
  */
-async function syncMembersDown(projectId: string): Promise<void> {
-  const supabase = await getSupabase()
+async function syncMembersDown(projectId: string, context: SyncContext): Promise<void> {
+  const { api, client: supabase } = context
   const { data: members } = await supabase
     .from('project_members')
     .select('*')
@@ -895,14 +875,14 @@ async function syncMembersDown(projectId: string): Promise<void> {
 
   if (!members) return
 
-  const localMembers = await window.api.projects.getMembers(projectId)
+  const localMembers = await api.projects.getMembers(projectId)
   const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
   // Batch-fetch profiles for any members whose local row is missing or stale.
   const memberIdsNeedingProfile: string[] = []
   const localUsersById = new Map<string, { id: string; email: string } | undefined>()
   for (const member of members) {
-    const localUser = await window.api.users.findById(member.user_id)
+    const localUser = await api.users.findById(member.user_id)
     localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
     if (!localUser || isPlaceholderEmail(localUser.email)) {
       memberIdsNeedingProfile.push(member.user_id)
@@ -926,14 +906,14 @@ async function syncMembersDown(projectId: string): Promise<void> {
     const profile = profilesById.get(member.user_id)
 
     if (!localUser) {
-      await window.api.users.create({
+      await api.users.create({
         id: member.user_id,
         email: profile?.email ?? placeholderEmail(member.user_id),
         display_name: profile?.display_name ?? null,
         avatar_url: profile?.avatar_url ?? null
       }).catch(() => { /* already exists */ })
     } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
-      await window.api.users.update(member.user_id, {
+      await api.users.update(member.user_id, {
         email: profile.email,
         display_name: profile.display_name,
         avatar_url: profile.avatar_url
@@ -941,7 +921,7 @@ async function syncMembersDown(projectId: string): Promise<void> {
     }
 
     if (!localMemberIds.has(member.user_id)) {
-      await window.api.projects.addMember(
+      await api.projects.addMember(
         projectId,
         member.user_id,
         member.role,
@@ -950,7 +930,7 @@ async function syncMembersDown(projectId: string): Promise<void> {
     }
 
     if (member.display_color || member.display_initials) {
-      await window.api.projects.updateMember(projectId, member.user_id, {
+      await api.projects.updateMember(projectId, member.user_id, {
         display_color: member.display_color ?? null,
         display_initials: member.display_initials ?? null
       })
@@ -961,13 +941,13 @@ async function syncMembersDown(projectId: string): Promise<void> {
 /**
  * Sync all shared project data from Supabase to local SQLite.
  */
-export async function syncProjectDown(projectId: string, userId: string): Promise<void> {
+export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext): Promise<void> {
   // Never sync down when offline — would delete all local tasks
   if (!navigator.onLine) {
     console.log('[SyncService] Skipping syncProjectDown (offline)')
     return
   }
-  const context = await captureSyncContext()
+  context ??= await captureSyncContext()
   context.assertCurrent()
   if (useAuthStore.getState().currentUser?.id !== userId) return
   const { api, client: supabase } = context

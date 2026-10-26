@@ -1,3 +1,4 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { toCanonicalIso } from './lww'
@@ -139,21 +140,24 @@ export class ProjectRepository {
   }
 
   archiveWithTasks(id: string): Project | undefined {
-    const now = new Date().toISOString()
-    withTransaction(this.db, () => {
-      this.db.prepare(`UPDATE projects SET is_archived = 1, updated_at = ? WHERE id = ?`).run(now, id)
-      this.db.prepare(`UPDATE tasks SET is_archived = 1, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
-    })
-    return this.findById(id)
+    return this.setArchiveWithTasks(id, 1)
   }
 
   unarchiveWithTasks(id: string): Project | undefined {
-    const now = new Date().toISOString()
-    withTransaction(this.db, () => {
-      this.db.prepare(`UPDATE projects SET is_archived = 0, updated_at = ? WHERE id = ?`).run(now, id)
-      this.db.prepare(`UPDATE tasks SET is_archived = 0, updated_at = ? WHERE project_id = ? AND deleted_at IS NULL`).run(now, id)
+    return this.setArchiveWithTasks(id, 0)
+  }
+
+  private setArchiveWithTasks(id: string, archived: number): Project | undefined {
+    return withTransaction(this.db, () => {
+      const project = this.findById(id)
+      if (!project || project.deleted_at) return project
+      const latestTask = this.db.prepare('SELECT MAX(updated_at) AS stamp FROM tasks WHERE project_id=? AND deleted_at IS NULL').get(id) as { stamp: string | null }
+      const now = new Date(Math.max(Date.now(), Date.parse(project.archive_updated_at ?? '') + 1 || 0, Date.parse(latestTask.stamp ?? '') + 1 || 0)).toISOString()
+      this.db.prepare('UPDATE projects SET is_archived=?, archive_updated_at=?, updated_at=? WHERE id=?').run(archived, now, now, id)
+      this.db.prepare('UPDATE tasks SET is_archived=?, updated_at=? WHERE project_id=? AND deleted_at IS NULL').run(archived, now, id)
+      new SyncQueueRepository(this.db).enqueue('projects', id, 'UPDATE', JSON.stringify({ id, archive_with_tasks: true, is_archived: archived, updated_at: now }))
+      return this.findById(id)
     })
-    return this.findById(id)
   }
 
   /**
@@ -164,12 +168,11 @@ export class ProjectRepository {
     const existing = this.findById(remote.id)
     // LWW via numeric epoch — local SQLite stores ISO `Z` form, Supabase
     // returns `+00:00` form; lexical compare flags equal instants as drift.
-    if (
-      existing &&
-      Date.parse(existing.updated_at) >= Date.parse(remote.updated_at)
-    ) {
-      return existing
-    }
+    const metadataNewer = !existing || Date.parse(remote.updated_at) > Date.parse(existing.updated_at)
+    const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) > Date.parse(existing.archive_updated_at))
+    if (!metadataNewer && !archiveNewer) return existing!
+    const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote
+    remote = { ...(metadataNewer ? remote : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
     // `is_shared` is a local-only derived cache (computed from
     // project_members membership). Preserve the existing local value, or
     // default to 0 for brand-new rows — sync down for shared projects
@@ -185,10 +188,10 @@ export class ProjectRepository {
       .prepare(
         `INSERT INTO projects (
           id, name, description, color, icon, owner_id, is_default, is_shared, sidebar_order,
-          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit, is_archived,
+          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit, is_archived, archive_updated_at,
           created_at, updated_at, deleted_at
         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            description = excluded.description,
@@ -202,6 +205,7 @@ export class ProjectRepository {
            auto_archive_value = excluded.auto_archive_value,
            auto_archive_unit = excluded.auto_archive_unit,
            is_archived = excluded.is_archived,
+           archive_updated_at = excluded.archive_updated_at,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
            deleted_at = excluded.deleted_at`
@@ -221,6 +225,7 @@ export class ProjectRepository {
         remote.auto_archive_value,
         remote.auto_archive_unit,
         remote.is_archived ?? 0,
+        toCanonicalIso(remote.archive_updated_at ?? null),
         toCanonicalIso(remote.created_at),
         toCanonicalIso(remote.updated_at),
         toCanonicalIso(remote.deleted_at ?? null)

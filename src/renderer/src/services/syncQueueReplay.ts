@@ -21,7 +21,9 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     const current = await api.projects.findById(entry.row_id)
     if (!current || current.deleted_at) return true
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
-    await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at, tasks)
+    if (!current.archive_updated_at) throw new Error('Archive action version missing')
+    const applied = await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at, tasks, current.archive_updated_at)
+    if (Date.parse(applied.archive_updated_at) > Date.parse(current.archive_updated_at)) await api.projects.applyRemote({ ...current, ...applied })
     return true
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {

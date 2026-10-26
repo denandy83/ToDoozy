@@ -25,6 +25,7 @@ export interface Project {
   auto_archive_value: number
   auto_archive_unit: string
   is_archived: number
+  archive_updated_at?: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null

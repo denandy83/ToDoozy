@@ -1,7 +1,9 @@
+import { requireSession } from './sessionRecovery'
+import { useAuthStore } from '../shared/stores/authStore'
+import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
-import { captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
-import { writeProjectArchive } from './projectArchiveSync'
+import { captureSyncContext, captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
  * and user-level data (settings, themes, saved views, areas, labels) to Supabase.
@@ -14,7 +16,7 @@ import { getSupabase, safeRefresh } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { useLabelStore } from '../shared/stores/labelStore'
-import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
+import type { Task, Status, Label, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
@@ -36,53 +38,6 @@ async function hasLiveSession(origin: SyncProducer, context: string, idDescripto
     return false
   }
   return true
-}
-
-/** Mark a successful push in the sync store */
-async function markSynced(origin: SyncProducer): Promise<void> {
-  if (await origin.isCurrent()) useSyncStore.getState().setLastSynced()
-}
-
-async function refreshProducerPending(origin: SyncProducer): Promise<void> {
-  const pendingCount = await origin.api.sync.count()
-  if (await origin.isCurrent()) useSyncStore.setState({ pendingCount })
-}
-
-/**
- * Route a sync push failure through every channel a user/operator might watch:
- * - console (kept for dev)
- * - Settings → Logs panel (logEvent — also feeds the anomaly detector)
- * - sync_queue (so reconnect/queue-drain retries it)
- * - syncStore.errorMessage + status='error' (red dot)
- * - pendingCount refresh (so queue-stuck tooltip stays accurate)
- *
- * Without this, non-thrown Supabase errors (RLS denial, 5xx) are swallowed and
- * the app reports "synced just now" while local rows never reach Supabase.
- */
-async function reportPushFailure(
-  origin: SyncProducer,
-  context: string,
-  error: { message?: string; code?: string; details?: string } | unknown,
-  table: string,
-  rowId: string,
-  payload: string,
-  operation: SyncOperation = 'UPDATE'
-): Promise<void> {
-  if (!await origin.isCurrent()) return
-  const err = error as { message?: string; code?: string; details?: string }
-  const msg = err?.message ?? (typeof error === 'string' ? error : 'unknown error')
-  const code = err?.code ?? ''
-  const details = err?.details ?? ''
-  console.error(`[PersonalSync] ${context} error:`, msg, code, details, `id=${rowId}`)
-  logEvent('error', 'sync', `${context} failed: ${msg}`, `table=${table} id=${rowId} code=${code} details=${details}`)
-  try {
-    await origin.api.sync.enqueue(table, rowId, operation, payload)
-  } catch (e) {
-    console.error('[PersonalSync] Failed to enqueue after push error:', e)
-  }
-  if (!await origin.isCurrent()) return
-  useSyncStore.getState().setError(msg || `${context} failed`)
-  await refreshProducerPending(origin)
 }
 
 /** Track consecutive auth failures — surface after 2 in a row to avoid false alarms */
@@ -116,7 +71,11 @@ export function resetRefreshGate(): void {
   refreshAttemptedThisCycle = false
 }
 
-function handleSyncError(context: string, error: { message?: string; code?: string; status?: number } | unknown): void {
+async function handlePullError(origin: SyncContext | undefined, name: string, error: unknown): Promise<void> {
+  if (origin && await origin.isCurrent()) handleSyncError(name, error, origin)
+}
+
+function handleSyncError(context: string, error: { message?: string; code?: string; status?: number } | unknown, origin?: SyncContext): void {
   const err = error as { message?: string; code?: string; status?: number }
   const isAuth = err?.status === 401 || err?.status === 403 || err?.code === 'PGRST301' || err?.code === '42501'
     || err?.message?.includes('JWT') || err?.message?.includes('expired')
@@ -125,7 +84,8 @@ function handleSyncError(context: string, error: { message?: string; code?: stri
     authFailureCount++
     if (authFailureCount >= 2) {
       // Try to refresh the session automatically before surfacing error
-      attemptSessionRefresh().then((refreshed) => {
+      attemptSessionRefresh().then(async (refreshed) => {
+        if (origin && !await origin.isCurrent()) return
         if (!refreshed) {
           useSyncStore.getState().setError('Authentication expired — sign out and back in to restore sync')
         }
@@ -212,7 +172,7 @@ async function ensureProjectInSupabase(projectId: string, origin: SyncProducer):
 /**
  * Push a single task to Supabase (upsert).
  */
-export async function pushTask(task: Task): Promise<void> {
+export async function pushTask(task: Task, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!(await hasLiveSession(origin, 'pushTask', `task=${task.id}`))) {
       await origin.api.sync.enqueue('tasks', task.id, 'UPDATE', JSON.stringify(task))
@@ -310,14 +270,14 @@ export async function pushTask(task: Task): Promise<void> {
     } catch (err) {
       await reportPushFailure(origin, 'pushTask', err, 'tasks', task.id, JSON.stringify(task))
     }
-  })
+  }, producer)
 }
 
 /**
  * Soft-delete a task in Supabase. Sets deleted_at + updated_at; the row stays
  * for 30 days so other devices observe the tombstone before purge runs.
  */
-export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
+export async function deleteTaskFromSupabase(taskId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     recentlyDeletedIds.add(taskId)
     if (!(await hasLiveSession(origin, 'deleteTask', `task=${taskId}`))) return
@@ -337,7 +297,7 @@ export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
     } catch (err) {
       await reportPushFailure(origin, 'deleteTask', err, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
     }
-  })
+  }, producer)
 }
 
 /**
@@ -1155,6 +1115,7 @@ export async function pushProject(project: {
   auto_archive_value?: number
   auto_archive_unit?: string
   is_archived?: number
+  archive_updated_at?: string | null
   created_at: string
   updated_at: string
 }, producer?: SyncProducer): Promise<void> {
@@ -1192,7 +1153,7 @@ export async function pushProject(project: {
             .eq('id', project.id)
         }
         if (project.is_archived !== undefined) {
-          await supabase.from('projects').update({ is_archived: project.is_archived }).eq('id', project.id)
+          await supabase.from('projects').update({ is_archived: project.is_archived, archive_updated_at: project.archive_updated_at ?? null }).eq('id', project.id)
         }
       }
     } catch (err) {
@@ -1204,25 +1165,12 @@ export async function pushProject(project: {
   }, producer)
 }
 
-export async function pushProjectArchive(projectId: string, isArchived: number): Promise<void> {
+export async function pushProjectArchive(): Promise<void> {
   return withSyncProducer(async (origin) => {
-    const now = new Date().toISOString()
-    const payload = JSON.stringify({ id: projectId, is_archived: isArchived, updated_at: now, archive_with_tasks: true })
-    try {
-      if (!(await hasLiveSession(origin, 'pushProjectArchive', `id=${projectId}`))) {
-        await origin.api.sync.enqueue('projects', projectId, 'UPDATE', payload)
-        await refreshProducerPending(origin)
-        if (await origin.isCurrent()) useSyncStore.getState().setStatus('syncing')
-        return
-      }
-      const project = await origin.api.projects.findById(projectId)
-      if (!project || project.deleted_at) return
-      const tasks = await origin.api.tasks.findAllByProject(projectId, { includeTombstones: true })
-      await writeProjectArchive((await origin.client())!, projectId, project.is_archived ?? 0, project.updated_at, tasks)
-      await markSynced(origin)
-    } catch (error) {
-      await reportPushFailure(origin, 'pushProjectArchive', error, 'projects', projectId, payload)
-    }
+    if (!await origin.client()) { await refreshProducerPending(origin); return }
+    const { processSyncQueue } = await import('./SyncService')
+    if (!await origin.isCurrent()) return
+    await processSyncQueue({ api: origin.api, client: (await origin.client())!, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
   })
 }
 
@@ -1232,15 +1180,15 @@ export async function pushProjectArchive(projectId: string, isArchived: number):
  * Upload ALL local data to Supabase (first-time sync).
  * Shows progress via syncStore.
  */
-export async function fullUpload(userId: string): Promise<void> {
+export async function fullUpload(userId: string, context?: SyncContext): Promise<void> {
   const syncStore = useSyncStore.getState()
-  syncStore.setFirstSync(true)
-  syncStore.setStatus('syncing')
+  if (!context || await context.isCurrent()) syncStore.setFirstSync(true)
+  if (!context || await context.isCurrent()) syncStore.setStatus('syncing')
 
   try {
-    const supabase = await getSupabase()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) throw new Error('No authenticated session')
+    context ??= await captureSyncContext()
+    const { api, client: supabase } = context
+    if (useAuthStore.getState().currentUser?.id !== userId) return
 
     // NOTE: last_sync_at is written ONLY on successful completion (end of this
     // function). It must never be claimed up-front as an in-flight sentinel —
@@ -1251,43 +1199,46 @@ export async function fullUpload(userId: string): Promise<void> {
     // Electron single-instance lock — so no parallel fullUpload can start.
 
     // Count total items for progress — only sync projects owned by this user
-    const allProjects = await window.api.projects.getProjectsForUser(userId)
+    const allProjects = await api.projects.getProjectsForUser(userId)
     const projects = allProjects.filter((p) => p.owner_id === userId)
-    const allLabels = await window.api.labels.findAll(userId)
-    const allSettings = await window.api.settings.getAll(userId)
-    const savedViews = await window.api.savedViews.findByUserId(userId)
+    const allLabels = await api.labels.findAll(userId)
+    const allSettings = await api.settings.getAll(userId)
+    const savedViews = await api.savedViews.findByUserId(userId)
 
     let totalItems = projects.length + allLabels.length + allSettings.length + savedViews.length
     let completed = 0
 
-    const updateProgress = (): void => {
+    const updateProgress = async (): Promise<void> => {
       completed++
-      syncStore.setFirstSyncProgress(Math.round((completed / totalItems) * 100))
+      if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(Math.round((completed / totalItems) * 100))
     }
 
     // 1. Push all labels
     for (const label of allLabels) {
+      if (!await context.isCurrent()) return
       await pushLabel(label, userId)
-      updateProgress()
+      await updateProgress()
     }
 
     // 2. Push all projects (with statuses and tasks)
     for (const project of projects) {
+      if (!await context.isCurrent()) return
       await pushProject(project)
-      updateProgress()
+      await updateProgress()
 
       // Push statuses
-      const statuses = await window.api.statuses.findByProjectId(project.id)
+      const statuses = await api.statuses.findByProjectId(project.id)
       totalItems += statuses.length
       for (const status of statuses) {
+        if (!await context.isCurrent()) return
         await pushStatus(status)
-        updateProgress()
+        await updateProgress()
       }
 
       // Push project↔label associations to the project_labels junction
       // (the legacy `projects.label_data` JSON is no longer written — the
       // junction is the source of truth, with proper tombstones + LWW).
-      const projectLabels = await window.api.labels.findByProjectId(project.id)
+      const projectLabels = await api.labels.findByProjectId(project.id)
       if (projectLabels.length > 0) {
         const rows = projectLabels.map((l) => ({
           project_id: project.id,
@@ -1310,48 +1261,53 @@ export async function fullUpload(userId: string): Promise<void> {
 
       // Push ALL tasks (including archived and templates)
       // Parent tasks first, then subtasks (to satisfy FK constraint on parent_id)
-      const activeTasks = await window.api.tasks.findByProjectId(project.id)
-      const archivedTasks = await window.api.tasks.findArchived(project.id)
-      const templateTasks = await window.api.tasks.findTemplates(project.id)
+      const activeTasks = await api.tasks.findByProjectId(project.id)
+      const archivedTasks = await api.tasks.findArchived(project.id)
+      const templateTasks = await api.tasks.findTemplates(project.id)
       const allTasks = [...activeTasks, ...archivedTasks, ...templateTasks]
       const parentTasks = allTasks.filter((t) => !t.parent_id)
       const subtasks = allTasks.filter((t) => t.parent_id)
       const tasks = [...parentTasks, ...subtasks]
       totalItems += tasks.length
       for (const task of tasks) {
+        if (!await context.isCurrent()) return
         await pushTask(task)
-        updateProgress()
+        await updateProgress()
       }
     }
 
     // 3. Push settings (immediate, not debounced — this is initial full upload)
     for (const setting of allSettings) {
       if (setting.value !== null) {
+        if (!await context.isCurrent()) return
         await pushSettingImmediate(setting.key, setting.value, userId)
       }
-      updateProgress()
+      await updateProgress()
     }
 
     // 4. Push saved views
     for (const view of savedViews) {
+      if (!await context.isCurrent()) return
       await pushSavedView(view)
-      updateProgress()
+      await updateProgress()
     }
 
     // 5. Push project areas
     try {
-      const areas = await window.api.projectAreas.findByUserId(userId)
+      const areas = await api.projectAreas.findByUserId(userId)
       for (const area of areas) {
+        if (!await context.isCurrent()) return
         await pushProjectArea({ ...area, user_id: userId })
       }
     } catch { /* areas might not exist */ }
 
     // 6. Push themes (parse config JSON inline)
     try {
-      const themes = await window.api.themes.list(userId)
+      const themes = await api.themes.list(userId)
       for (const theme of themes) {
         try {
           const config = JSON.parse(theme.config) as Record<string, string>
+          if (!await context.isCurrent()) return
           await pushTheme({
             id: theme.id,
             user_id: userId,
@@ -1381,9 +1337,9 @@ export async function fullUpload(userId: string): Promise<void> {
     // upsert the reconcile path already uses.
     const taskLabelRows: Array<{ task_id: string; label_id: string }> = []
     for (const project of projects) {
-      const tasks = await window.api.tasks.findByProjectId(project.id)
+      const tasks = await api.tasks.findByProjectId(project.id)
       for (const task of tasks) {
-        const taskLabels = await window.api.tasks.getLabels(task.id)
+        const taskLabels = await api.tasks.getLabels(task.id)
         for (const tl of taskLabels) {
           taskLabelRows.push({ task_id: tl.task_id, label_id: tl.label_id })
         }
@@ -1403,13 +1359,14 @@ export async function fullUpload(userId: string): Promise<void> {
     console.log(`[PersonalSync] Full upload done — Supabase: ${sbProjects} project memberships, ${sbStatuses} statuses, ${sbTasks} tasks (local: ${projects.length} projects, ${totalItems} total items)`)
 
     // Mark sync complete
-    await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
-    syncStore.setLastSynced()
-    syncStore.setFirstSync(false)
+    await api.settings.set(userId, 'last_sync_at', new Date().toISOString())
+    if (!context || await context.isCurrent()) syncStore.setLastSynced()
+    if (!context || await context.isCurrent()) syncStore.setFirstSync(false)
   } catch (err) {
+    if (!context || !await context.isCurrent()) return
     console.error('[PersonalSync] Full upload failed:', err)
-    syncStore.setError(err instanceof Error ? err.message : 'Sync failed')
-    syncStore.setFirstSync(false)
+    if (!context || await context.isCurrent()) syncStore.setError(err instanceof Error ? err.message : 'Sync failed')
+    if (!context || await context.isCurrent()) syncStore.setFirstSync(false)
   }
 }
 
@@ -1418,16 +1375,18 @@ export async function fullUpload(userId: string): Promise<void> {
 /**
  * Pull ALL data from Supabase to populate an empty local database (new device).
  */
-export async function fullPull(userId: string): Promise<void> {
+export async function fullPull(userId: string, context?: SyncContext): Promise<void> {
   const syncStore = useSyncStore.getState()
-  syncStore.setFirstSync(true)
-  syncStore.setStatus('syncing')
+  if (!context || await context.isCurrent()) syncStore.setFirstSync(true)
+  if (!context || await context.isCurrent()) syncStore.setStatus('syncing')
 
   try {
-    const supabase = await getSupabase()
+    context ??= await captureSyncContext()
+    const { api, client: supabase } = context
+    if (useAuthStore.getState().currentUser?.id !== userId) return
 
     // 1. Pull labels
-    syncStore.setFirstSyncProgress(10)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(10)
     const { data: remoteLabels } = await readAll(() => supabase
       .from('user_labels')
       .select('*')
@@ -1435,15 +1394,15 @@ export async function fullPull(userId: string): Promise<void> {
 
     if (remoteLabels) {
       for (const label of remoteLabels) {
-        const existing = await window.api.labels.findById(label.id)
+        const existing = await api.labels.findById(label.id)
         if (!existing) {
           // Dedupe: if a label with the same (user_id, name) already exists locally,
           // don't create a duplicate row — let the existing row stand. The project_labels
           // wiring below points at it via name lookup, so the duplicate Supabase row
           // becomes orphaned and gets cleaned up by the next reconcile/cleanup pass.
-          const sameName = await window.api.labels.findByName(userId, label.name)
+          const sameName = await api.labels.findByName(userId, label.name)
           if (!sameName) {
-            await window.api.labels.create({
+            await api.labels.create({
               id: label.id,
               user_id: userId,
               name: label.name,
@@ -1455,7 +1414,7 @@ export async function fullPull(userId: string): Promise<void> {
     }
 
     // 2. Pull projects
-    syncStore.setFirstSyncProgress(20)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(20)
     const { data: memberships } = await supabase
       .from('project_members')
       .select('project_id')
@@ -1465,7 +1424,7 @@ export async function fullPull(userId: string): Promise<void> {
       const total = memberships.length
       for (let i = 0; i < total; i++) {
         const m = memberships[i]
-        const localProject = await window.api.projects.findById(m.project_id)
+        const localProject = await api.projects.findById(m.project_id)
         if (!localProject) {
           // Fetch project details
           const { data: project } = await supabase
@@ -1475,9 +1434,9 @@ export async function fullPull(userId: string): Promise<void> {
             .single()
 
           if (project) {
-            await window.api.projects.applyRemote(project)
-            await window.api.projects.addMember(project.id, userId, project.owner_id === userId ? 'owner' : 'member')
-            await window.api.projects.update(project.id, { is_shared: 1 })
+            await api.projects.applyRemote(project)
+            await api.projects.addMember(project.id, userId, project.owner_id === userId ? 'owner' : 'member')
+            await api.projects.update(project.id, { is_shared: 1 })
             // Sync statuses
             const { data: statuses } = await readAll(() => supabase
               .from('statuses')
@@ -1486,7 +1445,7 @@ export async function fullPull(userId: string): Promise<void> {
 
             if (statuses) {
               for (const s of statuses) {
-                await window.api.statuses.applyRemote(s)
+                await api.statuses.applyRemote(s)
               }
             }
 
@@ -1501,11 +1460,11 @@ export async function fullPull(userId: string): Promise<void> {
               const orderedTasks = remoteTaskOrder(tasks)
               for (const task of orderedTasks) {
                 for (const userId of new Set([task.owner_id, task.assigned_to].filter((id): id is string => !!id))) {
-                  if (!await window.api.users.findById(userId)) {
-                    await window.api.users.create({ id: userId, email: placeholderEmail(userId), display_name: null, avatar_url: null })
+                  if (!await api.users.findById(userId)) {
+                    await api.users.create({ id: userId, email: placeholderEmail(userId), display_name: null, avatar_url: null })
                   }
                 }
-                await window.api.tasks.applyRemote(task)
+                await api.tasks.applyRemote(task)
               }
             }
 
@@ -1517,7 +1476,7 @@ export async function fullPull(userId: string): Promise<void> {
 
             if (remoteTaskLabels) {
               for (const tl of remoteTaskLabels) {
-                await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+                await api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
               }
             }
 
@@ -1534,7 +1493,7 @@ export async function fullPull(userId: string): Promise<void> {
               const missingLabelIds = (
                 await Promise.all(
                   remoteProjectLabels.map(async (pl) => {
-                    const local = await window.api.labels.findById(pl.label_id as string)
+                    const local = await api.labels.findById(pl.label_id as string)
                     return local ? null : (pl.label_id as string)
                   })
                 )
@@ -1547,9 +1506,9 @@ export async function fullPull(userId: string): Promise<void> {
                 if (remoteLabels) {
                   for (const rl of remoteLabels) {
                     const name = rl.name as string
-                    const existingByName = await window.api.labels.findByName(userId, name).catch(() => null)
+                    const existingByName = await api.labels.findByName(userId, name).catch(() => null)
                     if (!existingByName) {
-                      await window.api.labels.create({
+                      await api.labels.create({
                         id: rl.id as string,
                         user_id: userId,
                         name,
@@ -1562,16 +1521,16 @@ export async function fullPull(userId: string): Promise<void> {
               for (const pl of remoteProjectLabels) {
                 const labelId = pl.label_id as string
                 const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
-                const exists = await window.api.labels.findById(labelId).catch(() => null)
+                const exists = await api.labels.findById(labelId).catch(() => null)
                 if (!exists) continue
-                await window.api.labels.applyRemoteProjectLabel({
+                await api.labels.applyRemoteProjectLabel({
                   project_id: project.id,
                   label_id: labelId,
                   created_at: (pl.created_at as string | null) ?? null,
                   deleted_at: deletedAt
                 }).catch(() => {})
                 if (deletedAt) {
-                  await window.api.labels
+                  await api.labels
                     .softDeleteTaskLabelsForProjectLabel(project.id, labelId)
                     .catch(() => {})
                 }
@@ -1579,12 +1538,12 @@ export async function fullPull(userId: string): Promise<void> {
             }
           }
         }
-        syncStore.setFirstSyncProgress(20 + Math.round((i / total) * 50))
+        if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(20 + Math.round((i / total) * 50))
       }
     }
 
     // 3. Pull settings
-    syncStore.setFirstSyncProgress(75)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(75)
     const { data: remoteSettings } = await supabase
       .from('user_settings')
       .select('key, value')
@@ -1598,12 +1557,12 @@ export async function fullPull(userId: string): Promise<void> {
         // re-establish the very leak #114 closed. Filter through the same
         // single-sourced exclusion list the push paths use.
         if (isSettingSyncExcluded(setting.key)) continue
-        await window.api.settings.set(userId, setting.key, setting.value)
+        await api.settings.set(userId, setting.key, setting.value)
       }
     }
 
     // 4. Pull saved views
-    syncStore.setFirstSyncProgress(85)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(85)
     const { data: remoteViews } = await supabase
       .from('user_saved_views')
       .select('*')
@@ -1611,9 +1570,9 @@ export async function fullPull(userId: string): Promise<void> {
 
     if (remoteViews) {
       for (const view of remoteViews) {
-        const existing = await window.api.savedViews.findById(view.id)
+        const existing = await api.savedViews.findById(view.id)
         if (!existing) {
-          await window.api.savedViews.create({
+          await api.savedViews.create({
             id: view.id,
             user_id: view.user_id,
             name: view.name,
@@ -1626,7 +1585,7 @@ export async function fullPull(userId: string): Promise<void> {
     }
 
     // 5. Pull project areas
-    syncStore.setFirstSyncProgress(90)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(90)
     const { data: remoteAreas } = await supabase
       .from('user_project_areas')
       .select('*')
@@ -1635,7 +1594,7 @@ export async function fullPull(userId: string): Promise<void> {
     if (remoteAreas) {
       for (const area of remoteAreas) {
         try {
-          await window.api.projectAreas.create({
+          await api.projectAreas.create({
             id: area.id,
             user_id: area.user_id,
             name: area.name,
@@ -1648,7 +1607,7 @@ export async function fullPull(userId: string): Promise<void> {
     }
 
     // 6. Pull custom themes
-    syncStore.setFirstSyncProgress(95)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(95)
     const { data: remoteThemes } = await supabase
       .from('user_themes')
       .select('*')
@@ -1656,7 +1615,7 @@ export async function fullPull(userId: string): Promise<void> {
 
     if (remoteThemes) {
       for (const theme of remoteThemes) {
-        const existing = await window.api.themes.findById(theme.id)
+        const existing = await api.themes.findById(theme.id)
         if (existing) continue
         const themeBg = theme.bg ?? ''
         const themeNum = parseInt(themeBg.replace('#', ''), 16)
@@ -1677,7 +1636,7 @@ export async function fullPull(userId: string): Promise<void> {
           sidebar: `#${((sidebarR << 16) | (sidebarG << 8) | sidebarB).toString(16).padStart(6, '0')}`
         }
         try {
-          await window.api.themes.create({
+          await api.themes.create({
             id: theme.id,
             name: theme.name,
             mode: theme.mode,
@@ -1691,15 +1650,16 @@ export async function fullPull(userId: string): Promise<void> {
     }
 
     // Mark sync complete
-    await window.api.settings.set(userId, 'last_sync_at', new Date().toISOString())
-    syncStore.setLastSynced()
-    syncStore.setFirstSync(false)
-    syncStore.setFirstSyncProgress(100)
+    await api.settings.set(userId, 'last_sync_at', new Date().toISOString())
+    if (!context || await context.isCurrent()) syncStore.setLastSynced()
+    if (!context || await context.isCurrent()) syncStore.setFirstSync(false)
+    if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(100)
     console.log('[PersonalSync] Full pull complete')
   } catch (err) {
+    if (!context || !await context.isCurrent()) return
     console.error('[PersonalSync] Full pull failed:', err)
-    syncStore.setError(err instanceof Error ? err.message : 'Sync failed')
-    syncStore.setFirstSync(false)
+    if (!context || await context.isCurrent()) syncStore.setError(err instanceof Error ? err.message : 'Sync failed')
+    if (!context || await context.isCurrent()) syncStore.setFirstSync(false)
   }
 }
 
@@ -1711,17 +1671,18 @@ export async function fullPull(userId: string): Promise<void> {
  * Pull project metadata (name, color, icon) from Supabase if newer than local.
  */
 export async function pullProjectMetadata(projectId: string, context?: SyncContext): Promise<boolean> {
-  const api = context?.api ?? window.api
   try {
-    const supabase = (context?.client ?? await getSupabase())
+    context ??= await captureSyncContext()
+    const api = context.api
+    const supabase = context.client
     const { data: remote, error } = await supabase
       .from('projects')
-      .select('name, color, icon, description, updated_at, is_archived')
+      .select('name, color, icon, description, updated_at, is_archived, archive_updated_at')
       .eq('id', projectId)
       .maybeSingle()
 
     if (error) {
-      handleSyncError('pullProjectMetadata', error)
+      await handlePullError(context, 'pullProjectMetadata', error)
       return false
     }
     if (!remote) return false
@@ -1729,13 +1690,13 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
     const local = await api.projects.findById(projectId)
     if (!local) return false
 
-    if (Date.parse(remote.updated_at) > Date.parse(local.updated_at)) {
+    if (Date.parse(remote.updated_at) > Date.parse(local.updated_at) || (remote.archive_updated_at && Date.parse(remote.archive_updated_at) > Date.parse(local.archive_updated_at ?? '1970-01-01'))) {
       await api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
       return true
     }
     return false
   } catch (err) {
-    handleSyncError('pullProjectMetadata', err)
+    await handlePullError(context, 'pullProjectMetadata', err)
     return false
   }
 }
@@ -1745,10 +1706,11 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
  * Must run before pullNewTasks to satisfy FK constraints.
  */
 export async function pullStatuses(projectId: string, context?: SyncContext): Promise<number> {
-  const api = context?.api ?? window.api
   try {
-    const supabase = (context?.client ?? await getSupabase())
-    const since = lastPullAt.get(`statuses:${projectId}`)
+    context ??= await captureSyncContext()
+    const api = context.api
+    const supabase = context.client
+    const since = lastPullAt.get(`${context.scope}:statuses:${projectId}`)
     const { data: remoteStatuses, error } = await readAll(() => {
       let query = supabase.from('statuses').select('*').eq('project_id', projectId)
       if (since) query = query.gt('updated_at', since)
@@ -1769,12 +1731,12 @@ export async function pullStatuses(projectId: string, context?: SyncContext): Pr
     }
     const pName = projectNameCache.get(projectId) ?? projectId
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for "${pName}"`)
-    context?.assertCurrent()
+    if (!await context.isCurrent()) return 0
     const watermark = pullWatermark(remoteStatuses)
-    if (watermark) lastPullAt.set(`statuses:${projectId}`, watermark)
+    if (watermark) lastPullAt.set(`${context.scope}:statuses:${projectId}`, watermark)
     return changed
   } catch (err) {
-    handleSyncError('pullStatuses', err)
+    await handlePullError(context, 'pullStatuses', err)
     return 0
   }
 }
@@ -1809,13 +1771,13 @@ export async function pullStatuses(projectId: string, context?: SyncContext): Pr
 async function ensureLabelsExistLocally(
   labelIds: string[],
   projectId: string | null,
-  expectedUserId?: string,
-  context?: SyncContext
+  expectedUserId: string | undefined,
+  context: SyncContext
 ): Promise<Map<string, string>> {
-  const api = context?.api ?? window.api
+  const api = context.api
   const remap = new Map<string, string>()
   if (labelIds.length === 0) return remap
-  const supabase = (context?.client ?? await getSupabase())
+  const supabase = context.client
   const { useAuthStore } = await import('../shared/stores/authStore')
   const ownerId = useAuthStore.getState().currentUser?.id ?? null
   const assertUser = (): void => {
@@ -1882,10 +1844,11 @@ async function ensureLabelsExistLocally(
  * Returns the number of newly applied label assignments.
  */
 export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string, context?: SyncContext): Promise<number> {
-  const api = context?.api ?? window.api
   if (!taskIds.length) return 0
   try {
-    const supabase = (context?.client ?? await getSupabase())
+    context ??= await captureSyncContext()
+    const api = context.api
+    const supabase = context.client
     const { data: pairs, error } = await readAllIn(taskIds, (ids) => supabase.from('task_labels').select('task_id, label_id')
       .in('task_id', ids).is('deleted_at', null), ['task_id', 'label_id'])
     if (error) throw new Error(error.message)
@@ -1901,7 +1864,7 @@ export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?:
     }
     return added
   } catch (err) {
-    console.warn('[PersonalSync] pullTaskLabelsForTasks failed:', err)
+    if (context && await context.isCurrent()) console.warn('[PersonalSync] pullTaskLabelsForTasks failed:', err)
     return 0
   }
 }
@@ -1918,13 +1881,14 @@ function pullWatermark(rows: Array<{ updated_at?: string }>): string | null {
 }
 
 export async function pullNewTasks(projectId: string, context?: SyncContext): Promise<number> {
-  const api = context?.api ?? window.api
   try {
+    context ??= await captureSyncContext()
+    const api = context.api
     // Ensure statuses exist locally before inserting tasks (FK constraint)
     await pullStatuses(projectId, context)
 
-    const supabase = (context?.client ?? await getSupabase())
-    const since = lastPullAt.get(`tasks:${projectId}`)
+    const supabase = context.client
+    const since = lastPullAt.get(`${context.scope}:tasks:${projectId}`)
     const { data: remoteTasks, error } = await readAll(() => {
       let query = supabase.from('tasks').select('*').eq('project_id', projectId)
       if (since) query = query.gt('updated_at', since)
@@ -1932,7 +1896,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     }, ['updated_at', 'id'])
 
     if (error) {
-      handleSyncError('pullNewTasks', error)
+      await handlePullError(context, 'pullNewTasks', error)
       return 0
     }
     if (!remoteTasks) return 0
@@ -2040,14 +2004,14 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     if (pulled > 0) {
       console.log(`[PersonalSync] "${pName}": ${pulled} pulled`)
     }
-    context?.assertCurrent()
+    if (!await context.isCurrent()) return 0
     const watermark = pullWatermark(remoteTasks)
-    if (!failed && watermark) lastPullAt.set(`tasks:${projectId}`, watermark)
+    if (!failed && watermark) lastPullAt.set(`${context.scope}:tasks:${projectId}`, watermark)
     // Supabase responded successfully — clear any auth failure state
     clearAuthFailures()
     return pulled
   } catch (err) {
-    handleSyncError('pullNewTasks', err)
+    await handlePullError(context, 'pullNewTasks', err)
     return 0
   }
 }
@@ -2866,28 +2830,31 @@ export async function purgeLeakedApiKeySetting(userId: string): Promise<void> {
  */
 let initSyncInFlight: Promise<void> | null = null
 export async function initSync(userId: string): Promise<void> {
+  const context = await captureSyncContext()
+  const api = context.api
+  if (useAuthStore.getState().currentUser?.id !== userId) return
   if (initSyncInFlight) return initSyncInFlight
   initSyncInFlight = (async () => {
     // Always clean up a pre-#114 leaked plaintext api_key before any pull path,
     // so fullPull on a fresh/empty-local device can never re-absorb the secret.
     await purgeLeakedApiKeySetting(userId)
 
-    const lastSyncAt = await window.api.settings.get(userId, 'last_sync_at')
+    const lastSyncAt = await api.settings.get(userId, 'last_sync_at')
     const syncStore = useSyncStore.getState()
 
     if (!lastSyncAt) {
-      const localProjects = await window.api.projects.getProjectsForUser(userId)
+      const localProjects = await api.projects.getProjectsForUser(userId)
       const hasLocalData = localProjects.length > 0
 
       if (hasLocalData) {
         console.log('[PersonalSync] Local data found, uploading to Supabase')
-        await fullUpload(userId)
+        await fullUpload(userId, context)
       } else {
         console.log('[PersonalSync] No local data, pulling from Supabase')
-        await fullPull(userId)
+        await fullPull(userId, context)
       }
     } else {
-      syncStore.setLastSynced()
+      if (await context.isCurrent()) syncStore.setLastSynced()
     }
   })()
   try {
@@ -2902,17 +2869,18 @@ export async function initSync(userId: string): Promise<void> {
  * Used by Realtime handler when a task_label INSERT is detected.
  */
 export async function syncTaskLabel(taskId: string, labelId: string): Promise<void> {
-  const supabase = await getSupabase()
+  const context = await captureSyncContext()
+  const { api, client: supabase } = context
   // Ensure label exists locally
-  const localLabel = await window.api.labels.findById(labelId)
+  const localLabel = await api.labels.findById(labelId)
   if (!localLabel) {
     const { data: remoteLabel } = await supabase.from('user_labels').select('*').eq('id', labelId).single()
     if (remoteLabel) {
       const { useAuthStore } = await import('../shared/stores/authStore')
       const userId = useAuthStore.getState().currentUser?.id ?? remoteLabel.user_id ?? null
-      const sameName = userId ? await window.api.labels.findByName(userId, remoteLabel.name) : undefined
+      const sameName = userId ? await api.labels.findByName(userId, remoteLabel.name) : undefined
       if (!sameName && userId) {
-        await window.api.labels.create({
+        await api.labels.create({
           id: remoteLabel.id,
           user_id: userId,
           name: remoteLabel.name,
@@ -2921,7 +2889,7 @@ export async function syncTaskLabel(taskId: string, labelId: string): Promise<vo
       }
     }
   }
-  await window.api.tasks.addLabel(taskId, labelId).catch(() => {})
+  await api.tasks.addLabel(taskId, labelId).catch(() => {})
 }
 
 // ── Realtime Subscriptions for All Projects ──────────────────────────

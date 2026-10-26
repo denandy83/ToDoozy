@@ -42,7 +42,7 @@ beforeEach(() => {
     sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async (_context: unknown, channel: string, args: unknown[]) => { const [ns, method] = channel.split(':'); return (window.api as never as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args) }, getQueue: vi.fn(async () => [...queue]), count: vi.fn(async () => queue.length), dequeue: vi.fn(async (id) => { queue = queue.filter((row) => row.id !== id) }) },
     settings: { findAllByUser: vi.fn(async () => [{ user_id: 'u', key: 'theme', value: 'dark', updated_at: '2026-10-25T12:00:00Z', deleted_at: null }]) },
     tasks: { findAllByProject: vi.fn(async () => []), findById: vi.fn(async () => local), getLabels: vi.fn(async () => []) },
-    projects: { findById: vi.fn(async () => ({ id: 'p', is_archived: 0, updated_at: '2026-10-25T13:00:00Z' })) }
+    projects: { findById: vi.fn(async () => ({ id: 'p', is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z', updated_at: '2026-10-25T13:00:00Z' })) }
   } })
   useSyncStore.setState({ status: 'synced', pendingCount: 0, errorMessage: null })
   setOnlineStatus(true)
@@ -90,7 +90,7 @@ describe('durable sync retries', () => {
   it('replays a superseded archive command using the current restored state', async () => {
     const mock = clientMock()
     await replaySpecialEntry(mock.client, entry('q', 'projects', { id: 'p', is_archived: 1, archive_with_tasks: true }))
-    expect(mock.writes.map((write) => write.payload)).toEqual([{ is_archived: 0, updated_at: '2026-10-25T13:00:00Z' }, { is_archived: 0, updated_at: '2026-10-25T13:00:00Z' }])
+    expect(mock.writes.map((write) => write.payload)).toEqual([{ is_archived: 0, updated_at: '2026-10-25T13:00:00Z', archive_updated_at: '2026-10-25T13:00:00Z' }, { is_archived: 0, updated_at: '2026-10-25T13:00:00Z' }])
   })
   it('removes stale task-label links using the existing remote hard-delete contract', async () => {
     const mock = clientMock(null, [{ label_id: 'removed' }])
@@ -99,9 +99,9 @@ describe('durable sync retries', () => {
     expect(mock.filters).toContainEqual(['in', 'label_id', ['removed']])
   })
   it('treats a zero-row archive RLS denial and task update failure as failures', async () => {
-    await expect(writeProjectArchive(clientMock(null, []).client, 'p', 1, 'now', [])).rejects.toThrow('owner')
+    await expect(writeProjectArchive(clientMock(null, []).client, 'p', 1, 'now', [], 'now')).rejects.toThrow('owner')
     const mock = clientMock('write rejected')
-    await expect(writeProjectArchive(mock.client, 'p', 1, 'now', [])).rejects.toThrow('write rejected')
+    await expect(writeProjectArchive(mock.client, 'p', 1, 'now', [], 'now')).rejects.toThrow('write rejected')
   })
 })
 
@@ -174,6 +174,7 @@ describe('queue integration with isolated account databases', () => {
           const [namespace, method] = channel.split(':')
           const repo = repositories[active]
           if (namespace === 'sync') {
+            if (method === 'count') return repo.syncQueue.count()
             if (method === 'getQueue') return repo.syncQueue.findAll()
             if (method === 'dequeue') return repo.syncQueue.dequeue(String(args[0]))
           }
@@ -244,11 +245,10 @@ describe('queue integration with isolated account databases', () => {
   it('replays restore racing a queued archive and its task cascade', async () => {
     const repo = repositories[0]
     repo.projects.archiveWithTasks('p')
-    repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
     const drain = processSyncQueue()
     await started.promise
     repo.projects.unarchiveWithTasks('p')
-    await writeProjectArchive(pinned.client as SupabaseClient, 'p', 0, 'newer', [repo.tasks.findById('t')!])
+    await writeProjectArchive(pinned.client as SupabaseClient, 'p', 0, 'newer', [repo.tasks.findById('t')!], repo.projects.findById('p')!.archive_updated_at!)
     pause.resolve()
     expect(await drain).toBe(1)
     expect(remote.projects).toMatchObject({ is_archived: 0 })
@@ -259,7 +259,6 @@ describe('queue integration with isolated account databases', () => {
     if (archived) repo.projects.archiveWithTasks('p')
     else repo.projects.unarchiveWithTasks('p')
     repo.tasks.update('t', { is_archived: archived ? 0 : 1 })
-    repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
     const drain = processSyncQueue()
     await started.promise
     repo.tasks.update('t', { is_archived: archived })
@@ -275,7 +274,6 @@ describe('queue integration with isolated account databases', () => {
     if (archived) repo.projects.archiveWithTasks('p')
     else repo.projects.unarchiveWithTasks('p')
     repo.tasks.update('t', { is_archived: archived ? 0 : 1 })
-    repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
     expect(await processSyncQueue()).toBe(1)
     expect(remote.tasks).toMatchObject({ is_archived: archived ? 0 : 1 })
   })

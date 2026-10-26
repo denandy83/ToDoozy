@@ -1,3 +1,5 @@
+import { useAuthStore } from '../shared/stores/authStore'
+import { captureSyncContext } from './syncContext'
 /**
  * UserChannelService — one Realtime channel per signed-in user covering the
  * user-scoped tables that were previously polling/reconcile-only:
@@ -83,14 +85,17 @@ async function handleUserTableChange(
   if (eventType === 'DELETE') return
   const desc = SYNC_TABLES[USER_TABLE_TO_DESCRIPTOR[table]]
   if (!desc) return
+  const context = await captureSyncContext()
+  if (useAuthStore.getState().currentUser?.id !== userId) return
   try {
     // applyRemote implementations are LWW (skip when local updated_at is
     // newer), so the echo of this device's own push is a no-op.
-    await desc.localApplyRemote(row)
+    await desc.localApplyRemote(row, context.api)
   } catch (err) {
     logEvent('error', 'realtime', `User-channel apply failed for ${table}`, `err=${err instanceof Error ? err.message : String(err)}`)
     return
   }
+  if (!await context.isCurrent()) return
   const currentProjectId = useProjectStore.getState().currentProjectId
   switch (table) {
     case 'user_labels':
@@ -116,19 +121,22 @@ async function handleMembershipInsert(
   row: Record<string, unknown>,
   state: UserChannelState
 ): Promise<void> {
+  const context = await captureSyncContext()
+  if (state.userId !== useAuthStore.getState().currentUser?.id) return
+  const { api, client: supabase } = context
   const projectId = row.project_id as string | undefined
   if (!projectId || membershipPullsInFlight.has(projectId)) return
 
-  const local = await window.api.projects.findById(projectId)
+  const local = await api.projects.findById(projectId)
   if (local) {
     // Already known — role/membership metadata changed at most.
+    if (!await context.isCurrent()) return
     await useProjectStore.getState().hydrateProjects(state.userId)
     return
   }
 
   membershipPullsInFlight.add(projectId)
   try {
-    const supabase = await getSupabase()
     const { count } = await supabase
       .from('project_members')
       .select('*', { count: 'exact', head: true })
@@ -137,7 +145,8 @@ async function handleMembershipInsert(
 
     if (isShared) {
       const { syncProjectDown, subscribeToProject } = await import('./SyncService')
-      await syncProjectDown(projectId, state.userId)
+      await syncProjectDown(projectId, state.userId, context)
+      if (!await context.isCurrent()) return
       await subscribeToProject(projectId)
     } else {
       const { data: project } = await supabase
@@ -149,14 +158,16 @@ async function handleMembershipInsert(
       if (!project) return
       const projectsDesc = SYNC_TABLES.projects
       if (!projectsDesc) return
-      await projectsDesc.localApplyRemote(project)
-      await window.api.projects
+      await api.projects.applyRemote(project)
+      await api.projects
         .addMember(projectId, state.userId, (row.role as string) ?? 'owner')
         .catch(() => { /* membership row may already exist */ })
-      await pullNewTasks(projectId)
+      await pullNewTasks(projectId, context)
+      if (!await context.isCurrent()) return
       await state.opts.subscribePersonalProject(projectId)
     }
 
+    if (!await context.isCurrent()) return
     await useProjectStore.getState().hydrateProjects(state.userId)
     logEvent('info', 'realtime', `User channel: pulled new ${isShared ? 'shared' : 'personal'} project`, `project=${projectId}`)
   } catch (err) {

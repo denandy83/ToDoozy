@@ -1,3 +1,9 @@
+vi.mock('./syncContext', () => ({ captureSyncContext: vi.fn(async () => {
+  const id = useAuthStore.getState().currentUser?.id
+  const api = window.api
+  const client = await getSupabase()
+  return { api, client, scope: id, assertCurrent() {}, isCurrent: async () => useAuthStore.getState().currentUser?.id === id }
+}) }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))

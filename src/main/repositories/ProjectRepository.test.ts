@@ -378,3 +378,37 @@ describe('remote archive intent', () => {
     } finally { db.close() }
   })
 })
+
+it('persists archive intent and its retry atomically and keeps it through rename/import', () => {
+  const db = createTestDb()
+  try {
+    const owner = seedUser(db), repo = new ProjectRepository(db)
+    const project = makeProject(repo, owner, 'intent')
+    const archived = repo.archiveWithTasks(project.id)!
+    const entries = db.prepare('SELECT payload FROM sync_queue').all() as { payload: string }[]
+    expect(entries).toHaveLength(1)
+    expect(JSON.parse(entries[0].payload)).toMatchObject({ archive_with_tasks: true, updated_at: archived.archive_updated_at })
+    repo.update(project.id, { name: 'Renamed' })
+    expect(repo.findById(project.id)?.archive_updated_at).toBe(archived.archive_updated_at)
+    const incoming = { ...project, name: 'Remote rename', is_archived: 0, updated_at: '2099-01-01T00:00:00.000Z' }
+    expect(repo.applyRemote(incoming)).toMatchObject({ name: 'Remote rename', is_archived: 1, archive_updated_at: archived.archive_updated_at })
+    db.exec("CREATE TRIGGER fail_archive_queue BEFORE INSERT ON sync_queue BEGIN SELECT RAISE(ABORT,'synthetic queue failure'); END")
+    expect(() => repo.unarchiveWithTasks(project.id)).toThrow('synthetic queue failure')
+    expect(repo.findById(project.id)?.is_archived).toBe(1)
+    expect(repo.findById(project.id)?.archive_updated_at).toBe(archived.archive_updated_at)
+  } finally { db.close() }
+})
+
+it('recovers a known pending archive version without substituting a later rename time', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
+    for (const migration of migrations.slice(0, -1)) migration(db)
+    const owner = seedUser(db), repo = new ProjectRepository(db)
+    const project = makeProject(repo, owner, 'legacy-intent')
+    db.prepare('UPDATE projects SET is_archived=1,updated_at=? WHERE id=?').run('2026-01-03T00:00:00Z', project.id)
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('q','projects',project.id,'UPDATE',JSON.stringify({ archive_with_tasks: true, is_archived: 1, updated_at: '2026-01-01T00:00:00Z' }),'2026-01-04T00:00:00Z')
+    migrations[migrations.length - 1](db)
+    expect(repo.findById(project.id)).toMatchObject({ is_archived: 1, archive_updated_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-03T00:00:00Z' })
+  } finally { db.close() }
+})

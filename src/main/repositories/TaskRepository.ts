@@ -243,7 +243,9 @@ export class TaskRepository {
     const existing = this.findById(id)
     if (!existing) return undefined
     if (input.is_archived === undefined && !TASK_UPDATABLE_COLUMNS.some((col) => input[col] !== undefined && input[col] !== existing[col])) return existing
-    const now = new Date().toISOString()
+    const now = input.is_archived !== undefined
+      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
+      : new Date().toISOString()
     const sets: string[] = ['updated_at = ?']
     const values: (string | number | null)[] = [now]
 
@@ -274,6 +276,10 @@ export class TaskRepository {
   // Using create()/update() in sync code stamps NOW into updated_at, which makes
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
+    const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(task.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
+    if (!task.deleted_at && project?.archive_updated_at && Date.parse(task.updated_at) < Date.parse(project.archive_updated_at)) {
+      task = { ...task, is_archived: project.is_archived, updated_at: project.archive_updated_at }
+    }
     const existing = this.findById(task.id)
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local

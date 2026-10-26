@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Status, Task } from '../../../shared/types'
-import { getSupabase } from '../lib/supabase'
+import { captureSyncContext } from './syncContext'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useTaskStore } from '../shared/stores/taskStore'
 import { useStatusStore } from '../shared/stores/statusStore'
@@ -42,12 +42,14 @@ export function refreshSearchIndex(userId: string): Promise<void> {
 async function refresh(userId: string): Promise<void> {
   const isCurrentUser = (): boolean => useAuthStore.getState().currentUser?.id === userId
   try {
-    const projects = await window.api.projects.getProjectsForUser(userId)
+    const context = await captureSyncContext()
+    const api = context.api
+    const projects = await api.projects.getProjectsForUser(userId)
     const ids = projects.map((project) => project.id).sort()
     if (!ids.length || !isCurrentUser()) return
-    const client = await getSupabase()
+    const client = context.client
     if (!isCurrentUser()) return
-    const scope = `${userId}:${ids.join(',')}`
+    const scope = `${context.scope}:${userId}:${ids.join(',')}`
     const [statuses, tasks] = await Promise.all([
       readRows<Status>(client, 'statuses', ids, watermarks.get(`${scope}:statuses`)),
       readRows<Task>(client, 'tasks', ids, watermarks.get(`${scope}:tasks`))
@@ -55,7 +57,7 @@ async function refresh(userId: string): Promise<void> {
     if (!isCurrentUser()) return
     for (const status of statuses) {
       if (!isCurrentUser()) return
-      await window.api.statuses.applyRemote(status)
+      await api.statuses.applyRemote(status)
     }
     const byId = new Map(tasks.map((task) => [task.id, task]))
     const applied = new Set<string>()
@@ -66,12 +68,12 @@ async function refresh(userId: string): Promise<void> {
       const parent = task.parent_id ? byId.get(task.parent_id) : undefined
       if (parent) await apply(parent)
       for (const id of new Set([task.owner_id, task.assigned_to].filter((id): id is string => !!id))) {
-        const user = await window.api.users.findById(id)
+        const user = await api.users.findById(id)
         if (!isCurrentUser()) return
-        if (!user) await window.api.users.create({ id, email: placeholderEmail(id), display_name: null, avatar_url: null })
+        if (!user) await api.users.create({ id, email: placeholderEmail(id), display_name: null, avatar_url: null })
       }
       if (!isCurrentUser()) return
-      await window.api.tasks.applyRemote(task)
+      await api.tasks.applyRemote(task)
       applied.add(task.id)
     }
     for (const task of tasks) await apply(task)

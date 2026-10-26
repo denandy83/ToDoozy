@@ -96,7 +96,7 @@ beforeEach(() => {
       }
     })
   })
-  context = { api: api as never, client, assertCurrent() {} }
+  context = { api: api as never, client, assertCurrent() {}, isCurrent: async () => true, scope: projectId }
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })
