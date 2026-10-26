@@ -26,7 +26,7 @@ let databaseGeneration = 0
 let databaseUserId: string | null = null
 const databaseHandlers = new Map<string, Parameters<typeof ipcMain.handle>[1]>()
 function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {
-  if (channel === 'activityLog:create' || /^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync):/.test(channel)) databaseHandlers.set(channel, listener)
+  if (channel === 'activityLog:create' || channel === 'activityLog:applyRemote' || /^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync|syncMeta):/.test(channel)) databaseHandlers.set(channel, listener)
   ipcMain.handle(channel, listener)
 }
 
@@ -698,7 +698,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'activityLog:applyRemote',
     (_e, input: Parameters<Repositories['activityLog']['applyRemote']>[0]) => {
       return getRepos().activityLog.applyRemote(input)
@@ -1119,7 +1119,7 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Sync Meta (high-water marks) ──────────────────────────────────
-  ipcMain.handle(
+  handle(
     'syncMeta:getHighWater',
     (
       _e,
@@ -1131,7 +1131,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'syncMeta:setHighWater',
     (
       _e,
@@ -1144,7 +1144,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'syncMeta:getLastReconciledAt',
     (
       _e,
@@ -1156,7 +1156,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'syncMeta:setLastReconciledAt',
     (
       _e,

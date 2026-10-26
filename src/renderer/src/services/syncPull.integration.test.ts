@@ -42,8 +42,11 @@ function parts(value: string): string[] {
 }
 function matches(row: Record<string, unknown>, predicate: string): boolean {
   if (predicate.startsWith('and(')) return parts(predicate.slice(4, -1)).every((part) => matches(row, part))
-  const [, key, operator, encoded] = predicate.match(/^([^.]+)\.(eq|gt)\.(.*)$/)!
-  const value = JSON.parse(encoded)
+  const [, key, operator, encoded] = predicate.match(/^([^.]+)\.(eq|gt|lte|is)\.(.*)$/)!
+  let value: unknown
+  try { value = JSON.parse(encoded) } catch { value = encoded }
+  if (operator === 'is') return (row[key] ?? null) === value
+  if (operator === 'lte') return String(row[key]) <= String(value)
   return operator === 'eq' ? row[key] === value : String(row[key]) > String(value)
 }
 function makeClient(): SupabaseClient {
@@ -276,7 +279,7 @@ it.each([0, 1])('converges rejected equal-version archive=%s before queue comple
   db.prepare('UPDATE projects SET updated_at=?,archive_updated_at=?,is_archived=? WHERE id=?').run(t10, t10, state, projectId)
   for (const id of ['affected', 'later', 'deleted']) {
     repo.tasks.create({ id, project_id: projectId, owner_id: 'u', status_id: 'open', title: id })
-    db.prepare('UPDATE tasks SET updated_at=?,is_archived=?,deleted_at=? WHERE id=?').run(id === 'later' ? t11 : t10, state, id === 'deleted' ? t10 : null, id)
+    db.prepare('UPDATE tasks SET updated_at=?,archive_updated_at=?,is_archived=?,deleted_at=? WHERE id=?').run(id === 'later' ? t11 : t10, id === 'later' ? t11 : t10, state, id === 'deleted' ? t10 : null, id)
   }
   repo.syncQueue.enqueue('projects', projectId, 'UPDATE', JSON.stringify({ id: projectId, archive_with_tasks: true, is_archived: state }))
   rows.projects = [{ ...repo.projects.findById(projectId), is_archived: 1 - state }]
@@ -301,4 +304,32 @@ it.each([0, 1])('reconciles archive=%s beyond a metadata high-water without losi
   expect(result.failed).toBe(0)
   expect(repo.projects.findById(projectId)).toMatchObject({ name: 'Local newer', updated_at: t8, archive_updated_at: t10, is_archived: state })
   expect(rows.projects[0]).toMatchObject({ name: 'Local newer', updated_at: t8, archive_updated_at: t10, is_archived: state })
+})
+
+it('pulls persisted reorder versions for tasks already present on the recipient', async () => {
+  const initial = '2026-01-01T00:00:00.000Z'
+  for (const id of ['first', 'second']) {
+    repo.tasks.create({ id, project_id: projectId, owner_id: 'u', status_id: 'open', title: id })
+    db.prepare('UPDATE tasks SET updated_at=?,order_index=? WHERE id=?').run(initial, id === 'first' ? 0 : 1, id)
+  }
+  repo.tasks.reorder(['second', 'first'])
+  rows.tasks = ['first', 'second'].map((id) => ({ ...repo.tasks.findById(id) }))
+  for (const id of ['first', 'second']) db.prepare('UPDATE tasks SET updated_at=?,order_index=? WHERE id=?').run(initial, id === 'first' ? 0 : 1, id)
+  expect(await pullNewTasks(projectId, context)).toBe(2)
+  expect(repo.tasks.findById('first')?.order_index).toBe(1)
+  expect(repo.tasks.findById('second')?.order_index).toBe(0)
+})
+
+it.each([0, 1])('discovers independent archive=%s changes below a later metadata watermark and converges equal conflicts', async (state) => {
+  const stamp = '2026-01-01T01:00:00.000Z', archive = '2026-01-01T12:00:00.000Z'
+  const original = repo.tasks.create({ id: 'choice', project_id: projectId, owner_id: 'u', status_id: 'open', title: 'Choice' })
+  db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(stamp, original.id)
+  rows.tasks = [{ ...repo.tasks.findById('choice') }, { ...original, id: 'later-metadata', updated_at: '2026-01-03T00:00:00.000Z' }]
+  await pullNewTasks(projectId, context)
+  rows.tasks[0] = { ...rows.tasks[0], is_archived: state, archive_updated_at: archive }
+  await pullNewTasks(projectId, context)
+  expect(repo.tasks.findById('choice')).toMatchObject({ is_archived: state, archive_updated_at: archive, updated_at: stamp })
+  db.prepare('UPDATE tasks SET is_archived=? WHERE id=?').run(1-state, 'choice')
+  await pullNewTasks(projectId, context)
+  expect(repo.tasks.findById('choice')?.is_archived).toBe(state)
 })

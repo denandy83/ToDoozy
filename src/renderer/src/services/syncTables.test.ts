@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+vi.mock('./syncContext', () => ({ captureSyncContext: async () => ({ api: window.api, client: supabaseHolder.client, assertCurrent: () => undefined, isCurrent: async () => true, scope: 'synthetic' }) }))
 import type { SyncTableDescriptor, RemoteActivityRow } from './syncTables'
 
 // pullActivityLogForProject talks to Supabase directly — swap the client for

@@ -36,8 +36,11 @@ function split(value: string): string[] {
 }
 function matches(row: Record<string, unknown>, filter: string): boolean {
   if (filter.startsWith('and(')) return split(filter.slice(4, -1)).every((part) => matches(row, part))
-  const [, key, op, encoded] = filter.match(/^([^.]+)\.(eq|gt)\.(.*)$/)!
-  const value = JSON.parse(encoded)
+  const [, key, op, encoded] = filter.match(/^([^.]+)\.(eq|gt|lte|is)\.(.*)$/)!
+  let value: unknown
+  try { value = JSON.parse(encoded) } catch { value = encoded }
+  if (op === 'is') return (row[key] ?? null) === value
+  if (op === 'lte') return String(row[key]) <= String(value)
   return op === 'eq' ? row[key] === value : String(row[key]) > String(value)
 }
 beforeEach(() => {
@@ -81,8 +84,8 @@ beforeEach(() => {
           const existing = remote[table]?.find((item) => item.id === row.id)
           if (existing && Date.parse(String(existing.updated_at)) > Date.parse(String(row.updated_at))) continue
           const project = remote.projects[0]
-          const inherited = table === 'tasks' && project.archive_updated_at && Date.parse(String(row.updated_at)) <= Date.parse(String(project.archive_updated_at))
-            ? { is_archived: project.is_archived } : {}
+          const inherited = table === 'tasks' && project.archive_updated_at && Date.parse(String(row.archive_updated_at ?? '1970-01-01')) <= Date.parse(String(project.archive_updated_at))
+            ? { is_archived: project.is_archived, archive_updated_at: project.archive_updated_at } : {}
           if (existing) Object.assign(existing, row, inherited)
           else (remote[table] ??= []).push({ ...row, ...inherited })
         }
@@ -125,7 +128,7 @@ beforeEach(() => {
 })
 afterEach(() => { db.close(); vi.unstubAllGlobals(); vi.useRealTimers() })
 function task(id: string, archived: number, stamp: string) {
-  return { id, project_id: 'p', owner_id: 'u', status_id: 's', title: id, is_archived: archived, created_at: t0, updated_at: stamp, deleted_at: null }
+  return { id, project_id: 'p', owner_id: 'u', status_id: 's', title: id, is_archived: archived, archive_updated_at: stamp, created_at: t0, updated_at: stamp, deleted_at: null }
 }
 function action(archived: number) {
   if (archived) repo.projects.archiveWithTasks('p')

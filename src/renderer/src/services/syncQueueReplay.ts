@@ -4,16 +4,8 @@ import { readAll } from './readAll'
 import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
+import { currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
 import { writeProjectArchive } from './projectArchiveSync'
-
-async function currentProjectLink(projectId: string, labelId: string, api = window.api): Promise<{ deleted_at: string | null } | undefined> {
-  const project = await api.projects.findById(projectId)
-  if (!project) return undefined
-  const links = project.is_shared === 1
-    ? await api.labels.getProjectLabelsForSharedProjects()
-    : await api.labels.getProjectLabelsForOwner(project.owner_id)
-  return links.find((link) => link.project_id === projectId && link.label_id === labelId)
-}
 
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
   row: Awaited<ReturnType<typeof api.statuses.findById>>
@@ -57,12 +49,17 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {
     const current = await currentProjectLink(payload.projectId, String(payload.labelId), api)
-    if (!current) return true
+    if (payload.deletedAt && 'expectedLink' in payload && projectLinkSuperseded(current, payload.expectedLink as Awaited<ReturnType<typeof currentProjectLink>>)) return true
+    if (!current && !payload.deletedAt) return true
     const { error } = await client.from('project_labels').upsert({
       project_id: payload.projectId, label_id: payload.labelId,
-      created_at: new Date().toISOString(), deleted_at: current.deleted_at
+      created_at: new Date().toISOString(), deleted_at: payload.deletedAt && 'expectedLink' in payload ? payload.deletedAt : current!.deleted_at
     }, { onConflict: 'project_id,label_id' })
     if (error) throw new Error(error.message)
+    return true
+  }
+  if (entry.table_name === 'task_labels' && payload.remove_project_label === true) {
+    await removeRemoteProjectLabel(client, api, payload as unknown as ProjectLabelRemoval)
     return true
   }
   if (entry.table_name === 'task_labels') {
@@ -87,7 +84,9 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       }
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {
       const current = await currentProjectLink(payload.projectId, payload.labelId, api)
-      if (!current?.deleted_at) return true
+      if ('expectedLink' in payload) {
+        if (projectLinkSuperseded(current, payload.expectedLink as Awaited<ReturnType<typeof currentProjectLink>>)) return true
+      } else if (!current?.deleted_at) return true
       const { data: tasks, error } = await readAll(() => client.from('tasks').select('id').eq('project_id', payload.projectId))
       if (error) throw new Error(error.message)
       if (tasks?.length) {
@@ -121,7 +120,7 @@ export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncCon
   if (entry.table_name === 'projects') {
     const project = await api.projects.findById(entry.row_id)
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
-    return JSON.stringify([project ?? null, tasks.map(({ id, is_archived, updated_at, deleted_at }) => ({ id, is_archived, updated_at, deleted_at })).sort((a, b) => a.id.localeCompare(b.id))])
+    return JSON.stringify([project ?? null, tasks.map(({ id, is_archived, archive_updated_at, updated_at, deleted_at }) => ({ id, is_archived, archive_updated_at, updated_at, deleted_at })).sort((a, b) => a.id.localeCompare(b.id))])
   }
   if (typeof payload.task_id === 'string') return JSON.stringify((await api.tasks.getLabels(payload.task_id)).map((row) => row.label_id).sort())
   if (typeof payload.projectId === 'string') return JSON.stringify(await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null)

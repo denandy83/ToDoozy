@@ -541,3 +541,54 @@ describe('TaskRepository — orphaned-status repair is write-free in steady stat
     expect(executed.slice(mark).filter(isTasksUpdate)).toEqual([])
   })
 })
+
+describe('independent task archive and reorder versions', () => {
+  it.each([0, 1])('keeps metadata edits separate from explicit archive=%s', (archived) => {
+    const db = createTestDb()
+    try {
+      const { projectId, userId, statusId } = seedFixtures(db)
+      const repo = new TaskRepository(db)
+      const task = makeTask(repo, projectId, userId, statusId, 'intent')
+      const initial = task.updated_at
+      const choice = repo.update(task.id, { is_archived: archived })!
+      expect(choice.updated_at).toBe(initial)
+      expect(choice.archive_updated_at).toBeTruthy()
+      const edited = repo.update(task.id, { title: 'New metadata' })!
+      expect(edited.archive_updated_at).toBe(choice.archive_updated_at)
+      db.prepare('UPDATE projects SET is_archived=?, archive_updated_at=? WHERE id=?').run(1-archived, '2099-01-01T00:00:00Z', projectId)
+      const applied = repo.applyRemoteTask({ ...edited, title: 'Cloud newer metadata', updated_at: '2099-01-02T00:00:00Z' })
+      expect(applied).toMatchObject({ title: 'Cloud newer metadata', is_archived: 1-archived, archive_updated_at: '2099-01-01T00:00:00.000Z' })
+      const later = repo.update(task.id, { is_archived: archived })!
+      expect(Date.parse(later.archive_updated_at!)).toBeGreaterThan(Date.parse(applied.archive_updated_at!))
+      expect(later.updated_at).toBe(applied.updated_at)
+    } finally { db.close() }
+  })
+  it('persists reorder versions newer than every reordered row', () => {
+    const db = createTestDb()
+    try {
+      const { projectId, userId, statusId } = seedFixtures(db)
+      const repo = new TaskRepository(db)
+      makeTask(repo, projectId, userId, statusId, 'a')
+      makeTask(repo, projectId, userId, statusId, 'b')
+      db.exec("UPDATE tasks SET updated_at='2099-01-01T00:00:00Z'")
+      repo.reorder(['b', 'a'])
+      expect(repo.findById('b')?.order_index).toBe(0)
+      expect(repo.findById('a')?.order_index).toBe(1)
+      expect(Date.parse(repo.findById('a')!.updated_at)).toBeGreaterThan(Date.parse('2099-01-01T00:00:00Z'))
+    } finally { db.close() }
+  })
+})
+
+it('counts active subtasks while preserving archived traversal for cascades', () => {
+  const db = createTestDb()
+  try {
+    const { projectId, userId, statusId } = seedFixtures(db)
+    const repo = new TaskRepository(db)
+    makeTask(repo, projectId, userId, statusId, 'parent')
+    repo.create({ id: 'active-child', project_id: projectId, owner_id: userId, status_id: statusId, title: 'Active', parent_id: 'parent' })
+    repo.create({ id: 'archived-child', project_id: projectId, owner_id: userId, status_id: statusId, title: 'Archived', parent_id: 'parent', is_archived: 1 })
+    expect(repo.getSubtaskCount('parent')).toEqual({ total: 1, done: 0 })
+    expect(repo.findSubtasks('parent')).toHaveLength(1)
+    expect(repo.findSubtasks('parent', true)).toHaveLength(2)
+  } finally { db.close() }
+})

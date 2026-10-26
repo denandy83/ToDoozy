@@ -687,23 +687,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const api = origin.api
     try {
       await api.tasks.reorder(taskIds)
+      const persisted = (await Promise.all(taskIds.map((id) => api.tasks.findById(id)))).filter((task) => !!task)
       await requireProducerCurrent(origin)
-      set((state) => {
-        const updated = { ...state.tasks }
-        for (let i = 0; i < taskIds.length; i++) {
-          const task = updated[taskIds[i]]
-          if (task) {
-            updated[taskIds[i]] = { ...task, order_index: i }
-          }
-        }
-        return { tasks: updated }
-      })
-      // Sync reordered tasks to Supabase
-      const currentTasks = get().tasks
-      for (const id of taskIds) {
-        const task = currentTasks[id]
-        if (task) syncIfShared(task, 'UPDATE', origin)
-      }
+      set((state) => ({ tasks: { ...state.tasks, ...Object.fromEntries(persisted.map((task) => [task.id, task])) } }))
+      for (const task of persisted) syncIfShared(task, 'UPDATE', origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reorder tasks'
       await requireProducerCurrent(origin)
@@ -1000,11 +987,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const origin = captureSyncProducer()
     const api = origin.api
     try {
-      const linkId = await resolveLabelForCurrentUser(labelId, origin)
+      let linkId = await resolveLabelForCurrentUser(labelId, origin)
       await Promise.all(ids.map((id) => api.tasks.addLabel(id, linkId)))
       const { pushProjectLabel } = await import('../../services/PersonalSyncService')
       const projectIds = new Set((await Promise.all(ids.map((id) => api.tasks.findById(id)))).filter((task) => !!task).map((task) => task.project_id))
-      for (const projectId of projectIds) await pushProjectLabel(projectId, linkId, null, origin)
+      for (const projectId of projectIds) linkId = await pushProjectLabel(projectId, linkId, null, origin) ?? linkId
       // Re-hydrate labels for affected tasks
       const labelResults: Record<string, Label[]> = {}
       for (const id of ids) {

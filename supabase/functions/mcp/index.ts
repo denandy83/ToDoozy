@@ -277,7 +277,7 @@ export class TaskRepo {
       priority: input.priority ?? 0, due_date: input.due_date ?? null,
       parent_id: input.parent_id ?? null, order_index: input.order_index ?? 0,
       is_in_my_day: input.is_in_my_day ?? 0, is_template: input.is_template ?? 0,
-      is_archived: input.is_archived ?? 0, completed_date: input.completed_date ?? null,
+      is_archived: input.is_archived ?? 0, archive_updated_at: input.is_archived !== undefined ? now : null, completed_date: input.completed_date ?? null,
       recurrence_rule: input.recurrence_rule ?? null, reference_url: input.reference_url ?? null,
       created_at: now, updated_at: now
     }
@@ -291,6 +291,10 @@ export class TaskRepo {
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (col in input) updates[col] = input[col]
+    }
+    if ('is_archived' in input) {
+      updates.archive_updated_at = new Date(Math.max(Date.now(), Date.parse(String(original.archive_updated_at ?? '')) + 1 || 0)).toISOString()
+      if (Object.keys(updates).every((key) => ['is_archived', 'updated_at', 'archive_updated_at'].includes(key))) updates.updated_at = original.updated_at
     }
     // If the caller wants to move the task, the destination must also be a
     // project they belong to.

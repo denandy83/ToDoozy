@@ -15,9 +15,9 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase, safeRefresh } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
-import { useLabelStore } from '../shared/stores/labelStore'
 import type { Task, Status, Label, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
+import { currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel } from './projectLabelIntent'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -209,6 +209,7 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
         order_index: task.order_index,
         is_template: task.is_template,
         is_archived: task.is_archived,
+        archive_updated_at: task.archive_updated_at ?? null,
         is_in_my_day: task.is_in_my_day ?? 0,
         completed_date: task.completed_date,
         recurrence_rule: task.recurrence_rule,
@@ -448,12 +449,14 @@ export async function pushProjectLabel(
   labelId: string,
   deletedAt: string | null,
   producer?: SyncProducer
-): Promise<void> {
-  return withSyncProducer(async (origin) => {
+): Promise<string | undefined> {
+  let effectiveId = labelId
+  await withSyncProducer(async (origin) => {
+    const expectedLink = deletedAt ? await currentProjectLink(projectId, labelId, origin.api) : undefined
     if (!(await hasLiveSession(origin, 'pushProjectLabel', `${projectId}::${labelId}`))) {
       const localLabel = await origin.api.labels.findById(labelId)
-      if (localLabel && localLabel.user_id === origin.userId) await pushLabel(localLabel, origin.userId, origin)
-      await origin.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt }))
+      if (!deletedAt && localLabel && localLabel.user_id === origin.userId) await pushLabel(localLabel, origin.userId, origin)
+      await origin.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt, ...(expectedLink !== undefined ? { expectedLink } : {}) }))
       await refreshProducerPending(origin)
       return
     }
@@ -466,22 +469,22 @@ export async function pushProjectLabel(
       // into another user's user_labels (RLS), and if the label belongs to
       // another user it should already be on Supabase from their push.
       const localLabel = await origin.api.labels.findById(labelId)
-      if (localLabel) {
+      if (!deletedAt && localLabel) {
         const { useAuthStore } = await import('../shared/stores/authStore')
         const authedUserId = useAuthStore.getState().currentUser?.id ?? null
         if (authedUserId && localLabel.user_id === authedUserId) {
           labelId = await pushLabel(localLabel, authedUserId, origin) ?? labelId
+          effectiveId = labelId
         }
       }
 
-      const project = await origin.api.projects.findById(projectId)
-      if (!project) return
-      const links = project.is_shared === 1
-        ? await origin.api.labels.getProjectLabelsForSharedProjects()
-        : await origin.api.labels.getProjectLabelsForOwner(project.owner_id)
-      const current = links.find((link) => link.project_id === projectId && link.label_id === labelId)
-      if (!current) return
-      deletedAt = current.deleted_at
+      const current = await currentProjectLink(projectId, labelId, origin.api)
+      if (deletedAt) {
+        if (projectLinkSuperseded(current, expectedLink!)) return
+      } else {
+        if (!current) return
+        deletedAt = current.deleted_at
+      }
       const supabase = (await origin.client())!
       const { error } = await supabase
         .from('project_labels')
@@ -500,7 +503,7 @@ export async function pushProjectLabel(
           error,
           'project_labels',
           `${projectId}::${labelId}`,
-          JSON.stringify({ projectId, labelId, deletedAt })
+          JSON.stringify({ projectId, labelId, deletedAt, ...(expectedLink !== undefined ? { expectedLink } : {}) })
         )
       } else {
         await markSynced(origin)
@@ -511,10 +514,11 @@ export async function pushProjectLabel(
         err,
         'project_labels',
         `${projectId}::${labelId}`,
-        JSON.stringify({ projectId, labelId, deletedAt })
+        JSON.stringify({ projectId, labelId, deletedAt, ...(expectedLink !== undefined ? { expectedLink } : {}) })
       )
     }
   }, producer)
+  return effectiveId
 }
 
 /**
@@ -526,98 +530,20 @@ export async function pushProjectLabel(
  * is tombstoned. (Remote task_labels has no `deleted_at`, so cleanup must
  * be a hard DELETE rather than a tombstone.)
  */
-export async function pushRemoveLabelFromProject(
-  projectId: string,
-  labelId: string
-): Promise<void> {
+export async function pushRemoveLabelFromProject(projectId: string, labelId: string): Promise<void> {
   return withSyncProducer(async (origin) => {
-    if (!(await hasLiveSession(origin, 'pushRemoveLabelFromProject', `${projectId}::${labelId}`))) return
+    const label = await origin.api.labels.findById(labelId)
+    const payload = { projectId, labelId, labelName: label?.name, remove_project_label: true, deletedAt: new Date().toISOString(), expectedLink: await currentProjectLink(projectId, labelId, origin.api) }
     try {
-      const supabase = (await origin.client())!
-
-      // Resolve the label's name. We tombstone EVERY same-name project_labels
-      // row in this project — across all members — so a label removed by one
-      // member disappears from every other member's view, even members
-      // whose label_ids weren't loaded into our local store at remove-time.
-      const localLabel = await origin.api.labels.findById(labelId).catch(() => null)
-      let targetName: string | null = localLabel?.name?.toLowerCase() ?? null
-      if (!targetName) {
-        const { data: remoteLabel } = await supabase
-          .from('user_labels')
-          .select('name')
-          .eq('id', labelId)
-          .maybeSingle()
-        targetName = (remoteLabel?.name as string | undefined)?.toLowerCase() ?? null
+      if (!(await hasLiveSession(origin, 'pushRemoveLabelFromProject', `${projectId}::${labelId}`))) {
+        await origin.api.sync.enqueue('task_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify(payload))
+        await refreshProducerPending(origin)
+        return
       }
-
-      // Collect all sibling label_ids in this project with the same name.
-      // Includes labels the local store hasn't hydrated yet (newly-created
-      // by another member, etc.) — without this, those rows survive the
-      // removal and resurrect via syncProjectDown on every other member's
-      // next login.
-      let siblingIds: string[] = [labelId]
-      if (targetName) {
-        const { data: siblings } = await readAll(() => supabase
-          .from('project_labels')
-          .select('label_id, user_labels!inner(name)')
-          .eq('project_id', projectId)
-          .is('deleted_at', null), ['label_id'])
-        if (siblings) {
-          const matched = (siblings as Array<{ label_id: string; user_labels: { name: string } | { name: string }[] }>)
-            .filter((row) => {
-              const ul = Array.isArray(row.user_labels) ? row.user_labels[0] : row.user_labels
-              return ul?.name?.toLowerCase() === targetName
-            })
-            .map((row) => row.label_id)
-          if (matched.length > 0) {
-            // Always include the requested labelId so we tombstone it even if
-            // its row isn't currently alive (idempotent UPSERT).
-            siblingIds = Array.from(new Set([labelId, ...matched]))
-          }
-        }
-      }
-
-      // 1. Tombstone every sibling project_labels row.
-      for (const id of siblingIds) {
-        void pushProjectLabel(projectId, id, new Date().toISOString(), origin)
-      }
-
-      // 2. Hard-delete task_labels for every task in the project that had
-      // any of those labels. Chunked because task_labels has no project_id
-      // column — we can only filter by task_id.
-      const tasks = await origin.api.tasks
-        .findByProjectId(projectId)
-        .catch(() => [] as Task[])
-      const taskIds = tasks.map((t) => t.id)
-      if (taskIds.length === 0) return
-      const chunkSize = 200
-      for (let i = 0; i < taskIds.length; i += chunkSize) {
-        const chunk = taskIds.slice(i, i + chunkSize)
-        const { error } = await supabase
-          .from('task_labels')
-          .delete()
-          .in('label_id', siblingIds)
-          .in('task_id', chunk)
-        if (error) {
-          await reportPushFailure(origin,
-            'pushRemoveLabelFromProject',
-            error,
-            'task_labels',
-            `${projectId}::${labelId}`,
-            JSON.stringify({ projectId, labelId, siblingIds, chunkSize: chunk.length })
-          )
-          return
-        }
-      }
+      await removeRemoteProjectLabel((await origin.client())!, origin.api, payload)
       await markSynced(origin)
-    } catch (err) {
-      await reportPushFailure(origin,
-        'pushRemoveLabelFromProject',
-        err,
-        'task_labels',
-        `${projectId}::${labelId}`,
-        JSON.stringify({ projectId, labelId })
-      )
+    } catch (error) {
+      await reportPushFailure(origin, 'pushRemoveLabelFromProject', error, 'task_labels', `${projectId}::${labelId}`, JSON.stringify(payload))
     }
   })
 }
@@ -1881,9 +1807,10 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
 
     const supabase = context.client
     const since = lastPullAt.get(`${context.scope}:tasks:${projectId}`)
+    const archiveSince = lastPullAt.get(`${context.scope}:task-archives:${projectId}`)
     const { data: remoteTasks, error } = await readAll(() => {
       let query = supabase.from('tasks').select('*').eq('project_id', projectId)
-      if (since) query = query.gt('updated_at', since)
+      if (since) query = query.or(`updated_at.gt.${since},archive_updated_at.gt.${archiveSince ?? '1970-01-01T00:00:00Z'}`)
       return query
     }, ['updated_at', 'id'])
 
@@ -1935,6 +1862,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
             assigned_to: rt.assigned_to,
             is_template: rt.is_template ?? 0,
             is_archived: rt.is_archived ?? 0,
+            archive_updated_at: rt.archive_updated_at ?? null,
             is_in_my_day: rt.is_in_my_day ?? 0,
             completed_date: rt.completed_date,
             recurrence_rule: rt.recurrence_rule,
@@ -1950,7 +1878,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
           failed = true
           console.error(`[PersonalSync] Failed to create task "${rt.title}" (${rt.id}):`, e)
         }
-      } else if (rt.updated_at && existing.updated_at && Date.parse(rt.updated_at) > Date.parse(existing.updated_at)) {
+      } else if ((rt.updated_at && existing.updated_at && Date.parse(rt.updated_at) > Date.parse(existing.updated_at)) || (rt.archive_updated_at && (Date.parse(rt.archive_updated_at) > Date.parse(existing.archive_updated_at ?? '1970-01-01') || (Date.parse(rt.archive_updated_at) === Date.parse(existing.archive_updated_at ?? '') && rt.is_archived !== existing.is_archived)))) {
         // Remote is newer — update locally (preserve remote timestamps via applyRemote)
         try {
           await api.tasks.applyRemote({
@@ -1967,6 +1895,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
             assigned_to: rt.assigned_to,
             is_template: rt.is_template ?? existing.is_template ?? 0,
             is_archived: rt.is_archived ?? 0,
+            archive_updated_at: rt.archive_updated_at ?? null,
             is_in_my_day: rt.is_in_my_day ?? 0,
             completed_date: rt.completed_date,
             recurrence_rule: rt.recurrence_rule,
@@ -1999,6 +1928,8 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     if (!await context.isCurrent()) return 0
     const watermark = pullWatermark(remoteTasks)
     if (!failed && watermark) lastPullAt.set(`${context.scope}:tasks:${projectId}`, watermark)
+    const archiveWatermark = pullWatermark(remoteTasks.map((task) => ({ updated_at: task.archive_updated_at ?? undefined })))
+    if (!failed && archiveWatermark) lastPullAt.set(`${context.scope}:task-archives:${projectId}`, archiveWatermark)
     // Supabase responded successfully — clear any auth failure state
     clearAuthFailures()
     return pulled
@@ -2039,13 +1970,10 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
   // Check session upfront — if there's no session, do NOT touch the cooldown.
   // Otherwise a pre-login reconcile attempt would block the first real reconcile
   // after sign-in for 30 seconds, leaving the user staring at "last sync: never".
-  const supabase = await getSupabase()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) {
-    logEvent('warn', 'sync', 'Reconcile skipped — no session')
-    return { pushed: 0, pulled: 0 }
-  }
-  reconcileInFlight = reconcileImpl(userId)
+  if (useAuthStore.getState().currentUser?.id !== userId) return { pushed: 0, pulled: 0 }
+  const context = await captureSyncContext().catch(() => null)
+  if (!context) return { pushed: 0, pulled: 0 }
+  reconcileInFlight = reconcileImpl(userId, context)
   try {
     const result = await reconcileInFlight
     lastReconcileAt = Date.now()
@@ -2055,11 +1983,11 @@ export async function reconcile(userId: string): Promise<{ pushed: number; pulle
   }
 }
 
-async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: number }> {
+async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pushed: number; pulled: number }> {
   let totalPushed = 0
   let totalPulled = 0
   try {
-    const context = await captureSyncContext()
+    const api = context.api
     const supabase = context.client
 
     const runTable = async (
@@ -2076,7 +2004,8 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         const stats = await reconcileTable(
           desc as Parameters<typeof reconcileTable>[0],
           scopeId,
-          userId
+          userId,
+          context
         )
         totalPushed += stats.pushed
         totalPulled += stats.pulled
@@ -2105,7 +2034,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     await runTable('projects', userId)
 
     // 2. Project-scoped: per personal project, statuses then tasks.
-    const allProjects = await window.api.projects.getProjectsForUser(userId)
+    const allProjects = await api.projects.getProjectsForUser(userId)
     const personalProjects = allProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
 
     // activity_log is pull-only (no descriptor — see syncTables.ts): an
@@ -2114,7 +2043,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     // activity has no other path into local SQLite besides the live event.
     const pullActivity = async (projectId: string): Promise<void> => {
       try {
-        const pulled = await pullActivityLogForProject(projectId, userId)
+        const pulled = await pullActivityLogForProject(projectId, userId, context)
         if (pulled > 0) {
           totalPulled += pulled
           logEvent('info', 'sync', `Reconcile: activity_log`, `pulled=${pulled} scope=${projectId}`)
@@ -2151,15 +2080,15 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     // 4. task_labels junction — composite-PK with no updated_at, so it doesn't
     // fit reconcileTable's high-water-mark flow. Diff via key-set.
     try {
-      const localPairs = await window.api.tasks.getTaskLabelsForUser(userId)
+      const localPairs = await api.tasks.getTaskLabelsForUser(userId)
       const pairKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
       const localKeySet = new Set<string>(localPairs.map((p) => pairKey(p.task_id, p.label_id)))
 
       const personalTaskIds = new Set<string>()
       for (const project of personalProjects) {
-        const tasks = await window.api.tasks.findByProjectId(project.id)
-        const archived = await window.api.tasks.findArchived(project.id)
-        const templates = await window.api.tasks.findTemplates(project.id)
+        const tasks = await api.tasks.findByProjectId(project.id)
+        const archived = await api.tasks.findArchived(project.id)
+        const templates = await api.tasks.findTemplates(project.id)
         for (const t of [...tasks, ...archived, ...templates]) personalTaskIds.add(t.id)
       }
 
@@ -2219,7 +2148,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         let tlPulled = 0
         for (const p of missingInLocal) {
           let resolvedLabelId = p.label_id
-          const localLabel = await window.api.labels.findById(p.label_id)
+          const localLabel = await api.labels.findById(p.label_id)
           if (!localLabel) {
             // Label ID not found locally — may have been created by MCP with a different UUID
             // than the local canonical. Try to remap by name.
@@ -2229,7 +2158,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
               .eq('id', p.label_id)
               .maybeSingle()
             if (remoteLabel?.name) {
-              const canonical = await window.api.labels.findByName(userId, remoteLabel.name)
+              const canonical = await api.labels.findByName(userId, remoteLabel.name)
               if (canonical) {
                 resolvedLabelId = canonical.id
               } else {
@@ -2240,7 +2169,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             }
           }
           try {
-            await window.api.tasks.addLabel(p.task_id, resolvedLabelId)
+            await api.tasks.addLabel(p.task_id, resolvedLabelId)
             tlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.
@@ -2261,7 +2190,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     // shape as task_labels. Diff by key set, push deltas, pull missing rows
     // (with tombstone propagation).
     try {
-      const localProjectLabels = await window.api.labels.getProjectLabelsForOwner(userId)
+      const localProjectLabels = await api.labels.getProjectLabelsForOwner(userId)
       const pairKey = (projectId: string, labelId: string): string => `${projectId}::${labelId}`
       const localByKey = new Map<
         string,
@@ -2340,7 +2269,8 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         // counts here usually mean a filter mismatch between local and remote
         // reads (the bug fixed by getProjectLabelsForOwner's is_shared filter).
         if (toPush.length > 0) {
-          const labelMap = useLabelStore.getState().labels
+          const definitions = await Promise.all(toPush.slice(0, 5).map((link) => api.labels.findById(link.label_id)))
+          const labelMap = Object.fromEntries(definitions.filter((label) => !!label).map((label) => [label.id, label]))
           const sample = toPush.slice(0, 5).map((p) => {
             const proj = getCachedProjectName(p.project_id) ?? p.project_id
             const lbl = labelMap[p.label_id]?.name ?? p.label_id
@@ -2380,9 +2310,9 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             const remoteDelMs = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
             if (remoteDelMs <= localDelMs) continue
           }
-          const labelExists = await window.api.labels.findById(remote.label_id)
+          const labelExists = await api.labels.findById(remote.label_id)
           if (!labelExists) continue
-          await window.api.labels.applyRemoteProjectLabel({
+          await api.labels.applyRemoteProjectLabel({
             project_id: remote.project_id,
             label_id: remote.label_id,
             created_at: remote.created_at,
@@ -2396,7 +2326,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
           // removal. The deleted_at filter on getTaskLabelsForSharedProjects
           // depends on this cascade firing.
           if (remote.deleted_at) {
-            await window.api.labels
+            await api.labels
               .softDeleteTaskLabelsForProjectLabel(remote.project_id, remote.label_id)
               .catch(() => {})
           }
@@ -2434,14 +2364,14 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         // Collect all task IDs across all shared projects (active + archived + templates).
         const sharedTaskIds: string[] = []
         for (const project of sharedProjects) {
-          const tasks = await window.api.tasks.findByProjectId(project.id)
-          const archived = await window.api.tasks.findArchived(project.id)
-          const templates = await window.api.tasks.findTemplates(project.id)
+          const tasks = await api.tasks.findByProjectId(project.id)
+          const archived = await api.tasks.findArchived(project.id)
+          const templates = await api.tasks.findTemplates(project.id)
           for (const t of [...tasks, ...archived, ...templates]) sharedTaskIds.push(t.id)
         }
 
         // ── task_labels (shared) ──────────────────────────────────────────
-        const localSharedTl = await window.api.tasks.getTaskLabelsForSharedProjects()
+        const localSharedTl = await api.tasks.getTaskLabelsForSharedProjects()
         const localSharedTlSet = new Set<string>(
           localSharedTl.map((p) => tlPairKey(p.task_id, p.label_id))
         )
@@ -2527,7 +2457,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         }
 
         // ── project_labels (shared) ───────────────────────────────────────
-        const localSharedPl = await window.api.labels.getProjectLabelsForSharedProjects()
+        const localSharedPl = await api.labels.getProjectLabelsForSharedProjects()
         const localSharedPlByKey = new Map(
           localSharedPl.map((p) => [plPairKey(p.project_id, p.label_id), p])
         )
@@ -2659,7 +2589,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         if (referencedLabelIds.size > 0) {
           const missingLabelIds: string[] = []
           for (const lid of referencedLabelIds) {
-            const exists = await window.api.labels.findById(lid)
+            const exists = await api.labels.findById(lid)
             if (!exists) missingLabelIds.push(lid)
           }
           if (missingLabelIds.length > 0) {
@@ -2694,7 +2624,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             }
             for (const remote of fetched) {
               try {
-                await window.api.labels.applyRemote(remote as unknown as Label)
+                await api.labels.applyRemote(remote as unknown as Label)
                 shLabelsPulled++
               } catch (e) {
                 logEvent(
@@ -2710,19 +2640,19 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
 
         // ── Apply pulls now that referenced labels exist locally ──────────
         for (const remote of tlMissingLocal) {
-          const labelExists = await window.api.labels.findById(remote.label_id)
+          const labelExists = await api.labels.findById(remote.label_id)
           if (!labelExists) continue
           try {
-            await window.api.tasks.addLabel(remote.task_id, remote.label_id)
+            await api.tasks.addLabel(remote.task_id, remote.label_id)
             shTlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.
           }
         }
         for (const remote of plToApply) {
-          const labelExists = await window.api.labels.findById(remote.label_id)
+          const labelExists = await api.labels.findById(remote.label_id)
           if (!labelExists) continue
-          await window.api.labels.applyRemoteProjectLabel({
+          await api.labels.applyRemoteProjectLabel({
             project_id: remote.project_id,
             label_id: remote.label_id,
             created_at: remote.created_at,
@@ -2732,7 +2662,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
           // arrives, kill the local task_labels rows so the next reconcile
           // doesn't re-push them as "missing on remote".
           if (remote.deleted_at) {
-            await window.api.labels
+            await api.labels
               .softDeleteTaskLabelsForProjectLabel(remote.project_id, remote.label_id)
               .catch(() => {})
           }

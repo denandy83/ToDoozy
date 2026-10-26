@@ -13,7 +13,7 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
       CREATE TABLE projects(id text PRIMARY KEY, owner_id text, name text, is_archived integer, updated_at timestamptz);
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES ('p','owner','Original',0,'2026-01-01T00:00:00Z');
-      INSERT INTO tasks VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL);`)
+      INSERT INTO tasks(id,project_id,is_archived,updated_at,deleted_at) VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL);`)
     await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
     const client = { from(table: string) {
       let patch: Record<string, unknown> | null = null, columns = '*'
@@ -25,13 +25,19 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
         lte(key: string, value: unknown) { filters.push([key, value, '<=']); return chain },
         in(key: string, value: unknown) { filters.push([key, value, '=ANY']); return chain },
         order() { return chain }, limit() { return chain },
+        or(value: string) {
+          const match = value.match(/^([a-z_]+)\.is\.null,\1\.lte\.(.+)$/)
+          if (!match || !Number.isFinite(Date.parse(match[2]))) throw new Error('Invalid archive filter')
+          filters.push([match[1], match[2], 'NULL_OR_LTE'])
+          return chain
+        },
         then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
           return (async () => {
             const params: unknown[] = []
             const bind = (value: unknown) => { params.push(value); return `$${params.length}` }
             const quote = (key: string) => { if (!/^[a-z_]+$/.test(key)) throw new Error('Invalid fixture column'); return `"${key}"` }
             const sets = patch ? Object.entries(patch).map(([key, value]) => `${quote(key)}=${bind(value)}`).join(',') : ''
-            const where = filters.map(([key, value, operator]) => operator === 'IS' ? `${quote(key)} IS NULL` : operator === '=ANY' ? `${quote(key)}=ANY(${bind(value)})` : `${quote(key)}${operator}${bind(value)}`).join(' AND ')
+            const where = filters.map(([key, value, operator]) => operator === 'NULL_OR_LTE' ? `(${quote(key)} IS NULL OR ${quote(key)}<=${bind(value)})` : operator === 'IS' ? `${quote(key)} IS NULL` : operator === '=ANY' ? `${quote(key)}=ANY(${bind(value)})` : `${quote(key)}${operator}${bind(value)}`).join(' AND ')
             const query = patch ? `UPDATE ${quote(table)} SET ${sets} WHERE ${where} RETURNING *` : `SELECT ${columns} FROM ${quote(table)} WHERE ${where}`
             requests.push(table)
             try { return { data: (await db.query(query, params)).rows, error: null } } catch (error) { return { data: null, error: { message: String(error) } } }
@@ -43,7 +49,7 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
     configureLegacyArchive(client)
     const t10 = '2026-01-01T10:00:00.000Z', t20 = '2026-01-01T20:00:00.000Z', t30 = '2026-01-02T06:00:00.000Z'
     for (const state of [0, 1]) {
-      await db.exec("TRUNCATE tasks,projects; INSERT INTO projects VALUES ('p','owner','Original',0,'2026-01-01T00:00:00Z',NULL); INSERT INTO tasks VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL)")
+      await db.exec("TRUNCATE tasks,projects; INSERT INTO projects VALUES ('p','owner','Original',0,'2026-01-01T00:00:00Z',NULL); INSERT INTO tasks(id,project_id,is_archived,updated_at,deleted_at) VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL)")
       await writeProjectArchive(client, 'p', state, [], t10)
       for (const table of ['projects', 'tasks']) {
         const row = (await db.query(`SELECT updated_at::text AS stamp FROM ${table}`)).rows[0]
@@ -94,10 +100,10 @@ it.each([0, 1])('keeps metadata versions independent of archive inheritance=%s',
       CREATE TABLE projects(id text PRIMARY KEY,name text,description text,is_archived integer,updated_at timestamptz);
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,description text,status_id text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES ('p','New','New description',${state},'2026-01-01T20:00Z');
-      INSERT INTO tasks VALUES ('t','p','New','New description','new-status',${state},'2026-01-01T20:00Z',NULL);`)
+      INSERT INTO tasks(id,project_id,title,description,status_id,is_archived,updated_at,deleted_at) VALUES ('t','p','New','New description','new-status',${state},'2026-01-01T20:00Z',NULL);`)
     await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
     await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T10:00Z';
-      INSERT INTO tasks VALUES ('t','p','Old','Old description','old-status',${1 - state},'2026-01-01T05:00Z',NULL)
+      INSERT INTO tasks(id,project_id,title,description,status_id,is_archived,updated_at,deleted_at) VALUES ('t','p','Old','Old description','old-status',${1 - state},'2026-01-01T05:00Z',NULL)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,status_id=excluded.status_id,is_archived=excluded.is_archived,updated_at=excluded.updated_at;
       INSERT INTO projects VALUES ('p','Old','Old description',${1 - state},'2026-01-01T05:00Z','2026-01-02T06:00Z')
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,is_archived=excluded.is_archived,updated_at=excluded.updated_at,archive_updated_at=excluded.archive_updated_at;`)
@@ -132,10 +138,10 @@ it.each([0, 1])('inherits archive=%s on delayed INSERT/upsert and preserves meta
     await db.exec(readFileSync(new URL('../../migrations/20261026105740_disable_legacy_status_consistency_guard.sql', import.meta.url), 'utf8'))
     await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
     await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T10:00Z';
-      INSERT INTO tasks VALUES ('insert','p','Pending','open',NULL,${1-state},'2026-01-01T05:00Z',NULL);
-      INSERT INTO tasks VALUES ('upsert','p','Pending','done',NULL,${1-state},'2026-01-01T05:00Z',NULL)
+      INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('insert','p','Pending','open',NULL,${1-state},'2026-01-01T05:00Z',NULL);
+      INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('upsert','p','Pending','done',NULL,${1-state},'2026-01-01T05:00Z',NULL)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title,is_archived=excluded.is_archived,updated_at=excluded.updated_at;
-      INSERT INTO tasks VALUES ('deleted','p','Deleted','open',NULL,${1-state},'2026-01-01T05:00Z','2026-01-01T05:00Z');`)
+      INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('deleted','p','Deleted','open',NULL,${1-state},'2026-01-01T05:00Z','2026-01-01T05:00Z');`)
     const rows = (await db.query('SELECT *,updated_at::text AS stamp FROM tasks ORDER BY id')).rows
     expect(rows.find((row) => row.id === 'deleted')?.is_archived).toBe(1-state)
     for (const id of ['insert', 'upsert']) {
@@ -144,18 +150,39 @@ it.each([0, 1])('inherits archive=%s on delayed INSERT/upsert and preserves meta
       expect(Date.parse(String(row.stamp))).toBe(Date.parse('2026-01-01T05:00Z'))
     }
     expect(rows.find((row) => row.id === 'upsert')?.completed_date).toMatch(/Z$/)
-    await db.exec(`UPDATE tasks SET is_archived=${1-state},updated_at='2026-01-01T12:00Z' WHERE id='insert';
+    await db.exec(`UPDATE tasks SET is_archived=${1-state},archive_updated_at='2026-01-01T12:00Z',updated_at='2026-01-01T05:00Z' WHERE id='insert';
       UPDATE tasks SET is_archived=${state} WHERE id='insert' AND updated_at<='2026-01-01T10:00Z';`)
     expect((await db.query("SELECT is_archived FROM tasks WHERE id='insert'")).rows[0].is_archived).toBe(1-state)
-    await expect(db.exec("INSERT INTO tasks VALUES ('invalid','p','Bad','missing',NULL,0,'2026-01-01T05:00Z',NULL)")).rejects.toThrow(/Status must be active/)
+    await expect(db.exec("INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('invalid','p','Bad','missing',NULL,0,'2026-01-01T05:00Z',NULL)")).rejects.toThrow(/Status must be active/)
     await db.exec(`ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
       CREATE POLICY members_read ON tasks FOR SELECT TO authenticated USING (true);
       CREATE POLICY member_insert ON tasks FOR INSERT TO authenticated WITH CHECK (project_id='p' AND current_setting('test.actor') IN ('owner','member'));
       GRANT SELECT ON projects,statuses,tasks TO authenticated; GRANT INSERT ON tasks TO authenticated;
       SET ROLE authenticated; SET test.actor='member';
-      INSERT INTO tasks VALUES ('member','p','Member pending','open',NULL,${1-state},'2026-01-01T05:00Z',NULL);`)
+      INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('member','p','Member pending','open',NULL,${1-state},'2026-01-01T05:00Z',NULL);`)
     expect((await db.query("SELECT is_archived FROM tasks WHERE id='member'")).rows[0].is_archived).toBe(state)
     await db.exec("SET test.actor='outsider'")
-    await expect(db.exec("INSERT INTO tasks VALUES ('outsider','p','Bad','open',NULL,0,'2026-01-01T05:00Z',NULL)")).rejects.toThrow(/row-level security/)
+    await expect(db.exec("INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('outsider','p','Bad','open',NULL,0,'2026-01-01T05:00Z',NULL)")).rejects.toThrow(/row-level security/)
+  } finally { await db.close() }
+}, 15000)
+
+it.each([0, 1])('accepts modern metadata without reversing archive=%s and accepts separate explicit intent', async (state) => {
+  const db = new PGlite()
+  try {
+    await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+      CREATE TABLE projects(id text PRIMARY KEY,name text,is_archived integer,updated_at timestamptz);
+      CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
+      INSERT INTO projects VALUES ('p','Project',${state},'2026-01-01T00:01Z');
+      INSERT INTO tasks VALUES ('t','p','Old',${1-state},'2026-01-01T00:01Z',NULL);`)
+    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T00:10Z';
+      UPDATE tasks SET is_archived=${state},archive_updated_at='2026-01-01T00:10Z';
+      UPDATE tasks SET title='New metadata',updated_at='2026-01-01T00:12Z',is_archived=${1-state},archive_updated_at=NULL;`)
+    expect((await db.query('SELECT title,is_archived FROM tasks')).rows[0]).toEqual({ title: 'New metadata', is_archived: state })
+    await db.exec(`UPDATE tasks SET is_archived=${1-state},archive_updated_at='2026-01-01T00:13Z';
+      UPDATE tasks SET title='Stale metadata',updated_at='2026-01-01T00:05Z',is_archived=${state},archive_updated_at=NULL;`)
+    expect((await db.query('SELECT title,is_archived,updated_at::text AS stamp FROM tasks')).rows[0]).toMatchObject({ title: 'New metadata', is_archived: 1-state })
+    await db.exec(`UPDATE tasks SET title='Newer metadata',updated_at='2026-01-01T00:14Z',is_archived=${state},archive_updated_at='2026-01-01T00:10Z';`)
+    expect((await db.query('SELECT title,is_archived FROM tasks')).rows[0]).toEqual({ title: 'Newer metadata', is_archived: 1-state })
   } finally { await db.close() }
 }, 15000)

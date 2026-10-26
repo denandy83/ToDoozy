@@ -90,7 +90,7 @@ describe('durable sync retries', () => {
   it('replays a superseded archive command using the current restored state', async () => {
     const mock = clientMock()
     await replaySpecialEntry(mock.client, entry('q', 'projects', { id: 'p', is_archived: 1, archive_with_tasks: true }))
-    expect(mock.writes.map((write) => write.payload)).toEqual([{ is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z' }, { is_archived: 0 }])
+    expect(mock.writes.map((write) => write.payload)).toEqual([{ is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z' }, { is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z' }])
   })
   it('removes stale task-label links using the existing remote hard-delete contract', async () => {
     const mock = clientMock(null, [{ label_id: 'removed' }])

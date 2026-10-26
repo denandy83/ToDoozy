@@ -12,12 +12,12 @@ import { pullTaskLabelsForTasks } from './PersonalSyncService'
 const inFlight = new Map<string, Promise<void>>()
 const watermarks = new Map<string, string>()
 
-async function readRows<T extends { id: string; updated_at: string }>(client: SupabaseClient, table: string, ids: string[], since?: string): Promise<T[]> {
+async function readRows<T extends { id: string; updated_at: string }>(client: SupabaseClient, table: string, ids: string[], since?: string, archiveSince?: string): Promise<T[]> {
   const rows = new Map<string, T>()
   let cursor: T | undefined
   for (;;) {
     let query = client.from(table).select('*').in('project_id', ids).order('updated_at').order('id').limit(500)
-    if (since) query = query.gt('updated_at', since)
+    if (since) query = table === 'tasks' ? query.or(`updated_at.gt.${since},archive_updated_at.gt.${archiveSince ?? '1970-01-01T00:00:00Z'}`) : query.gt('updated_at', since)
     if (cursor) {
       const stamp = JSON.stringify(cursor.updated_at)
       query = query.or(`updated_at.gt.${stamp},and(updated_at.eq.${stamp},id.gt.${cursor.id})`)
@@ -55,7 +55,7 @@ async function refresh(userId: string): Promise<void> {
     const scope = `${context.scope}:${userId}:${ids.join(',')}`
     const [statuses, tasks] = await Promise.all([
       readRows<Status>(client, 'statuses', ids, watermarks.get(`${scope}:statuses`)),
-      readRows<Task>(client, 'tasks', ids, watermarks.get(`${scope}:tasks`))
+      readRows<Task>(client, 'tasks', ids, watermarks.get(`${scope}:tasks`), watermarks.get(`${scope}:task-archives`))
     ])
     if (!isCurrentUser()) return
     for (const status of statuses) {
@@ -91,6 +91,8 @@ async function refresh(userId: string): Promise<void> {
     }
     if (!isCurrentUser()) return
     await useTaskStore.getState().hydrateAllForUser(userId)
+    const archiveDates = tasks.map((task) => Date.parse(task.archive_updated_at ?? '')).filter(Number.isFinite)
+    if (archiveDates.length) watermarks.set(`${scope}:task-archives`, new Date(Math.max(...archiveDates) - 1).toISOString())
     for (const [table, rows] of [['statuses', statuses], ['tasks', tasks]] as const) {
       if (rows.length) watermarks.set(`${scope}:${table}`, new Date(Math.max(...rows.map((row) => Date.parse(row.updated_at))) - 1).toISOString())
     }

@@ -403,12 +403,12 @@ it('recovers a known pending archive version without substituting a later rename
   const db = new DatabaseSync(':memory:')
   try {
     db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
-    for (const migration of migrations.slice(0, -1)) migration(db)
+    for (const migration of migrations.slice(0, 26)) migration(db)
     const owner = seedUser(db), repo = new ProjectRepository(db)
     const project = makeProject(repo, owner, 'legacy-intent')
     db.prepare('UPDATE projects SET is_archived=1,updated_at=? WHERE id=?').run('2026-01-03T00:00:00Z', project.id)
     db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('q','projects',project.id,'UPDATE',JSON.stringify({ archive_with_tasks: true, is_archived: 1, updated_at: '2026-01-01T00:00:00Z' }),'2026-01-04T00:00:00Z')
-    migrations[migrations.length - 1](db)
+    migrations[26](db)
     expect(repo.findById(project.id)).toMatchObject({ is_archived: 1, archive_updated_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-03T00:00:00Z' })
   } finally { db.close() }
 })

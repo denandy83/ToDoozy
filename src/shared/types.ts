@@ -70,6 +70,7 @@ export interface Task {
   is_in_my_day: number
   is_template: number
   is_archived: number
+  archive_updated_at?: string | null
   completed_date: string | null
   recurrence_rule: string | null
   reference_url: string | null

@@ -160,13 +160,13 @@ export class TaskRepository {
       .all(parentId) as unknown as Task[]
   }
 
-  getSubtaskCount(parentId: string, includeArchived = false): { total: number; done: number } {
+  getSubtaskCount(parentId: string): { total: number; done: number } {
     const row = this.db
       .prepare(
         `SELECT
            COUNT(*) as total,
            SUM(CASE WHEN status_id IN (SELECT id FROM statuses WHERE is_done = 1) THEN 1 ELSE 0 END) as done
-         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'}`
+         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL AND is_archived = 0`
       )
       .get(parentId) as { total: number; done: number }
     return { total: row.total, done: row.done ?? 0 }
@@ -208,12 +208,14 @@ export class TaskRepository {
 
   create(input: CreateTaskInput): Task {
     const now = new Date().toISOString()
+    const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(input.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
+    const archiveAt = input.is_archived !== undefined ? new Date(Math.max(Date.now(), Date.parse(project?.archive_updated_at ?? '') + 1 || 0)).toISOString() : project?.archive_updated_at ?? null
     this.db
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, title, status_id, assigned_to, description,
          priority, due_date, parent_id, order_index, is_in_my_day, is_template, is_archived,
-         completed_date, recurrence_rule, reference_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         completed_date, recurrence_rule, reference_url, created_at, updated_at, archive_updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -229,12 +231,13 @@ export class TaskRepository {
         input.order_index ?? 0,
         input.is_in_my_day ?? 0,
         input.is_template ?? 0,
-        input.is_archived ?? 0,
+        input.is_archived ?? project?.is_archived ?? 0,
         input.completed_date ?? null,
         input.recurrence_rule ?? null,
         input.reference_url ?? null,
         now,
-        now
+        now,
+        archiveAt
       )
     return this.findById(input.id)!
   }
@@ -247,10 +250,12 @@ export class TaskRepository {
       ? (this.db.prepare('SELECT archive_updated_at FROM projects WHERE id=?').get(existing.project_id) as { archive_updated_at: string | null } | undefined)?.archive_updated_at
       : null
     const now = input.is_archived !== undefined
-      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1, Date.parse(archiveVersion ?? '') + 1 || 0)).toISOString()
+      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1, Date.parse(existing.archive_updated_at ?? '') + 1 || 0, Date.parse(archiveVersion ?? '') + 1 || 0)).toISOString()
       : new Date().toISOString()
+    const metadataChanged = TASK_UPDATABLE_COLUMNS.some((col) => col !== 'is_archived' && input[col] !== undefined && input[col] !== existing[col])
     const sets: string[] = ['updated_at = ?']
-    const values: (string | number | null)[] = [now]
+    const values: (string | number | null)[] = [metadataChanged ? now : existing.updated_at]
+    if (input.is_archived !== undefined) { sets.push('archive_updated_at = ?'); values.push(now) }
 
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (input[col] !== undefined) {
@@ -282,18 +287,20 @@ export class TaskRepository {
     const existing = this.findById(task.id)
     if (existing?.deleted_at && !isRemoteNewer(existing.updated_at, task.updated_at)) return existing
     const metadataNewer = !existing || isRemoteNewer(existing.updated_at, task.updated_at)
-    if (!metadataNewer) task = existing!
+    const archiveNewer = !!task.archive_updated_at && (!existing?.archive_updated_at || Date.parse(task.archive_updated_at) >= Date.parse(existing.archive_updated_at))
+    const archive = archiveNewer ? task : existing?.archive_updated_at ? existing : metadataNewer ? task : existing!
+    task = { ...(metadataNewer ? task : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
     const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(task.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
-    if (!task.deleted_at && project?.archive_updated_at && Date.parse(task.updated_at) <= Date.parse(project.archive_updated_at)) {
-      task = { ...task, is_archived: project.is_archived }
+    if (!task.deleted_at && project?.archive_updated_at && Date.parse(task.archive_updated_at ?? '1970-01-01') <= Date.parse(project.archive_updated_at)) {
+      task = { ...task, is_archived: project.is_archived, archive_updated_at: project.archive_updated_at }
     }
-    if (!metadataNewer && task.is_archived === existing!.is_archived) return existing!
+    if (!metadataNewer && task.is_archived === existing!.is_archived && task.archive_updated_at === existing!.archive_updated_at) return existing!
     this.db
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, assigned_to, title, description, status_id,
          priority, due_date, parent_id, order_index, is_template, is_archived, is_in_my_day,
-         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at, deleted_at, archive_updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            owner_id = excluded.owner_id,
@@ -314,7 +321,8 @@ export class TaskRepository {
            my_day_dismissed_date = excluded.my_day_dismissed_date,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
-           deleted_at = excluded.deleted_at`
+           deleted_at = excluded.deleted_at,
+           archive_updated_at = excluded.archive_updated_at`
       )
       .run(
         task.id,
@@ -337,7 +345,8 @@ export class TaskRepository {
         task.my_day_dismissed_date ?? null,
         toCanonicalIso(task.created_at),
         toCanonicalIso(task.updated_at),
-        toCanonicalIso(task.deleted_at ?? null)
+        toCanonicalIso(task.deleted_at ?? null),
+        toCanonicalIso(task.archive_updated_at ?? null)
       )
     return this.findById(task.id)!
   }
@@ -365,10 +374,10 @@ export class TaskRepository {
 
   reorder(taskIds: string[]): void {
     withTransaction(this.db, () => {
-      const stmt = this.db.prepare('UPDATE tasks SET order_index = ? WHERE id = ?')
-      for (let i = 0; i < taskIds.length; i++) {
-        stmt.run(i, taskIds[i])
-      }
+      const tasks = taskIds.map((id) => this.findById(id)).filter((task) => !!task)
+      const now = new Date(Math.max(Date.now(), ...tasks.map((task) => Date.parse(task.updated_at) + 1))).toISOString()
+      const stmt = this.db.prepare('UPDATE tasks SET order_index = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      for (let i = 0; i < taskIds.length; i++) stmt.run(i, now, taskIds[i])
     })
   }
 

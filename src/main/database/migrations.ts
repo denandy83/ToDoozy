@@ -766,4 +766,8 @@ const migration_27: Migration = (db) => {
   for (const [id, action] of actions) db.prepare('UPDATE projects SET archive_updated_at=? WHERE id=? AND is_archived=?').run(action.stamp, id, action.archived)
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27]
+const migration_28: Migration = (db) => {
+  db.exec('ALTER TABLE tasks ADD COLUMN archive_updated_at TEXT NULL')
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28]

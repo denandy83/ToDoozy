@@ -426,11 +426,13 @@ export class LabelRepository {
 
   /** Link an existing label to a project — revives a tombstoned link if present. */
   addToProject(projectId: string, labelId: string): void {
+    const previous = this.db.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, labelId) as { created_at: string } | undefined
+    const now = new Date(Math.max(Date.now(), Date.parse(previous?.created_at ?? '') + 1 || 0)).toISOString()
     this.db.prepare(
       `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
-       VALUES (?, ?, datetime('now'), NULL)
-       ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL`
-    ).run(projectId, labelId)
+       VALUES (?, ?, ?, NULL)
+       ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL, created_at = excluded.created_at`
+    ).run(projectId, labelId, now)
   }
 
   findByTaskId(taskId: string): Label[] {

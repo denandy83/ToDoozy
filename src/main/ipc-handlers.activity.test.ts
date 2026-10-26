@@ -51,6 +51,9 @@ afterEach(async () => { await new Promise((done) => setTimeout(done, 0)); vi.uns
 it('logs actual task-store activity through the registered bound IPC boundary', async () => {
   const store = useTaskStore.getState()
   await store.createTask({ id: 't', project_id: 'p', status_id: 's', owner_id: 'a', title: 'Task' })
+  const origin = captureSyncProducer()
+  await origin.api.syncMeta.setHighWater('a', 'p', 'tasks', '2026-01-01T00:00:00.000Z')
+  expect(await origin.api.syncMeta.getHighWater('a', 'p', 'tasks')).toBe('2026-01-01T00:00:00.000Z')
   await store.updateTask('t', { title: 'Edited', status_id: 's2', priority: 2, due_date: '2026-01-01', assigned_to: 'a', recurrence_rule: 'FREQ=DAILY', reference_url: 'https://example.invalid', is_in_my_day: 1 })
   await store.addLabel('t', 'l')
   await store.removeLabel('t', 'l')
@@ -70,6 +73,7 @@ it.each(['account', 'database'])('rejects stale activity after a %s switch witho
   const create = vi.spyOn(repositories[1].activityLog, 'create')
   await expect(origin.api.activityLog.create({ id: 'log', task_id: 't', user_id: 'a', action: 'created' })).rejects.toThrow('database changed')
   await expect(invoke('sync:invokeContext', context, 'activityLog:create', [])).rejects.toThrow('database changed')
+  await expect(origin.api.syncMeta.setHighWater('a', 'p', 'tasks', '2026-01-01T00:00:00.000Z')).rejects.toThrow('database changed')
   expect(create).not.toHaveBeenCalled()
   expect(databases[1].prepare('SELECT count(*) AS n FROM activity_log').get()?.n).toBe(0)
 })
