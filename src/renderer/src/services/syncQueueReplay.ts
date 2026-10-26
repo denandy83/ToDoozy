@@ -4,7 +4,7 @@ import { readAll } from './readAll'
 import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
-import { currentProjectLabelFamily, currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
+import { writeProjectLabelChoices, currentProjectLabelFamily, currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
 import { preserveStatusDeletionEdits, type StatusDeletionCommand } from './statusDeletionSync'
 import { orderTaskLabelWrites, syncTaskLabelChoices } from './taskLabelAdditions'
 import { writeProjectArchive } from './projectArchiveSync'
@@ -84,11 +84,10 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       if (remote.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(payload.projectId,String(payload.labelId))
       return true
     }
-    const { error } = await client.from('project_labels').upsert({
-      project_id: payload.projectId, label_id: payload.labelId,
-      created_at: current?.created_at ?? payload.createdAt ?? entry.created_at, deleted_at: payload.deletedAt && 'expectedLink' in payload ? payload.deletedAt : current!.deleted_at
-    }, { onConflict: 'project_id,label_id' })
-    if (error) throw new Error(error.message)
+    await writeProjectLabelChoices(client,api,[{
+      project_id: String(payload.projectId), label_id: String(payload.labelId),
+      created_at: String(current?.created_at ?? payload.createdAt ?? entry.created_at), deleted_at: payload.deletedAt && 'expectedLink' in payload ? String(payload.deletedAt) : current!.deleted_at
+    }],()=>context?.assertCurrent())
     if (payload.addition && current && !current.deleted_at) {
       const tasks = await api.tasks.findAllByProject(String(payload.projectId))
       await syncTaskLabelChoices(client, tasks.map((task) => task.id), api, await labelScope())
@@ -96,7 +95,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     return true
   }
   if (entry.table_name === 'task_labels' && payload.remove_project_label === true) {
-    await removeRemoteProjectLabel(client, api, payload as unknown as ProjectLabelRemoval, await labelScope())
+    await removeRemoteProjectLabel(client, api, payload as unknown as ProjectLabelRemoval, await labelScope(),()=>context?.assertCurrent())
     return true
   }
   if (entry.table_name === 'task_labels') {
@@ -132,7 +131,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
         projectId:payload.projectId,labelId:payload.labelId,
         deletedAt:String(payload.deletedAt ?? current?.deleted_at ?? entry.created_at),
         expectedLink:'expectedLink' in payload ? payload.expectedLink as ProjectLabelRemoval['expectedLink'] : current
-      },await labelScope())
+      },await labelScope(),()=>context?.assertCurrent())
     } else {
       throw new Error('Unrecognized task-label retry payload')
     }

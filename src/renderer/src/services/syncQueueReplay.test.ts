@@ -244,7 +244,7 @@ describe('queue integration with isolated account databases', () => {
     await (pinned.client as SupabaseClient).from('project_labels').upsert({ project_id: 'p', label_id: 'l', deleted_at: 'newer' })
     pause.resolve()
     expect(await drain).toBe(1)
-    expect(remote.project_labels).toMatchObject({ project_id: 'p', label_id: 'l', deleted_at: expect.any(String) })
+    expect(remote.project_labels).toMatchObject([{ project_id: 'p', label_id: 'l', deleted_at: expect.any(String) }])
   })
   it('replays restore racing a queued archive and its task cascade', async () => {
     const repo = repositories[0]

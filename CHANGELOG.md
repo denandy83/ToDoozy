@@ -6,6 +6,8 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ## v1.10.0
 
+- **Project-label delivery** — Overlapping eager, queued, upload and reconciliation writes recheck current local intent after delivery; failed repair remains queued. Family clocks use the same accented-name comparison as the UI.
+- **Bot release validation** — The candidate container uses Node 22.23.2, matching CI, and generated bot output is excluded from lint without excluding handwritten sources.
 - **Label removal clocks** — Project-label removals and later additions advance beyond known same-name association clocks, including clock-ahead imports and clock rollback.
 - **Telegram polling watchdog** — Bounded graceful recovery, polling/backlog monitoring and sanitized failure logs address silent polling loss. Package checks are included in CI. Source implementation awaits independent verification and deployment; it is not user-verified or deployed.
 

@@ -39,7 +39,7 @@ export function projectLinkSuperseded(current: Awaited<ReturnType<typeof current
   return !!current && !current.deleted_at && JSON.stringify(current) !== JSON.stringify(expected)
 }
 
-export async function removeRemoteProjectLabel(client: SupabaseClient, api: TodoozyAPI, intent: ProjectLabelRemoval, scope: string): Promise<void> {
+export async function removeRemoteProjectLabel(client: SupabaseClient, api: TodoozyAPI, intent: ProjectLabelRemoval, scope: string, assertCurrent: () => void = () => {}): Promise<void> {
   const currentAdditions = async (): Promise<Awaited<ReturnType<typeof currentProjectLabelFamily>>> => {
     const additions = (await api.sync.getQueue()).filter((entry) => entry.table_name === 'project_labels').map((entry) => JSON.parse(entry.payload))
     return (await currentProjectLabelFamily(intent.projectId, intent.labelId, api, intent.labelName)).filter((link) => !link.deleted_at && (
@@ -52,10 +52,9 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
     const latest=await currentAdditions()
     if (!latest.length) return false
     for (let index = 0; index < latest.length; index += 200) {
-      const { error } = await client.from('project_labels').upsert(latest.slice(index,index+200).map((link) => ({
+      await writeProjectLabelChoices(client,api,latest.slice(index,index+200).map((link) => ({
         project_id: intent.projectId, label_id: link.label_id, created_at: link.created_at, deleted_at: null
-      })), { onConflict: 'project_id,label_id' })
-      if (error) throw new Error(error.message)
+      })),assertCurrent)
     }
     const localTasks = await api.tasks.findAllByProject(intent.projectId)
     await syncTaskLabelChoices(client, localTasks.map((task) => task.id), api, scope)
@@ -84,10 +83,9 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
   }
   if (await restoreReaddition()) return
   for (let index = 0; index < ids.length; index += 200) {
-    const { error } = await client.from('project_labels').upsert(ids.slice(index, index + 200).map((label_id) => ({
+    await writeProjectLabelChoices(client,api,ids.slice(index,index+200).map((label_id) => ({
       project_id: intent.projectId, label_id, created_at: intent.deletedAt, deleted_at: intent.deletedAt
-    })), { onConflict: 'project_id,label_id' })
-    if (error) throw new Error(error.message)
+    })),assertCurrent,true)
   }
   const { data: tasks } = await readAll(() => client.from('tasks').select('id').eq('project_id', intent.projectId))
   if (await restoreReaddition()) return
@@ -101,4 +99,49 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
     }
   }
   await restoreReaddition()
+}
+
+export async function writeProjectLabelChoices(
+  client: SupabaseClient,
+  api: TodoozyAPI,
+  links: Array<{project_id:string;label_id:string;created_at:string;deleted_at:string|null}>,
+  assertCurrent: () => void,
+  allowMissing = false
+): Promise<void> {
+  const unique = [...new Map(links.map((link)=>[JSON.stringify([link.project_id,link.label_id]),link])).values()]
+  const latest = async (rows: typeof links): Promise<typeof links> => {
+    const result: typeof links = []
+    for (const row of rows) {
+      assertCurrent()
+      const current = await currentProjectLink(row.project_id,row.label_id,api)
+      assertCurrent()
+      if (current) {
+        const chosen = allowMissing && Date.parse(row.deleted_at ?? row.created_at)>Date.parse(current.deleted_at ?? current.created_at) ? row : {...row,...current}
+        result.push(chosen)
+      } else if (allowMissing) result.push(row)
+    }
+    return result
+  }
+  await Promise.all(Array.from({length:Math.ceil(unique.length/200)},async(_,index)=>{
+    let pending = unique.slice(index*200,index*200+200)
+    try {
+      while (pending.length) {
+        const before = await latest(pending)
+        if (!before.length) return
+        assertCurrent()
+        const {error} = await client.from('project_labels').upsert(before,{onConflict:'project_id,label_id'})
+        assertCurrent()
+        if (error) throw new Error(error.message)
+        const after = await latest(before)
+        const previous = new Map(before.map((row)=>[JSON.stringify([row.project_id,row.label_id]),row]))
+        pending = after.filter((row)=>JSON.stringify(row)!==JSON.stringify(previous.get(JSON.stringify([row.project_id,row.label_id]))))
+      }
+    } catch (error) {
+      assertCurrent()
+      for (const row of await latest(pending)) {
+        await api.sync.enqueue('project_labels',`${row.project_id}::${row.label_id}`,'UPDATE',JSON.stringify({projectId:row.project_id,labelId:row.label_id,createdAt:row.created_at,deletedAt:row.deleted_at,...(row.deleted_at?{expectedLink:{created_at:row.created_at,deleted_at:row.deleted_at}}:{addition:true})}))
+      }
+      throw error
+    }
+  }))
 }

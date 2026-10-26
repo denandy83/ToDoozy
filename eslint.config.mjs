@@ -2,7 +2,7 @@ import tseslint from '@electron-toolkit/eslint-config-ts'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default [
-  { ignores: ['out/**', 'dist/**', 'node_modules/**', '.claude/**', 'ToDoozy/**'] },
+  { ignores: ['out/**', 'dist/**', 'packages/telegram-bot/dist/**', 'node_modules/**', '.claude/**', 'ToDoozy/**'] },
   ...tseslint.configs.recommended,
   {
     rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }] }

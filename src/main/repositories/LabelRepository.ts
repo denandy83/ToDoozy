@@ -466,10 +466,11 @@ export class LabelRepository {
   }
 
   private nextProjectLabelVersion(projectId: string, labelId: string): string {
-    const links = this.db.prepare(`SELECT pl.created_at,pl.deleted_at FROM project_labels pl
-      JOIN labels l ON l.id=pl.label_id WHERE pl.project_id=? AND
-      (pl.label_id=? OR lower(l.name)=(SELECT lower(name) FROM labels WHERE id=?))`)
-      .all(projectId,labelId,labelId) as Array<{created_at:string;deleted_at:string|null}>
+    const name = this.findById(labelId)?.name.toLowerCase()
+    const links = (this.db.prepare(`SELECT pl.label_id,l.name,pl.created_at,pl.deleted_at FROM project_labels pl
+      JOIN labels l ON l.id=pl.label_id WHERE pl.project_id=?`)
+      .all(projectId) as Array<{label_id:string;name:string;created_at:string;deleted_at:string|null}>)
+      .filter((link) => link.label_id === labelId || (name !== undefined && link.name.toLowerCase() === name))
     let version = Date.now()
     for (const link of links) {
       for (const value of [link.created_at,link.deleted_at]) {

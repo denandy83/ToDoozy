@@ -18,7 +18,7 @@ import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import type { Task, Status, Label, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
-import { currentProjectLink, projectLinkSuperseded } from './projectLabelIntent'
+import { currentProjectLink, projectLinkSuperseded, writeProjectLabelChoices } from './projectLabelIntent'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -450,28 +450,8 @@ export async function pushProjectLabel(
         await processSyncQueue({api:origin.api,client:supabase,assertCurrent:origin.assertCurrent,isCurrent:origin.isCurrent,scope:await origin.scope()})
         return
       }
-      const { error } = await supabase
-        .from('project_labels')
-        .upsert(
-          {
-            project_id: projectId,
-            label_id: labelId,
-            created_at: current?.created_at ?? new Date().toISOString(),
-            deleted_at: deletedAt
-          },
-          { onConflict: 'project_id,label_id' }
-        )
-      if (error) {
-        await reportPushFailure(origin,
-          'pushProjectLabel',
-          error,
-          'project_labels',
-          `${projectId}::${labelId}`,
-          JSON.stringify({ projectId, labelId, deletedAt, ...(expectedLink !== undefined ? { expectedLink } : {}) })
-        )
-      } else {
-        await markSynced(origin)
-      }
+      await writeProjectLabelChoices(supabase,origin.api,[{project_id:projectId,label_id:labelId,created_at:current!.created_at,deleted_at:deletedAt}],origin.assertCurrent)
+      await markSynced(origin)
     } catch (err) {
       await reportPushFailure(origin,
         'pushProjectLabel',
@@ -1125,19 +1105,7 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
             if (remote.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(project.id,label.id)
           } else if(local && !local.deleted_at) rows.push({project_id:project.id,label_id:label.id,created_at:local.created_at,deleted_at:null})
         }
-        if (rows.length) {
-        const { error: plErr } = await supabase
-          .from('project_labels')
-          .upsert(rows, { onConflict: 'project_id,label_id' })
-        if (plErr) {
-          logEvent(
-            'warn',
-            'sync',
-            `fullUpload: push project_labels failed for ${project.name}`,
-            plErr.message
-          )
-        }
-        }
+        if (rows.length) await writeProjectLabelChoices(supabase,api,rows,context.assertCurrent)
       }
 
       // Push ALL tasks (including archived and templates)
@@ -2113,13 +2081,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
         let plPushed = 0
         for (let i = 0; i < toPush.length; i += chunkSize) {
           const chunk = toPush.slice(i, i + chunkSize)
-          const { error: upsertErr } = await supabase
-            .from('project_labels')
-            .upsert(chunk, { onConflict: 'project_id,label_id' })
-          if (upsertErr) {
-            logEvent('error', 'sync', 'Reconcile: push project_labels failed', `err=${upsertErr.message}`)
-            break
-          }
+          await writeProjectLabelChoices(supabase,api,chunk,context.assertCurrent)
           plPushed += chunk.length
         }
         totalPushed += plPushed
@@ -2278,18 +2240,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
             )
             for (let i = 0; i < plToPush.length; i += chunkSize) {
               const chunk = plToPush.slice(i, i + chunkSize)
-              const { error: upsertErr } = await supabase
-                .from('project_labels')
-                .upsert(chunk, { onConflict: 'project_id,label_id' })
-              if (upsertErr) {
-                logEvent(
-                  'error',
-                  'sync',
-                  'Reconcile: push shared project_labels failed',
-                  `err=${upsertErr.message}`
-                )
-                break
-              }
+              await writeProjectLabelChoices(supabase,api,chunk,context.assertCurrent)
               shPlPushed += chunk.length
             }
           }

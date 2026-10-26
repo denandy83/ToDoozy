@@ -1,5 +1,11 @@
 # Telegram bot polling recovery
 
+The candidate container and CI use Node 22.23.2. Node 22 is supported LTS; Node 20
+is EOL ([official release table](https://nodejs.org/en/about/previous-releases)).
+Generated `dist` output is excluded from root lint; source, tests and config remain
+covered. Container-image build evidence must be recorded separately when a usable
+local Docker daemon is available; package checks alone do not prove the image.
+
 The bot uses the locked `node-telegram-bot-api` 0.66.0 API. The installed package's
 `doc/api.md` documents `getWebHookInfo()`, `isPolling()`, `startPolling()` and
 `stopPolling()`. Its `src/telegramPolling.js` is the compatibility reference:
