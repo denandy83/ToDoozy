@@ -15,7 +15,7 @@ import type { SyncContext } from './syncContext'
 
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
-vi.mock('./syncContext', () => ({ captureSyncContext: vi.fn(async () => context) }))
+vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
 vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateLabels: async () => {} }) } }))
 vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))
 
@@ -419,4 +419,31 @@ it.each(['complete','second-page-failure'])('converges a 502-to-501 assignment s
   expect(pageCounts.task_labels).toBe(2)
   expect(repo.tasks.getLabels(task.id)).toHaveLength(mode==='complete'?501:502)
   expect(repo.labels.findByProjectId(projectId)).toHaveLength(502)
+})
+
+it.each([0,1])('keeps clock-ahead family removal through public reconciliation and later re-add (shared=%s)',async(shared)=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime('2020-01-01T00:00:00Z')
+  try {
+    repo.projects.addMember(projectId,'u','owner')
+    repo.projects.update(projectId,{is_shared:shared})
+    const task=repo.tasks.create({id:'clock-reconcile',project_id:projectId,owner_id:'u',status_id:'open',title:'Clock'})
+    const label=repo.labels.create({id:'clock-reconcile-label',user_id:'u',name:'Clock'})
+    const link={project_id:projectId,label_id:label.id,created_at:'2031-01-01T00:00:00.000Z',deleted_at:null}
+    repo.labels.applyRemoteProjectLabel(link);repo.tasks.applyRemoteTaskLabels(task.id,[label.id])
+    rows.projects=[{...repo.projects.findById(projectId)}];rows.statuses=[{...repo.statuses.findById('open')}]
+    rows.tasks=[{...task}];rows.user_labels=[{...label}];rows.project_labels=[{...link}]
+    rows.task_labels=[{task_id:task.id,label_id:label.id,deleted_at:null}]
+    expect(repo.labels.removeFromProject(projectId,label.id)).toBe(true)
+    setOnlineStatus(true)
+    await processSyncQueue(context);await reconcile('u');await processSyncQueue(context)
+    expect(repo.syncQueue.count()).toBe(0)
+    expect(rows.project_labels[0].deleted_at).toBe('2031-01-01T00:00:00.001Z')
+    expect(rows.task_labels).toEqual([]);expect(repo.labels.findByTaskId(task.id)).toEqual([])
+    repo.tasks.addLabel(task.id,label.id)
+    await processSyncQueue(context);await reconcile('u');await processSyncQueue(context)
+    expect(repo.syncQueue.count()).toBe(0)
+    expect(rows.project_labels[0]).toMatchObject({deleted_at:null,created_at:'2031-01-01T00:00:00.002Z'})
+    expect(rows.task_labels).toEqual([{task_id:task.id,label_id:label.id,deleted_at:null}])
+    expect(repo.labels.findByTaskId(task.id).map((row)=>row.id)).toEqual([label.id])
+  } finally {vi.useRealTimers()}
 })

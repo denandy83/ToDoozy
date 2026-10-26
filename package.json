@@ -16,7 +16,8 @@
     "pack:dev": "electron-vite build && electron-builder --dir -c.appId=com.todoozy.dev -c.productName=\"ToDoozy Dev\"",
     "dist:mac:dev": "electron-vite build && electron-builder --mac -c.appId=com.todoozy.dev -c.productName=\"ToDoozy Dev\"",
     "dist": "electron-vite build && electron-builder",
-    "dist:mac": "electron-vite build && electron-builder --mac"
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "check:telegram-bot": "npm --prefix packages/telegram-bot run typecheck && npm --prefix packages/telegram-bot test && npm --prefix packages/telegram-bot run build"
   },
   "repository": {
     "type": "git",

@@ -10,6 +10,7 @@ import { useAuthStore } from '../shared/stores/authStore'
 import { requireSession } from './sessionRecovery'
 import { setOnlineStatus, processSyncQueue } from './SyncService'
 import { useTaskStore } from '../shared/stores/taskStore'
+import { useLabelStore } from '../shared/stores/labelStore'
 import type { TodoozyAPI } from '../../../preload/index.d'
 import { captureSyncContext } from './syncContext'
 import { SYNC_TABLES } from './syncTables'
@@ -114,7 +115,10 @@ beforeEach(async () => {
           if(failRecoveryResponse) {failRecoveryResponse=false;throw new Error('synthetic lost recovery response')}
           return {data:JSON.parse(JSON.stringify(result.rows)),error:null}
         }
-        const result=JSON.parse(JSON.stringify((await remote.query(`SELECT ${columns} FROM ${quote(table)}${where?' WHERE '+where:''}`,params)).rows))
+        const joined=table==='project_labels' && columns.includes('user_labels!inner(name)')
+        const projection=joined ? columns.split(',').map((column)=>column==='user_labels!inner(name)' ? "json_build_object('name',ul.name) AS user_labels" : `${quote(table)}.${quote(column)}`).join(',') : columns
+        const from=joined ? `${quote(table)} JOIN user_labels ul ON ul.id=project_labels.label_id` : quote(table)
+        const result=JSON.parse(JSON.stringify((await remote.query(`SELECT ${projection} FROM ${from}${where?' WHERE '+where:''}`,params)).rows))
         if(table==='task_labels' && afterLabelSnapshot) {const hook=afterLabelSnapshot;afterLabelSnapshot=null;await hook()}
         return {data:result,error:null}
       } catch(error) { return {data:null,error:{message:String(error)}} }
@@ -597,4 +601,61 @@ it('retains canonical removal intent when cloud identity resolution fails',async
   await processSyncQueue();await processSyncQueue()
   expect(repos.syncQueue.count()).toBe(0)
   expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,labels[0]])).rows).toHaveLength(0)
+},15000)
+
+it.each([0,1].flatMap((shared)=>['same-tick','rollback','import-ahead','sibling-ahead'].map((clock)=>({shared,clock}))))('retains actual project-label removal after $clock delivery (shared=$shared)',async({shared,clock})=>{
+  const ids=await seedSettledAssignments(), labelId=ids[0]
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  const client=await captureSyncContext()
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime('2030-01-01T20:00:00.000Z')
+  await useLabelStore.getState().hydrateLabels(project)
+  setOnlineStatus(true)
+  await useLabelStore.getState().addToProject(project,labelId)
+  await useTaskStore.getState().addLabel(task,labelId)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  let maximum=Date.parse(String(local.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(project,labelId)!.created_at))
+  if(clock==='import-ahead' || clock==='sibling-ahead') {
+    const foreign=clock==='sibling-ahead'?id(907):labelId
+    if(foreign!==labelId) {
+      repos.users.create({id:id(908),email:'foreign@example.invalid',display_name:null,avatar_url:null})
+      const canonical=repos.labels.findById(labelId)!
+      const definition={...canonical,id:foreign,user_id:id(908)}
+      repos.labels.applyRemote(definition)
+      await client.client.from('user_labels').upsert(definition)
+    }
+    const ahead={project_id:project,label_id:foreign,created_at:'2031-01-01T00:00:00.000Z',deleted_at:null}
+    repos.labels.applyRemoteProjectLabel(ahead)
+    await client.client.from('project_labels').upsert(ahead)
+    await client.client.from('task_labels').upsert({task_id:task,label_id:foreign,deleted_at:null})
+    maximum=Date.parse(ahead.created_at)
+    await useLabelStore.getState().hydrateLabels(project)
+  }
+  if(clock==='rollback') vi.setSystemTime('2029-01-01T00:00:00.000Z')
+  setOnlineStatus(false)
+  expect(await useLabelStore.getState().removeFromProject(project,labelId)).toBe(true)
+  const commands=repos.syncQueue.findAll().map((entry)=>JSON.parse(entry.payload)).filter((value)=>value.remove_project_label)
+  expect(commands.length).toBeGreaterThan(0)
+  for(const command of commands) {
+    expect(Date.parse(command.deletedAt)).toBeGreaterThan(maximum)
+    expect(local.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(project,command.labelId)?.deleted_at).toBe(command.deletedAt)
+    if(command.labelId===labelId) expect(repos.tasks.getLabelState(task).find((row)=>row.label_id===labelId)?.deleted_at).toBe(command.deletedAt)
+  }
+  setOnlineStatus(true)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  const {refreshProjectLabels}=await import('./remoteProjectRefresh')
+  const {pullTaskLabelsForTasks}=await import('./PersonalSyncService')
+  await refreshProjectLabels(project,client)
+  await pullTaskLabelsForTasks([task],owner,client)
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  expect(repos.labels.findByProjectId(project).map((row)=>row.id)).not.toContain(labelId)
+  expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id)).toEqual([ids[1]])
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id<>$2',[task,ids[1]])).rows).toEqual([])
+  await useTaskStore.getState().addLabel(task,labelId)
+  await processSyncQueue();await processSyncQueue()
+  await refreshProjectLabels(project,client);await pullTaskLabelsForTasks([task],owner,client)
+  expect(repos.syncQueue.count()).toBe(0)
+  expect(repos.labels.findByTaskId(task).map((row)=>row.id)).toContain(labelId)
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,labelId])).rows).toHaveLength(1)
 },15000)

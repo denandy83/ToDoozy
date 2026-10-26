@@ -1,3 +1,4 @@
+import { logBotFailure } from './pollingWatchdog'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -265,7 +266,7 @@ export async function createTask(params: {
       task_id: id,
       label_id: labelId
     })
-    if (labelError) console.error(`[Bot] Failed to assign label ${labelId}:`, labelError.message)
+    if (labelError) logBotFailure('Failed to assign label', labelError)
   }
 
   return data

@@ -408,8 +408,8 @@ export class LabelRepository {
 
   /** Remove a label from a specific project. Tasks in that project lose the label. */
   removeFromProject(projectId: string, labelId: string): boolean {
-    const now = new Date().toISOString()
     return withTransaction(this.db, () => {
+      const now = this.nextProjectLabelVersion(projectId, labelId)
       // Soft-delete task_labels for tasks in this project (active rows only)
       this.db.prepare(
         `UPDATE task_labels SET deleted_at = ?,sync_pending=0,local_version=(SELECT COALESCE(MAX(local_version),0)+1 FROM task_labels)
@@ -456,14 +456,28 @@ export class LabelRepository {
   /** Link an existing label to a project — revives a tombstoned link if present. */
   addToProject(projectId: string, labelId: string): void {
     if (!this.db.isTransaction) return withTransaction(this.db, () => this.addToProject(projectId, labelId))
-    const previous = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, labelId) as { created_at: string; deleted_at: string | null } | undefined
-    const now = new Date(Math.max(Date.now(), Date.parse(previous?.created_at ?? '') + 1 || 0, Date.parse(previous?.deleted_at ?? '') + 1 || 0)).toISOString()
+    const now = this.nextProjectLabelVersion(projectId, labelId)
     this.db.prepare(
       `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
        VALUES (?, ?, ?, NULL)
        ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL, created_at = excluded.created_at`
     ).run(projectId, labelId, now)
     new SyncQueueRepository(this.db).enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt: null, addition: true, createdAt: now }))
+  }
+
+  private nextProjectLabelVersion(projectId: string, labelId: string): string {
+    const links = this.db.prepare(`SELECT pl.created_at,pl.deleted_at FROM project_labels pl
+      JOIN labels l ON l.id=pl.label_id WHERE pl.project_id=? AND
+      (pl.label_id=? OR lower(l.name)=(SELECT lower(name) FROM labels WHERE id=?))`)
+      .all(projectId,labelId,labelId) as Array<{created_at:string;deleted_at:string|null}>
+    let version = Date.now()
+    for (const link of links) {
+      for (const value of [link.created_at,link.deleted_at]) {
+        const clock = Date.parse(value ?? '')
+        if (Number.isFinite(clock)) version = Math.max(version,clock+1)
+      }
+    }
+    return new Date(version).toISOString()
   }
 
   findByTaskId(taskId: string): Label[] {

@@ -1,12 +1,14 @@
 {
   "name": "todoozy-telegram-bot",
   "version": "1.0.0",
-  "description": "ToDoozy Telegram bot — create and manage tasks via Telegram using smart input parser syntax",
+  "description": "ToDoozy Telegram bot \u2014 create and manage tasks via Telegram using smart input parser syntax",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test": "../../node_modules/.bin/vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

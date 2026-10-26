@@ -6,6 +6,9 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ## v1.10.0
 
+- **Label removal clocks** — Project-label removals and later additions advance beyond known same-name association clocks, including clock-ahead imports and clock rollback.
+- **Telegram polling watchdog** — Bounded graceful recovery, polling/backlog monitoring and sanitized failure logs address silent polling loss. Package checks are included in CI. Source implementation awaits independent verification and deployment; it is not user-verified or deployed.
+
 - **Search across projects and descriptions** — Command-K refreshes tasks from known projects, including projects you have not opened, and searches task descriptions as well as titles.
 - **Descriptions stay intact** — Opening or leaving the description editor no longer saves untouched content. Remote updates cancel stale pending saves, and title-only MCP edits preserve the description.
 - **Shared project archive and restore** — Only the owner can archive a shared project for everyone. Settings → Projects → Archive provides a permanent way to restore it and its tasks.

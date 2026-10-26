@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
 import { LabelRepository } from './LabelRepository'
@@ -615,4 +615,27 @@ it('persists task-driven addition identity before imports even after removal ack
       expect(labels.hasPendingProjectAddition(projectId,'addition')).toBe(true)
     }
   } finally {db.close()}
+})
+
+it('orders family removals and later additions after valid imported clocks',()=>{
+  const db=createTestDb(),{userId,projectId}=seedFixtures(db),repo=new LabelRepository(db)
+  const original=repo.create({id:'clock-c',user_id:userId,name:'Clock',project_id:projectId})
+  for(const id of ['clock-user-f','clock-user-invalid']) db.prepare('INSERT INTO users(id,email,created_at,updated_at) VALUES(?,?,?,?)').run(id,id+'@example.invalid','2020-01-01','2020-01-01')
+  repo.create({id:'clock-f',user_id:'clock-user-f',name:'CLOCK',project_id:projectId})
+  repo.create({id:'clock-invalid',user_id:'clock-user-invalid',name:'clock',project_id:projectId})
+  seedTask(db,'clock-task',projectId,userId)
+  db.prepare('INSERT INTO task_labels(task_id,label_id) VALUES(?,?)').run('clock-task',original.id)
+  db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE label_id=?').run('2031-01-01T00:00:00Z','2032-01-01T00:00:00Z','clock-f')
+  db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE label_id=?').run('invalid','invalid','clock-invalid')
+  const now=vi.spyOn(Date,'now').mockReturnValue(Date.parse('2020-01-01T00:00:00Z'))
+  try {
+    expect(repo.removeFromProject(projectId,original.id)).toBe(true)
+    const link=db.prepare('SELECT deleted_at FROM project_labels WHERE label_id=?').get(original.id)!
+    expect(link.deleted_at).toBe('2032-01-01T00:00:00.001Z')
+    expect(db.prepare('SELECT deleted_at FROM task_labels WHERE task_id=?').get('clock-task')?.deleted_at).toBe(link.deleted_at)
+    const command=JSON.parse(String(db.prepare("SELECT payload FROM sync_queue WHERE table_name='task_labels'").get()!.payload))
+    expect(command.deletedAt).toBe(link.deleted_at);expect(command.expectedLink.deleted_at).toBe(link.deleted_at)
+    repo.addToProject(projectId,original.id)
+    expect(db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE label_id=?').get(original.id)).toMatchObject({created_at:'2032-01-01T00:00:00.002Z',deleted_at:null})
+  } finally {now.mockRestore();db.close()}
 })

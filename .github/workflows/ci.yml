@@ -19,6 +19,8 @@ jobs:
           node-version: 22.23.2
           cache: npm
       - run: npm ci
+      - run: npm ci --prefix packages/telegram-bot --ignore-scripts
+      - run: npm run check:telegram-bot
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
