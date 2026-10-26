@@ -1,3 +1,4 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
@@ -693,5 +694,32 @@ it('requeues an acknowledged source-only assignment under a fresh physical recei
     expect(tasks.getLabelState('physical-task')[0].sync_pending).toBe(0)
     labels.consolidate(source.id,{...source,id:'physical-canonical'})
     expect(tasks.getLabelState('physical-task')[0]).toEqual({...next,sync_pending:0})
+  } finally {db.close()}
+})
+
+
+it.each(['source','target'].flatMap((newest)=>['add','remove'].map((choice)=>({newest,choice}))))('merges complete project association clocks ($newest/$choice)',({newest,choice})=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId}=seedFixtures(db),labels=new LabelRepository(db)
+    const source=labels.create({id:'project-source',user_id:userId,name:'Étiquette'})
+    const target={...source,id:'project-target',name:'étiquette'}
+    labels.applyRemote(target)
+    const state=(id:string)=>({project_id:projectId,label_id:id,created_at:'2020-01-01T00:00:00.000Z',deleted_at:null as string|null})
+    const older=state(newest==='source'?target.id:source.id),latest=state(newest==='source'?source.id:target.id)
+    if(choice==='add') {older.deleted_at='2021-01-01T00:00:00.000Z';latest.created_at='2022-01-01T00:00:00.000Z'}
+    else latest.deleted_at='2022-01-01T00:00:00.000Z'
+    labels.applyRemoteProjectLabel(older);labels.applyRemoteProjectLabel(latest)
+    const removal=latest.deleted_at?latest:older
+    new SyncQueueRepository(db).enqueue('task_labels',`${projectId}::${removal.label_id}`,'UPDATE',JSON.stringify({projectId,labelId:removal.label_id,remove_project_label:true,deletedAt:removal.deleted_at,expectedLink:{created_at:removal.created_at,deleted_at:removal.deleted_at}}))
+    labels.consolidate(source.id,target)
+    const merged=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,target.id)
+    expect(merged).toEqual({created_at:latest.created_at,deleted_at:latest.deleted_at})
+    const commands=new SyncQueueRepository(db).findAll().map((entry)=>JSON.parse(entry.payload))
+    expect(commands.every((command)=>command.labelId===target.id)).toBe(true)
+    for(const command of commands.filter((command)=>command.remove_project_label)) {
+      if(choice==='remove') expect(command).toMatchObject({deletedAt:latest.deleted_at,expectedLink:merged})
+      else expect(command.expectedLink.deleted_at).toBe(older.deleted_at)
+    }
   } finally {db.close()}
 })

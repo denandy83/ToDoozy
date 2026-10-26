@@ -312,10 +312,13 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
   const palette = new Set<string>(), junction = new Set(['t:remote-only'])
   let fail = mode === 'failure'
   network.client = { from(table: string) {
-    let payload: unknown, operation = 'select', projectId = 'p'
+    let payload: unknown, operation = 'select'
+    const filters: Array<(row: Record<string,unknown>)=>boolean> = []
     const chain: Record<string, unknown> = {}
-    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or', 'ilike']) chain[method] = () => chain
-    chain.eq = (key: string, value: string) => { if (key === 'project_id') projectId = value; return chain }
+    for (const method of ['select', 'order', 'limit', 'or', 'ilike']) chain[method] = () => chain
+    chain.eq = (key: string, value: unknown) => { filters.push((row)=>row[key]===value); return chain }
+    chain.is = (key: string, value: unknown) => { filters.push((row)=>(row[key]??null)===value); return chain }
+    chain.in = (key: string, values: unknown[]) => { filters.push((row)=>values.includes(row[key])); return chain }
     chain.maybeSingle = async () => {
       if (mode === 'removed') {
         const local = repo.labels.findByName('a', name)
@@ -324,9 +327,21 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
       return { data: canonical, error: null }
     }
     chain.upsert = (value: unknown) => { payload = value; operation = 'upsert'; return chain }
+    chain.delete = () => { operation = 'delete'; return chain }
     chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
       await network.token!()
-      if (operation === 'select') return { data: [...palette].filter((pair) => pair.startsWith(`${projectId}:`)).map((pair) => ({ label_id: pair.split(':')[1] })), error: null }
+      const rows: Array<Record<string,unknown>> = table==='user_labels' ? [canonical,{id:'remote-only',name:'Unrelated'}]
+        : [...(table==='project_labels'?palette:junction)].map((pair)=>{
+          const [parent,label_id]=pair.split(':')
+          return table==='project_labels'?{project_id:parent,label_id,created_at:'2000-01-01T00:00:00.000Z',deleted_at:null}:{task_id:parent,label_id,deleted_at:null}
+        })
+      const selected=rows.filter((row)=>filters.every((filter)=>filter(row)))
+      if (operation === 'select') return { data: selected, error: null }
+      if (operation === 'delete') {
+        if(table!=='task_labels') throw new Error('Unsupported fixture deletion')
+        for(const row of selected) junction.delete(`${row.task_id}:${row.label_id}`)
+        return {data:[],error:null}
+      }
       if (table === 'project_labels' && fail) return { data: null, error: { message: 'synthetic palette failure' } }
       const values = Array.isArray(payload) ? payload : [payload]
       if (table === 'user_labels' && values.some((row) => row.id !== 'c')) return { data: null, error: { message: 'canonical conflict', code: '23505' } }
@@ -347,7 +362,7 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
     setOnlineStatus(true)
     await processSyncQueue()
   }
-  if(mode==='removed') await processSyncQueue()
+  for(let drain=0;drain<4 && repo.syncQueue.count();drain++) await processSyncQueue()
   expect(palette).toEqual(new Set(mode === 'removed' ? [] : path === 'bulk' ? ['p:c', 'p2:c'] : ['p:c']))
   expect(junction).toEqual(new Set(mode === 'removed' ? ['t:remote-only'] : path === 'bulk' ? ['t:remote-only', 't:c', 't2:c'] : ['t:remote-only', 't:c']))
   expect(repo.syncQueue.count()).toBe(0)

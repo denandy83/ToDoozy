@@ -920,3 +920,56 @@ it.each([0,1].flatMap((shared)=>['source','target'].flatMap((newest)=>['add','re
     expect(fresh.labels.findByTaskId(task).map((row)=>row.id).sort()).toEqual([family.unrelated,...(choice==='add'?[family.canonical]:[])].sort())
   } finally {observer.close()}
 },15000)
+
+
+it.each([0,1].flatMap((shared)=>['push','remap'].flatMap((caller)=>['Family','Étiquette'].map((name)=>({shared,caller,name})))))('retains cached-palette removal across project consolidation ($shared/$caller/$name)',async({shared,caller,name})=>{
+  const family=await seedTaskFamily(name,shared),context=await captureSyncContext()
+  local.prepare('DELETE FROM project_labels WHERE project_id=? AND label_id=?').run(project,family.canonical)
+  await useLabelStore.getState().hydrateLabels(project)
+  expect(useLabelStore.getState().projectLabels[project].has(family.canonical)).toBe(false)
+  let release!:()=>void,started!:()=>void
+  const held=new Promise<void>((resolve)=>{release=resolve}),applied=new Promise<void>((resolve)=>{started=resolve})
+  const api={...context.api,labels:new Proxy(context.api.labels,{get:(labels,method)=>method==='applyRemoteProjectLabel'?async(link:Parameters<typeof labels.applyRemoteProjectLabel>[0])=>{
+    await labels.applyRemoteProjectLabel(link)
+    if(link.label_id===family.canonical) {started();await held}
+  }:Reflect.get(labels,method)})}
+  const {refreshProjectLabels}=await import('./remoteProjectRefresh')
+  const refreshing=refreshProjectLabels(project,{...context,api})
+  await applied
+  expect(repos.labels.findByProjectId(project).map((row)=>row.id)).toContain(family.canonical)
+  expect(useLabelStore.getState().projectLabels[project].has(family.canonical)).toBe(false)
+  expect(await useLabelStore.getState().removeFromProject(project,family.foreign)).toBe(true)
+  const removal=repos.syncQueue.findAll().map((row)=>JSON.parse(row.payload)).find((row)=>row.remove_project_label && row.labelId===family.foreign)
+  expect(removal).toBeDefined()
+  release();await refreshing
+  await remote.exec('CREATE UNIQUE INDEX labels_owner_name ON user_labels(user_id,lower(name)) WHERE deleted_at IS NULL')
+  const definition=repos.labels.findById(family.foreign)!
+  if(caller==='push') {
+    const {pushLabel}=await import('./PersonalSyncService')
+    expect(await pushLabel(definition,owner,{api:context.api,userId:owner,client:async()=>context.client,assertCurrent:context.assertCurrent,isCurrent:context.isCurrent,scope:async()=>context.scope})).toBe(family.canonical)
+  } else await SYNC_TABLES.labels!.remoteUpsert({...definition,user_id:owner},context)
+  expect(local.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(project,family.canonical)?.deleted_at).toBe(removal.deletedAt)
+  setOnlineStatus(true)
+  failProjectWriteNumber=projectBatches.length+1
+  await processSyncQueue()
+  expect(repos.syncQueue.count()).toBeGreaterThan(0)
+  failProjectWriteNumber=null
+  await processSyncQueue();await processSyncQueue()
+  const {reconcile,pullTaskLabelsForTasks}=await import('./PersonalSyncService')
+  await refreshProjectLabels(project,context);await pullTaskLabelsForTasks([task],owner,context);await reconcile(owner)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  expect(repos.labels.findByProjectId(project).map((row)=>row.id)).toEqual([family.unrelated])
+  expect((await remote.query('SELECT * FROM project_labels WHERE project_id=$1 AND label_id=ANY($2) AND deleted_at IS NULL',[project,[family.canonical,family.foreign]])).rows).toEqual([])
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[id(986),family.foreign])).rows).toHaveLength(1)
+  const observer=new DatabaseSync(':memory:');observer.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)')
+  try {
+    for(const migrate of migrations) migrate(observer)
+    const fresh=createRepositories(observer)
+    fresh.users.create(repos.users.findById(owner)!)
+    fresh.projects.applyRemote(repos.projects.findById(project)!)
+    for(const label of (await remote.query('SELECT * FROM user_labels')).rows) fresh.labels.applyRemote(JSON.parse(JSON.stringify(label)))
+    for(const link of (await remote.query('SELECT * FROM project_labels WHERE project_id=$1',[project])).rows) fresh.labels.applyRemoteProjectLabel(JSON.parse(JSON.stringify(link)))
+    expect(fresh.labels.findByProjectId(project).map((row)=>row.id)).toEqual([family.unrelated])
+  } finally {observer.close()}
+},15000)

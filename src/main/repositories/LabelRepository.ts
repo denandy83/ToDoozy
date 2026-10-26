@@ -334,18 +334,26 @@ export class LabelRepository {
         .prepare('SELECT project_id FROM project_labels WHERE label_id = ?')
         .all(fromId) as Array<{ project_id: string }>
       for (const row of projectRows) {
-        const exists = this.db
-          .prepare('SELECT 1 FROM project_labels WHERE project_id = ? AND label_id = ?')
-          .get(row.project_id, toId)
-        if (exists) {
-          const sourceLink=this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,fromId) as {created_at:string;deleted_at:string|null}
-          const targetLink=this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as {created_at:string;deleted_at:string|null}
-          if (this.hasPendingProjectAddition(row.project_id,fromId) && Date.parse(sourceLink.created_at)>Date.parse(targetLink.deleted_at ?? targetLink.created_at)) this.db.prepare('UPDATE project_labels SET created_at=(SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?),deleted_at=NULL WHERE project_id=? AND label_id=?').run(row.project_id,fromId,row.project_id,toId)
-          this.db.prepare('DELETE FROM project_labels WHERE project_id = ? AND label_id = ?').run(row.project_id, fromId)
-          if ((this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as {deleted_at:string|null})?.deleted_at) this.softDeleteTaskLabelsForProjectLabel(row.project_id,toId)
+        const sourceLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,fromId) as {created_at:string;deleted_at:string|null}
+        const targetLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as typeof sourceLink | undefined
+        const version = (link: typeof sourceLink): number => {
+          const value = Date.parse(link.deleted_at ?? link.created_at)
+          return Number.isFinite(value) ? value : -Infinity
+        }
+        const winner = !targetLink || version(sourceLink)>version(targetLink) || (version(sourceLink)===version(targetLink) && sourceLink.deleted_at && !targetLink.deleted_at) ? sourceLink : targetLink
+        if (targetLink) {
+          this.db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE project_id=? AND label_id=?').run(winner.created_at,winner.deleted_at,row.project_id,toId)
+          this.db.prepare('DELETE FROM project_labels WHERE project_id=? AND label_id=?').run(row.project_id,fromId)
         } else {
-          this.db.prepare('UPDATE project_labels SET label_id = ? WHERE project_id = ? AND label_id = ?').run(toId, row.project_id, fromId)
+          this.db.prepare('UPDATE project_labels SET label_id=? WHERE project_id=? AND label_id=?').run(toId,row.project_id,fromId)
           projectRemaps++
+        }
+        if (winner.deleted_at) this.softDeleteTaskLabelsForProjectLabel(row.project_id,toId)
+        if (winner===sourceLink) {
+          new SyncQueueRepository(this.db).enqueue(winner.deleted_at?'task_labels':'project_labels',`${row.project_id}::${toId}`,'UPDATE',JSON.stringify({
+            projectId:row.project_id,labelId:toId,labelName:nameParam,
+            ...(winner.deleted_at?{remove_project_label:true,deletedAt:winner.deleted_at,expectedLink:winner}:{addition:true,createdAt:winner.created_at,deletedAt:null})
+          }))
         }
       }
 
@@ -356,13 +364,16 @@ export class LabelRepository {
           for (const key of ['insert','delete']) if (Array.isArray(payload[key])) payload[key]=[...new Set(payload[key].map((id:string)=>id===fromId?toId:id))]
           this.db.prepare('UPDATE sync_queue SET payload=? WHERE id=?').run(JSON.stringify(payload),command.id)
         }
-        if (payload.labelId !== fromId) continue
+        if (payload.labelId !== fromId && payload.labelId !== toId) continue
         payload.labelId = toId
         if (payload.addition) payload.createdAt = (this.db.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId,toId) as {created_at:string} | undefined)?.created_at ?? payload.createdAt
         if (Array.isArray(payload.siblingIds) && payload.siblingIds.includes(fromId)) payload.siblingIds = [...new Set([...payload.siblingIds, toId])]
         if (payload.expectedLink) {
           const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId, toId) as { created_at: string; deleted_at: string | null } | undefined
-          if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) payload.expectedLink = link
+          if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) {
+            payload.expectedLink = link
+            if (link.deleted_at && payload.deletedAt) payload.deletedAt = link.deleted_at
+          }
         }
         this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
           .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
