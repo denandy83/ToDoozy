@@ -1,3 +1,4 @@
+import { mutateProjectStatus } from './statusRpc.ts'
 // ToDoozy MCP Server — Supabase Edge Function
 // Streamable HTTP transport with API key authentication via mcp-lite
 //
@@ -562,11 +563,7 @@ export class StatusRepo {
   }
   private async mutate(projectId: string, action: string, input: Record<string, unknown>) {
     await this.assertOwner(projectId)
-    const { data, error } = await this.client.rpc('manage_project_status', {
-      p_project_id: projectId, p_actor: this.userId, p_action: action, p_input: input
-    })
-    if (error) throw new Error(error.message)
-    return data
+    return await mutateProjectStatus(this.client, projectId, this.userId, action, input)
   }
   async create(input: Record<string, unknown>) {
     return await this.mutate(input.project_id as string, 'create', input)

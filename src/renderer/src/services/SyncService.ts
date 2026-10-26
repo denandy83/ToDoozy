@@ -1,3 +1,4 @@
+import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
 import { captureSyncContext } from './syncContext'
@@ -1094,19 +1095,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
   if (statuses) {
     for (const status of statuses) {
-      const existing = await api.statuses.findById(status.id)
-      if (!existing) {
-        await api.statuses.create({
-          id: status.id,
-          project_id: status.project_id,
-          name: status.name,
-          color: status.color,
-          icon: status.icon,
-          order_index: status.order_index,
-          is_done: status.is_done,
-          is_default: status.is_default
-        })
-      }
+      await api.statuses.applyRemote(status)
     }
   }
 
@@ -1158,10 +1147,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     // Sort parents before subtasks to satisfy the parent_id FK constraint.
     // Remote rows arrive in arbitrary order; inserting a subtask before its
     // parent throws FOREIGN KEY constraint failed on tasks:create.
-    const tasksToInsert = [
-      ...remoteTasks.filter((t) => !t.parent_id),
-      ...remoteTasks.filter((t) => t.parent_id)
-    ]
+    const tasksToInsert = remoteTaskOrder(remoteTasks)
 
     for (const task of tasksToInsert) {
       remoteTaskIds.add(task.id)

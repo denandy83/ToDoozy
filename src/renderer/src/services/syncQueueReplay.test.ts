@@ -99,9 +99,9 @@ describe('durable sync retries', () => {
     expect(mock.filters).toContainEqual(['in', 'label_id', ['removed']])
   })
   it('treats a zero-row archive RLS denial and task update failure as failures', async () => {
-    await expect(writeProjectArchive(clientMock(null, []).client, 'p', 1, 'now')).rejects.toThrow('owner')
+    await expect(writeProjectArchive(clientMock(null, []).client, 'p', 1, 'now', [])).rejects.toThrow('owner')
     const mock = clientMock('write rejected')
-    await expect(writeProjectArchive(mock.client, 'p', 1, 'now')).rejects.toThrow('write rejected')
+    await expect(writeProjectArchive(mock.client, 'p', 1, 'now', [])).rejects.toThrow('write rejected')
   })
 })
 
@@ -159,7 +159,7 @@ describe('queue integration with isolated account databases', () => {
         requests++
         if (hold) { hold = false; started.resolve(); await pause.promise }
         if (operation !== 'select') remote[table] = structuredClone(payload)
-        return { data: table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : [], error: null }
+        return { data: table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : table === 'tasks' ? [{ id: 't' }] : [], error: null }
       })().then(resolve, reject)
       return chain
     } } as unknown as SupabaseClient
@@ -248,7 +248,7 @@ describe('queue integration with isolated account databases', () => {
     const drain = processSyncQueue()
     await started.promise
     repo.projects.unarchiveWithTasks('p')
-    await writeProjectArchive(pinned.client as SupabaseClient, 'p', 0, 'newer')
+    await writeProjectArchive(pinned.client as SupabaseClient, 'p', 0, 'newer', [repo.tasks.findById('t')!])
     pause.resolve()
     expect(await drain).toBe(1)
     expect(remote.projects).toMatchObject({ is_archived: 0 })

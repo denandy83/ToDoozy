@@ -9,32 +9,58 @@ export interface SyncContext {
   assertCurrent(): void
 }
 
-export async function captureSyncContext(): Promise<SyncContext> {
+export function captureSyncProducer() {
   const userId = useAuthStore.getState().currentUser?.id
-  const database = await window.api.sync.captureContext()
-  const session = await requireSession()
-  const config = await window.api.auth.getSupabaseConfig()
+  const database = window.api.sync.captureContext()
   const assertCurrent = (): void => {
-    if (!userId || useAuthStore.getState().currentUser?.id !== userId || database.userId !== userId || session?.user.id !== userId) throw new Error('Sync account changed or signed out')
+    if (!userId || useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed or signed out')
   }
-  assertCurrent()
-  const client = createClient(config.url, config.anonKey, {
-    accessToken: async () => {
-      assertCurrent()
-      const current = await window.api.sync.captureContext()
-      assertCurrent()
-      if (current.generation !== database.generation || current.userId !== database.userId) throw new Error('Sync database changed')
-      return session!.access_token
-    },
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
-  })
+  const assertDatabase = async (): Promise<void> => {
+    assertCurrent()
+    const [origin, current] = await Promise.all([database, window.api.sync.captureContext()])
+    assertCurrent()
+    if (origin.userId !== userId || current.userId !== origin.userId || current.generation !== origin.generation) throw new Error('Sync database changed')
+  }
+  const isCurrent = async (): Promise<boolean> => {
+    try { await assertDatabase(); return true } catch { return false }
+  }
   const api = new Proxy({} as TodoozyAPI, {
     get: (_, namespace: string) => new Proxy({}, {
-      get: (_, method: string) => (...args: unknown[]) => {
+      get: (_, method: string) => async (...args: unknown[]) => {
+        const origin = await database
         assertCurrent()
-        return window.api.sync.invokeContext(database, `${namespace}:${method}`, args)
+        return window.api.sync.invokeContext(origin, `${namespace}:${method}`, args)
       }
     })
   })
-  return { api, client, assertCurrent }
+  let authentication: Promise<SupabaseClient | null> | undefined
+  const client = (): Promise<SupabaseClient | null> => authentication ??= (async () => {
+    await database
+    const session = await requireSession()
+    await assertDatabase()
+    if (!session) return null
+    if (session.user.id !== userId) throw new Error('Sync session account changed')
+    const config = await window.api.auth.getSupabaseConfig()
+    await assertDatabase()
+    return createClient(config.url, config.anonKey, {
+      accessToken: async () => { await assertDatabase(); return session.access_token },
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    })
+  })()
+  return { api, client, assertCurrent, isCurrent, userId }
+}
+
+export type SyncProducer = ReturnType<typeof captureSyncProducer>
+
+export async function withSyncProducer(operation: (origin: SyncProducer) => Promise<void>, origin = captureSyncProducer()): Promise<void> {
+  try { await operation(origin) } catch (error) {
+    if (await origin.isCurrent()) throw error
+  }
+}
+
+export async function captureSyncContext(): Promise<SyncContext> {
+  const origin = captureSyncProducer()
+  const client = await origin.client()
+  if (!client) throw new Error('Sync signed out')
+  return { api: origin.api, client, assertCurrent: origin.assertCurrent }
 }

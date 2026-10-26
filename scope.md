@@ -143,3 +143,11 @@ All 46 open tasks labeled `Todoozy` (excl. `Later`) were fact-checked against HE
 - Restored ignored public Supabase client configuration; the project auth settings endpoint accepted the key. Added production-build validation that rejects missing endpoints and server-side keys, plus isolated regressions. CI now runs typecheck, tests, lint and build using repository Actions variables containing only public client settings.
 - Typecheck, production build, lint (zero errors, existing warnings) and 79 test files / 1164 tests passed. An actual build with empty settings failed with the intended configuration error.
 - Xcode has no signed-in Apple account. It is waiting at the account sign-in sheet; user authentication requested before distribution-certificate and notarization setup.
+
+
+## 2026-10-26 — Gate review follow-up
+
+- The outer executor reports deploying the exact task-status guard SQL as `20261026094537_task_status_assignment_guard`; the local filename and test references now match that history. SQL bytes remain unchanged (Git blob `53f17146fae986da0e9ec9a0f779b2baecdbe953`). No production query or deployment was performed in this review phase.
+- The supplied independent PostgreSQL 17 verification passed 16/16 cases on a9aad656, including independent sessions, RLS, ISO TEXT dates, and deadlock rollback followed by explicit retry. Automatic application retry was outside that verifier's scope; the pending MCP source adds bounded retry only for SQLSTATE 40P01 and 40001 on the complete atomic status RPC.
+- Production MCP remains v16. Updated runtime sources await outer-executor verification and deployment. The signed application remains unpublished and the gate remains in progress.
+- R4 and review-1 share the retained `readAll`/`readAllIn` repair: tasks/statuses paginate before watermarks, label definitions and project/task junctions paginate before application, and queue reconciliation/cleanup reads all remote rows. `syncPull.integration.test.ts` covers more than 1,000 tasks, statuses, labels and junctions, failed-page watermark retention, and both queued cleanup paths.

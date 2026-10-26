@@ -11,7 +11,7 @@ CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz);
 CREATE TABLE statuses(id uuid PRIMARY KEY, project_id uuid REFERENCES projects(id), name text NOT NULL,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
 CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz,deleted_at timestamptz);`);
 const migration=readFileSync(new URL('../../migrations/20261026075322_atomic_status_management.sql', import.meta.url),'utf8'); await db.exec(migration);
-await db.exec(readFileSync(new URL('../../migrations/20261026092325_task_status_assignment_guard.sql', import.meta.url), 'utf8'));
+await db.exec(readFileSync(new URL('../../migrations/20261026094537_task_status_assignment_guard.sql', import.meta.url), 'utf8'));
 const project='00000000-0000-0000-0000-000000000001', actor='00000000-0000-0000-0000-000000000002';
 const a='00000000-0000-0000-0000-000000000003', b='00000000-0000-0000-0000-000000000004', c='00000000-0000-0000-0000-000000000005';
 await db.query('INSERT INTO projects VALUES($1,$2,NULL)',[project,actor]);
@@ -80,7 +80,7 @@ it('guards all task insert/upsert/copy/update assignments and status interleavin
     await db.query(`INSERT INTO statuses(id,project_id,name,is_done,is_default) VALUES
       ($1,$4,'Open',0,1),($2,$4,'Custom',0,0),($3,$5,'Foreign',0,1)`, [open, custom, foreign, project, other])
     await db.query("INSERT INTO tasks(id,project_id,status_id,title,completed_date) VALUES($1,$2,$3,'legacy','legacy-value')", [id(8), project, foreign])
-    for (const file of ['20261026075322_atomic_status_management.sql', '20261026092325_task_status_assignment_guard.sql']) {
+    for (const file of ['20261026075322_atomic_status_management.sql', '20261026094537_task_status_assignment_guard.sql']) {
       await db.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'))
     }
     assert.equal((await db.query('SELECT completed_date FROM tasks WHERE id=$1', [id(8)])).rows[0].completed_date, 'legacy-value')

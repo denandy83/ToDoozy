@@ -1,5 +1,6 @@
+import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
-import type { SyncContext } from './syncContext'
+import { captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
 import { writeProjectArchive } from './projectArchiveSync'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
@@ -16,7 +17,6 @@ import { useLabelStore } from '../shared/stores/labelStore'
 import type { Task, Status, Label, SyncOperation, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
-import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
 
@@ -27,9 +27,10 @@ import { isSettingSyncExcluded } from './settingsSyncPolicy'
  * cleanly is preferable to spamming error logs; the change stays in local
  * SQLite and the post-recovery reconcile picks it up.
  */
-async function hasLiveSession(context: string, idDescriptor: string): Promise<boolean> {
-  const session = await requireSession()
-  if (!session) {
+async function hasLiveSession(origin: SyncProducer, context: string, idDescriptor: string): Promise<boolean> {
+  const client = await origin.client()
+  if (!client) {
+    if (!await origin.isCurrent()) return false
     logEvent('warn', 'sync', `${context} waiting — no session`, idDescriptor)
     useSyncStore.getState().setStatus('offline')
     return false
@@ -38,8 +39,13 @@ async function hasLiveSession(context: string, idDescriptor: string): Promise<bo
 }
 
 /** Mark a successful push in the sync store */
-function markSynced(): void {
-  useSyncStore.getState().setLastSynced()
+async function markSynced(origin: SyncProducer): Promise<void> {
+  if (await origin.isCurrent()) useSyncStore.getState().setLastSynced()
+}
+
+async function refreshProducerPending(origin: SyncProducer): Promise<void> {
+  const pendingCount = await origin.api.sync.count()
+  if (await origin.isCurrent()) useSyncStore.setState({ pendingCount })
 }
 
 /**
@@ -54,6 +60,7 @@ function markSynced(): void {
  * the app reports "synced just now" while local rows never reach Supabase.
  */
 async function reportPushFailure(
+  origin: SyncProducer,
   context: string,
   error: { message?: string; code?: string; details?: string } | unknown,
   table: string,
@@ -61,6 +68,7 @@ async function reportPushFailure(
   payload: string,
   operation: SyncOperation = 'UPDATE'
 ): Promise<void> {
+  if (!await origin.isCurrent()) return
   const err = error as { message?: string; code?: string; details?: string }
   const msg = err?.message ?? (typeof error === 'string' ? error : 'unknown error')
   const code = err?.code ?? ''
@@ -68,12 +76,13 @@ async function reportPushFailure(
   console.error(`[PersonalSync] ${context} error:`, msg, code, details, `id=${rowId}`)
   logEvent('error', 'sync', `${context} failed: ${msg}`, `table=${table} id=${rowId} code=${code} details=${details}`)
   try {
-    await window.api.sync.enqueue(table, rowId, operation, payload)
+    await origin.api.sync.enqueue(table, rowId, operation, payload)
   } catch (e) {
     console.error('[PersonalSync] Failed to enqueue after push error:', e)
   }
+  if (!await origin.isCurrent()) return
   useSyncStore.getState().setError(msg || `${context} failed`)
-  void useSyncStore.getState().refreshPendingCount()
+  await refreshProducerPending(origin)
 }
 
 /** Track consecutive auth failures — surface after 2 in a row to avoid false alarms */
@@ -148,7 +157,7 @@ const recentlyDeletedIds = new Set<string>()
 const lastPullAt = new Map<string, string>()
 
 /** Debounce buffer for settings writes — collects changes over 5s then pushes once */
-const pendingSettings = new Map<string, { key: string; value: string; userId: string }>()
+const pendingSettings = new Map<string, { key: string; value: string; userId: string; origin: SyncProducer }>()
 let settingsFlushTimer: ReturnType<typeof setTimeout> | null = null
 
 function flushSettingsBuffer(): void {
@@ -156,7 +165,7 @@ function flushSettingsBuffer(): void {
   pendingSettings.clear()
   settingsFlushTimer = null
   for (const entry of entries) {
-    pushSettingImmediate(entry.key, entry.value, entry.userId)
+    void pushSettingImmediate(entry.key, entry.value, entry.userId, entry.origin)
   }
 }
 
@@ -187,14 +196,15 @@ export function chunkArray<T>(items: T[], size: number): T[][] {
 }
 
 /** Ensure a project + membership exists in Supabase before pushing tasks/statuses */
-async function ensureProjectInSupabase(projectId: string): Promise<void> {
-  if (confirmedProjects.has(projectId)) return
+async function ensureProjectInSupabase(projectId: string, origin: SyncProducer): Promise<void> {
+  const key = `${origin.userId}:${projectId}`
+  if (confirmedProjects.has(key)) return
 
-  const project = await window.api.projects.findById(projectId)
+  const project = await origin.api.projects.findById(projectId)
   if (!project) return
 
-  await pushProject(project)
-  confirmedProjects.add(projectId)
+  await pushProject(project, origin)
+  if (await origin.isCurrent()) confirmedProjects.add(key)
 }
 
 // ── Push Operations ──────────────────────────────────────────────────
@@ -203,102 +213,104 @@ async function ensureProjectInSupabase(projectId: string): Promise<void> {
  * Push a single task to Supabase (upsert).
  */
 export async function pushTask(task: Task): Promise<void> {
-  if (!(await hasLiveSession('pushTask', `task=${task.id}`))) {
-    await window.api.sync.enqueue('tasks', task.id, 'UPDATE', JSON.stringify(task))
-    await window.api.sync.enqueue('task_labels', task.id, 'UPDATE', JSON.stringify({ task_id: task.id }))
-    await useSyncStore.getState().refreshPendingCount()
-    if (useSyncStore.getState().status === 'synced') useSyncStore.getState().setStatus('syncing')
-    return
-  }
-  try {
-    const supabase = await getSupabase()
-
-    // Ensure the project exists in Supabase (RLS requires project_members entry)
-    await ensureProjectInSupabase(task.project_id)
-
-    // task_labels is the source of truth; we used to also write a denormalized
-    // `tasks.label_names` JSON for the shared-project Realtime fast-path, but
-    // it caused rename drift and isn't needed once realtime handlers query the
-    // junction directly. We still load labelIds here for the post-push junction
-    // diff below.
-    const taskLabels = await window.api.tasks.getLabels(task.id)
-    const labelIds = taskLabels.map((tl) => tl.label_id)
-
-    const payload = {
-      id: task.id,
-      project_id: task.project_id,
-      owner_id: task.owner_id,
-      assigned_to: task.assigned_to,
-      title: task.title,
-      description: task.description,
-      status_id: task.status_id,
-      priority: task.priority,
-      due_date: task.due_date,
-      parent_id: task.parent_id,
-      order_index: task.order_index,
-      is_template: task.is_template,
-      is_archived: task.is_archived,
-      is_in_my_day: task.is_in_my_day ?? 0,
-      completed_date: task.completed_date,
-      recurrence_rule: task.recurrence_rule,
-      reference_url: task.reference_url,
-      my_day_dismissed_date: task.my_day_dismissed_date ?? null,
-      created_at: task.created_at,
-      updated_at: task.updated_at
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'pushTask', `task=${task.id}`))) {
+      await origin.api.sync.enqueue('tasks', task.id, 'UPDATE', JSON.stringify(task))
+      await origin.api.sync.enqueue('task_labels', task.id, 'UPDATE', JSON.stringify({ task_id: task.id }))
+      await refreshProducerPending(origin)
+      if (await origin.isCurrent() && useSyncStore.getState().status === 'synced') useSyncStore.getState().setStatus('syncing')
+      return
     }
-    const { error } = await supabase.from('tasks').upsert(payload)
-    if (error) {
-      await reportPushFailure('pushTask', error, 'tasks', task.id, JSON.stringify(payload))
-    } else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed task "${task.title}"`, `id=${task.id} project=${task.project_id}`)
-      // Sync the task_labels junction — the tasks.label_names JSON is denormalized
-      // metadata only; the junction is what cross-device task_labels reads use.
-      // Diff local vs remote and apply both directions so add/remove on this device
-      // propagates to Supabase.
-      try {
-        const { data: remoteTaskLabels, error: labelReadError } = await readAll(() => supabase
-          .from('task_labels')
-          .select('label_id').is('deleted_at', null)
-          .eq('task_id', task.id), ['label_id'])
-        if (labelReadError) throw new Error(labelReadError.message)
-        const remoteLabelIds = new Set<string>((remoteTaskLabels ?? []).map((r) => r.label_id as string))
-        const localLabelIds = new Set<string>(labelIds)
-        const toInsert = labelIds.filter((id) => !remoteLabelIds.has(id))
-        const toDelete = [...remoteLabelIds].filter((id) => !localLabelIds.has(id))
-        if (toInsert.length > 0) {
-          const { error: insertErr } = await supabase
+    try {
+      const supabase = (await origin.client())!
+
+      // Ensure the project exists in Supabase (RLS requires project_members entry)
+      await ensureProjectInSupabase(task.project_id, origin)
+
+      // task_labels is the source of truth; we used to also write a denormalized
+      // `tasks.label_names` JSON for the shared-project Realtime fast-path, but
+      // it caused rename drift and isn't needed once realtime handlers query the
+      // junction directly. We still load labelIds here for the post-push junction
+      // diff below.
+      const taskLabels = await origin.api.tasks.getLabels(task.id)
+      const labelIds = taskLabels.map((tl) => tl.label_id)
+
+      const payload = {
+        id: task.id,
+        project_id: task.project_id,
+        owner_id: task.owner_id,
+        assigned_to: task.assigned_to,
+        title: task.title,
+        description: task.description,
+        status_id: task.status_id,
+        priority: task.priority,
+        due_date: task.due_date,
+        parent_id: task.parent_id,
+        order_index: task.order_index,
+        is_template: task.is_template,
+        is_archived: task.is_archived,
+        is_in_my_day: task.is_in_my_day ?? 0,
+        completed_date: task.completed_date,
+        recurrence_rule: task.recurrence_rule,
+        reference_url: task.reference_url,
+        my_day_dismissed_date: task.my_day_dismissed_date ?? null,
+        created_at: task.created_at,
+        updated_at: task.updated_at
+      }
+      const { error } = await supabase.from('tasks').upsert(payload)
+      if (error) {
+        await reportPushFailure(origin, 'pushTask', error, 'tasks', task.id, JSON.stringify(payload))
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed task "${task.title}"`, `id=${task.id} project=${task.project_id}`)
+        // Sync the task_labels junction — the tasks.label_names JSON is denormalized
+        // metadata only; the junction is what cross-device task_labels reads use.
+        // Diff local vs remote and apply both directions so add/remove on this device
+        // propagates to Supabase.
+        try {
+          const { data: remoteTaskLabels, error: labelReadError } = await readAll(() => supabase
             .from('task_labels')
-            .upsert(toInsert.map((labelId) => ({ task_id: task.id, label_id: labelId, deleted_at: null })))
-          if (insertErr) {
-            await reportPushFailure('pushTaskLabels', insertErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, insert: toInsert }))
+            .select('label_id').is('deleted_at', null)
+            .eq('task_id', task.id), ['label_id'])
+          if (labelReadError) throw new Error(labelReadError.message)
+          const remoteLabelIds = new Set<string>((remoteTaskLabels ?? []).map((r) => r.label_id as string))
+          const localLabelIds = new Set<string>(labelIds)
+          const toInsert = labelIds.filter((id) => !remoteLabelIds.has(id))
+          const toDelete = [...remoteLabelIds].filter((id) => !localLabelIds.has(id))
+          if (toInsert.length > 0) {
+            const { error: insertErr } = await supabase
+              .from('task_labels')
+              .upsert(toInsert.map((labelId) => ({ task_id: task.id, label_id: labelId, deleted_at: null })))
+            if (insertErr) {
+              await reportPushFailure(origin, 'pushTaskLabels', insertErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, insert: toInsert }))
+            }
+          }
+          if (toDelete.length > 0) {
+            const { error: deleteErr } = await supabase
+              .from('task_labels')
+              .delete()
+              .eq('task_id', task.id)
+              .in('label_id', toDelete)
+            if (deleteErr) {
+              await reportPushFailure(origin, 'pushTaskLabels', deleteErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, delete: toDelete }))
+            }
+          }
+        } catch (e) {
+          await reportPushFailure(origin, 'pushTaskLabels', e, 'task_labels', task.id, JSON.stringify({ task_id: task.id }))
+        }
+        // Flag pushes of is_archived on shared projects — after the v1.4.3 fix this
+        // should never happen from auto-archive, so any occurrence warrants a look.
+        if (task.is_archived === 1) {
+          const project = await origin.api.projects.findById(task.project_id)
+          if (project?.is_shared === 1) {
+            logEvent('warn', 'sync', `Pushed is_archived=1 on shared task "${task.title}"`, `task=${task.id} project=${task.project_id}`)
           }
         }
-        if (toDelete.length > 0) {
-          const { error: deleteErr } = await supabase
-            .from('task_labels')
-            .delete()
-            .eq('task_id', task.id)
-            .in('label_id', toDelete)
-          if (deleteErr) {
-            await reportPushFailure('pushTaskLabels', deleteErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, delete: toDelete }))
-          }
-        }
-      } catch (e) {
-        await reportPushFailure('pushTaskLabels', e, 'task_labels', task.id, JSON.stringify({ task_id: task.id }))
       }
-      // Flag pushes of is_archived on shared projects — after the v1.4.3 fix this
-      // should never happen from auto-archive, so any occurrence warrants a look.
-      if (task.is_archived === 1) {
-        const project = await window.api.projects.findById(task.project_id)
-        if (project?.is_shared === 1) {
-          logEvent('warn', 'sync', `Pushed is_archived=1 on shared task "${task.title}"`, `task=${task.id} project=${task.project_id}`)
-        }
-      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushTask', err, 'tasks', task.id, JSON.stringify(task))
     }
-  } catch (err) {
-    await reportPushFailure('pushTask', err, 'tasks', task.id, JSON.stringify(task))
-  }
+  })
 }
 
 /**
@@ -306,101 +318,108 @@ export async function pushTask(task: Task): Promise<void> {
  * for 30 days so other devices observe the tombstone before purge runs.
  */
 export async function deleteTaskFromSupabase(taskId: string): Promise<void> {
-  recentlyDeletedIds.add(taskId)
-  if (!(await hasLiveSession('deleteTask', `task=${taskId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const now = new Date().toISOString()
-    const { error } = await supabase
-      .from('tasks')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', taskId)
-    if (error) {
-      await reportPushFailure('deleteTask', error, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted task', `id=${taskId}`)
+  return withSyncProducer(async (origin) => {
+    recentlyDeletedIds.add(taskId)
+    if (!(await hasLiveSession(origin, 'deleteTask', `task=${taskId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('tasks')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', taskId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteTask', error, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted task', `id=${taskId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteTask', err, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteTask', err, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
-  }
+  })
 }
 
 /**
  * Push a status to Supabase.
  */
 export async function pushStatus(status: Status): Promise<void> {
-  const payload = {
-    id: status.id,
-    project_id: status.project_id,
-    name: status.name,
-    color: status.color,
-    icon: status.icon,
-    order_index: status.order_index,
-    is_done: status.is_done,
-    is_default: status.is_default,
-    created_at: status.created_at,
-    updated_at: status.updated_at
-  }
-  if (!(await hasLiveSession('pushStatus', `status=${status.id}`))) {
-    await window.api.sync.enqueue('statuses', status.id, 'UPDATE', JSON.stringify(payload))
-    await useSyncStore.getState().refreshPendingCount()
-    return
-  }
-  try {
-    await ensureProjectInSupabase(status.project_id)
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('statuses').upsert(payload)
-    if (error) {
-      await reportPushFailure('pushStatus', error, 'statuses', status.id, JSON.stringify(payload))
-    } else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed status "${status.name}"`, `id=${status.id} project=${status.project_id}`)
+  return withSyncProducer(async (origin) => {
+    const payload = {
+      id: status.id,
+      project_id: status.project_id,
+      name: status.name,
+      color: status.color,
+      icon: status.icon,
+      order_index: status.order_index,
+      is_done: status.is_done,
+      is_default: status.is_default,
+      created_at: status.created_at,
+      updated_at: status.updated_at
     }
-  } catch (err) {
-    await reportPushFailure('pushStatus', err, 'statuses', status.id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushStatus', `status=${status.id}`))) {
+      await origin.api.sync.enqueue('statuses', status.id, 'UPDATE', JSON.stringify(payload))
+      await refreshProducerPending(origin)
+      return
+    }
+    try {
+      await ensureProjectInSupabase(status.project_id, origin)
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('statuses').upsert(payload)
+      if (error) {
+        await reportPushFailure(origin, 'pushStatus', error, 'statuses', status.id, JSON.stringify(payload))
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed status "${status.name}"`, `id=${status.id} project=${status.project_id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushStatus', err, 'statuses', status.id, JSON.stringify(payload))
+    }
+  })
 }
 
 /**
  * Push a label to user_labels in Supabase.
  */
-export async function pushLabel(label: Label, userId: string): Promise<void> {
-  const payload = {
-    id: label.id,
-    user_id: userId,
-    name: label.name,
-    color: label.color,
-    order_index: label.order_index,
-    updated_at: label.updated_at,
-    deleted_at: label.deleted_at ?? null
-  }
-  if (!(await hasLiveSession('pushLabel', `label=${label.id}`))) {
-    await window.api.sync.enqueue('user_labels', label.id, 'UPDATE', JSON.stringify(payload))
-    await useSyncStore.getState().refreshPendingCount()
-    return
-  }
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_labels').upsert(payload)
-    if (error) {
-      // Any upsert error is a consolidation candidate (see syncTables
-      // remoteUpsert for the two collision shapes): a (user_id, lower(name))
-      // UNIQUE violation, OR an ON CONFLICT(id) overwrite of a row owned by the
-      // user's alt account that fails on RLS (the task d5b138b1 divergence —
-      // not a 23505). consolidateLabelOnRemote collapses the local row onto the
-      // user's OWN canonical by name when one exists; otherwise it returns
-      // false and we report the original push failure.
-      const consolidated = await consolidateLabelOnRemote(label, userId)
-      if (consolidated) return
-      await reportPushFailure('pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
-    } else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed label "${label.name}"`, `id=${label.id}`)
+export async function pushLabel(label: Label, userId: string, producer?: SyncProducer): Promise<void> {
+  return withSyncProducer(async (origin) => {
+    if (origin.userId !== userId) return
+    const payload = {
+      id: label.id,
+      user_id: userId,
+      name: label.name,
+      color: label.color,
+      order_index: label.order_index,
+      updated_at: label.updated_at,
+      deleted_at: label.deleted_at ?? null
     }
-  } catch (err) {
-    await reportPushFailure('pushLabel', err, 'user_labels', label.id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushLabel', `label=${label.id}`))) {
+      await origin.api.sync.enqueue('user_labels', label.id, 'UPDATE', JSON.stringify(payload))
+      await refreshProducerPending(origin)
+      return
+    }
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_labels').upsert(payload)
+      if (error) {
+        // Any upsert error is a consolidation candidate (see syncTables
+        // remoteUpsert for the two collision shapes): a (user_id, lower(name))
+        // UNIQUE violation, OR an ON CONFLICT(id) overwrite of a row owned by the
+        // user's alt account that fails on RLS (the task d5b138b1 divergence —
+        // not a 23505). consolidateLabelOnRemote collapses the local row onto the
+        // user's OWN canonical by name when one exists; otherwise it returns
+        // false and we report the original push failure.
+        const consolidated = await consolidateLabelOnRemote(label, userId, origin)
+        if (consolidated) return
+        await reportPushFailure(origin, 'pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed label "${label.name}"`, `id=${label.id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushLabel', err, 'user_labels', label.id, JSON.stringify(payload))
+    }
+  }, producer)
 }
 
 /**
@@ -408,9 +427,9 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
  * label by name and remap local junction tables to use its ID, then drop
  * the local label. Returns true if consolidation succeeded.
  */
-async function consolidateLabelOnRemote(localLabel: Label, userId: string): Promise<boolean> {
+async function consolidateLabelOnRemote(localLabel: Label, userId: string, origin: SyncProducer): Promise<boolean> {
   try {
-    const supabase = await getSupabase()
+    const supabase = (await origin.client())!
     // Need the full row — consolidate has to insert it locally before the
     // junction remap can run (FK to labels.id).
     const { data: remote } = await supabase
@@ -439,14 +458,14 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string): Prom
       updated_at: String(r.updated_at ?? new Date().toISOString()),
       deleted_at: r.deleted_at == null ? null : String(r.deleted_at)
     }
-    const result = await window.api.labels.consolidate(localLabel.id, canonicalLabel)
+    const result = await origin.api.labels.consolidate(localLabel.id, canonicalLabel)
     logEvent(
       'info',
       'sync',
       `Consolidated local label "${localLabel.name}" onto remote ID`,
       `local=${localLabel.id} → remote=${remote.id} taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps}`
     )
-    markSynced()
+    await markSynced(origin)
     return true
   } catch (err) {
     console.warn('[PersonalSync] Failed to consolidate label on remote:', err)
@@ -463,76 +482,79 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string): Prom
 export async function pushProjectLabel(
   projectId: string,
   labelId: string,
-  deletedAt: string | null
+  deletedAt: string | null,
+  producer?: SyncProducer
 ): Promise<void> {
-  if (!(await hasLiveSession('pushProjectLabel', `${projectId}::${labelId}`))) {
-    await window.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt }))
-    await useSyncStore.getState().refreshPendingCount()
-    return
-  }
-  try {
-    // Pre-flight: ensure the label row exists in user_labels on Supabase
-    // before pushing the junction row. Without this, project_labels.label_id
-    // can FK-reject (23503) for labels that exist locally but were never
-    // pushed (silent pushLabel failure, or labels that pre-date sync). Only
-    // push labels owned by the current authed user — we can't write rows
-    // into another user's user_labels (RLS), and if the label belongs to
-    // another user it should already be on Supabase from their push.
-    const localLabel = await window.api.labels.findById(labelId)
-    if (localLabel) {
-      const { useAuthStore } = await import('../shared/stores/authStore')
-      const authedUserId = useAuthStore.getState().currentUser?.id ?? null
-      if (authedUserId && localLabel.user_id === authedUserId) {
-        await pushLabel(localLabel, authedUserId)
-      }
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'pushProjectLabel', `${projectId}::${labelId}`))) {
+      await origin.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt }))
+      await refreshProducerPending(origin)
+      return
     }
-
-    const supabase = await getSupabase()
-    const { error } = await supabase
-      .from('project_labels')
-      .upsert(
-        {
-          project_id: projectId,
-          label_id: labelId,
-          created_at: new Date().toISOString(),
-          deleted_at: deletedAt
-        },
-        { onConflict: 'project_id,label_id' }
-      )
-    if (error) {
-      // Treat FK violation as a soft failure — the referenced label simply
-      // isn't on Supabase. Log and skip queueing a retry that will keep
-      // failing forever; let the next reconcile pass surface it again with
-      // proper context (or skip it if the local label has been cleaned up).
-      const e = error as { code?: string; details?: string }
-      if (e.code === '23503') {
-        logEvent(
-          'warn',
-          'sync',
-          'pushProjectLabel skipped — label_id not in user_labels on Supabase',
-          `project=${projectId} label=${labelId} details=${e.details ?? ''}`
-        )
-        return
+    try {
+      // Pre-flight: ensure the label row exists in user_labels on Supabase
+      // before pushing the junction row. Without this, project_labels.label_id
+      // can FK-reject (23503) for labels that exist locally but were never
+      // pushed (silent pushLabel failure, or labels that pre-date sync). Only
+      // push labels owned by the current authed user — we can't write rows
+      // into another user's user_labels (RLS), and if the label belongs to
+      // another user it should already be on Supabase from their push.
+      const localLabel = await origin.api.labels.findById(labelId)
+      if (localLabel) {
+        const { useAuthStore } = await import('../shared/stores/authStore')
+        const authedUserId = useAuthStore.getState().currentUser?.id ?? null
+        if (authedUserId && localLabel.user_id === authedUserId) {
+          await pushLabel(localLabel, authedUserId, origin)
+        }
       }
-      await reportPushFailure(
+
+      const supabase = (await origin.client())!
+      const { error } = await supabase
+        .from('project_labels')
+        .upsert(
+          {
+            project_id: projectId,
+            label_id: labelId,
+            created_at: new Date().toISOString(),
+            deleted_at: deletedAt
+          },
+          { onConflict: 'project_id,label_id' }
+        )
+      if (error) {
+        // Treat FK violation as a soft failure — the referenced label simply
+        // isn't on Supabase. Log and skip queueing a retry that will keep
+        // failing forever; let the next reconcile pass surface it again with
+        // proper context (or skip it if the local label has been cleaned up).
+        const e = error as { code?: string; details?: string }
+        if (e.code === '23503') {
+          logEvent(
+            'warn',
+            'sync',
+            'pushProjectLabel skipped — label_id not in user_labels on Supabase',
+            `project=${projectId} label=${labelId} details=${e.details ?? ''}`
+          )
+          return
+        }
+        await reportPushFailure(origin,
+          'pushProjectLabel',
+          error,
+          'project_labels',
+          `${projectId}::${labelId}`,
+          JSON.stringify({ projectId, labelId, deletedAt })
+        )
+      } else {
+        await markSynced(origin)
+      }
+    } catch (err) {
+      await reportPushFailure(origin,
         'pushProjectLabel',
-        error,
+        err,
         'project_labels',
         `${projectId}::${labelId}`,
         JSON.stringify({ projectId, labelId, deletedAt })
       )
-    } else {
-      markSynced()
     }
-  } catch (err) {
-    await reportPushFailure(
-      'pushProjectLabel',
-      err,
-      'project_labels',
-      `${projectId}::${labelId}`,
-      JSON.stringify({ projectId, labelId, deletedAt })
-    )
-  }
+  }, producer)
 }
 
 /**
@@ -548,94 +570,96 @@ export async function pushRemoveLabelFromProject(
   projectId: string,
   labelId: string
 ): Promise<void> {
-  if (!(await hasLiveSession('pushRemoveLabelFromProject', `${projectId}::${labelId}`))) return
-  try {
-    const supabase = await getSupabase()
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'pushRemoveLabelFromProject', `${projectId}::${labelId}`))) return
+    try {
+      const supabase = (await origin.client())!
 
-    // Resolve the label's name. We tombstone EVERY same-name project_labels
-    // row in this project — across all members — so a label removed by one
-    // member disappears from every other member's view, even members
-    // whose label_ids weren't loaded into our local store at remove-time.
-    const localLabel = await window.api.labels.findById(labelId).catch(() => null)
-    let targetName: string | null = localLabel?.name?.toLowerCase() ?? null
-    if (!targetName) {
-      const { data: remoteLabel } = await supabase
-        .from('user_labels')
-        .select('name')
-        .eq('id', labelId)
-        .maybeSingle()
-      targetName = (remoteLabel?.name as string | undefined)?.toLowerCase() ?? null
-    }
+      // Resolve the label's name. We tombstone EVERY same-name project_labels
+      // row in this project — across all members — so a label removed by one
+      // member disappears from every other member's view, even members
+      // whose label_ids weren't loaded into our local store at remove-time.
+      const localLabel = await origin.api.labels.findById(labelId).catch(() => null)
+      let targetName: string | null = localLabel?.name?.toLowerCase() ?? null
+      if (!targetName) {
+        const { data: remoteLabel } = await supabase
+          .from('user_labels')
+          .select('name')
+          .eq('id', labelId)
+          .maybeSingle()
+        targetName = (remoteLabel?.name as string | undefined)?.toLowerCase() ?? null
+      }
 
-    // Collect all sibling label_ids in this project with the same name.
-    // Includes labels the local store hasn't hydrated yet (newly-created
-    // by another member, etc.) — without this, those rows survive the
-    // removal and resurrect via syncProjectDown on every other member's
-    // next login.
-    let siblingIds: string[] = [labelId]
-    if (targetName) {
-      const { data: siblings } = await readAll(() => supabase
-        .from('project_labels')
-        .select('label_id, user_labels!inner(name)')
-        .eq('project_id', projectId)
-        .is('deleted_at', null), ['label_id'])
-      if (siblings) {
-        const matched = (siblings as Array<{ label_id: string; user_labels: { name: string } | { name: string }[] }>)
-          .filter((row) => {
-            const ul = Array.isArray(row.user_labels) ? row.user_labels[0] : row.user_labels
-            return ul?.name?.toLowerCase() === targetName
-          })
-          .map((row) => row.label_id)
-        if (matched.length > 0) {
-          // Always include the requested labelId so we tombstone it even if
-          // its row isn't currently alive (idempotent UPSERT).
-          siblingIds = Array.from(new Set([labelId, ...matched]))
+      // Collect all sibling label_ids in this project with the same name.
+      // Includes labels the local store hasn't hydrated yet (newly-created
+      // by another member, etc.) — without this, those rows survive the
+      // removal and resurrect via syncProjectDown on every other member's
+      // next login.
+      let siblingIds: string[] = [labelId]
+      if (targetName) {
+        const { data: siblings } = await readAll(() => supabase
+          .from('project_labels')
+          .select('label_id, user_labels!inner(name)')
+          .eq('project_id', projectId)
+          .is('deleted_at', null), ['label_id'])
+        if (siblings) {
+          const matched = (siblings as Array<{ label_id: string; user_labels: { name: string } | { name: string }[] }>)
+            .filter((row) => {
+              const ul = Array.isArray(row.user_labels) ? row.user_labels[0] : row.user_labels
+              return ul?.name?.toLowerCase() === targetName
+            })
+            .map((row) => row.label_id)
+          if (matched.length > 0) {
+            // Always include the requested labelId so we tombstone it even if
+            // its row isn't currently alive (idempotent UPSERT).
+            siblingIds = Array.from(new Set([labelId, ...matched]))
+          }
         }
       }
-    }
 
-    // 1. Tombstone every sibling project_labels row.
-    for (const id of siblingIds) {
-      void pushProjectLabel(projectId, id, new Date().toISOString())
-    }
-
-    // 2. Hard-delete task_labels for every task in the project that had
-    // any of those labels. Chunked because task_labels has no project_id
-    // column — we can only filter by task_id.
-    const tasks = await window.api.tasks
-      .findByProjectId(projectId)
-      .catch(() => [] as Task[])
-    const taskIds = tasks.map((t) => t.id)
-    if (taskIds.length === 0) return
-    const chunkSize = 200
-    for (let i = 0; i < taskIds.length; i += chunkSize) {
-      const chunk = taskIds.slice(i, i + chunkSize)
-      const { error } = await supabase
-        .from('task_labels')
-        .delete()
-        .in('label_id', siblingIds)
-        .in('task_id', chunk)
-      if (error) {
-        await reportPushFailure(
-          'pushRemoveLabelFromProject',
-          error,
-          'task_labels',
-          `${projectId}::${labelId}`,
-          JSON.stringify({ projectId, labelId, siblingIds, chunkSize: chunk.length })
-        )
-        return
+      // 1. Tombstone every sibling project_labels row.
+      for (const id of siblingIds) {
+        void pushProjectLabel(projectId, id, new Date().toISOString(), origin)
       }
+
+      // 2. Hard-delete task_labels for every task in the project that had
+      // any of those labels. Chunked because task_labels has no project_id
+      // column — we can only filter by task_id.
+      const tasks = await origin.api.tasks
+        .findByProjectId(projectId)
+        .catch(() => [] as Task[])
+      const taskIds = tasks.map((t) => t.id)
+      if (taskIds.length === 0) return
+      const chunkSize = 200
+      for (let i = 0; i < taskIds.length; i += chunkSize) {
+        const chunk = taskIds.slice(i, i + chunkSize)
+        const { error } = await supabase
+          .from('task_labels')
+          .delete()
+          .in('label_id', siblingIds)
+          .in('task_id', chunk)
+        if (error) {
+          await reportPushFailure(origin,
+            'pushRemoveLabelFromProject',
+            error,
+            'task_labels',
+            `${projectId}::${labelId}`,
+            JSON.stringify({ projectId, labelId, siblingIds, chunkSize: chunk.length })
+          )
+          return
+        }
+      }
+      await markSynced(origin)
+    } catch (err) {
+      await reportPushFailure(origin,
+        'pushRemoveLabelFromProject',
+        err,
+        'task_labels',
+        `${projectId}::${labelId}`,
+        JSON.stringify({ projectId, labelId })
+      )
     }
-    markSynced()
-  } catch (err) {
-    await reportPushFailure(
-      'pushRemoveLabelFromProject',
-      err,
-      'task_labels',
-      `${projectId}::${labelId}`,
-      JSON.stringify({ projectId, labelId })
-    )
-  }
+  })
 }
 
 /**
@@ -644,56 +668,61 @@ export async function pushRemoveLabelFromProject(
  * other devices learn the label is gone (Realtime UPDATE event).
  */
 export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
-  if (!(await hasLiveSession('deleteLabel', `label=${labelId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const now = new Date().toISOString()
-    const { error } = await supabase
-      .from('user_labels')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', labelId)
-    if (error) {
-      await reportPushFailure('deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted label', `id=${labelId}`)
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'deleteLabel', `label=${labelId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('user_labels')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', labelId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted label', `id=${labelId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-  }
+  })
 }
 
 /**
  * Push a setting to user_settings in Supabase (immediate, no debounce).
  */
-async function pushSettingImmediate(key: string, value: string, userId: string): Promise<void> {
-  // Never let a bearer secret (api_key) reach the cloud user_settings table —
-  // covers the first-time fullUpload path and the debounced flush (#98/#114).
-  if (isSettingSyncExcluded(key)) return
-  const id = `${userId}:${key}`
-  const payload = {
-    id,
-    user_id: userId,
-    key,
-    value,
-    updated_at: new Date().toISOString()
-  }
-  if (!(await hasLiveSession('pushSetting', `id=${id}`))) {
-    await window.api.sync.enqueue('user_settings', id, 'UPDATE', JSON.stringify(payload))
-    await useSyncStore.getState().refreshPendingCount()
-    return
-  }
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_settings').upsert(payload)
-    if (error) await reportPushFailure('pushSetting', error, 'user_settings', id, JSON.stringify(payload))
-    else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed setting "${key}"`, `id=${id}`)
+async function pushSettingImmediate(key: string, value: string, userId: string, producer?: SyncProducer): Promise<void> {
+  return withSyncProducer(async (origin) => {
+    if (origin.userId !== userId) return
+    // Never let a bearer secret (api_key) reach the cloud user_settings table —
+    // covers the first-time fullUpload path and the debounced flush (#98/#114).
+    if (isSettingSyncExcluded(key)) return
+    const id = `${userId}:${key}`
+    const payload = {
+      id,
+      user_id: userId,
+      key,
+      value,
+      updated_at: new Date().toISOString()
     }
-  } catch (err) {
-    await reportPushFailure('pushSetting', err, 'user_settings', id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushSetting', `id=${id}`))) {
+      await origin.api.sync.enqueue('user_settings', id, 'UPDATE', JSON.stringify(payload))
+      await refreshProducerPending(origin)
+      return
+    }
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_settings').upsert(payload)
+      if (error) await reportPushFailure(origin, 'pushSetting', error, 'user_settings', id, JSON.stringify(payload))
+      else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed setting "${key}"`, `id=${id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushSetting', err, 'user_settings', id, JSON.stringify(payload))
+    }
+  }, producer)
 }
 
 /**
@@ -703,7 +732,7 @@ export function pushSetting(key: string, value: string, userId: string): void {
   // Defense-in-depth: excluded keys (api_key) are device-local secrets and must
   // never be buffered/flushed to Supabase user_settings (#98/#114).
   if (isSettingSyncExcluded(key)) return
-  pendingSettings.set(`${userId}:${key}`, { key, value, userId })
+  pendingSettings.set(`${userId}:${key}`, { key, value, userId, origin: captureSyncProducer() })
   if (settingsFlushTimer) clearTimeout(settingsFlushTimer)
   settingsFlushTimer = setTimeout(flushSettingsBuffer, 5_000)
 }
@@ -721,23 +750,25 @@ export async function pushSavedView(view: {
   color: string | null
   deleted_at?: string | null
 }): Promise<void> {
-  const payload = {
-    ...view,
-    deleted_at: view.deleted_at ?? null,
-    updated_at: new Date().toISOString()
-  }
-  if (!(await hasLiveSession('pushSavedView', `id=${view.id}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_saved_views').upsert(payload)
-    if (error) await reportPushFailure('pushSavedView', error, 'user_saved_views', view.id, JSON.stringify(payload))
-    else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed saved view "${view.name}"`, `id=${view.id}`)
+  return withSyncProducer(async (origin) => {
+    const payload = {
+      ...view,
+      deleted_at: view.deleted_at ?? null,
+      updated_at: new Date().toISOString()
     }
-  } catch (err) {
-    await reportPushFailure('pushSavedView', err, 'user_saved_views', view.id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushSavedView', `id=${view.id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_saved_views').upsert(payload)
+      if (error) await reportPushFailure(origin, 'pushSavedView', error, 'user_saved_views', view.id, JSON.stringify(payload))
+      else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed saved view "${view.name}"`, `id=${view.id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushSavedView', err, 'user_saved_views', view.id, JSON.stringify(payload))
+    }
+  })
 }
 
 /**
@@ -753,23 +784,25 @@ export async function pushProjectArea(area: {
   is_collapsed: number
   deleted_at?: string | null
 }): Promise<void> {
-  const payload = {
-    ...area,
-    deleted_at: area.deleted_at ?? null,
-    updated_at: new Date().toISOString()
-  }
-  if (!(await hasLiveSession('pushProjectArea', `id=${area.id}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_project_areas').upsert(payload)
-    if (error) await reportPushFailure('pushProjectArea', error, 'user_project_areas', area.id, JSON.stringify(payload))
-    else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed project area "${area.name}"`, `id=${area.id}`)
+  return withSyncProducer(async (origin) => {
+    const payload = {
+      ...area,
+      deleted_at: area.deleted_at ?? null,
+      updated_at: new Date().toISOString()
     }
-  } catch (err) {
-    await reportPushFailure('pushProjectArea', err, 'user_project_areas', area.id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushProjectArea', `id=${area.id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_project_areas').upsert(payload)
+      if (error) await reportPushFailure(origin, 'pushProjectArea', error, 'user_project_areas', area.id, JSON.stringify(payload))
+      else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed project area "${area.name}"`, `id=${area.id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushProjectArea', err, 'user_project_areas', area.id, JSON.stringify(payload))
+    }
+  })
 }
 
 /**
@@ -786,108 +819,116 @@ export async function pushProjectTemplate(template: {
   updated_at: string
   deleted_at: string | null
 }): Promise<void> {
-  if (!(await hasLiveSession('pushProjectTemplate', `template=${template.id}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('project_templates').upsert(template)
-    if (error) {
-      await reportPushFailure(
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'pushProjectTemplate', `template=${template.id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('project_templates').upsert(template)
+      if (error) {
+        await reportPushFailure(origin,
+          'pushProjectTemplate',
+          error,
+          'project_templates',
+          template.id,
+          JSON.stringify(template)
+        )
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed project template "${template.name}"`, `id=${template.id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin,
         'pushProjectTemplate',
-        error,
+        err,
         'project_templates',
         template.id,
         JSON.stringify(template)
       )
-    } else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed project template "${template.name}"`, `id=${template.id}`)
     }
-  } catch (err) {
-    await reportPushFailure(
-      'pushProjectTemplate',
-      err,
-      'project_templates',
-      template.id,
-      JSON.stringify(template)
-    )
-  }
+  })
 }
 
 /**
  * Soft-delete a project template on Supabase.
  */
 export async function deleteProjectTemplateFromSupabase(templateId: string): Promise<void> {
-  const now = new Date().toISOString()
-  const payload = { deleted_at: now, updated_at: now }
-  if (!(await hasLiveSession('deleteProjectTemplate', `id=${templateId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('project_templates').update(payload).eq('id', templateId)
-    if (error) {
-      await reportPushFailure(
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    const payload = { deleted_at: now, updated_at: now }
+    if (!(await hasLiveSession(origin, 'deleteProjectTemplate', `id=${templateId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('project_templates').update(payload).eq('id', templateId)
+      if (error) {
+        await reportPushFailure(origin,
+          'deleteProjectTemplate',
+          error,
+          'project_templates',
+          templateId,
+          JSON.stringify(payload),
+          'UPDATE'
+        )
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted project template', `id=${templateId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin,
         'deleteProjectTemplate',
-        error,
+        err,
         'project_templates',
         templateId,
         JSON.stringify(payload),
         'UPDATE'
       )
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted project template', `id=${templateId}`)
     }
-  } catch (err) {
-    await reportPushFailure(
-      'deleteProjectTemplate',
-      err,
-      'project_templates',
-      templateId,
-      JSON.stringify(payload),
-      'UPDATE'
-    )
-  }
+  })
 }
 
 /**
  * Delete a saved view from Supabase.
  */
 export async function deleteSavedViewFromSupabase(viewId: string): Promise<void> {
-  const now = new Date().toISOString()
-  const payload = { deleted_at: now, updated_at: now }
-  if (!(await hasLiveSession('deleteSavedView', `id=${viewId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_saved_views').update(payload).eq('id', viewId)
-    if (error) {
-      await reportPushFailure('deleteSavedView', error, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted saved view', `id=${viewId}`)
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    const payload = { deleted_at: now, updated_at: now }
+    if (!(await hasLiveSession(origin, 'deleteSavedView', `id=${viewId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_saved_views').update(payload).eq('id', viewId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteSavedView', error, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted saved view', `id=${viewId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteSavedView', err, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteSavedView', err, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
-  }
+  })
 }
 
 /**
  * Delete a project area from Supabase.
  */
 export async function deleteProjectAreaFromSupabase(areaId: string): Promise<void> {
-  const now = new Date().toISOString()
-  const payload = { deleted_at: now, updated_at: now }
-  if (!(await hasLiveSession('deleteProjectArea', `id=${areaId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_project_areas').update(payload).eq('id', areaId)
-    if (error) {
-      await reportPushFailure('deleteProjectArea', error, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted project area', `id=${areaId}`)
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    const payload = { deleted_at: now, updated_at: now }
+    if (!(await hasLiveSession(origin, 'deleteProjectArea', `id=${areaId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_project_areas').update(payload).eq('id', areaId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteProjectArea', error, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted project area', `id=${areaId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteProjectArea', err, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteProjectArea', err, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
-  }
+  })
 }
 
 /**
@@ -911,39 +952,41 @@ export async function pushTheme(theme: {
   updated_at?: string
   deleted_at?: string | null
 }): Promise<void> {
-  const now = new Date().toISOString()
-  const payload = {
-    id: theme.id,
-    user_id: theme.user_id,
-    name: theme.name,
-    mode: theme.mode,
-    bg: theme.bg,
-    fg: theme.fg,
-    fg_secondary: theme.fg_secondary,
-    fg_muted: theme.fg_muted,
-    muted: theme.muted,
-    accent: theme.accent,
-    accent_fg: theme.accent_fg,
-    // Legacy column, still NOT NULL — kept in sync with fg_secondary.
-    surface: theme.fg_secondary,
-    border: theme.border,
-    sidebar: theme.sidebar ?? null,
-    created_at: theme.created_at ?? now,
-    updated_at: theme.updated_at ?? now,
-    deleted_at: theme.deleted_at ?? null
-  }
-  if (!(await hasLiveSession('pushTheme', `id=${theme.id}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase.from('user_themes').upsert(payload)
-    if (error) await reportPushFailure('pushTheme', error, 'user_themes', theme.id, JSON.stringify(payload))
-    else {
-      markSynced()
-      logEvent('info', 'sync', `Pushed theme "${theme.name}"`, `id=${theme.id} mode=${theme.mode}`)
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    const payload = {
+      id: theme.id,
+      user_id: theme.user_id,
+      name: theme.name,
+      mode: theme.mode,
+      bg: theme.bg,
+      fg: theme.fg,
+      fg_secondary: theme.fg_secondary,
+      fg_muted: theme.fg_muted,
+      muted: theme.muted,
+      accent: theme.accent,
+      accent_fg: theme.accent_fg,
+      // Legacy column, still NOT NULL — kept in sync with fg_secondary.
+      surface: theme.fg_secondary,
+      border: theme.border,
+      sidebar: theme.sidebar ?? null,
+      created_at: theme.created_at ?? now,
+      updated_at: theme.updated_at ?? now,
+      deleted_at: theme.deleted_at ?? null
     }
-  } catch (err) {
-    await reportPushFailure('pushTheme', err, 'user_themes', theme.id, JSON.stringify(payload))
-  }
+    if (!(await hasLiveSession(origin, 'pushTheme', `id=${theme.id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase.from('user_themes').upsert(payload)
+      if (error) await reportPushFailure(origin, 'pushTheme', error, 'user_themes', theme.id, JSON.stringify(payload))
+      else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Pushed theme "${theme.name}"`, `id=${theme.id} mode=${theme.mode}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'pushTheme', err, 'user_themes', theme.id, JSON.stringify(payload))
+    }
+  })
 }
 
 /**
@@ -952,23 +995,25 @@ export async function pushTheme(theme: {
  * via Realtime UPDATE so other devices can drop the row.
  */
 export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
-  if (!(await hasLiveSession('deleteTheme', `id=${themeId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const now = new Date().toISOString()
-    const { error } = await supabase
-      .from('user_themes')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', themeId)
-    if (error) {
-      await reportPushFailure('deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', 'Soft-deleted theme', `id=${themeId}`)
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'deleteTheme', `id=${themeId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('user_themes')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', themeId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', 'Soft-deleted theme', `id=${themeId}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-  }
+  })
 }
 
 /**
@@ -976,24 +1021,26 @@ export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
  * Hard-DELETE is reserved for the 30-day purge job.
  */
 export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
-  const id = `${userId}:${key}`
-  if (!(await hasLiveSession('deleteSetting', `id=${id}`))) return
-  try {
-    const supabase = await getSupabase()
-    const now = new Date().toISOString()
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', id)
-    if (error) {
-      await reportPushFailure('deleteSetting', error, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-    } else {
-      markSynced()
-      logEvent('info', 'sync', `Soft-deleted setting "${key}"`, `id=${id}`)
+  return withSyncProducer(async (origin) => {
+    const id = `${userId}:${key}`
+    if (!(await hasLiveSession(origin, 'deleteSetting', `id=${id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('user_settings')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', id)
+      if (error) {
+        await reportPushFailure(origin, 'deleteSetting', error, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
+      } else {
+        await markSynced(origin)
+        logEvent('info', 'sync', `Soft-deleted setting "${key}"`, `id=${id}`)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteSetting', err, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteSetting', err, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-  }
+  })
 }
 
 /**
@@ -1001,23 +1048,25 @@ export async function deleteSettingFromSupabase(key: string, userId: string): Pr
  * for the 30-day purge job — a soft tombstone propagates via Realtime UPDATE.
  */
 export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
-  const now = new Date().toISOString()
-  if (!(await hasLiveSession('deleteStatus', `id=${statusId}`))) return
-  try {
-    const supabase = await getSupabase()
-    const { error } = await supabase
-      .from('statuses')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', statusId)
-    if (error) {
-      await reportPushFailure('deleteStatus', error, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
-    } else {
-      logEvent('info', 'sync', `Soft-deleted status`, `id=${statusId}`)
-      markSynced()
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    if (!(await hasLiveSession(origin, 'deleteStatus', `id=${statusId}`))) return
+    try {
+      const supabase = (await origin.client())!
+      const { error } = await supabase
+        .from('statuses')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', statusId)
+      if (error) {
+        await reportPushFailure(origin, 'deleteStatus', error, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
+      } else {
+        logEvent('info', 'sync', `Soft-deleted status`, `id=${statusId}`)
+        await markSynced(origin)
+      }
+    } catch (err) {
+      await reportPushFailure(origin, 'deleteStatus', err, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
     }
-  } catch (err) {
-    await reportPushFailure('deleteStatus', err, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
-  }
+  })
 }
 
 /**
@@ -1030,59 +1079,61 @@ export async function deleteStatusFromSupabase(statusId: string): Promise<void> 
  * have no separate sync identity.
  */
 export async function deleteProjectFromSupabase(projectId: string): Promise<void> {
-  const now = new Date().toISOString()
-  if (!(await hasLiveSession('deleteProject', `id=${projectId}`))) return
-  try {
-    const supabase = await getSupabase()
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    if (!(await hasLiveSession(origin, 'deleteProject', `id=${projectId}`))) return
+    try {
+      const supabase = (await origin.client())!
 
-    // Cascade tombstones to children first so any device pulling sees consistent state.
-    const { error: tasksErr } = await supabase
-      .from('tasks')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('project_id', projectId)
-      .is('deleted_at', null)
-    if (tasksErr) {
-      logEvent('error', 'sync', `deleteProject tasks soft-delete error: ${tasksErr.message}`, `project=${projectId}`)
-      useSyncStore.getState().setError(tasksErr.message)
-      return
-    }
+      // Cascade tombstones to children first so any device pulling sees consistent state.
+      const { error: tasksErr } = await supabase
+        .from('tasks')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('project_id', projectId)
+        .is('deleted_at', null)
+      if (tasksErr) {
+        logEvent('error', 'sync', `deleteProject tasks soft-delete error: ${tasksErr.message}`, `project=${projectId}`)
+        if (await origin.isCurrent()) useSyncStore.getState().setError(tasksErr.message)
+        return
+      }
 
-    const { error: stsErr } = await supabase
-      .from('statuses')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('project_id', projectId)
-      .is('deleted_at', null)
-    if (stsErr) {
-      logEvent('error', 'sync', `deleteProject statuses soft-delete error: ${stsErr.message}`, `project=${projectId}`)
-      useSyncStore.getState().setError(stsErr.message)
-      return
-    }
+      const { error: stsErr } = await supabase
+        .from('statuses')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('project_id', projectId)
+        .is('deleted_at', null)
+      if (stsErr) {
+        logEvent('error', 'sync', `deleteProject statuses soft-delete error: ${stsErr.message}`, `project=${projectId}`)
+        if (await origin.isCurrent()) useSyncStore.getState().setError(stsErr.message)
+        return
+      }
 
-    // project_members is a junction without sync identity — physical remove is fine.
-    const { error: memberErr } = await supabase.from('project_members').delete().eq('project_id', projectId)
-    if (memberErr) {
-      logEvent('error', 'sync', `deleteProject members error: ${memberErr.message}`, `project=${projectId}`)
-      useSyncStore.getState().setError(memberErr.message)
-      return
-    }
+      // project_members is a junction without sync identity — physical remove is fine.
+      const { error: memberErr } = await supabase.from('project_members').delete().eq('project_id', projectId)
+      if (memberErr) {
+        logEvent('error', 'sync', `deleteProject members error: ${memberErr.message}`, `project=${projectId}`)
+        if (await origin.isCurrent()) useSyncStore.getState().setError(memberErr.message)
+        return
+      }
 
-    const { error: projErr } = await supabase
-      .from('projects')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('id', projectId)
-    if (projErr) {
-      logEvent('error', 'sync', `deleteProject error: ${projErr.message}`, `project=${projectId}`)
-      useSyncStore.getState().setError(projErr.message)
-    } else {
-      logEvent('info', 'sync', `Soft-deleted project`, `id=${projectId}`)
-      markSynced()
+      const { error: projErr } = await supabase
+        .from('projects')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', projectId)
+      if (projErr) {
+        logEvent('error', 'sync', `deleteProject error: ${projErr.message}`, `project=${projectId}`)
+        if (await origin.isCurrent()) useSyncStore.getState().setError(projErr.message)
+      } else {
+        logEvent('info', 'sync', `Soft-deleted project`, `id=${projectId}`)
+        await markSynced(origin)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'deleteProject threw'
+      console.error('[PersonalSync] deleteProject failed:', err)
+      logEvent('error', 'sync', `deleteProject threw: ${msg}`, `project=${projectId}`)
+      if (await origin.isCurrent()) useSyncStore.getState().setError(msg)
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'deleteProject threw'
-    console.error('[PersonalSync] deleteProject failed:', err)
-    logEvent('error', 'sync', `deleteProject threw: ${msg}`, `project=${projectId}`)
-    useSyncStore.getState().setError(msg)
-  }
+  })
 }
 
 // ── Project Push ─────────────────────────────────────────────────────
@@ -1106,69 +1157,73 @@ export async function pushProject(project: {
   is_archived?: number
   created_at: string
   updated_at: string
-}): Promise<void> {
-  if (!(await hasLiveSession('pushProject', `id=${project.id}`))) return
-  try {
-    const supabase = await getSupabase()
-    // Use the share_project RPC (SECURITY DEFINER) which atomically inserts
-    // the project + owner membership, bypassing RLS chicken-and-egg problem
-    const { error } = await supabase.rpc('share_project', {
-      p_id: project.id,
-      p_name: project.name,
-      p_description: project.description,
-      p_color: project.color ?? '#888888',
-      p_icon: project.icon ?? 'folder'
-    })
-    if (error) {
-      // RPC payload isn't a row upsert — queue won't retry it via processSyncQueue.
-      // Log + setError so the user sees it; reconcile/manual force-sync will recover.
-      const msg = error.message ?? 'pushProject RPC failed'
-      console.error('[PersonalSync] pushProject error:', error)
-      logEvent('error', 'sync', `pushProject failed: ${msg}`, `project=${project.id} code=${error.code ?? ''}`)
-      useSyncStore.getState().setError(msg)
-    } else {
-      markSynced()
-      // Push auto-archive settings separately (not in RPC)
-      if (project.auto_archive_enabled !== undefined) {
-        await supabase
-          .from('projects')
-          .update({
-            auto_archive_enabled: project.auto_archive_enabled,
-            auto_archive_value: project.auto_archive_value,
-            auto_archive_unit: project.auto_archive_unit
-          })
-          .eq('id', project.id)
+}, producer?: SyncProducer): Promise<void> {
+  return withSyncProducer(async (origin) => {
+    if (!(await hasLiveSession(origin, 'pushProject', `id=${project.id}`))) return
+    try {
+      const supabase = (await origin.client())!
+      // Use the share_project RPC (SECURITY DEFINER) which atomically inserts
+      // the project + owner membership, bypassing RLS chicken-and-egg problem
+      const { error } = await supabase.rpc('share_project', {
+        p_id: project.id,
+        p_name: project.name,
+        p_description: project.description,
+        p_color: project.color ?? '#888888',
+        p_icon: project.icon ?? 'folder'
+      })
+      if (error) {
+        // RPC payload isn't a row upsert — queue won't retry it via processSyncQueue.
+        // Log + setError so the user sees it; reconcile/manual force-sync will recover.
+        const msg = error.message ?? 'pushProject RPC failed'
+        console.error('[PersonalSync] pushProject error:', error)
+        logEvent('error', 'sync', `pushProject failed: ${msg}`, `project=${project.id} code=${error.code ?? ''}`)
+        if (await origin.isCurrent()) useSyncStore.getState().setError(msg)
+      } else {
+        await markSynced(origin)
+        // Push auto-archive settings separately (not in RPC)
+        if (project.auto_archive_enabled !== undefined) {
+          await supabase
+            .from('projects')
+            .update({
+              auto_archive_enabled: project.auto_archive_enabled,
+              auto_archive_value: project.auto_archive_value,
+              auto_archive_unit: project.auto_archive_unit
+            })
+            .eq('id', project.id)
+        }
+        if (project.is_archived !== undefined) {
+          await supabase.from('projects').update({ is_archived: project.is_archived }).eq('id', project.id)
+        }
       }
-      if (project.is_archived !== undefined) {
-        await supabase.from('projects').update({ is_archived: project.is_archived }).eq('id', project.id)
-      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'pushProject threw'
+      console.error('[PersonalSync] pushProject failed:', err)
+      logEvent('error', 'sync', `pushProject threw: ${msg}`, `project=${project.id}`)
+      if (await origin.isCurrent()) useSyncStore.getState().setError(msg)
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'pushProject threw'
-    console.error('[PersonalSync] pushProject failed:', err)
-    logEvent('error', 'sync', `pushProject threw: ${msg}`, `project=${project.id}`)
-    useSyncStore.getState().setError(msg)
-  }
+  }, producer)
 }
 
 export async function pushProjectArchive(projectId: string, isArchived: number): Promise<void> {
-  const now = new Date().toISOString()
-  const payload = JSON.stringify({ id: projectId, is_archived: isArchived, updated_at: now, archive_with_tasks: true })
-  try {
-    if (!(await hasLiveSession('pushProjectArchive', `id=${projectId}`))) {
-      await window.api.sync.enqueue('projects', projectId, 'UPDATE', payload)
-      await useSyncStore.getState().refreshPendingCount()
-      useSyncStore.getState().setStatus('syncing')
-      return
+  return withSyncProducer(async (origin) => {
+    const now = new Date().toISOString()
+    const payload = JSON.stringify({ id: projectId, is_archived: isArchived, updated_at: now, archive_with_tasks: true })
+    try {
+      if (!(await hasLiveSession(origin, 'pushProjectArchive', `id=${projectId}`))) {
+        await origin.api.sync.enqueue('projects', projectId, 'UPDATE', payload)
+        await refreshProducerPending(origin)
+        if (await origin.isCurrent()) useSyncStore.getState().setStatus('syncing')
+        return
+      }
+      const project = await origin.api.projects.findById(projectId)
+      if (!project || project.deleted_at) return
+      const tasks = await origin.api.tasks.findAllByProject(projectId, { includeTombstones: true })
+      await writeProjectArchive((await origin.client())!, projectId, project.is_archived ?? 0, project.updated_at, tasks)
+      await markSynced(origin)
+    } catch (error) {
+      await reportPushFailure(origin, 'pushProjectArchive', error, 'projects', projectId, payload)
     }
-    const project = await window.api.projects.findById(projectId)
-    if (!project || project.deleted_at) return
-    const tasks = await window.api.tasks.findAllByProject(projectId, { includeTombstones: true })
-    await writeProjectArchive(await getSupabase(), projectId, project.is_archived ?? 0, project.updated_at, tasks)
-    markSynced()
-  } catch (error) {
-    await reportPushFailure('pushProjectArchive', error, 'projects', projectId, payload)
-  }
+  })
 }
 
 // ── Full Upload (first-time sync) ────────────────────────────────────
@@ -1431,19 +1486,7 @@ export async function fullPull(userId: string): Promise<void> {
 
             if (statuses) {
               for (const s of statuses) {
-                const existingStatus = await window.api.statuses.findById(s.id)
-                if (!existingStatus) {
-                  await window.api.statuses.create({
-                    id: s.id,
-                    project_id: s.project_id,
-                    name: s.name,
-                    color: s.color,
-                    icon: s.icon,
-                    order_index: s.order_index,
-                    is_done: s.is_done,
-                    is_default: s.is_default
-                  })
-                }
+                await window.api.statuses.applyRemote(s)
               }
             }
 
@@ -1455,41 +1498,14 @@ export async function fullPull(userId: string): Promise<void> {
 
             if (tasks) {
               // Parents before subtasks so the parent_id FK is always satisfied.
-              const orderedTasks = [
-                ...tasks.filter((t) => !t.parent_id),
-                ...tasks.filter((t) => t.parent_id)
-              ]
+              const orderedTasks = remoteTaskOrder(tasks)
               for (const task of orderedTasks) {
-                const existingTask = await window.api.tasks.findById(task.id)
-                if (!existingTask) {
-                  // Ensure owner exists
-                  const localOwner = await window.api.users.findById(task.owner_id)
-                  if (!localOwner) {
-                    await window.api.users.create({ id: task.owner_id, email: placeholderEmail(task.owner_id), display_name: null, avatar_url: null }).catch(() => {})
-                  }
-                  try {
-                    await window.api.tasks.create({
-                    id: task.id,
-                    project_id: task.project_id,
-                    owner_id: task.owner_id,
-                    title: task.title,
-                    description: task.description,
-                    status_id: task.status_id,
-                    priority: task.priority,
-                    due_date: task.due_date,
-                    parent_id: task.parent_id,
-                    order_index: task.order_index,
-                    assigned_to: task.assigned_to,
-                    is_template: task.is_template,
-                    is_archived: task.is_archived,
-                    completed_date: task.completed_date,
-                    recurrence_rule: task.recurrence_rule,
-                    reference_url: task.reference_url
-                  })
-                  } catch (e) {
-                    console.error(`[PersonalSync] initSync: failed to create task "${task.title}" (${task.id}):`, e)
+                for (const userId of new Set([task.owner_id, task.assigned_to].filter((id): id is string => !!id))) {
+                  if (!await window.api.users.findById(userId)) {
+                    await window.api.users.create({ id: userId, email: placeholderEmail(userId), display_name: null, avatar_url: null })
                   }
                 }
+                await window.api.tasks.applyRemote(task)
               }
             }
 
@@ -1926,18 +1942,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     const touchedTaskIds: string[] = []
 
     // Parents before subtasks so the parent_id FK is satisfied when inserting.
-    const remaining = new Map(remoteTasks.map((task) => [task.id, task]))
-    const orderedRemoteTasks: typeof remoteTasks = []
-    const visiting = new Set<string>()
-    const visit = (id: string): void => {
-      const task = remaining.get(id)
-      if (!task || visiting.has(id)) return
-      visiting.add(id)
-      if (task.parent_id) visit(task.parent_id)
-      remaining.delete(id)
-      orderedRemoteTasks.push(task)
-    }
-    for (const id of remaining.keys()) visit(id)
+    const orderedRemoteTasks = remoteTaskOrder(remoteTasks)
 
     for (const rt of orderedRemoteTasks) {
       if (recentlyDeletedIds.has(rt.id)) continue

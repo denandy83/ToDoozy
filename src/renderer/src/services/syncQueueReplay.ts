@@ -50,8 +50,8 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
         if (writeError) throw new Error(writeError.message)
       }
       const removed = (remote ?? []).filter((link) => !localIds.has(link.label_id)).map((link) => link.label_id)
-      if (removed.length) {
-        const { error: removeError } = await client.from('task_labels').delete().eq('task_id', taskId).in('label_id', removed)
+      for (let index = 0; index < removed.length; index += 200) {
+        const { error: removeError } = await client.from('task_labels').delete().eq('task_id', taskId).in('label_id', removed.slice(index, index + 200))
         if (removeError) throw new Error(removeError.message)
       }
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {

@@ -7,6 +7,7 @@ import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { fullPull, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
 import { syncProjectDown } from './SyncService'
+import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshProjectLabels } from './remoteProjectRefresh'
 import type { SyncContext } from './syncContext'
 
@@ -48,7 +49,9 @@ function makeClient(): SupabaseClient {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
     let limit = 1000, columns = '*'
+    let remove = false
     const chain = {
+      delete() { remove = true; return chain },
       select(value = '*') { columns = value; return chain },
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return chain },
       is(key: string, value: unknown) { filters.push((row) => (row[key] ?? null) === value); return chain },
@@ -59,6 +62,10 @@ function makeClient(): SupabaseClient {
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       then(resolve: (value: unknown) => unknown) {
+        if (remove) {
+          rows[table] = (rows[table] ?? []).filter((row) => !filters.every((filter) => filter(row)))
+          return Promise.resolve(resolve({ data: [], error: null }))
+        }
         pageCounts[table] = (pageCounts[table] ?? 0) + 1
         if (failedTable === table && pageCounts[table] === 2) return Promise.resolve(resolve({ data: null, error: { message: 'page failed' } }))
         const data = (rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)))
@@ -135,4 +142,47 @@ it.each([0, 1])('refreshes missed shared archive metadata at startup: %s', async
   rows.projects = [{ ...repo.projects.findById(projectId), is_archived: archived, updated_at: '2099-01-01T00:00:00.000Z' }]
   await syncProjectDown(projectId, 'u')
   expect(repo.projects.findById(projectId)).toMatchObject({ is_archived: archived, is_shared: 1, updated_at: '2099-01-01T00:00:00.000Z' })
+})
+
+
+it.each(['fullPull', 'sharedStartup'])('preserves imported status/task tombstones and timestamps through %s', async (mode) => {
+  const importedId = mode === 'fullPull' ? 'fresh-import' : projectId
+  const stamp = '2020-01-01T00:00:00.000Z', deleted = '2020-01-02T00:00:00.000Z'
+  const project = { ...repo.projects.findById(projectId)!, id: importedId }
+  const status = { ...repo.statuses.findById('open')!, id: 'imported-open', project_id: importedId, created_at: stamp, updated_at: stamp }
+  rows.projects = [project]
+  rows.project_members = [{ project_id: importedId, user_id: 'u', role: 'member' }]
+  rows.statuses = [status, { ...status, id: 'imported-deleted', deleted_at: deleted, updated_at: deleted }]
+  const template = repo.tasks.create({ id: 'template', project_id: projectId, status_id: 'open', owner_id: 'u', title: 'Synthetic template' })
+  const task = { ...template, id: 'imported-parent', project_id: importedId, status_id: status.id, created_at: stamp, updated_at: stamp }
+  rows.tasks = [
+    { ...task, id: 'imported-leaf', parent_id: 'imported-middle' },
+    { ...task, id: 'imported-middle', parent_id: task.id },
+    { ...task, id: 'imported-deleted-task', status_id: 'imported-deleted', deleted_at: deleted, updated_at: deleted },
+    task
+  ]
+  if (mode === 'fullPull') await fullPull('u')
+  else await syncProjectDown(importedId, 'u')
+  expect(repo.statuses.findById('imported-deleted')).toMatchObject({ created_at: stamp, updated_at: deleted, deleted_at: deleted })
+  expect(repo.statuses.findByProjectId(importedId).map((row) => row.id)).not.toContain('imported-deleted')
+  expect(repo.tasks.findById('imported-deleted-task')).toMatchObject({ created_at: stamp, updated_at: deleted, deleted_at: deleted })
+  expect(repo.tasks.findById('imported-parent')).toMatchObject({ created_at: stamp, updated_at: stamp, deleted_at: null })
+  expect(repo.tasks.findById('imported-leaf')).toMatchObject({ parent_id: 'imported-middle', updated_at: stamp })
+})
+it('R4/review-1: reads every remote task before project-wide queued label cleanup', async () => {
+  repo.labels.create({ id: 'removed-label', user_id: 'u', name: 'Removed' })
+  repo.labels.addToProject(projectId, 'removed-label')
+  repo.labels.removeFromProject(projectId, 'removed-label')
+  rows.tasks = Array.from({ length: 1101 }, (_, index) => ({ id: `cleanup-${String(index).padStart(4, '0')}`, project_id: projectId }))
+  rows.task_labels = rows.tasks.map((task) => ({ task_id: task.id, label_id: 'removed-label' }))
+  await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: JSON.stringify({ projectId, labelId: 'removed-label' }) } as never, context)
+  expect(rows.task_labels).toHaveLength(0)
+  expect(pageCounts.tasks).toBe(3)
+})
+it('R4/review-1: reconciles every remote junction for one queued task', async () => {
+  repo.tasks.create({ id: 't', project_id: projectId, status_id: 'open', owner_id: 'u', title: 'Task' })
+  rows.task_labels = Array.from({ length: 1101 }, (_, index) => ({ task_id: 't', label_id: `label-${String(index).padStart(4, '0')}` }))
+  await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: '{"task_id":"t"}' } as never, context)
+  expect(rows.task_labels).toHaveLength(0)
+  expect(pageCounts.task_labels).toBe(3)
 })
