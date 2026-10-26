@@ -25,6 +25,7 @@
     "src/shared/**/*.ts",
     "src/preload/**/*.ts",
     "src/preload/**/*.d.ts",
-    "electron.vite.config.ts"
+    "electron.vite.config.ts",
+    "scripts/supabase-build-config.ts"
   ]
 }

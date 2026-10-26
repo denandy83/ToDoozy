@@ -137,3 +137,9 @@ All 46 open tasks labeled `Todoozy` (excl. `Later`) were fact-checked against HE
 - User confirmed verification. All 17 implemented backlog items are Done with an explicit note that acceptance does not mean the signed Mac app has been published. The two operational tasks and the new task-only label removal follow-up remain open.
 - Prepared v1.10.0 package/lockfile metadata and changelog; production build, typecheck and all 1160 tests passed again. Independent review confirmed completion-date behavior with a non-UTC database timezone.
 - Application release remains pending: no no-mistakes executable/configured pipeline found on this Mac, no Developer ID distribution identity for the configured team HXNS28BT9C, and no notarization settings present. Only an Apple Development identity is available. Requested the release host/pipeline location; no origin push, tag or public release performed.
+
+## 2026-10-26 — Release environment repair
+- Installed official no-mistakes v1.84.0 (verified release SHA-256), initialized the local gate and launchd daemon, and configured the existing authenticated Codex runner. No direct origin push.
+- Restored ignored public Supabase client configuration; the project auth settings endpoint accepted the key. Added production-build validation that rejects missing endpoints and server-side keys, plus isolated regressions. CI now runs typecheck, tests, lint and build using repository Actions variables containing only public client settings.
+- Typecheck, production build, lint (zero errors, existing warnings) and 79 test files / 1164 tests passed. An actual build with empty settings failed with the intended configuration error.
+- Xcode has no signed-in Apple account. It is waiting at the account sign-in sheet; user authentication requested before distribution-certificate and notarization setup.

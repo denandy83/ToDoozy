@@ -75,6 +75,10 @@ npm run build
 
 **Requirements:** macOS, Node.js, a Supabase project (credentials in `.env`).
 
+Copy `.env.example` to `.env` and set the project's URL and public publishable key (or legacy anon key). These client settings are embedded in the app. Production builds reject missing configuration and server-side keys. Never use a service-role or secret key here.
+
+GitHub CI runs type checking, tests, lint and a production build on pull requests and main. Set the repository Actions variables `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same public client settings; no signing credentials are needed for these checks.
+
 ---
 
 ## Features
