@@ -28,6 +28,7 @@ async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Prom
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
 export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry, context?: SyncContext): Promise<boolean> {
   const api = context?.api ?? window.api
+  if (entry.table_name === 'project_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
   if (entry.table_name === 'statuses' && payload.status_delete === true) {
     const { row: current, command } = await statusDeleteIntent(entry, api)
@@ -50,7 +51,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     if (!current || current.deleted_at) return true
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
     if (!current.archive_updated_at) throw new Error('Archive action version missing')
-    const applied = await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at, tasks, current.archive_updated_at)
+    const applied = await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, tasks, current.archive_updated_at)
     if (Date.parse(applied.archive_updated_at) > Date.parse(current.archive_updated_at) || applied.is_archived !== current.is_archived) await api.projects.applyRemote({ ...current, ...applied })
     return true
   }
@@ -113,8 +114,9 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
 }
 
 export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncContext): Promise<string> {
-  const payload = JSON.parse(entry.payload)
   const api = context.api
+  if (entry.table_name === 'project_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
+  const payload = JSON.parse(entry.payload)
   if (entry.table_name === 'statuses' && payload.status_delete === true) return JSON.stringify(await statusDeleteIntent(entry, api))
   if (entry.table_name === 'projects') {
     const project = await api.projects.findById(entry.row_id)

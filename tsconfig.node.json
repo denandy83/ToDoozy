@@ -20,6 +20,7 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
+  "exclude": ["src/main/ipc-handlers.activity.test.ts"],
   "include": [
     "src/main/**/*.ts",
     "src/shared/**/*.ts",

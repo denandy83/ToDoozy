@@ -338,6 +338,15 @@ export class LabelRepository {
         }
       }
 
+      const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name='project_labels'").all() as Array<{ id: string; payload: string }>
+      for (const command of commands) {
+        const payload = JSON.parse(command.payload)
+        if (payload.labelId !== fromId) continue
+        payload.labelId = toId
+        this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
+          .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
+      }
+      this.db.prepare("DELETE FROM sync_queue WHERE table_name='user_labels' AND row_id=?").run(fromId)
       if (fromExists) {
         this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
       }

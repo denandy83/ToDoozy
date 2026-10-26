@@ -341,8 +341,9 @@ export async function pushStatus(status: Status, producer?: SyncProducer): Promi
 /**
  * Push a label to user_labels in Supabase.
  */
-export async function pushLabel(label: Label, userId: string, producer?: SyncProducer): Promise<void> {
-  return withSyncProducer(async (origin) => {
+export async function pushLabel(label: Label, userId: string, producer?: SyncProducer): Promise<string | undefined> {
+  let effectiveId: string | undefined
+  await withSyncProducer(async (origin) => {
     if (origin.userId !== userId) return
     const payload = {
       id: label.id,
@@ -370,16 +371,18 @@ export async function pushLabel(label: Label, userId: string, producer?: SyncPro
         // user's OWN canonical by name when one exists; otherwise it returns
         // false and we report the original push failure.
         const consolidated = await consolidateLabelOnRemote(label, userId, origin)
-        if (consolidated) return
+        if (consolidated) { effectiveId = consolidated; return }
         await reportPushFailure(origin, 'pushLabel', error, 'user_labels', label.id, JSON.stringify(payload))
       } else {
         await markSynced(origin)
+        effectiveId = label.id
         logEvent('info', 'sync', `Pushed label "${label.name}"`, `id=${label.id}`)
       }
     } catch (err) {
       await reportPushFailure(origin, 'pushLabel', err, 'user_labels', label.id, JSON.stringify(payload))
     }
   }, producer)
+  return effectiveId
 }
 
 /**
@@ -387,7 +390,7 @@ export async function pushLabel(label: Label, userId: string, producer?: SyncPro
  * label by name and remap local junction tables to use its ID, then drop
  * the local label. Returns true if consolidation succeeded.
  */
-async function consolidateLabelOnRemote(localLabel: Label, userId: string, origin: SyncProducer): Promise<boolean> {
+async function consolidateLabelOnRemote(localLabel: Label, userId: string, origin: SyncProducer): Promise<string | false> {
   try {
     const supabase = (await origin.client())!
     // Need the full row — consolidate has to insert it locally before the
@@ -401,10 +404,11 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
       .maybeSingle()
     if (!remote || (remote.id as string) === localLabel.id) return false
     if (remote.deleted_at) {
-      await supabase
+      const { error: reviveError } = await supabase
         .from('user_labels')
         .update({ deleted_at: null, updated_at: new Date().toISOString() })
         .eq('id', remote.id as string)
+      if (reviveError) throw new Error(reviveError.message)
       remote.deleted_at = null
     }
     const r = remote as Record<string, unknown>
@@ -426,7 +430,7 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
       `local=${localLabel.id} → remote=${remote.id} taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps}`
     )
     await markSynced(origin)
-    return true
+    return canonicalLabel.id
   } catch (err) {
     console.warn('[PersonalSync] Failed to consolidate label on remote:', err)
     return false
@@ -447,6 +451,8 @@ export async function pushProjectLabel(
 ): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!(await hasLiveSession(origin, 'pushProjectLabel', `${projectId}::${labelId}`))) {
+      const localLabel = await origin.api.labels.findById(labelId)
+      if (localLabel && localLabel.user_id === origin.userId) await pushLabel(localLabel, origin.userId, origin)
       await origin.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt }))
       await refreshProducerPending(origin)
       return
@@ -464,10 +470,18 @@ export async function pushProjectLabel(
         const { useAuthStore } = await import('../shared/stores/authStore')
         const authedUserId = useAuthStore.getState().currentUser?.id ?? null
         if (authedUserId && localLabel.user_id === authedUserId) {
-          await pushLabel(localLabel, authedUserId, origin)
+          labelId = await pushLabel(localLabel, authedUserId, origin) ?? labelId
         }
       }
 
+      const project = await origin.api.projects.findById(projectId)
+      if (!project) return
+      const links = project.is_shared === 1
+        ? await origin.api.labels.getProjectLabelsForSharedProjects()
+        : await origin.api.labels.getProjectLabelsForOwner(project.owner_id)
+      const current = links.find((link) => link.project_id === projectId && link.label_id === labelId)
+      if (!current) return
+      deletedAt = current.deleted_at
       const supabase = (await origin.client())!
       const { error } = await supabase
         .from('project_labels')
@@ -481,20 +495,6 @@ export async function pushProjectLabel(
           { onConflict: 'project_id,label_id' }
         )
       if (error) {
-        // Treat FK violation as a soft failure — the referenced label simply
-        // isn't on Supabase. Log and skip queueing a retry that will keep
-        // failing forever; let the next reconcile pass surface it again with
-        // proper context (or skip it if the local label has been cleaned up).
-        const e = error as { code?: string; details?: string }
-        if (e.code === '23503') {
-          logEvent(
-            'warn',
-            'sync',
-            'pushProjectLabel skipped — label_id not in user_labels on Supabase',
-            `project=${projectId} label=${labelId} details=${e.details ?? ''}`
-          )
-          return
-        }
         await reportPushFailure(origin,
           'pushProjectLabel',
           error,
@@ -1681,7 +1681,7 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
     const local = await api.projects.findById(projectId)
     if (!local) return false
 
-    if (Date.parse(remote.updated_at) > Date.parse(local.updated_at) || (remote.archive_updated_at && Date.parse(remote.archive_updated_at) > Date.parse(local.archive_updated_at ?? '1970-01-01'))) {
+    if (Date.parse(remote.updated_at) > Date.parse(local.updated_at) || (remote.archive_updated_at && Date.parse(remote.archive_updated_at) >= Date.parse(local.archive_updated_at ?? '1970-01-01'))) {
       await api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
       return true
     }
@@ -1875,6 +1875,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
   try {
     context ??= await captureSyncContext()
     const api = context.api
+    await pullProjectMetadata(projectId, context)
     // Ensure statuses exist locally before inserting tasks (FK constraint)
     await pullStatuses(projectId, context)
 
@@ -2058,7 +2059,8 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
   let totalPushed = 0
   let totalPulled = 0
   try {
-    const supabase = await getSupabase()
+    const context = await captureSyncContext()
+    const supabase = context.client
 
     const runTable = async (
       tableName: Parameters<typeof reconcileTable>[0]['name'] | string,
@@ -2130,6 +2132,7 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
     }
 
     for (const project of allProjects.filter((p) => p.is_shared === 1)) {
+      await pullProjectMetadata(project.id, context)
       await pullActivity(project.id)
     }
 

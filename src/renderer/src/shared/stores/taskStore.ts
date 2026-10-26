@@ -407,7 +407,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const origin = captureSyncProducer()
     const api = origin.api
     try {
-      const oldTask = get().tasks[id]
+      const oldTask = get().tasks[id] ?? await api.tasks.findById(id)
       const task = await api.tasks.update(id, input)
       if (task) {
         await requireProducerCurrent(origin)
@@ -542,7 +542,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const api = origin.api
     try {
       // Capture task before deletion for sync
-      const taskToDelete = get().tasks[id]
+      const taskToDelete = get().tasks[id] ?? await api.tasks.findById(id)
       if (taskToDelete) logTaskActivity(id, 'deleted', taskToDelete.title, null, origin)
 
       // Collect task IDs to clean up attachment files before DB cascade

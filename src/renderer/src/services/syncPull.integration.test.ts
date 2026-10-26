@@ -7,6 +7,7 @@ import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { fullPull, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
 import { syncProjectDown, processSyncQueue, setOnlineStatus } from './SyncService'
+import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshSearchIndex } from './searchSync'
 import { refreshProjectLabels } from './remoteProjectRefresh'
@@ -50,9 +51,11 @@ function makeClient(): SupabaseClient {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
     let limit = 1000, columns = '*'
+    let values: Array<Record<string, unknown>> | null = null
     let patch: Record<string, unknown> | null = null
     let remove = false
     const chain = {
+      upsert(rows: Record<string, unknown> | Array<Record<string, unknown>>) { values = Array.isArray(rows) ? rows : [rows]; return chain },
       update(value: Record<string, unknown>) { patch = value; return chain },
       lte(key: string, value: string) { filters.push((row) => String(row[key]) <= value); return chain },
       delete() { remove = true; return chain },
@@ -64,8 +67,17 @@ function makeClient(): SupabaseClient {
       order(key: string) { order.push(key); return chain },
       limit(value: number) { limit = Math.min(value, 1000); return chain },
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
+      maybeSingle: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       then(resolve: (value: unknown) => unknown) {
+        if (values) {
+          for (const value of values) {
+            const existing = (rows[table] ?? []).find((row) => row.id === value.id)
+            if (existing && Date.parse(String(value.updated_at)) >= Date.parse(String(existing.updated_at))) Object.assign(existing, value)
+            else if (!existing) (rows[table] ??= []).push({ ...value })
+          }
+          return Promise.resolve(resolve({ data: [], error: null }))
+        }
         if (patch) {
           const selected = (rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)))
           if (table !== 'projects') for (const row of selected) Object.assign(row, patch)
@@ -277,4 +289,16 @@ it.each([0, 1])('converges rejected equal-version archive=%s before queue comple
   await pullNewTasks(projectId, context)
   expect(repo.tasks.findById('affected')?.is_archived).toBe(1 - state)
   expect(repo.tasks.findById('later')?.is_archived).toBe(state)
+})
+
+it.each([0, 1])('reconciles archive=%s beyond a metadata high-water without losing newer metadata', async (state) => {
+  const t1 = '2026-01-01T01:00:00.000Z', t8 = '2026-01-01T08:00:00.000Z', t10 = '2026-01-01T10:00:00.000Z'
+  db.prepare('UPDATE projects SET name=?,updated_at=? WHERE id=?').run('Local newer', t8, projectId)
+  rows.projects = [{ ...repo.projects.findById(projectId), name: 'Remote old', updated_at: t1, archive_updated_at: t10, is_archived: state }]
+  repo.syncMeta.setHighWater('u', 'u', 'projects', '2026-01-02T00:00:00.000Z')
+  const result = await reconcileTable(SYNC_TABLES.projects as Parameters<typeof reconcileTable>[0], 'u', 'u')
+  expect(result.skipped).toBe(false)
+  expect(result.failed).toBe(0)
+  expect(repo.projects.findById(projectId)).toMatchObject({ name: 'Local newer', updated_at: t8, archive_updated_at: t10, is_archived: state })
+  expect(rows.projects[0]).toMatchObject({ name: 'Local newer', updated_at: t8, archive_updated_at: t10, is_archived: state })
 })

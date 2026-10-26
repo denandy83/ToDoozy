@@ -295,42 +295,53 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
   expect(calls).not.toContain('project_labels')
 })
 
-it.each(['online', 'offline', 'failure'])('keeps explicit canonical label additions durable through store entry points: %s', async (mode) => {
+it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single', 'bulk'].flatMap((path) => ['existing', 'adopted'].map((resolution) => ({ mode, path, resolution })))))('keeps consolidated additions durable: $mode/$path/$resolution', async ({ mode, path, resolution }) => {
   stage = 'labels'
   const repo = repos[0]
   repo.projects.update('p', { is_shared: 1 })
-  repo.labels.create({ id: 'foreign', user_id: 'other', name: 'Private label' })
+  const name = resolution === 'existing' ? 'Private label' : 'New foreign label'
+  repo.labels.create({ id: 'foreign', user_id: 'other', name })
+  const canonical = { ...repo.labels.findById('l')!, id: 'c', name }
   useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: {}, showDetailPanel: false })
   const palette = new Set<string>(), junction = new Set(['t:remote-only'])
   let fail = mode === 'failure'
   network.client = { from(table: string) {
     let payload: unknown, operation = 'select'
     const chain: Record<string, unknown> = {}
-    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or', 'ilike']) chain[method] = () => chain
+    chain.maybeSingle = async () => {
+      if (mode === 'removed') {
+        const local = repo.labels.findByName('a', name)
+        if (local) repo.labels.removeFromProject('p', local.id)
+      }
+      return { data: canonical, error: null }
+    }
     chain.upsert = (value: unknown) => { payload = value; operation = 'upsert'; return chain }
     chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
       await network.token!()
       if (operation === 'select') return { data: [...palette].map((label_id) => ({ label_id })), error: null }
       if (table === 'project_labels' && fail) return { data: null, error: { message: 'synthetic palette failure' } }
       const values = Array.isArray(payload) ? payload : [payload]
-      if (table === 'project_labels') for (const row of values) palette.add(row.label_id)
+      if (table === 'user_labels' && values.some((row) => row.id !== 'c')) return { data: null, error: { message: 'canonical conflict', code: '23505' } }
+      if (table === 'project_labels') for (const row of values) { if (row.deleted_at) palette.delete(row.label_id); else palette.add(row.label_id) }
       if (table === 'task_labels') for (const row of values) junction.add(`${row.task_id}:${row.label_id}`)
       return { data: [], error: null }
     })().then(resolve, reject)
     return chain
   } } as unknown as SupabaseClient
   if (mode === 'offline') { setOnlineStatus(false); vi.mocked(requireSession).mockResolvedValue(null) }
-  await useTaskStore.getState().addLabel('t', 'foreign')
+  if (path === 'single') await useTaskStore.getState().addLabel('t', 'foreign')
+  else await useTaskStore.getState().bulkAddLabel(['t'], 'foreign')
   await vi.advanceTimersByTimeAsync(1)
-  if (mode !== 'online') {
+  if (mode === 'offline' || mode === 'failure') {
     expect(repo.syncQueue.count()).toBeGreaterThan(0)
     fail = false
     vi.mocked(requireSession).mockResolvedValue({ user: { id: 'a' }, access_token: 'synthetic-a' } as Session)
     setOnlineStatus(true)
     await processSyncQueue()
   }
-  expect(palette).toEqual(new Set(['l']))
-  expect(junction).toEqual(new Set(['t:remote-only', 't:l']))
+  expect(palette).toEqual(new Set(mode === 'removed' ? [] : ['c']))
+  expect(junction).toEqual(new Set(mode === 'removed' ? ['t:remote-only'] : ['t:remote-only', 't:c']))
   expect(repo.syncQueue.count()).toBe(0)
 })
 

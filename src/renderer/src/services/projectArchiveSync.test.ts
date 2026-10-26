@@ -70,11 +70,24 @@ beforeEach(() => {
   } })
   network.client = { from(table: string) {
     let patch: Record<string, unknown> | null = null, limit = 1000, columns = '*'
+    let upserts: Array<Record<string, unknown>> | null = null
     let ids: unknown[] = []
     const orders: string[] = []
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const execute = async () => {
       await network.token!()
+      if (upserts) {
+        for (const row of upserts) {
+          const existing = remote[table]?.find((item) => item.id === row.id)
+          if (existing && Date.parse(String(existing.updated_at)) > Date.parse(String(row.updated_at))) continue
+          const project = remote.projects[0]
+          const inherited = table === 'tasks' && project.archive_updated_at && Date.parse(String(row.updated_at)) <= Date.parse(String(project.archive_updated_at))
+            ? { is_archived: project.is_archived } : {}
+          if (existing) Object.assign(existing, row, inherited)
+          else (remote[table] ??= []).push({ ...row, ...inherited })
+        }
+        return { data: [], error: null }
+      }
       if (table === 'projects' && patch && onProjectWrite) { const hook = onProjectWrite; onProjectWrite = null; await hook() }
       if (table === 'tasks' && !patch) reads++
       if (table === 'tasks' && patch) {
@@ -92,6 +105,7 @@ beforeEach(() => {
       return { data: data.map((row) => columns === '*' ? { ...row } : Object.fromEntries(columns.split(',').map((key) => [key.trim(), row[key.trim()]]))), error: null }
     }
     const chain = {
+      upsert(value: Record<string, unknown> | Array<Record<string, unknown>>) { upserts = Array.isArray(value) ? value : [value]; return chain },
       update(value: Record<string, unknown>) { patch = value; return chain },
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return chain },
       is(key: string, value: unknown) { filters.push((row) => (row[key] ?? null) === value); return chain },
@@ -102,6 +116,7 @@ beforeEach(() => {
       order(key: string) { orders.push(key); return chain },
       limit(value: number) { limit = Math.min(1000, value); return chain },
       or(value: string) { filters.push((row) => split(value).some((part) => matches(row, part))); return chain },
+      maybeSingle: async () => { const value = await execute(); return { ...value, data: value.data?.[0] ?? null } },
       single: async () => { const value = await execute(); return { ...value, data: value.data?.[0] ?? null } },
       then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) { return execute().then(resolve, reject) }
     }
@@ -127,20 +142,20 @@ it.each([0, 1].flatMap((archived) => ['immediate', 'queue'].map((path) => ({ arc
     if (path === 'queue') expect(await processSyncQueue()).toBe(1)
     else await pushProjectArchive()
     expect(repo.syncQueue.count()).toBe(0)
-    expect(remote.tasks.find((row) => row.id === 'old-cloud')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    expect(remote.tasks.find((row) => row.id === 'old-cloud')).toMatchObject({ is_archived: archived, updated_at: t5 })
     for (const id of ['later-cloud', 'local']) expect(remote.tasks.find((row) => row.id === id)).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
   }
 )
 it.each([0, 1].flatMap((archived) => ['pull', 'startup'].map((path) => ({ archived, path }))))(
-  'F2: older unseen rows imported during pending cascade inherit its version: $archived/$path', async ({ archived, path }) => {
+  'F2: older unseen rows imported during pending cascade inherit its state without promoting metadata: $archived/$path', async ({ archived, path }) => {
     vi.setSystemTime(t10); action(archived)
     remote.tasks = [task('unseen', archived ? 0 : 1, t5), task('later-choice', archived ? 0 : 1, t20)]
     if (path === 'pull') expect(await pullNewTasks('p')).toBe(2)
     else await syncProjectDown('p', 'u')
-    expect(repo.tasks.findById('unseen')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    expect(repo.tasks.findById('unseen')).toMatchObject({ is_archived: archived, updated_at: t5 })
     expect(repo.tasks.findById('later-choice')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
     expect(await processSyncQueue()).toBe(1)
-    expect(remote.tasks.find((row) => row.id === 'unseen')).toMatchObject({ is_archived: archived, updated_at: t10 })
+    expect(remote.tasks.find((row) => row.id === 'unseen')).toMatchObject({ is_archived: archived, updated_at: t5 })
     expect(remote.tasks.find((row) => row.id === 'later-choice')).toMatchObject({ is_archived: archived ? 0 : 1, updated_at: t20 })
   }
 )
@@ -153,7 +168,7 @@ it.each([0, 1])('pages and batches 1101 rows, preserving intent through a partia
   expect(batches[0].ids).toHaveLength(200)
   failBatch = 0
   expect(await processSyncQueue()).toBe(1)
-  expect(remote.tasks.every((row) => row.is_archived === archived && row.updated_at === t10)).toBe(true)
+  expect(remote.tasks.every((row) => row.is_archived === archived && row.updated_at === t5)).toBe(true)
   expect(batches).toHaveLength(8)
   expect(batches.every((batch) => batch.ids.length <= 200)).toBe(true)
   expect(reads).toBe(6)
@@ -163,7 +178,7 @@ it('rechecks a new action racing a queued write and ignores delayed older produc
   remote.tasks = [task('unseen', 1, t5)]
   onProjectWrite = async () => { vi.setSystemTime(t20); action(1); vi.setSystemTime(t30); repo.projects.update('p', { name: 'Renamed' }) }
   expect(await processSyncQueue()).toBe(1)
-  expect(remote.tasks[0]).toMatchObject({ is_archived: 1, updated_at: t20 })
+  expect(remote.tasks[0]).toMatchObject({ is_archived: 1, updated_at: t5 })
   expect(repo.syncQueue.count()).toBe(1)
   expect(await processSyncQueue()).toBe(1)
   const written = batches.length
@@ -185,4 +200,30 @@ it('owner denial stops before task reads or writes', async () => {
   expect(reads).toBe(0)
   expect(batches).toHaveLength(0)
   expect(repo.syncQueue.count()).toBe(1)
+})
+
+it.each([0, 1].flatMap((state) => ['queue-first', 'pull-first'].map((ordering) => ({ state, ordering }))))(
+  'preserves pending metadata across remote archive=$state/$ordering', async ({ state, ordering }) => {
+    const t8 = '2026-01-01T08:00:00.000Z'
+    repo.tasks.applyRemoteTask({ ...task('pending', 1 - state, t8), title: 'New', description: 'New description' } as never)
+    remote.tasks = [{ ...task('pending', state, t5), title: 'Old', description: 'Old description' }]
+    remote.projects[0] = { ...remote.projects[0], is_archived: state, archive_updated_at: t10 }
+    repo.syncQueue.enqueue('tasks', 'pending', 'UPDATE', JSON.stringify({ id: 'pending' }))
+    if (ordering === 'pull-first') await syncProjectDown('p', 'u')
+    expect(await processSyncQueue()).toBe(1)
+    await pullNewTasks('p')
+    expect(repo.tasks.findById('pending')).toMatchObject({ title: 'New', description: 'New description', is_archived: state, updated_at: t8 })
+    expect(remote.tasks[0]).toMatchObject({ title: 'New', description: 'New description', is_archived: state, updated_at: t8 })
+  }
+)
+it.each([0, 1])('local archive=%s does not promote metadata over a newer cloud edit', async (state) => {
+  const t8 = '2026-01-01T08:00:00.000Z', t9 = '2026-01-01T09:00:00.000Z'
+  repo.tasks.applyRemoteTask({ ...task('pending', 1 - state, t8), title: 'Local' } as never)
+  remote.tasks = [{ ...task('pending', 1 - state, t9), title: 'Cloud newer' }]
+  vi.setSystemTime(t10); action(state)
+  expect(repo.tasks.findById('pending')?.updated_at).toBe(t8)
+  expect(repo.projects.findById('p')?.updated_at).toBe(t0)
+  await processSyncQueue()
+  await pullNewTasks('p')
+  expect(repo.tasks.findById('pending')).toMatchObject({ title: 'Cloud newer', is_archived: state, updated_at: t9 })
 })

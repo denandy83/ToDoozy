@@ -13,11 +13,11 @@ import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
  */
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
-import type { Task, Status, SyncOperation } from '../../../shared/types'
+import type { Task, Status, Label, SyncOperation } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
-import { getCachedProjectName } from './PersonalSyncService'
+import { pushLabel, getCachedProjectName } from './PersonalSyncService'
 import { SYNC_TABLES } from './syncTables'
 import { isSuspended } from './powerState'
 
@@ -589,7 +589,17 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
               const values = rows.filter(Boolean).map((row) => item.descriptor!.toRemote(row))
               if (values.length) {
                 const { error } = await supabase.from(item.entry.table_name).upsert(values)
-                if (error) throw new Error(error.message)
+                if (error) {
+                  if (item.entry.table_name !== 'user_labels') throw new Error(error.message)
+                  const producer: SyncProducer = {
+                    api, userId: useAuthStore.getState().currentUser?.id,
+                    client: async () => supabase, assertCurrent, isCurrent: context.isCurrent,
+                    scope: async () => context.scope
+                  }
+                  for (const row of values) {
+                    if (!await pushLabel(row as Label, producer.userId!, producer)) throw new Error(error.message)
+                  }
+                }
                 if (item.entry.table_name === 'tasks') await pushTaskLabelAdditions(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api)
               }
               const changed: Work[] = []
@@ -598,6 +608,10 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
                 if (!rows[rowIndex]) {
                   const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
                   await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)
+                }
+                if (item.entry.table_name === 'user_labels' && rows[rowIndex] && !await item.descriptor!.localGetById(candidate.entry.row_id, api)) {
+                  await complete(candidate)
+                  continue
                 }
                 if (snapshots[rowIndex] !== await candidate.snapshot()) changed.push(candidate)
                 else await complete(candidate)

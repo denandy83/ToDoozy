@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Status, Task } from '../../../shared/types'
+import { readAllIn } from './readAll'
+import type { Project, Status, Task } from '../../../shared/types'
 import { captureSyncContext } from './syncContext'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useTaskStore } from '../shared/stores/taskStore'
@@ -49,6 +50,8 @@ async function refresh(userId: string): Promise<void> {
     if (!ids.length || !isCurrentUser()) return
     const client = context.client
     if (!isCurrentUser()) return
+    const { data: metadata } = await readAllIn(ids, (batch) => client.from('projects').select('*').in('id', batch))
+    for (const project of metadata) await api.projects.applyRemote(project as unknown as Project)
     const scope = `${context.scope}:${userId}:${ids.join(',')}`
     const [statuses, tasks] = await Promise.all([
       readRows<Status>(client, 'statuses', ids, watermarks.get(`${scope}:statuses`)),
@@ -79,7 +82,7 @@ async function refresh(userId: string): Promise<void> {
     for (const task of tasks) await apply(task)
     for (let i = 0; i < tasks.length; i += 200) {
       if (!isCurrentUser()) return
-      await pullTaskLabelsForTasks(tasks.slice(i, i + 200).map((task) => task.id), userId)
+      await pullTaskLabelsForTasks(tasks.slice(i, i + 200).map((task) => task.id), userId, context)
     }
     if (!isCurrentUser()) return
     for (const project of projects) {

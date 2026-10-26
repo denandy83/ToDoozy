@@ -243,8 +243,11 @@ export class TaskRepository {
     const existing = this.findById(id)
     if (!existing) return undefined
     if (input.is_archived === undefined && !TASK_UPDATABLE_COLUMNS.some((col) => input[col] !== undefined && input[col] !== existing[col])) return existing
+    const archiveVersion = input.is_archived !== undefined
+      ? (this.db.prepare('SELECT archive_updated_at FROM projects WHERE id=?').get(existing.project_id) as { archive_updated_at: string | null } | undefined)?.archive_updated_at
+      : null
     const now = input.is_archived !== undefined
-      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
+      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1, Date.parse(archiveVersion ?? '') + 1 || 0)).toISOString()
       : new Date().toISOString()
     const sets: string[] = ['updated_at = ?']
     const values: (string | number | null)[] = [now]

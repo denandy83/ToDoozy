@@ -11,6 +11,7 @@ import type {
   ProjectArea,
   ProjectTemplate
 } from '../../../shared/types'
+import { readAll } from './readAll'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -322,12 +323,13 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
 
   async remoteList(ownerId, sinceUpdatedAt, includeTombstones) {
     const supabase = await getSupabase()
-    let query = supabase.from('projects').select('*').eq('owner_id', ownerId)
-    if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
-    if (!includeTombstones) query = query.is('deleted_at', null)
-    const { data, error } = await query
-    if (error) throw error
-    return (data ?? []) as Project[]
+    const { data } = await readAll(() => {
+      let query = supabase.from('projects').select('*').eq('owner_id', ownerId)
+      if (sinceUpdatedAt) query = query.or(`updated_at.gt.${sinceUpdatedAt},archive_updated_at.gt.${sinceUpdatedAt}`)
+      if (!includeTombstones) query = query.is('deleted_at', null)
+      return query
+    })
+    return data as unknown as Project[]
   },
 
   async remoteUpsert(local) {
@@ -1192,7 +1194,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // compare equal.
   const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
 
-  if (storedHigh) {
+  if (storedHigh && desc.name !== 'projects') {
     const highMs = tsMs(storedHigh)
     const localStale = !localMax || tsMs(localMax) <= highMs
     const remoteStale = !remoteMax || tsMs(remoteMax) <= highMs
@@ -1259,8 +1261,21 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // for the same instant are treated as equal (see tsMs comment above).
   for (const id of localById.keys()) {
     if (!remoteById.has(id)) continue
-    const local = localById.get(id)!
+    let local = localById.get(id)!
     const remote = remoteById.get(id)!
+    if (desc.name === 'projects') {
+      try {
+        await desc.localApplyRemote(remote)
+        local = (await desc.localGetById(id))!
+        const merged = desc.toRemote(local) as unknown as Project
+        const original = remote as unknown as Project
+        if (Date.parse(merged.archive_updated_at ?? '') > Date.parse(original.archive_updated_at ?? '1970-01-01')) {
+          await desc.remoteUpsert(local)
+          stats.pushed++
+          continue
+        }
+      } catch { stats.failed++; continue }
+    }
     const localUpdatedAt = desc.toRemote(local).updated_at
     const localMs = tsMs(localUpdatedAt)
     const remoteMs = tsMs(remote.updated_at)

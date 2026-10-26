@@ -153,8 +153,8 @@ export class ProjectRepository {
       if (!project || project.deleted_at) return project
       const latestTask = this.db.prepare('SELECT MAX(updated_at) AS stamp FROM tasks WHERE project_id=? AND deleted_at IS NULL').get(id) as { stamp: string | null }
       const now = new Date(Math.max(Date.now(), Date.parse(project.archive_updated_at ?? '') + 1 || 0, Date.parse(latestTask.stamp ?? '') + 1 || 0)).toISOString()
-      this.db.prepare('UPDATE projects SET is_archived=?, archive_updated_at=?, updated_at=? WHERE id=?').run(archived, now, now, id)
-      this.db.prepare('UPDATE tasks SET is_archived=?, updated_at=? WHERE project_id=? AND deleted_at IS NULL').run(archived, now, id)
+      this.db.prepare('UPDATE projects SET is_archived=?, archive_updated_at=? WHERE id=?').run(archived, now, id)
+      this.db.prepare('UPDATE tasks SET is_archived=? WHERE project_id=? AND deleted_at IS NULL').run(archived, id)
       new SyncQueueRepository(this.db).enqueue('projects', id, 'UPDATE', JSON.stringify({ id, archive_with_tasks: true, is_archived: archived, updated_at: now }))
       return this.findById(id)
     })
