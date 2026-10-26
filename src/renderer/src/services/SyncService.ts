@@ -1,3 +1,4 @@
+import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
 import { captureSyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
@@ -965,7 +966,10 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     console.log('[SyncService] Skipping syncProjectDown (offline)')
     return
   }
-  const supabase = await getSupabase()
+  const context = await captureSyncContext()
+  context.assertCurrent()
+  if (useAuthStore.getState().currentUser?.id !== userId) return
+  const { api, client: supabase } = context
 
   // Get shared project
   const { data: project } = await supabase
@@ -977,20 +981,20 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   if (!project) throw new Error('Shared project not found')
 
   // Ensure the project owner's user record exists locally with real profile data
-  const localOwner = await window.api.users.findById(project.owner_id)
+  const localOwner = await api.users.findById(project.owner_id)
   const { data: ownerProfileRows } = await supabase
     .rpc('get_user_profiles', { p_user_ids: [project.owner_id] })
   const ownerProfile = (ownerProfileRows as Array<{ email: string; display_name: string | null; avatar_url: string | null }> | null)?.[0] ?? null
 
   if (!localOwner) {
-    await window.api.users.create({
+    await api.users.create({
       id: project.owner_id,
       email: ownerProfile?.email ?? placeholderEmail(project.owner_id),
       display_name: ownerProfile?.display_name ?? null,
       avatar_url: ownerProfile?.avatar_url ?? null
     }).catch(() => { /* already exists */ })
   } else if (isPlaceholderEmail(localOwner.email) && ownerProfile) {
-    await window.api.users.update(project.owner_id, {
+    await api.users.update(project.owner_id, {
       email: ownerProfile.email,
       display_name: ownerProfile.display_name,
       avatar_url: ownerProfile.avatar_url
@@ -998,38 +1002,24 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
 
   // Create local project if not exists
-  const localProject = await window.api.projects.findById(projectId)
+  const localProject = await api.projects.findById(projectId)
   if (!localProject) {
     // Append the newly-discovered shared project after the member's own
     // projects rather than inheriting the owner's sidebar_order (which can be
     // a large integer that pushes it past the sidebar's MAX_VISIBLE_PROJECTS
     // cutoff). sidebar_order is a per-device preference; applyRemote preserves
     // this local value on subsequent syncs (COALESCE in the ON CONFLICT clause).
-    const localProjects = await window.api.projects.getProjectsForUser(userId)
+    const localProjects = await api.projects.getProjectsForUser(userId)
     const maxLocalOrder = localProjects.reduce(
       (m, p) => Math.max(m, p.sidebar_order ?? 0),
       -1
     )
-    await window.api.projects.create({
-      id: project.id,
-      name: project.name,
-      description: project.description,
-      color: project.color,
-      icon: project.icon,
-      owner_id: project.owner_id,
-      is_default: 0,
-      sidebar_order: maxLocalOrder + 1
-    })
+    await api.projects.applyRemote({ ...project, sidebar_order: maxLocalOrder + 1 })
     // Add current user as member locally
-    await window.api.projects.addMember(projectId, userId, 'member')
+    await api.projects.addMember(projectId, userId, 'member')
   }
-  // Mark as shared — but only if it isn't already, otherwise we bump
-  // updated_at every startup and trigger a phantom 2-row push on the next
-  // reconcile (`projects (pushed=2)` feedback loop).
-  if (localProject?.is_shared !== 1) {
-    await window.api.projects.update(projectId, { is_shared: 1 })
-    logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
-  }
+  if (localProject) await api.projects.applyRemote(project)
+  await api.projects.update(projectId, { is_shared: 1 })
 
   // Sync project↔label links from the project_labels junction (the source
   // of truth — preserves tombstones). Reading the legacy projects.label_data
@@ -1042,31 +1032,31 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   // tombstoned remotely stays tombstoned locally instead of being revived.
   // Step C: cascade tombstones to local task_labels so the chip disappears
   // immediately on this device.
-  const { data: remoteProjectLabels } = await supabase
+  const { data: remoteProjectLabels } = await readAll(() => supabase
     .from('project_labels')
     .select('project_id, label_id, created_at, deleted_at')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['project_id', 'label_id'])
   if (remoteProjectLabels && remoteProjectLabels.length > 0) {
     // Resolve label rows for any label_ids we don't have yet, by name.
     const missingLabelIds = (
       await Promise.all(
         remoteProjectLabels.map(async (pl) => {
-          const local = await window.api.labels.findById(pl.label_id as string)
+          const local = await api.labels.findById(pl.label_id as string)
           return local ? null : (pl.label_id as string)
         })
       )
     ).filter((id): id is string => id !== null)
     if (missingLabelIds.length > 0) {
-      const { data: remoteLabels } = await supabase
+      const { data: remoteLabels } = await readAllIn(missingLabelIds, (ids) => supabase
         .from('user_labels')
         .select('id, name, color')
-        .in('id', missingLabelIds)
+        .in('id', ids), ['id'])
       if (remoteLabels) {
         for (const rl of remoteLabels) {
           const name = rl.name as string
-          const existingByName = await window.api.labels.findByName(userId, name).catch(() => null)
+          const existingByName = await api.labels.findByName(userId, name).catch(() => null)
           if (!existingByName) {
-            await window.api.labels.create({
+            await api.labels.create({
               id: rl.id as string,
               user_id: userId,
               name,
@@ -1080,16 +1070,16 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     for (const pl of remoteProjectLabels) {
       const labelId = pl.label_id as string
       const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
-      const exists = await window.api.labels.findById(labelId).catch(() => null)
+      const exists = await api.labels.findById(labelId).catch(() => null)
       if (!exists) continue
-      await window.api.labels.applyRemoteProjectLabel({
+      await api.labels.applyRemoteProjectLabel({
         project_id: projectId,
         label_id: labelId,
         created_at: (pl.created_at as string | null) ?? null,
         deleted_at: deletedAt
       }).catch(() => {})
       if (deletedAt) {
-        await window.api.labels
+        await api.labels
           .softDeleteTaskLabelsForProjectLabel(projectId, labelId)
           .catch(() => {})
       }
@@ -1097,16 +1087,16 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
 
   // Sync statuses
-  const { data: statuses } = await supabase
+  const { data: statuses } = await readAll(() => supabase
     .from('statuses')
     .select('*')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['updated_at', 'id'])
 
   if (statuses) {
     for (const status of statuses) {
-      const existing = await window.api.statuses.findById(status.id)
+      const existing = await api.statuses.findById(status.id)
       if (!existing) {
-        await window.api.statuses.create({
+        await api.statuses.create({
           id: status.id,
           project_id: status.project_id,
           name: status.name,
@@ -1121,10 +1111,10 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
 
   // Sync tasks — create new, update existing, delete removed
-  const { data: remoteTasks } = await supabase
+  const { data: remoteTasks } = await readAll(() => supabase
     .from('tasks')
     .select('*')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['updated_at', 'id'])
 
   const remoteTaskIds = new Set<string>()
 
@@ -1140,7 +1130,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
     const missingUserIds: string[] = []
     for (const uid of referencedUserIds) {
-      const local = await window.api.users.findById(uid)
+      const local = await api.users.findById(uid)
       if (!local) missingUserIds.push(uid)
     }
     if (missingUserIds.length > 0) {
@@ -1156,7 +1146,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       }
       for (const uid of missingUserIds) {
         const profile = profilesById.get(uid)
-        await window.api.users.create({
+        await api.users.create({
           id: uid,
           email: profile?.email ?? placeholderEmail(uid),
           display_name: profile?.display_name ?? null,
@@ -1175,13 +1165,13 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
 
     for (const task of tasksToInsert) {
       remoteTaskIds.add(task.id)
-      const existing = await window.api.tasks.findById(task.id)
+      const existing = await api.tasks.findById(task.id)
 
       try {
         // applyRemote preserves remote created_at/updated_at; using create/update
         // would stamp NOW into updated_at and make the row look "local newer" on
         // the next sync, triggering redundant pushes back to remote.
-        await window.api.tasks.applyRemote({
+        await api.tasks.applyRemote({
           id: task.id,
           project_id: task.project_id,
           owner_id: task.owner_id,
@@ -1230,24 +1220,24 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     const chunkSize = 500
     for (let i = 0; i < taskIdList.length; i += chunkSize) {
       const chunk = taskIdList.slice(i, i + chunkSize)
-      const { data } = await supabase
+      const { data } = await readAll(() => supabase
         .from('task_labels')
         .select('task_id, label_id')
-        .in('task_id', chunk)
+        .in('task_id', chunk), ['task_id', 'label_id'])
       if (data) remoteTl.push(...(data as Array<{ task_id: string; label_id: string }>))
     }
     for (const tl of remoteTl) {
-      const exists = await window.api.labels.findById(tl.label_id).catch(() => null)
+      const exists = await api.labels.findById(tl.label_id).catch(() => null)
       if (!exists) continue
-      await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+      await api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
     }
   }
 
   // Delete local tasks that no longer exist in Supabase
-  const localTasks = await window.api.tasks.findByProjectId(projectId)
+  const localTasks = await api.tasks.findByProjectId(projectId)
   for (const lt of localTasks) {
     if (!remoteTaskIds.has(lt.id)) {
-      await window.api.tasks.delete(lt.id).catch(() => {})
+      await api.tasks.delete(lt.id).catch(() => {})
     }
   }
 
@@ -1258,7 +1248,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     .eq('project_id', projectId)
 
   if (members) {
-    const localMembers = await window.api.projects.getMembers(projectId)
+    const localMembers = await api.projects.getMembers(projectId)
     const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
     // Batch-fetch all member profiles (N+1 → 1 query) for any local users that
@@ -1266,7 +1256,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     const memberIdsNeedingProfile: string[] = []
     const localUsersById = new Map<string, { id: string; email: string } | undefined>()
     for (const member of members) {
-      const localUser = await window.api.users.findById(member.user_id)
+      const localUser = await api.users.findById(member.user_id)
       localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
       if (!localUser || isPlaceholderEmail(localUser.email)) {
         memberIdsNeedingProfile.push(member.user_id)
@@ -1290,14 +1280,14 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       const profile = memberProfilesById.get(member.user_id)
 
       if (!localUser) {
-        await window.api.users.create({
+        await api.users.create({
           id: member.user_id,
           email: profile?.email ?? placeholderEmail(member.user_id),
           display_name: profile?.display_name ?? null,
           avatar_url: profile?.avatar_url ?? null
         }).catch(() => { /* already exists */ })
       } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
-        await window.api.users.update(member.user_id, {
+        await api.users.update(member.user_id, {
           email: profile.email,
           display_name: profile.display_name,
           avatar_url: profile.avatar_url
@@ -1305,12 +1295,12 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       }
 
       if (!localMemberIds.has(member.user_id)) {
-        await window.api.projects.addMember(projectId, member.user_id, member.role)
+        await api.projects.addMember(projectId, member.user_id, member.role)
       }
 
       // Sync display customizations from Supabase
       if (member.display_color || member.display_initials) {
-        await window.api.projects.updateMember(projectId, member.user_id, {
+        await api.projects.updateMember(projectId, member.user_id, {
           display_color: member.display_color ?? null,
           display_initials: member.display_initials ?? null
         })

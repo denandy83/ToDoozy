@@ -42,7 +42,9 @@ function mapping(taskId: string, labelId: string, name: string): TaskLabelMappin
 }
 
 describe('taskStore.hydrateAllForUser', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { useAuthStore } = await import('./authStore')
+    useAuthStore.setState({ currentUser: { id: 'u1' } as never })
     const getProjectsForUser = vi.fn().mockResolvedValue([{ id: 'pA' }, { id: 'pB' }])
     const findAllByProject = vi.fn(async (pid: string) =>
       pid === 'pA' ? [makeTask('a1', 'pA'), makeTask('a2', 'pA')] : [makeTask('b1', 'pB')]
@@ -53,6 +55,13 @@ describe('taskStore.hydrateAllForUser', () => {
     vi.stubGlobal('window', {
       ...globalThis.window,
       api: {
+        sync: {
+          captureContext: async () => ({ userId: 'u1', generation: 1 }),
+          invokeContext: async (_context: unknown, channel: string, args: unknown[]) => {
+            const [ns, method] = channel.split(':')
+            return (window.api as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args)
+          }
+        },
         projects: { getProjectsForUser },
         tasks: { findAllByProject },
         labels: { findTaskLabelsByProject }
@@ -99,9 +108,11 @@ describe('taskStore.hydrateAllForUser', () => {
     const original = makeTask('a1', 'pA')
     useTaskStore.setState({ tasks: { a1: original }, taskLabels: {} })
     let finish!: (tasks: Task[]) => void
-    vi.mocked(window.api.tasks.findAllByProject).mockImplementation((pid) => pid === 'pA' ? new Promise((resolve) => { finish = resolve }) : Promise.resolve([]))
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    vi.mocked(window.api.tasks.findAllByProject).mockImplementation((pid) => pid === 'pA' ? new Promise((resolve) => { finish = resolve; entered() }) : Promise.resolve([]))
     const hydration = useTaskStore.getState().hydrateAllForUser('u1')
-    await Promise.resolve()
+    await started
     const edited = { ...original, title: 'Typing while remote refresh runs' }
     useTaskStore.setState({ tasks: { a1: edited } })
     finish([original])

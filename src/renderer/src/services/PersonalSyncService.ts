@@ -1,3 +1,4 @@
+import { readAll, readAllIn } from './readAll'
 import type { SyncContext } from './syncContext'
 import { writeProjectArchive } from './projectArchiveSync'
 /**
@@ -256,10 +257,10 @@ export async function pushTask(task: Task): Promise<void> {
       // Diff local vs remote and apply both directions so add/remove on this device
       // propagates to Supabase.
       try {
-        const { data: remoteTaskLabels, error: labelReadError } = await supabase
+        const { data: remoteTaskLabels, error: labelReadError } = await readAll(() => supabase
           .from('task_labels')
           .select('label_id').is('deleted_at', null)
-          .eq('task_id', task.id)
+          .eq('task_id', task.id), ['label_id'])
         if (labelReadError) throw new Error(labelReadError.message)
         const remoteLabelIds = new Set<string>((remoteTaskLabels ?? []).map((r) => r.label_id as string))
         const localLabelIds = new Set<string>(labelIds)
@@ -573,11 +574,11 @@ export async function pushRemoveLabelFromProject(
     // next login.
     let siblingIds: string[] = [labelId]
     if (targetName) {
-      const { data: siblings } = await supabase
+      const { data: siblings } = await readAll(() => supabase
         .from('project_labels')
         .select('label_id, user_labels!inner(name)')
         .eq('project_id', projectId)
-        .is('deleted_at', null)
+        .is('deleted_at', null), ['label_id'])
       if (siblings) {
         const matched = (siblings as Array<{ label_id: string; user_labels: { name: string } | { name: string }[] }>)
           .filter((row) => {
@@ -1160,7 +1161,10 @@ export async function pushProjectArchive(projectId: string, isArchived: number):
       useSyncStore.getState().setStatus('syncing')
       return
     }
-    await writeProjectArchive(await getSupabase(), projectId, isArchived, now)
+    const project = await window.api.projects.findById(projectId)
+    if (!project || project.deleted_at) return
+    const tasks = await window.api.tasks.findAllByProject(projectId, { includeTombstones: true })
+    await writeProjectArchive(await getSupabase(), projectId, project.is_archived ?? 0, project.updated_at, tasks)
     markSynced()
   } catch (error) {
     await reportPushFailure('pushProjectArchive', error, 'projects', projectId, payload)
@@ -1369,10 +1373,10 @@ export async function fullPull(userId: string): Promise<void> {
 
     // 1. Pull labels
     syncStore.setFirstSyncProgress(10)
-    const { data: remoteLabels } = await supabase
+    const { data: remoteLabels } = await readAll(() => supabase
       .from('user_labels')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', userId), ['id'])
 
     if (remoteLabels) {
       for (const label of remoteLabels) {
@@ -1416,36 +1420,14 @@ export async function fullPull(userId: string): Promise<void> {
             .single()
 
           if (project) {
-            // Create project locally
-            await window.api.projects.create({
-              id: project.id,
-              name: project.name,
-              description: project.description,
-              color: project.color ?? '#888888',
-              icon: project.icon ?? 'folder',
-              owner_id: project.owner_id,
-              is_default: 0
-            })
+            await window.api.projects.applyRemote(project)
             await window.api.projects.addMember(project.id, userId, project.owner_id === userId ? 'owner' : 'member')
-
-            // Mark as shared so auto-archive skips this project on the local device.
             await window.api.projects.update(project.id, { is_shared: 1 })
-            logEvent('info', 'sync', `Marked project "${project.name}" as shared (initSync)`, `project=${project.id}`)
-
-            // Sync auto-archive settings
-            if (project.auto_archive_enabled !== undefined) {
-              await window.api.projects.update(project.id, {
-                auto_archive_enabled: project.auto_archive_enabled ?? 0,
-                auto_archive_value: project.auto_archive_value ?? 3,
-                auto_archive_unit: project.auto_archive_unit ?? 'days'
-              })
-            }
-
             // Sync statuses
-            const { data: statuses } = await supabase
+            const { data: statuses } = await readAll(() => supabase
               .from('statuses')
               .select('*')
-              .eq('project_id', project.id)
+              .eq('project_id', project.id), ['updated_at', 'id'])
 
             if (statuses) {
               for (const s of statuses) {
@@ -1466,10 +1448,10 @@ export async function fullPull(userId: string): Promise<void> {
             }
 
             // Sync tasks
-            const { data: tasks } = await supabase
+            const { data: tasks } = await readAll(() => supabase
               .from('tasks')
               .select('*')
-              .eq('project_id', project.id)
+              .eq('project_id', project.id), ['updated_at', 'id'])
 
             if (tasks) {
               // Parents before subtasks so the parent_id FK is always satisfied.
@@ -1512,10 +1494,10 @@ export async function fullPull(userId: string): Promise<void> {
             }
 
             // Sync task_labels (junction table)
-            const { data: remoteTaskLabels } = await supabase
+            const { data: remoteTaskLabels } = await readAllIn(tasks.map((t) => t.id), (ids) => supabase
               .from('task_labels')
               .select('task_id, label_id')
-              .in('task_id', (tasks ?? []).map((t) => t.id))
+              .in('task_id', ids), ['task_id', 'label_id'])
 
             if (remoteTaskLabels) {
               for (const tl of remoteTaskLabels) {
@@ -1528,10 +1510,10 @@ export async function fullPull(userId: string): Promise<void> {
             // is a stale snapshot and reading it here would revive
             // tombstoned links via addToProject. See SyncService.ts for
             // the same fix applied to syncProjectDown.
-            const { data: remoteProjectLabels } = await supabase
+            const { data: remoteProjectLabels } = await readAll(() => supabase
               .from('project_labels')
               .select('project_id, label_id, created_at, deleted_at')
-              .eq('project_id', project.id)
+              .eq('project_id', project.id), ['project_id', 'label_id'])
             if (remoteProjectLabels && remoteProjectLabels.length > 0) {
               const missingLabelIds = (
                 await Promise.all(
@@ -1542,10 +1524,10 @@ export async function fullPull(userId: string): Promise<void> {
                 )
               ).filter((id): id is string => id !== null)
               if (missingLabelIds.length > 0) {
-                const { data: remoteLabels } = await supabase
+                const { data: remoteLabels } = await readAllIn(missingLabelIds, (ids) => supabase
                   .from('user_labels')
                   .select('id, name, color')
-                  .in('id', missingLabelIds)
+                  .in('id', ids), ['id'])
                 if (remoteLabels) {
                   for (const rl of remoteLabels) {
                     const name = rl.name as string
@@ -1751,10 +1733,11 @@ export async function pullStatuses(projectId: string, context?: SyncContext): Pr
   try {
     const supabase = (context?.client ?? await getSupabase())
     const since = lastPullAt.get(`statuses:${projectId}`)
-    let query = supabase.from('statuses').select('*').eq('project_id', projectId)
-    if (since) query = query.gt('updated_at', since)
-
-    const { data: remoteStatuses, error } = await query
+    const { data: remoteStatuses, error } = await readAll(() => {
+      let query = supabase.from('statuses').select('*').eq('project_id', projectId)
+      if (since) query = query.gt('updated_at', since)
+      return query
+    }, ['updated_at', 'id'])
 
     if (error || !remoteStatuses) return 0
     if (remoteStatuses.length === 0) return 0
@@ -1833,7 +1816,7 @@ async function ensureLabelsExistLocally(
   const missing = labelIds.filter((id) => !localLabels.has(id))
   const remoteLabels = new Map<string, Label>()
   if (missing.length) {
-    const { data, error } = await supabase.from('user_labels').select('*').in('id', missing)
+    const { data, error } = await readAllIn(missing, (ids) => supabase.from('user_labels').select('*').in('id', ids))
     if (error) throw new Error(error.message)
     for (const label of data ?? []) remoteLabels.set(label.id, label as Label)
   }
@@ -1887,8 +1870,8 @@ export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?:
   if (!taskIds.length) return 0
   try {
     const supabase = (context?.client ?? await getSupabase())
-    const { data: pairs, error } = await supabase.from('task_labels').select('task_id, label_id')
-      .in('task_id', taskIds).is('deleted_at', null)
+    const { data: pairs, error } = await readAllIn(taskIds, (ids) => supabase.from('task_labels').select('task_id, label_id')
+      .in('task_id', ids).is('deleted_at', null), ['task_id', 'label_id'])
     if (error) throw new Error(error.message)
     if (!pairs?.length) return 0
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
@@ -1926,10 +1909,11 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
 
     const supabase = (context?.client ?? await getSupabase())
     const since = lastPullAt.get(`tasks:${projectId}`)
-    let query = supabase.from('tasks').select('*').eq('project_id', projectId)
-    if (since) query = query.gt('updated_at', since)
-
-    const { data: remoteTasks, error } = await query
+    const { data: remoteTasks, error } = await readAll(() => {
+      let query = supabase.from('tasks').select('*').eq('project_id', projectId)
+      if (since) query = query.gt('updated_at', since)
+      return query
+    }, ['updated_at', 'id'])
 
     if (error) {
       handleSyncError('pullNewTasks', error)
@@ -2222,10 +2206,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
       let fetchOk = true
       for (let i = 0; i < taskIdList.length; i += chunkSize) {
         const chunk = taskIdList.slice(i, i + chunkSize)
-        const { data, error: tlErr } = await supabase
+        const { data, error: tlErr } = await readAll(() => supabase
           .from('task_labels')
           .select('task_id, label_id')
-          .in('task_id', chunk)
+          .in('task_id', chunk), ['task_id', 'label_id'])
         if (tlErr) {
           logEvent('error', 'sync', `Reconcile: list remote task_labels failed`, `err=${tlErr.message}`)
           fetchOk = false
@@ -2332,10 +2316,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
       let fetchOk = true
       for (let i = 0; i < personalProjectIds.length; i += chunkSize) {
         const chunk = personalProjectIds.slice(i, i + chunkSize)
-        const { data, error: plErr } = await supabase
+        const { data, error: plErr } = await readAll(() => supabase
           .from('project_labels')
           .select('project_id, label_id, created_at, deleted_at')
-          .in('project_id', chunk)
+          .in('project_id', chunk), ['project_id', 'label_id'])
         if (plErr) {
           logEvent('error', 'sync', 'Reconcile: list remote project_labels failed', `err=${plErr.message}`)
           fetchOk = false
@@ -2504,10 +2488,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         for (let i = 0; i < sharedTaskIds.length; i += chunkSize) {
           const chunk = sharedTaskIds.slice(i, i + chunkSize)
           if (chunk.length === 0) break
-          const { data, error: tlErr } = await supabase
+          const { data, error: tlErr } = await readAll(() => supabase
             .from('task_labels')
             .select('task_id, label_id')
-            .in('task_id', chunk)
+            .in('task_id', chunk), ['task_id', 'label_id'])
           if (tlErr) {
             logEvent(
               'error',
@@ -2594,10 +2578,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
         let plFetchOk = true
         for (let i = 0; i < sharedProjectIds.length; i += chunkSize) {
           const chunk = sharedProjectIds.slice(i, i + chunkSize)
-          const { data, error: plErr } = await supabase
+          const { data, error: plErr } = await readAll(() => supabase
             .from('project_labels')
             .select('project_id, label_id, created_at, deleted_at')
-            .in('project_id', chunk)
+            .in('project_id', chunk), ['project_id', 'label_id'])
           if (plErr) {
             logEvent(
               'error',
@@ -2719,10 +2703,10 @@ async function reconcileImpl(userId: string): Promise<{ pushed: number; pulled: 
             const fetched: Array<Record<string, unknown>> = []
             for (let i = 0; i < missingLabelIds.length; i += chunkSize) {
               const chunk = missingLabelIds.slice(i, i + chunkSize)
-              const { data, error: lblErr } = await supabase
+              const { data, error: lblErr } = await readAll(() => supabase
                 .from('user_labels')
                 .select('*')
-                .in('id', chunk)
+                .in('id', chunk), ['id'])
               if (lblErr) {
                 logEvent(
                   'error',

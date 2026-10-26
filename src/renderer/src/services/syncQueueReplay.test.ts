@@ -21,7 +21,7 @@ function clientMock(failure: string | null = null, rows: unknown[] = [{ id: 'p' 
   const client = { from(table: string) {
     let operation = 'select'
     const chain: Record<string, unknown> = {}
-    for (const method of ['select', 'eq', 'is', 'in']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); return chain }
+    for (const method of ['select', 'eq', 'is', 'in', 'lte', 'order', 'limit', 'or']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); return chain }
     for (const method of ['upsert', 'update', 'delete']) chain[method] = (payload: unknown) => { operation = method; writes.push({ table, operation, payload }); return chain }
     chain.then = (resolve: (result: unknown) => unknown) => resolve({ data: rows, error: operation !== 'select' && failure ? { message: failure } : null })
     return chain
@@ -41,7 +41,7 @@ beforeEach(() => {
     auth: { getSupabaseConfig: async () => ({ url: 'https://example.invalid', anonKey: 'synthetic' }) },
     sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async (_context: unknown, channel: string, args: unknown[]) => { const [ns, method] = channel.split(':'); return (window.api as never as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args) }, getQueue: vi.fn(async () => [...queue]), count: vi.fn(async () => queue.length), dequeue: vi.fn(async (id) => { queue = queue.filter((row) => row.id !== id) }) },
     settings: { findAllByUser: vi.fn(async () => [{ user_id: 'u', key: 'theme', value: 'dark', updated_at: '2026-10-25T12:00:00Z', deleted_at: null }]) },
-    tasks: { findById: vi.fn(async () => local), getLabels: vi.fn(async () => []) },
+    tasks: { findAllByProject: vi.fn(async () => []), findById: vi.fn(async () => local), getLabels: vi.fn(async () => []) },
     projects: { findById: vi.fn(async () => ({ id: 'p', is_archived: 0, updated_at: '2026-10-25T13:00:00Z' })) }
   } })
   useSyncStore.setState({ status: 'synced', pendingCount: 0, errorMessage: null })
@@ -152,7 +152,7 @@ describe('queue integration with isolated account databases', () => {
       let operation = 'select'
       let payload: unknown
       const chain: Record<string, unknown> = {}
-      for (const method of ['select', 'eq', 'in', 'is']) chain[method] = () => chain
+      for (const method of ['select', 'eq', 'in', 'is', 'lte', 'order', 'limit', 'or']) chain[method] = () => chain
       for (const method of ['upsert', 'update', 'delete']) chain[method] = (value: unknown) => { operation = method; payload = value; return chain }
       chain.then = (resolve: (result: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
         await pinned.token?.()
@@ -253,6 +253,31 @@ describe('queue integration with isolated account databases', () => {
     expect(await drain).toBe(1)
     expect(remote.projects).toMatchObject({ is_archived: 0 })
     expect(remote.tasks).toMatchObject({ is_archived: 0 })
+  })
+  it.each([0, 1])('preserves a newer per-task archive value after a queued cascade to %s', async (archived) => {
+    const repo = repositories[0]
+    if (archived) repo.projects.archiveWithTasks('p')
+    else repo.projects.unarchiveWithTasks('p')
+    repo.tasks.update('t', { is_archived: archived ? 0 : 1 })
+    repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
+    const drain = processSyncQueue()
+    await started.promise
+    repo.tasks.update('t', { is_archived: archived })
+    await syncTaskChange(repo.tasks.findById('t')!, 'UPDATE')
+    pause.resolve()
+    expect(await drain).toBe(1)
+    expect(remote.tasks).toMatchObject({ is_archived: archived })
+    expect(repo.syncQueue.count()).toBe(0)
+  })
+  it.each([0, 1])('replays current per-task intent opposite to cascade %s', async (archived) => {
+    hold = false
+    const repo = repositories[0]
+    if (archived) repo.projects.archiveWithTasks('p')
+    else repo.projects.unarchiveWithTasks('p')
+    repo.tasks.update('t', { is_archived: archived ? 0 : 1 })
+    repo.syncQueue.enqueue('projects', 'p', 'UPDATE', '{"id":"p","archive_with_tasks":true}')
+    expect(await processSyncQueue()).toBe(1)
+    expect(remote.tasks).toMatchObject({ is_archived: archived ? 0 : 1 })
   })
   it('retains the originating queue after account changes during a network write', async () => {
     repositories[0].syncQueue.enqueue('tasks', 't', 'UPDATE', '{"id":"t"}')

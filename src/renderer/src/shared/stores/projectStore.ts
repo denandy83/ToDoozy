@@ -1,3 +1,4 @@
+import { hydrationContext } from './hydrationContext'
 import { useAuthStore } from './authStore'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -40,14 +41,16 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   error: null,
 
   async hydrateProjects(userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const projects = await window.api.projects.getProjectsForUser(userId)
+      const projects = await api.projects.getProjectsForUser(userId)
       const projectMap: Record<string, Project> = {}
       for (const project of projects) {
         projectMap[project.id] = project
       }
       // Auto-select default project if none selected
+      if (!await isCurrent()) return
       const currentId = get().currentProjectId
       if (!currentId || !projectMap[currentId]) {
         const defaultProject = projects.find((p) => p.is_default === 1) ?? projects[0] ?? null
@@ -63,23 +66,28 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       const membersMap: Record<string, ProjectMember[]> = { ...get().members }
       for (const project of projects) {
         try {
-          membersMap[project.id] = await window.api.projects.getMembers(project.id)
+          membersMap[project.id] = await api.projects.getMembers(project.id)
         } catch { /* ignore */ }
       }
+      if (!await isCurrent()) return
       set({ members: membersMap })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       set({ error: message, loading: false })
     }
   },
 
   async hydrateMembers(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const members = await window.api.projects.getMembers(projectId)
+      const members = await api.projects.getMembers(projectId)
+      if (!await isCurrent()) return
       set((state) => ({
         members: { ...state.members, [projectId]: members }
       }))
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load project members'
       set({ error: message })
     }

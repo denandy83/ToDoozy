@@ -1,3 +1,4 @@
+import { readAll, readAllIn } from './readAll'
 import { captureSyncContext, type SyncContext } from './syncContext'
 import { useProjectStore } from '../shared/stores/projectStore'
 import { useAuthStore } from '../shared/stores/authStore'
@@ -11,11 +12,11 @@ export async function refreshProjectLabels(projectId: string, context?: SyncCont
   context ??= await captureSyncContext()
   const api = context.api
   const client = context.client
-  const { data: links, error } = await client.from('project_labels').select('*').eq('project_id', projectId)
+  const { data: links, error } = await readAll(() => client.from('project_labels').select('*').eq('project_id', projectId), ['project_id', 'label_id'])
   if (error) throw new Error(error.message)
   const ids = [...new Set((links ?? []).map((row) => row.label_id as string))]
   if (ids.length) {
-    const { data: labels, error: labelError } = await client.from('user_labels').select('*').in('id', ids)
+    const { data: labels, error: labelError } = await readAllIn(ids, (batch) => client.from('user_labels').select('*').in('id', batch))
     if (labelError) throw new Error(labelError.message)
     for (const label of labels ?? []) await api.labels.applyRemote(label)
   }

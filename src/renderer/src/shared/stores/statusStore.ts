@@ -1,4 +1,4 @@
-import { useAuthStore } from './authStore'
+import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -27,11 +27,11 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   error: null,
 
   async hydrateStatuses(projectId: string): Promise<void> {
-    const userId = useAuthStore.getState().currentUser?.id
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const statuses = await window.api.statuses.findByProjectId(projectId)
-      if (useAuthStore.getState().currentUser?.id !== userId) return
+      const statuses = await api.statuses.findByProjectId(projectId)
+      if (!await isCurrent()) return
       set((state) => {
         // Remove old statuses for this project, then add new ones
         const updated: Record<string, Status> = {}
@@ -44,7 +44,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         return { statuses: updated, loading: false }
       })
     } catch (err) {
-      if (useAuthStore.getState().currentUser?.id !== userId) return
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load statuses'
       set({ error: message, loading: false })
     }

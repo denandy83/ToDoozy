@@ -84,8 +84,9 @@ export class ProjectRepository {
 
   update(id: string, input: UpdateProjectInput): Project | undefined {
     const now = new Date().toISOString()
-    const sets: string[] = ['updated_at = ?']
-    const values: (string | null)[] = [now]
+    const localOnly = input.is_shared !== undefined && Object.keys(input).length === 1
+    const sets: string[] = localOnly ? [] : ['updated_at = ?']
+    const values: (string | null)[] = localOnly ? [] : [now]
 
     if (input.name !== undefined) {
       sets.push('name = ?')

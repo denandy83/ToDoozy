@@ -1,3 +1,4 @@
+import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { sortSubtasksForDisplay } from '../utils/sortTasks'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -233,9 +234,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   error: null,
 
   async hydrateTasks(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const tasks = await window.api.tasks.findByProjectId(projectId)
+      const tasks = await api.tasks.findByProjectId(projectId)
+      if (!await isCurrent()) return
       set((state) => {
         const updated: Record<string, Task> = {}
         for (const [id, t] of Object.entries(state.tasks)) {
@@ -247,21 +250,24 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         return { tasks: updated, loading: false }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks'
       set({ error: message, loading: false })
     }
   },
 
   async hydrateMyDay(userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
       // Auto-add tasks based on due date setting
       const { getSetting } = useSettingsStore.getState()
       const autoAddMode = getSetting('myday_auto_add') ?? 'due_today'
       if (autoAddMode !== 'off') {
-        await window.api.tasks.autoAddMyDay(userId, autoAddMode)
+        await api.tasks.autoAddMyDay(userId, autoAddMode)
       }
 
-      const tasks = await window.api.tasks.findMyDay(userId)
+      const tasks = await api.tasks.findMyDay(userId)
+      if (!await isCurrent()) return
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of tasks) {
@@ -270,14 +276,17 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         return { tasks: updated }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load My Day tasks'
       set({ error: message })
     }
   },
 
   async hydrateArchived(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const tasks = await window.api.tasks.findArchived(projectId)
+      const tasks = await api.tasks.findArchived(projectId)
+      if (!await isCurrent()) return
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of tasks) {
@@ -286,14 +295,17 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         return { tasks: updated }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load archived tasks'
       set({ error: message })
     }
   },
 
   async hydrateTemplates(_projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const tasks = await window.api.tasks.findAllTemplates(getUserId())
+      const tasks = await api.tasks.findAllTemplates(getUserId())
+      if (!await isCurrent()) return
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of tasks) {
@@ -302,21 +314,23 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         return { tasks: updated }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load templates'
       set({ error: message })
     }
   },
 
   async hydrateAllForProject(_projectId: string, userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
       // Load all projects' tasks for accurate sidebar counts
-      const allProjects = await window.api.projects.getProjectsForUser(userId)
-      const projectTaskPromises = allProjects.map((p) => window.api.tasks.findByProjectId(p.id))
-      const archivedPromises = allProjects.map((p) => window.api.tasks.findArchived(p.id))
+      const allProjects = await api.projects.getProjectsForUser(userId)
+      const projectTaskPromises = allProjects.map((p) => api.tasks.findByProjectId(p.id))
+      const archivedPromises = allProjects.map((p) => api.tasks.findArchived(p.id))
       const [myDay, templates, ...rest] = await Promise.all([
-        window.api.tasks.findMyDay(userId),
-        window.api.tasks.findAllTemplates(getUserId()),
+        api.tasks.findMyDay(userId),
+        api.tasks.findAllTemplates(getUserId()),
         ...projectTaskPromises,
         ...archivedPromises
       ])
@@ -326,25 +340,27 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       }
       for (const task of myDay) taskMap[task.id] = task
       for (const task of templates) taskMap[task.id] = task
+      if (!await isCurrent()) return
       set({ tasks: taskMap, loading: false })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks'
       set({ error: message, loading: false })
     }
   },
 
   async hydrateAllForUser(userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     // Cross-project hydration for views that span every project (Saved Views).
     // Refresh every known project, preserving edits made while IPC reads run.
     const initial = get()
-    const initialUser = getUserId()
     try {
-      const allProjects = await window.api.projects.getProjectsForUser(userId)
+      const allProjects = await api.projects.getProjectsForUser(userId)
       const [taskArrays, labelMappingArrays] = await Promise.all([
-        Promise.all(allProjects.map((p) => window.api.tasks.findAllByProject(p.id, { includeTombstones: true }))),
-        Promise.all(allProjects.map((p) => window.api.labels.findTaskLabelsByProject(p.id)))
+        Promise.all(allProjects.map((p) => api.tasks.findAllByProject(p.id, { includeTombstones: true }))),
+        Promise.all(allProjects.map((p) => api.labels.findTaskLabelsByProject(p.id)))
       ])
-      if (getUserId() !== initialUser) return
+      if (!await isCurrent()) return
       set((state) => {
         const projectIds = new Set(allProjects.map((p) => p.id))
         const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
@@ -375,7 +391,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         return { tasks, taskLabels }
       })
     } catch (err) {
-      if (getUserId() !== initialUser) return
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
       set({ error: message })
     }
@@ -766,31 +782,37 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async hydrateTaskLabels(taskId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const labels = await window.api.labels.findByTaskId(taskId)
+      const labels = await api.labels.findByTaskId(taskId)
+      if (!await isCurrent()) return
       set((state) => ({
         taskLabels: { ...state.taskLabels, [taskId]: labels }
       }))
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load task labels'
       set({ error: message })
     }
   },
 
   async hydrateAllTaskLabels(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
       const mappings: TaskLabelMapping[] =
-        await window.api.labels.findTaskLabelsByProject(projectId)
+        await api.labels.findTaskLabelsByProject(projectId)
       const grouped: Record<string, Label[]> = {}
       for (const m of mappings) {
         const { task_id, ...label } = m
         if (!grouped[task_id]) grouped[task_id] = []
         grouped[task_id].push(label)
       }
+      if (!await isCurrent()) return
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...grouped }
       }))
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load task labels'
       set({ error: message })
     }

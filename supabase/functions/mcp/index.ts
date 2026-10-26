@@ -287,17 +287,6 @@ export class TaskRepo {
   async update(id: string, input: Record<string, unknown>) {
     const original = await this.findById(id)
     if (!original) return undefined
-    if (input.status_id !== undefined || input.project_id !== undefined) {
-      const projectId = input.project_id ?? original.project_id
-      const statusId = input.status_id ?? original.status_id
-      const { data: status, error } = await this.client.from('statuses').select('id, is_done')
-        .eq('id', statusId).eq('project_id', projectId).is('deleted_at', null).maybeSingle()
-      if (error) throw new Error(error.message)
-      if (!status) throw new Error('Status does not belong to the task project')
-      if (input.status_id !== undefined) {
-        input = { ...input, completed_date: status.is_done === 1 ? (original.completed_date ?? new Date().toISOString()) : null }
-      }
-    }
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (col in input) updates[col] = input[col]

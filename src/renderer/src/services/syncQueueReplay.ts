@@ -1,3 +1,4 @@
+import { readAll } from './readAll'
 import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
@@ -19,7 +20,8 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
   if (entry.table_name === 'projects' && payload.archive_with_tasks === true) {
     const current = await api.projects.findById(entry.row_id)
     if (!current || current.deleted_at) return true
-    await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at)
+    const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
+    await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at, tasks)
     return true
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {
@@ -38,7 +40,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       // been superseded while offline. Never replay them over a newer edit.
       const taskId = payload.task_id
       const local = await api.tasks.getLabels(taskId)
-      const { data: remote, error } = await client.from('task_labels').select('label_id').eq('task_id', taskId)
+      const { data: remote, error } = await readAll(() => client.from('task_labels').select('label_id').eq('task_id', taskId), ['label_id'])
       if (error) throw new Error(error.message)
       const localIds = new Set(local.map((link) => link.label_id))
       if (local.length) {
@@ -55,13 +57,15 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {
       const current = await currentProjectLink(payload.projectId, payload.labelId, api)
       if (!current?.deleted_at) return true
-      const { data: tasks, error } = await client.from('tasks').select('id').eq('project_id', payload.projectId)
+      const { data: tasks, error } = await readAll(() => client.from('tasks').select('id').eq('project_id', payload.projectId))
       if (error) throw new Error(error.message)
       if (tasks?.length) {
         const labelIds = Array.isArray(payload.siblingIds) ? payload.siblingIds : [payload.labelId]
-        const { error: removeError } = await client.from('task_labels').delete()
-          .in('task_id', tasks.map((task) => task.id)).in('label_id', labelIds)
-        if (removeError) throw new Error(removeError.message)
+        for (let index = 0; index < tasks.length; index += 200) {
+          const { error: removeError } = await client.from('task_labels').delete()
+            .in('task_id', tasks.slice(index, index + 200).map((task) => task.id)).in('label_id', labelIds)
+          if (removeError) throw new Error(removeError.message)
+        }
       }
     } else {
       throw new Error('Unrecognized task-label retry payload')
@@ -81,7 +85,11 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
 export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncContext): Promise<string> {
   const payload = JSON.parse(entry.payload)
   const api = context.api
-  if (entry.table_name === 'projects') return JSON.stringify(await api.projects.findById(entry.row_id) ?? null)
+  if (entry.table_name === 'projects') {
+    const project = await api.projects.findById(entry.row_id)
+    const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
+    return JSON.stringify([project ?? null, tasks.map(({ id, is_archived, updated_at, deleted_at }) => ({ id, is_archived, updated_at, deleted_at })).sort((a, b) => a.id.localeCompare(b.id))])
+  }
   if (typeof payload.task_id === 'string') return JSON.stringify((await api.tasks.getLabels(payload.task_id)).map((row) => row.label_id).sort())
   if (typeof payload.projectId === 'string') return JSON.stringify(await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null)
   return entry.payload

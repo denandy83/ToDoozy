@@ -74,7 +74,7 @@ function makeSupabase(): SupabaseClient {
   const chain: Record<string, unknown> = {}
   const chainMethods = [
     'select', 'insert', 'upsert', 'update', 'delete',
-    'eq', 'neq', 'in', 'is', 'order', 'limit', 'filter', 'match'
+    'eq', 'neq', 'in', 'is', 'order', 'limit', 'or', 'filter', 'match'
   ]
   for (const method of chainMethods) chain[method] = (): Record<string, unknown> => chain
   chain.single = (): Promise<QueryResult> => Promise.resolve(result)
@@ -236,7 +236,7 @@ function makePullSupabase(
     }
     const chain: Record<string, unknown> = {}
     for (const m of [
-      'select', 'eq', 'neq', 'in', 'is', 'order', 'limit', 'filter', 'match',
+      'select', 'eq', 'neq', 'in', 'is', 'order', 'limit', 'or', 'filter', 'match',
       'update', 'delete', 'insert', 'upsert'
     ]) {
       chain[m] = (): Record<string, unknown> => chain
