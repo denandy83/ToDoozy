@@ -398,6 +398,7 @@ export type OpenExternalResult = { ok: true } | { ok: false; error: string }
 
 export interface ShellAPI {
   openExternal(url: string): Promise<OpenExternalResult>
+  openReference(url: string): Promise<OpenExternalResult>
 }
 
 export interface PowerAPI {

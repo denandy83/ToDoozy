@@ -266,7 +266,7 @@ export function DetailPanel(): React.JSX.Element | null {
   }
 
   const handleDescriptionChange = (description: string | null): void => {
-    updateTask(task.id, { description })
+    if (description !== task.description) updateTask(task.id, { description })
   }
 
   const handleAddLabel = async (labelId: string): Promise<void> => {

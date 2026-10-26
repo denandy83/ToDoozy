@@ -154,19 +154,19 @@ export class TaskRepository {
       .all(projectId) as unknown as Task[]
   }
 
-  findSubtasks(parentId: string): Task[] {
+  findSubtasks(parentId: string, includeArchived = false): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ORDER BY order_index ASC')
+      .prepare(`SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'} ORDER BY order_index ASC`)
       .all(parentId) as unknown as Task[]
   }
 
-  getSubtaskCount(parentId: string): { total: number; done: number } {
+  getSubtaskCount(parentId: string, includeArchived = false): { total: number; done: number } {
     const row = this.db
       .prepare(
         `SELECT
            COUNT(*) as total,
            SUM(CASE WHEN status_id IN (SELECT id FROM statuses WHERE is_done = 1) THEN 1 ELSE 0 END) as done
-         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL`
+         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'}`
       )
       .get(parentId) as { total: number; done: number }
     return { total: row.total, done: row.done ?? 0 }
@@ -240,6 +240,9 @@ export class TaskRepository {
   }
 
   update(id: string, input: UpdateTaskInput): Task | undefined {
+    const existing = this.findById(id)
+    if (!existing) return undefined
+    if (input.is_archived === undefined && !TASK_UPDATABLE_COLUMNS.some((col) => input[col] !== undefined && input[col] !== existing[col])) return existing
     const now = new Date().toISOString()
     const sets: string[] = ['updated_at = ?']
     const values: (string | number | null)[] = [now]
@@ -256,7 +259,7 @@ export class TaskRepository {
 
     // Cascade archive/unarchive to subtasks
     if (input.is_archived !== undefined) {
-      const subtasks = this.findSubtasks(id)
+      const subtasks = this.findSubtasks(id, true)
       for (const subtask of subtasks) {
         this.update(subtask.id, { is_archived: input.is_archived })
       }
@@ -556,7 +559,7 @@ export class TaskRepository {
     projectId: string,
     defaultStatusId: string
   ): void {
-    const subtasks = this.findSubtasks(originalParentId)
+    const subtasks = this.findSubtasks(originalParentId, true)
     for (const subtask of subtasks) {
       const subtaskId = randomUUID()
       this.create({
@@ -772,7 +775,7 @@ export class TaskRepository {
     }
 
     // Recursively duplicate subtasks
-    const subtasks = this.findSubtasks(id)
+    const subtasks = this.findSubtasks(id, true)
     for (const subtask of subtasks) {
       const subtaskNewId = randomUUID()
       const dupSubtask = this.findById(subtask.id)
@@ -871,7 +874,7 @@ export class TaskRepository {
     projectId: string,
     defaultStatusId: string
   ): void {
-    const subtasks = this.findSubtasks(originalParentId)
+    const subtasks = this.findSubtasks(originalParentId, true)
     for (const subtask of subtasks) {
       const subtaskId = randomUUID()
       this.create({

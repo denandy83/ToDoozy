@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
 import keytar from 'keytar'
@@ -995,6 +996,23 @@ export function registerIpcHandlers(): void {
     }
     await shell.openExternal(validation.url)
     return { ok: true as const }
+  })
+
+  ipcMain.handle('shell:openReference', async (_e, url: string) => {
+    try {
+      if (new URL(url).protocol === 'file:') {
+        const path = fileURLToPath(url) // rejects remote hosts and encoded separators
+        if (!existsSync(path)) return { ok: false, error: 'Referenced file does not exist on this Mac' }
+        shell.showItemInFolder(path)
+        return { ok: true }
+      }
+      const validation = validateExternalUrl(url)
+      if (!validation.ok) return { ok: false, error: validation.reason }
+      await shell.openExternal(validation.url)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Cannot open reference' }
+    }
   })
 
   // ── Launch at Login ─────────────────────────────────────────────────

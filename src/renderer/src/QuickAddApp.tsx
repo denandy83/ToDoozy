@@ -483,6 +483,7 @@ export default function QuickAddApp(): React.JSX.Element {
           position={smart.popupState.position}
           onSelect={handlePopupSelect}
           onDismiss={smart.dismissPopup}
+            footerHint={['/', '@'].includes(smart.popupState.operator.type) && !smart.popupState.operator.query ? 'Start typing to filter…' : undefined}
         />
       )}
     </div>

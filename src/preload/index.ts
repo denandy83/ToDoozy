@@ -312,7 +312,8 @@ const api: TodoozyAPI = {
   },
 
   shell: {
-    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+    openReference: (url) => ipcRenderer.invoke('shell:openReference', url)
   },
 
   app: {

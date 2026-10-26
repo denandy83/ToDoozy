@@ -1,3 +1,4 @@
+import { writeProjectArchive } from './projectArchiveSync'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
  * and user-level data (settings, themes, saved views, areas, labels) to Supabase.
@@ -27,7 +28,8 @@ import { isSettingSyncExcluded } from './settingsSyncPolicy'
 async function hasLiveSession(context: string, idDescriptor: string): Promise<boolean> {
   const session = await requireSession()
   if (!session) {
-    logEvent('warn', 'sync', `${context} skipped — no session`, idDescriptor)
+    logEvent('warn', 'sync', `${context} waiting — no session`, idDescriptor)
+    useSyncStore.getState().setStatus('offline')
     return false
   }
   return true
@@ -199,7 +201,13 @@ async function ensureProjectInSupabase(projectId: string): Promise<void> {
  * Push a single task to Supabase (upsert).
  */
 export async function pushTask(task: Task): Promise<void> {
-  if (!(await hasLiveSession('pushTask', `task=${task.id}`))) return
+  if (!(await hasLiveSession('pushTask', `task=${task.id}`))) {
+    await window.api.sync.enqueue('tasks', task.id, 'UPDATE', JSON.stringify(task))
+    await window.api.sync.enqueue('task_labels', task.id, 'UPDATE', JSON.stringify({ task_id: task.id }))
+    await useSyncStore.getState().refreshPendingCount()
+    if (useSyncStore.getState().status === 'synced') useSyncStore.getState().setStatus('syncing')
+    return
+  }
   try {
     const supabase = await getSupabase()
 
@@ -247,10 +255,11 @@ export async function pushTask(task: Task): Promise<void> {
       // Diff local vs remote and apply both directions so add/remove on this device
       // propagates to Supabase.
       try {
-        const { data: remoteTaskLabels } = await supabase
+        const { data: remoteTaskLabels, error: labelReadError } = await supabase
           .from('task_labels')
-          .select('label_id')
+          .select('label_id').is('deleted_at', null)
           .eq('task_id', task.id)
+        if (labelReadError) throw new Error(labelReadError.message)
         const remoteLabelIds = new Set<string>((remoteTaskLabels ?? []).map((r) => r.label_id as string))
         const localLabelIds = new Set<string>(labelIds)
         const toInsert = labelIds.filter((id) => !remoteLabelIds.has(id))
@@ -258,7 +267,7 @@ export async function pushTask(task: Task): Promise<void> {
         if (toInsert.length > 0) {
           const { error: insertErr } = await supabase
             .from('task_labels')
-            .upsert(toInsert.map((labelId) => ({ task_id: task.id, label_id: labelId })))
+            .upsert(toInsert.map((labelId) => ({ task_id: task.id, label_id: labelId, deleted_at: null })))
           if (insertErr) {
             await reportPushFailure('pushTaskLabels', insertErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, insert: toInsert }))
           }
@@ -331,7 +340,11 @@ export async function pushStatus(status: Status): Promise<void> {
     created_at: status.created_at,
     updated_at: status.updated_at
   }
-  if (!(await hasLiveSession('pushStatus', `status=${status.id}`))) return
+  if (!(await hasLiveSession('pushStatus', `status=${status.id}`))) {
+    await window.api.sync.enqueue('statuses', status.id, 'UPDATE', JSON.stringify(payload))
+    await useSyncStore.getState().refreshPendingCount()
+    return
+  }
   try {
     await ensureProjectInSupabase(status.project_id)
     const supabase = await getSupabase()
@@ -360,7 +373,11 @@ export async function pushLabel(label: Label, userId: string): Promise<void> {
     updated_at: label.updated_at,
     deleted_at: label.deleted_at ?? null
   }
-  if (!(await hasLiveSession('pushLabel', `label=${label.id}`))) return
+  if (!(await hasLiveSession('pushLabel', `label=${label.id}`))) {
+    await window.api.sync.enqueue('user_labels', label.id, 'UPDATE', JSON.stringify(payload))
+    await useSyncStore.getState().refreshPendingCount()
+    return
+  }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(payload)
@@ -446,7 +463,11 @@ export async function pushProjectLabel(
   labelId: string,
   deletedAt: string | null
 ): Promise<void> {
-  if (!(await hasLiveSession('pushProjectLabel', `${projectId}::${labelId}`))) return
+  if (!(await hasLiveSession('pushProjectLabel', `${projectId}::${labelId}`))) {
+    await window.api.sync.enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt }))
+    await useSyncStore.getState().refreshPendingCount()
+    return
+  }
   try {
     // Pre-flight: ensure the label row exists in user_labels on Supabase
     // before pushing the junction row. Without this, project_labels.label_id
@@ -630,13 +651,13 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
       .update({ deleted_at: now, updated_at: now })
       .eq('id', labelId)
     if (error) {
-      await reportPushFailure('deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'UPDATE')
+      await reportPushFailure('deleteLabel', error, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     } else {
       markSynced()
       logEvent('info', 'sync', 'Soft-deleted label', `id=${labelId}`)
     }
   } catch (err) {
-    await reportPushFailure('deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId }), 'UPDATE')
+    await reportPushFailure('deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
   }
 }
 
@@ -655,7 +676,11 @@ async function pushSettingImmediate(key: string, value: string, userId: string):
     value,
     updated_at: new Date().toISOString()
   }
-  if (!(await hasLiveSession('pushSetting', `id=${id}`))) return
+  if (!(await hasLiveSession('pushSetting', `id=${id}`))) {
+    await window.api.sync.enqueue('user_settings', id, 'UPDATE', JSON.stringify(payload))
+    await useSyncStore.getState().refreshPendingCount()
+    return
+  }
   try {
     const supabase = await getSupabase()
     const { error } = await supabase.from('user_settings').upsert(payload)
@@ -934,13 +959,13 @@ export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
       .update({ deleted_at: now, updated_at: now })
       .eq('id', themeId)
     if (error) {
-      await reportPushFailure('deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'UPDATE')
+      await reportPushFailure('deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     } else {
       markSynced()
       logEvent('info', 'sync', 'Soft-deleted theme', `id=${themeId}`)
     }
   } catch (err) {
-    await reportPushFailure('deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId }), 'UPDATE')
+    await reportPushFailure('deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
   }
 }
 
@@ -959,13 +984,13 @@ export async function deleteSettingFromSupabase(key: string, userId: string): Pr
       .update({ deleted_at: now, updated_at: now })
       .eq('id', id)
     if (error) {
-      await reportPushFailure('deleteSetting', error, 'user_settings', id, JSON.stringify({ id }), 'UPDATE')
+      await reportPushFailure('deleteSetting', error, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     } else {
       markSynced()
       logEvent('info', 'sync', `Soft-deleted setting "${key}"`, `id=${id}`)
     }
   } catch (err) {
-    await reportPushFailure('deleteSetting', err, 'user_settings', id, JSON.stringify({ id }), 'UPDATE')
+    await reportPushFailure('deleteSetting', err, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
   }
 }
 
@@ -1125,23 +1150,19 @@ export async function pushProject(project: {
 }
 
 export async function pushProjectArchive(projectId: string, isArchived: number): Promise<void> {
-  if (!(await hasLiveSession('pushProjectArchive', `id=${projectId}`))) return
+  const now = new Date().toISOString()
+  const payload = JSON.stringify({ id: projectId, is_archived: isArchived, updated_at: now, archive_with_tasks: true })
   try {
-    const supabase = await getSupabase()
-    const now = new Date().toISOString()
-    const { error: projErr } = await supabase
-      .from('projects')
-      .update({ is_archived: isArchived, updated_at: now })
-      .eq('id', projectId)
-    if (projErr) logEvent('error', 'sync', `pushProjectArchive (project) failed: ${projErr.message}`, `project=${projectId}`)
-    const { error: taskErr } = await supabase
-      .from('tasks')
-      .update({ is_archived: isArchived, updated_at: now })
-      .eq('project_id', projectId)
-    if (taskErr) logEvent('error', 'sync', `pushProjectArchive (tasks) failed: ${taskErr.message}`, `project=${projectId}`)
+    if (!(await hasLiveSession('pushProjectArchive', `id=${projectId}`))) {
+      await window.api.sync.enqueue('projects', projectId, 'UPDATE', payload)
+      await useSyncStore.getState().refreshPendingCount()
+      useSyncStore.getState().setStatus('syncing')
+      return
+    }
+    await writeProjectArchive(await getSupabase(), projectId, isArchived, now)
     markSynced()
-  } catch (err) {
-    logEvent('error', 'sync', `pushProjectArchive threw: ${err instanceof Error ? err.message : String(err)}`, `project=${projectId}`)
+  } catch (error) {
+    await reportPushFailure('pushProjectArchive', error, 'projects', projectId, payload)
   }
 }
 
@@ -1708,28 +1729,9 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
     const local = await window.api.projects.findById(projectId)
     if (!local) return false
 
-    if (remote.updated_at && local.updated_at && remote.updated_at > local.updated_at) {
-      await window.api.projects.update(projectId, {
-        name: remote.name,
-        color: remote.color,
-        icon: remote.icon,
-        description: remote.description,
-        is_archived: remote.is_archived ?? 0
-      })
+    if (Date.parse(remote.updated_at) > Date.parse(local.updated_at)) {
+      await window.api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
       return true
-    }
-
-    // Local is newer — only push if metadata actually differs (avoids phantom writes)
-    if (local.updated_at && remote.updated_at && local.updated_at > remote.updated_at) {
-      const metadataChanged =
-        local.name !== remote.name ||
-        local.color !== remote.color ||
-        local.icon !== remote.icon ||
-        (local.description ?? '') !== (remote.description ?? '') ||
-        (local.is_archived !== (remote.is_archived ?? 0))
-      if (metadataChanged) {
-        await pushProject(local)
-      }
     }
     return false
   } catch (err) {
@@ -1757,34 +1759,16 @@ export async function pullStatuses(projectId: string): Promise<number> {
     let changed = 0
     for (const rs of remoteStatuses) {
       const existing = await window.api.statuses.findById(rs.id)
-      if (!existing) {
-        await window.api.statuses.create({
-          id: rs.id,
-          project_id: rs.project_id,
-          name: rs.name,
-          color: rs.color,
-          icon: rs.icon,
-          order_index: rs.order_index,
-          is_done: rs.is_done,
-          is_default: rs.is_default
-        })
-        changed++
-      } else if (rs.updated_at && existing.updated_at && rs.updated_at > existing.updated_at) {
-        await window.api.statuses.update(rs.id, {
-          name: rs.name,
-          color: rs.color,
-          icon: rs.icon,
-          order_index: rs.order_index,
-          is_done: rs.is_done,
-          is_default: rs.is_default
-        })
+      if (!existing || Date.parse(rs.updated_at) > Date.parse(existing.updated_at)) {
+        await window.api.statuses.applyRemote(rs)
         changed++
       }
       // No "local newer → push" branch (same reasoning as pullNewTasks).
     }
     const pName = projectNameCache.get(projectId) ?? projectId
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for "${pName}"`)
-    lastPullAt.set(`statuses:${projectId}`, new Date().toISOString())
+    const watermark = pullWatermark(remoteStatuses)
+    if (watermark) lastPullAt.set(`statuses:${projectId}`, watermark)
     return changed
   } catch (err) {
     handleSyncError('pullStatuses', err)
@@ -1821,20 +1805,35 @@ export async function pullStatuses(projectId: string): Promise<number> {
  */
 async function ensureLabelsExistLocally(
   labelIds: string[],
-  projectId: string | null
+  projectId: string | null,
+  expectedUserId?: string
 ): Promise<Map<string, string>> {
   const remap = new Map<string, string>()
   if (labelIds.length === 0) return remap
   const supabase = await getSupabase()
   const { useAuthStore } = await import('../shared/stores/authStore')
   const ownerId = useAuthStore.getState().currentUser?.id ?? null
+  const assertUser = (): void => {
+    if (expectedUserId && useAuthStore.getState().currentUser?.id !== expectedUserId) throw new Error('Search account changed')
+  }
+  assertUser()
 
   const link = async (labelId: string): Promise<void> => {
     if (projectId) await window.api.labels.addToProject(projectId, labelId).catch(() => {})
   }
 
+  const localLabels = new Map((await Promise.all(labelIds.map((id) => window.api.labels.findById(id))))
+    .filter((label): label is Label => !!label).map((label) => [label.id, label]))
+  const missing = labelIds.filter((id) => !localLabels.has(id))
+  const remoteLabels = new Map<string, Label>()
+  if (missing.length) {
+    const { data, error } = await supabase.from('user_labels').select('*').in('id', missing)
+    if (error) throw new Error(error.message)
+    for (const label of data ?? []) remoteLabels.set(label.id, label as Label)
+  }
   for (const labelId of labelIds) {
-    const localLabel = await window.api.labels.findById(labelId)
+    assertUser()
+    const localLabel = localLabels.get(labelId)
     if (localLabel) {
       // Already present. Own it (or legacy NULL-owner) → use as-is. A
       // foreign-owned local row (rare in a single-user DB) → adopt to our own.
@@ -1848,11 +1847,7 @@ async function ensureLabelsExistLocally(
       continue
     }
 
-    const { data: remoteLabel } = await supabase
-      .from('user_labels')
-      .select('*')
-      .eq('id', labelId)
-      .single()
+    const remoteLabel = remoteLabels.get(labelId)
     if (!remoteLabel) continue
 
     if (!ownerId || remoteLabel.user_id === ownerId) {
@@ -1881,23 +1876,39 @@ async function ensureLabelsExistLocally(
  * updated_at doesn't advance (which is why pullNewTasks never sees it).
  * Returns the number of newly applied label assignments.
  */
-export async function pullTaskLabelsForTask(taskId: string): Promise<number> {
+export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string): Promise<number> {
+  if (!taskIds.length) return 0
   try {
     const supabase = await getSupabase()
-    const { data: pairs, error } = await supabase
-      .from('task_labels')
-      .select('task_id, label_id')
-      .eq('task_id', taskId)
-    if (error || !pairs || pairs.length === 0) return 0
+    const { data: pairs, error } = await supabase.from('task_labels').select('task_id, label_id')
+      .in('task_id', taskIds).is('deleted_at', null)
+    if (error) throw new Error(error.message)
+    if (!pairs?.length) return 0
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
-    const task = await window.api.tasks.findById(taskId).catch(() => null)
-    const remap = await ensureLabelsExistLocally(labelIds, task?.project_id ?? null)
-    const resolved = [...new Set(labelIds.map((id) => remap.get(id) ?? id))]
-    return await window.api.tasks.applyRemoteTaskLabels(taskId, resolved)
+    const remap = await ensureLabelsExistLocally(labelIds, null, expectedUserId)
+    let added = 0
+    const { useAuthStore } = await import('../shared/stores/authStore')
+    for (const taskId of taskIds) {
+      if (expectedUserId && useAuthStore.getState().currentUser?.id !== expectedUserId) return added
+      const resolved = [...new Set(pairs.filter((p) => p.task_id === taskId).map((p) => remap.get(p.label_id) ?? p.label_id))]
+      added += await window.api.tasks.applyRemoteTaskLabels(taskId, resolved)
+    }
+    return added
   } catch (err) {
-    console.warn('[PersonalSync] pullTaskLabelsForTask failed:', err)
+    console.warn('[PersonalSync] pullTaskLabelsForTasks failed:', err)
     return 0
   }
+}
+
+export async function pullTaskLabelsForTask(taskId: string): Promise<number> {
+  return pullTaskLabelsForTasks([taskId])
+}
+
+// Re-read the boundary millisecond: PostgreSQL timestamps have finer precision.
+// A fetched-row watermark cannot skip writes arriving while local apply runs.
+function pullWatermark(rows: Array<{ updated_at?: string }>): string | null {
+  const dates = rows.map((row) => Date.parse(row.updated_at ?? '')).filter(Number.isFinite)
+  return dates.length ? new Date(Math.max(...dates) - 1).toISOString() : null
 }
 
 export async function pullNewTasks(projectId: string): Promise<number> {
@@ -1919,13 +1930,22 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     if (!remoteTasks) return 0
 
     let pulled = 0
+    let failed = false
     const touchedTaskIds: string[] = []
 
     // Parents before subtasks so the parent_id FK is satisfied when inserting.
-    const orderedRemoteTasks = [
-      ...remoteTasks.filter((t) => !t.parent_id),
-      ...remoteTasks.filter((t) => t.parent_id)
-    ]
+    const remaining = new Map(remoteTasks.map((task) => [task.id, task]))
+    const orderedRemoteTasks: typeof remoteTasks = []
+    const visiting = new Set<string>()
+    const visit = (id: string): void => {
+      const task = remaining.get(id)
+      if (!task || visiting.has(id)) return
+      visiting.add(id)
+      if (task.parent_id) visit(task.parent_id)
+      remaining.delete(id)
+      orderedRemoteTasks.push(task)
+    }
+    for (const id of remaining.keys()) visit(id)
 
     for (const rt of orderedRemoteTasks) {
       if (recentlyDeletedIds.has(rt.id)) continue
@@ -1974,9 +1994,10 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           touchedTaskIds.push(rt.id)
           pulled++
         } catch (e) {
+          failed = true
           console.error(`[PersonalSync] Failed to create task "${rt.title}" (${rt.id}):`, e)
         }
-      } else if (rt.updated_at && existing.updated_at && rt.updated_at > existing.updated_at) {
+      } else if (rt.updated_at && existing.updated_at && Date.parse(rt.updated_at) > Date.parse(existing.updated_at)) {
         // Remote is newer — update locally (preserve remote timestamps via applyRemote)
         try {
           await window.api.tasks.applyRemote({
@@ -2005,6 +2026,7 @@ export async function pullNewTasks(projectId: string): Promise<number> {
           touchedTaskIds.push(rt.id)
           pulled++
         } catch (e) {
+          failed = true
           console.error(`[PersonalSync] Failed to update task "${rt.title}" (${rt.id}):`, e)
         }
       }
@@ -2014,32 +2036,15 @@ export async function pullNewTasks(projectId: string): Promise<number> {
       // a matching remote update (e.g. residue from the pre-applyRemote era).
     }
 
-    // Sync task_labels only for tasks that were actually created or updated
-    if (touchedTaskIds.length > 0) {
-      try {
-        const { data: remoteTaskLabels } = await supabase
-          .from('task_labels')
-          .select('task_id, label_id')
-          .in('task_id', touchedTaskIds)
-
-        if (remoteTaskLabels && remoteTaskLabels.length > 0) {
-          const labelIds = [...new Set(remoteTaskLabels.map((tl) => tl.label_id))]
-          const remap = await ensureLabelsExistLocally(labelIds, projectId)
-          for (const tl of remoteTaskLabels) {
-            const localLabelId = remap.get(tl.label_id) ?? tl.label_id
-            await window.api.tasks.addLabel(tl.task_id, localLabelId).catch(() => {})
-          }
-        }
-      } catch (e) {
-        console.error('[PersonalSync] Failed to sync task_labels:', e)
-      }
-    }
+    // Also handles task label events whose task updated_at did not advance.
+    if (touchedTaskIds.length) await pullTaskLabelsForTasks(touchedTaskIds)
 
     const pName = projectNameCache.get(projectId) ?? projectId
     if (pulled > 0) {
       console.log(`[PersonalSync] "${pName}": ${pulled} pulled`)
     }
-    lastPullAt.set(`tasks:${projectId}`, new Date().toISOString())
+    const watermark = pullWatermark(remoteTasks)
+    if (!failed && watermark) lastPullAt.set(`tasks:${projectId}`, watermark)
     // Supabase responded successfully — clear any auth failure state
     clearAuthFailures()
     return pulled
@@ -2903,11 +2908,7 @@ export async function syncTaskLabel(taskId: string, labelId: string): Promise<vo
   // Ensure label exists locally
   const localLabel = await window.api.labels.findById(labelId)
   if (!localLabel) {
-    const { data: remoteLabel } = await supabase
-      .from('user_labels')
-      .select('*')
-      .eq('id', labelId)
-      .single()
+    const { data: remoteLabel } = await supabase.from('user_labels').select('*').eq('id', labelId).single()
     if (remoteLabel) {
       const { useAuthStore } = await import('../shared/stores/authStore')
       const userId = useAuthStore.getState().currentUser?.id ?? remoteLabel.user_id ?? null

@@ -1,3 +1,4 @@
+import { useAuthStore } from './authStore'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type {
@@ -160,12 +161,17 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
 
   async archiveProject(id: string): Promise<Project | null> {
     try {
+      const current = get().projects[id] ?? await window.api.projects.findById(id)
+      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+        throw new Error('Only the project owner can archive or restore this project')
+      }
       const project = await window.api.projects.archiveWithTasks(id)
       if (project) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
-        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
-          pushProjectArchive(id, 1).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
-        })
+        const { useTaskStore } = await import('./taskStore')
+        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        const { pushProjectArchive } = await import('../../services/PersonalSyncService')
+        await pushProjectArchive(id, 1)
       }
       return project ?? null
     } catch (err) {
@@ -176,12 +182,17 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
 
   async unarchiveProject(id: string): Promise<Project | null> {
     try {
+      const current = get().projects[id] ?? await window.api.projects.findById(id)
+      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+        throw new Error('Only the project owner can archive or restore this project')
+      }
       const project = await window.api.projects.unarchiveWithTasks(id)
       if (project) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
-        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
-          pushProjectArchive(id, 0).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
-        })
+        const { useTaskStore } = await import('./taskStore')
+        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        const { pushProjectArchive } = await import('../../services/PersonalSyncService')
+        await pushProjectArchive(id, 0)
       }
       return project ?? null
     } catch (err) {

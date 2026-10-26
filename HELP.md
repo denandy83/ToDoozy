@@ -345,6 +345,9 @@ When saving a project template, you can choose to include due dates as relative 
 
 ## Archiving
 
+### Archive and restore a project
+Archive a project from its project settings. Only the owner can archive or restore a shared project; the change applies to every member and includes its tasks. To restore it later, open **Settings → Projects → Archive** and choose **Restore** beside the archived project.
+
 ### Auto-archive (global)
 Enable in **Settings → General**. Completed tasks are automatically archived after a configurable delay (e.g., 3 days). This global setting applies to all local projects unless overridden per-project.
 
@@ -550,6 +553,9 @@ Log in on a new device and all your data — tasks, projects, settings, themes, 
 ---
 
 ## Integrations
+
+### Search across projects
+Open the command palette to search task titles and descriptions. Opening it refreshes remote tasks across your known projects, including projects you have not opened this session. Locally saved tasks remain searchable while offline. When filtering a project by label, matching nested subtasks remain visible with their ancestor path expanded.
 
 ### MCP — AI Integration
 The Model Context Protocol lets Claude (or any MCP-compatible AI) manage your tasks directly through natural language.

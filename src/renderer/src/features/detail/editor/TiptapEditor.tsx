@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createDescriptionAutosave } from './descriptionAutosave'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import LinkExtension from '@tiptap/extension-link'
@@ -26,7 +27,11 @@ export function normalizeUrl(url: string): string {
 }
 
 export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEditorProps): React.JSX.Element {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const autosaveRef = useRef<ReturnType<typeof createDescriptionAutosave> | null>(null)
+  if (!autosaveRef.current) autosaveRef.current = createDescriptionAutosave((value) => onChangeRef.current(value))
+  const autosave = autosaveRef.current
   const [linkPopover, setLinkPopover] = useState<{
     top: number
     left: number
@@ -146,11 +151,7 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
     },
     onUpdate: ({ editor: ed }) => {
       if (isExternalUpdate.current) return
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        const md = getMarkdown(ed)
-        onChange(md || null)
-      }, 1000)
+      autosave.edit(getMarkdown(ed) || null)
 
     }
   })
@@ -161,24 +162,25 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
     const currentMd = getMarkdown(editor)
     if (currentMd !== (content ?? '')) {
       isExternalUpdate.current = true
-      editor.commands.setContent(content ?? '')
+      autosave.cancel()
+      editor.commands.setContent(content ?? '', { emitUpdate: false })
       isExternalUpdate.current = false
     }
-  }, [content, editor])
+  }, [content, editor, autosave])
 
   // Update editable state when readOnly changes
   useEffect(() => {
     if (editor && !editor.isDestroyed) {
-      editor.setEditable(!readOnly)
+      editor.setEditable(!readOnly, false)
     }
   }, [readOnly, editor])
 
   // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+      autosave.flush()
     }
-  }, [])
+  }, [autosave])
 
   // Allow external code to focus at end via custom event on the contenteditable element
   useEffect(() => {
@@ -258,14 +260,8 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
   }, [editor])
 
   const handleBlur = useCallback(() => {
-    if (!editor) return
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-    const md = getMarkdown(editor)
-    onChange(md || null)
-  }, [editor, onChange])
+    autosave.flush()
+  }, [autosave])
 
   if (!editor) return <div />
 

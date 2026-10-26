@@ -22,19 +22,18 @@
 // another user's row must return not-found/forbidden, never the row.
 
 import { McpServer, StreamableHttpTransport, type Ctx } from 'mcp-lite'
-import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.99.2'
 import rruleLib from 'npm:rrule@2'
 import { upsertTaskLabel, deleteTaskLabel } from './labelMutations.ts'
-import { upsertProjectLabel, fetchProjectLabels } from './projectLabels.ts'
+import { upsertProjectLabel, fetchProjectLabels, type ProjectLabelClient } from './projectLabels.ts'
 import {
   packRequestContext,
   unpackRequestContext,
   dispatchTool,
   type ToolCallResult
 } from './requestContext.ts'
-import { ProjectScope } from './scoping.ts'
+import { ProjectScope, type ScopeClient } from './scoping.ts'
 import { hashApiKey } from './hash.ts'
-import { buildStatusRecord, computeNextOrderIndex } from './statusMutations.ts'
 const RRule = rruleLib.RRule ?? rruleLib
 
 // ── Types (inlined from shared/types.ts) ──────────────────────────────
@@ -209,7 +208,7 @@ function getNextOccurrence(rule: string, fromDate: Date): Date | null {
 
 // ── Repository Classes ─────────────────────────────────────────────────
 
-class TaskRepo {
+export class TaskRepo {
   // scope gates every project-scoped query to the caller's member projects —
   // the service-role client bypasses RLS, so this is the ONLY thing stopping a
   // crafted id from returning another user's task (story #97).
@@ -221,42 +220,44 @@ class TaskRepo {
 
   async findById(id: string) {
     const projectIds = await this.scope.idArray()
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('project_id', projectId).eq('is_archived', 0).eq('is_template', 0)
       .is('parent_id', null).order('order_index')
     return data ?? []
   }
-  async findSubtasks(parentId: string) {
+  async findSubtasks(parentId: string, includeArchived = false) {
     const projectIds = await this.scope.idArray()
-    const { data } = await this.client.from('tasks').select('*')
+    let query = this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('parent_id', parentId).in('project_id', projectIds).order('order_index')
+    if (!includeArchived) query = query.eq('is_archived', 0)
+    const { data } = await query
     return data ?? []
   }
   async findMyDay(userId: string) {
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('owner_id', userId).eq('is_archived', 0).eq('is_template', 0).eq('is_in_my_day', 1)
     return data ?? []
   }
   async findArchived(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('project_id', projectId).eq('is_archived', 1).order('updated_at', { ascending: false })
     return data ?? []
   }
   async findTemplates(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('project_id', projectId).eq('is_template', 1).order('created_at', { ascending: false })
     return data ?? []
   }
   async findAllTemplates(userId: string) {
-    const { data } = await this.client.from('tasks').select('*')
+    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('owner_id', userId).eq('is_template', 1).order('created_at', { ascending: false })
     return data ?? []
   }
@@ -284,6 +285,19 @@ class TaskRepo {
     return data
   }
   async update(id: string, input: Record<string, unknown>) {
+    const original = await this.findById(id)
+    if (!original) return undefined
+    if (input.status_id !== undefined || input.project_id !== undefined) {
+      const projectId = input.project_id ?? original.project_id
+      const statusId = input.status_id ?? original.status_id
+      const { data: status, error } = await this.client.from('statuses').select('id, is_done')
+        .eq('id', statusId).eq('project_id', projectId).is('deleted_at', null).maybeSingle()
+      if (error) throw new Error(error.message)
+      if (!status) throw new Error('Status does not belong to the task project')
+      if (input.status_id !== undefined) {
+        input = { ...input, completed_date: status.is_done === 1 ? (original.completed_date ?? new Date().toISOString()) : null }
+      }
+    }
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (col in input) updates[col] = input[col]
@@ -318,7 +332,7 @@ class TaskRepo {
     })
     const labels = await this.getLabels(id)
     for (const label of labels) await this.addLabel(newId, label.label_id)
-    const subtasks = await this.findSubtasks(id)
+    const subtasks = await this.findSubtasks(id, true)
     for (const sub of subtasks) {
       const subCopyId = crypto.randomUUID()
       await this.create({
@@ -343,7 +357,7 @@ class TaskRepo {
     })
     const labels = await this.getLabels(id)
     for (const label of labels) await this.addLabel(newId, label.label_id)
-    const subtasks = await this.findSubtasks(id)
+    const subtasks = await this.findSubtasks(id, true)
     for (const sub of subtasks) {
       const subTemplateId = crypto.randomUUID()
       await this.create({
@@ -381,7 +395,7 @@ class TaskRepo {
   }
   async getLabels(taskId: string) {
     if (!(await this.findById(taskId))) return []
-    const { data } = await this.client.from('task_labels').select('task_id, label_id').eq('task_id', taskId)
+    const { data } = await this.client.from('task_labels').select('task_id, label_id').is('deleted_at', null).eq('task_id', taskId)
     return data ?? []
   }
   /** Throw unless `taskId` belongs to a project the caller is a member of. */
@@ -397,7 +411,7 @@ class TaskRepo {
   async search(filters: Record<string, unknown>) {
     // Base scope: only tasks in the caller's member projects are ever searchable.
     const projectIds = await this.scope.idArray()
-    let query = this.client.from('tasks').select('*').eq('is_template', 0).in('project_id', projectIds)
+    let query = this.client.from('tasks').select('*').is('deleted_at', null).eq('is_template', 0).in('project_id', projectIds)
     if (filters.is_archived !== undefined) query = query.eq('is_archived', filters.is_archived as number)
     else query = query.eq('is_archived', 0)
     if (filters.project_id) query = query.eq('project_id', filters.project_id as string)
@@ -416,13 +430,13 @@ class TaskRepo {
     const labelId = filters.label_id as string | undefined
     const labelIds = labelId ? [labelId] : undefined
     if (labelIds?.length) {
-      const { data: tlData } = await this.client.from('task_labels').select('task_id').in('label_id', labelIds)
+      const { data: tlData } = await this.client.from('task_labels').select('task_id').is('deleted_at', null).in('label_id', labelIds)
       const matchingIds = new Set((tlData ?? []).map((tl: { task_id: string }) => tl.task_id))
       results = results.filter((t: { id: string }) => matchingIds.has(t.id))
     }
     const excludeLabelIds = filters.exclude_label_ids as string[] | undefined
     if (excludeLabelIds?.length) {
-      const { data: tlData } = await this.client.from('task_labels').select('task_id').in('label_id', excludeLabelIds)
+      const { data: tlData } = await this.client.from('task_labels').select('task_id').is('deleted_at', null).in('label_id', excludeLabelIds)
       const excludeIds = new Set((tlData ?? []).map((tl: { task_id: string }) => tl.task_id))
       results = results.filter((t: { id: string }) => !excludeIds.has(t.id))
     }
@@ -457,7 +471,7 @@ class TaskRepo {
     return { id: nextId, dueDate: nextDate }
   }
   private async refreshLabelNames(taskId: string) {
-    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').eq('task_id', taskId)
+    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').is('deleted_at', null).eq('task_id', taskId)
     if (!taskLabels || taskLabels.length === 0) {
       await this.client.from('tasks').update({ label_names: null }).eq('id', taskId)
       return
@@ -504,7 +518,8 @@ class ProjectRepo {
     return project
   }
   async update(id: string, input: Record<string, unknown>) {
-    if (!(await this.scope.isMember(id))) return undefined
+    const project = await this.findById(id)
+    if (!project || project.owner_id !== this.userId) throw new Error('Only the project owner can change project settings')
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
     for (const k of ['name', 'description', 'color', 'icon', 'sidebar_order', 'is_default', 'is_shared']) {
       if (input[k] !== undefined) updates[k] = input[k]
@@ -517,7 +532,8 @@ class ProjectRepo {
   async delete(id: string) {
     // Refuse to cascade-delete a project (tasks, statuses, members) the caller
     // is not a member of — this is the most destructive path in the whole API.
-    if (!(await this.scope.isMember(id))) return false
+    const project = await this.findById(id)
+    if (!project || project.owner_id !== this.userId) throw new Error('Only the project owner can delete this project')
     await this.client.from('tasks').delete().eq('project_id', id)
     await this.client.from('statuses').delete().eq('project_id', id)
     await this.client.from('project_members').delete().eq('project_id', id)
@@ -526,50 +542,63 @@ class ProjectRepo {
   }
 }
 
-class StatusRepo {
-  constructor(private client: SupabaseClient, private scope: ProjectScope) {}
+export class StatusRepo {
+  constructor(private client: SupabaseClient, private scope: ProjectScope, private userId: string) {}
+  async assertOwner(projectId: string) {
+    const { data, error } = await this.client.from('projects').select('id')
+      .eq('id', projectId).eq('owner_id', this.userId).is('deleted_at', null).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) throw new Error('Only the project owner can manage statuses')
+  }
   async findByProjectId(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).order('order_index')
+    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).order('order_index')
     return data ?? []
   }
   async findById(id: string) {
     const projectIds = await this.scope.idArray()
-    const { data } = await this.client.from('statuses').select('*')
+    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null)
       .eq('id', id).in('project_id', projectIds).maybeSingle()
     return data ?? undefined
   }
   async findDefault(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return undefined
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_default', 1).maybeSingle()
+    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_default', 1).maybeSingle()
     return data ?? undefined
   }
   async findDone(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return undefined
-    const { data } = await this.client.from('statuses').select('*').eq('project_id', projectId).eq('is_done', 1).maybeSingle()
+    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_done', 1).maybeSingle()
     return data ?? undefined
   }
-  async create(input: Record<string, unknown>) {
-    // Never trust the caller's project_id: the service-role client bypasses RLS,
-    // so gate on membership by hand before writing (story #97).
-    if (!(await this.scope.isMember(input.project_id as string))) {
-      throw new Error(`Project not found: ${input.project_id}`)
-    }
-    // Defaults + flag coercion live in the pure, unit-tested statusMutations module.
-    const record = buildStatusRecord({
-      id: input.id as string,
-      project_id: input.project_id as string,
-      name: input.name as string,
-      color: input.color as string | null | undefined,
-      icon: input.icon as string | null | undefined,
-      order_index: input.order_index as number | null | undefined,
-      is_done: input.is_done as number | boolean | null | undefined,
-      is_default: input.is_default as number | boolean | null | undefined
-    }, new Date().toISOString())
-    const { data, error } = await this.client.from('statuses').insert(record).select().single()
-    if (error) throw new Error(`Failed to create status: ${error.message}`)
+  private async mutate(projectId: string, action: string, input: Record<string, unknown>) {
+    await this.assertOwner(projectId)
+    const { data, error } = await this.client.rpc('manage_project_status', {
+      p_project_id: projectId, p_actor: this.userId, p_action: action, p_input: input
+    })
+    if (error) throw new Error(error.message)
     return data
   }
+  async create(input: Record<string, unknown>) {
+    return await this.mutate(input.project_id as string, 'create', input)
+  }
+  async update(id: string, input: Record<string, unknown>) {
+    const status = await this.findById(id)
+    if (!status) throw new Error('Status not found')
+    return await this.mutate(status.project_id, 'update', { ...input, id })
+  }
+  async remove(id: string, targetId: string) {
+    const status = await this.findById(id)
+    if (!status) throw new Error('Status not found')
+    return await this.mutate(status.project_id, 'delete', { id, target_id: targetId })
+  }
+  async reorder(projectId: string, ids: string[]) {
+    return await this.mutate(projectId, 'reorder', { status_ids: ids })
+  }
+  async ensure(projectId: string, names: string[]) {
+    return await this.mutate(projectId, 'ensure', { names })
+  }
+
 }
 
 class LabelRepo {
@@ -588,7 +617,7 @@ class LabelRepo {
     // Junction-based read — the legacy projects.label_data JSON is no longer
     // consulted (the app stopped writing/reading it in v1.7.0). See projectLabels.ts.
     if (!(await this.scope.isMember(projectId))) return []
-    return await fetchProjectLabels(this.client, projectId)
+    return await fetchProjectLabels(this.client as unknown as ProjectLabelClient, projectId)
   }
   async findByTaskId(taskId: string) {
     // Only resolve labels for a task the caller can access.
@@ -596,7 +625,7 @@ class LabelRepo {
     const { data: task } = await this.client.from('tasks').select('id')
       .eq('id', taskId).in('project_id', projectIds).maybeSingle()
     if (!task) return []
-    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').eq('task_id', taskId)
+    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').is('deleted_at', null).eq('task_id', taskId)
     if (!taskLabels || taskLabels.length === 0) return []
     const labelIds = taskLabels.map((tl: { label_id: string }) => tl.label_id)
     const { data } = await this.client.from('user_labels').select('*').in('id', labelIds)
@@ -630,7 +659,7 @@ class LabelRepo {
     // legacy projects.label_data JSON (dropped entirely; the app ignores it
     // since v1.7.0). Throws on a silently-dropped upsert (RLS reject / FK
     // violation) instead of returning success — see projectLabels.ts.
-    await upsertProjectLabel(this.client, projectId, labelId)
+    await upsertProjectLabel(this.client as unknown as ProjectLabelClient, projectId, labelId)
   }
 }
 
@@ -771,11 +800,11 @@ interface Repos {
 function createRepos(client: SupabaseClient, userId: string): Repos {
   // One membership cache per request, shared by every project-scoped repo, so
   // the caller's `project_members` set is loaded at most once per tool call.
-  const scope = new ProjectScope(client, userId)
+  const scope = new ProjectScope(client as unknown as ScopeClient, userId)
   return {
     tasks: new TaskRepo(client, userId, scope),
     projects: new ProjectRepo(client, userId, scope),
-    statuses: new StatusRepo(client, scope),
+    statuses: new StatusRepo(client, scope, userId),
     labels: new LabelRepo(client, userId, scope),
     activityLog: new ActivityLogRepo(client),
     settings: new SettingsRepo(client),
@@ -786,19 +815,6 @@ function createRepos(client: SupabaseClient, userId: string): Repos {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-interface ToolResult {
-  content: Array<{ type: 'text'; text: string }>
-  isError?: boolean
-  [key: string]: unknown
-}
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
-}
-
-function fail(msg: string): ToolResult {
-  return { content: [{ type: 'text' as const, text: msg }], isError: true }
-}
 
 function requireStr(args: Record<string, unknown>, key: string): string {
   const val = args[key]
@@ -836,10 +852,10 @@ const PRIORITY_NAMES: Record<number, string> = { 0: 'none', 1: 'low', 2: 'normal
 // ── Tool Definitions ───────────────────────────────────────────────────
 
 const tools: ToolDef[] = [
-  { name: 'create_task', description: 'Create a new task in a project', inputSchema: { type: 'object', properties: { title: str('Task title'), project_id: str('Project ID'), description: str('Task description (markdown)'), priority: num('Priority: 0=none, 1=low, 2=normal, 3=high, 4=urgent'), due_date: str('Due date in ISO 8601 format'), parent_id: str('Parent task ID (creates a subtask)') }, required: ['title', 'project_id'] } },
+  { name: 'create_task', description: 'Create a new task in a project', inputSchema: { type: 'object', properties: { title: str('Task title'), project_id: str('Project ID'), description: str('Task description (markdown)'), priority: num('Priority: 0=none, 1=low, 2=normal, 3=high, 4=urgent'), due_date: str('Due date in ISO 8601 format'), parent_id: str('Parent task ID (creates a subtask)'), reference_url: str('Reference URL') }, required: ['title', 'project_id'] } },
   { name: 'list_tasks', description: 'List all active tasks in a project (excludes archived and template tasks)', inputSchema: { type: 'object', properties: { project_id: str('Project ID') }, required: ['project_id'] } },
   { name: 'get_task', description: 'Get a task by ID, including its labels', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
-  { name: 'update_task', description: 'Update task fields (title, description, priority, due_date, status_id)', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), title: str('New title'), description: str('New description (markdown)'), priority: num('Priority: 0=none, 1=low, 2=normal, 3=high, 4=urgent'), due_date: str('Due date in ISO 8601 format, or empty string to clear'), status_id: str('New status ID') }, required: ['task_id'] } },
+  { name: 'update_task', description: 'Update task fields (title, description, priority, due_date, status_id)', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), title: str('New title'), description: str('New description (markdown)'), priority: num('Priority: 0=none, 1=low, 2=normal, 3=high, 4=urgent'), due_date: str('Due date in ISO 8601 format, or empty string to clear'), status_id: str('New status ID'), reference_url: str('Reference URL, or empty string to clear') }, required: ['task_id'] } },
   { name: 'delete_task', description: 'Permanently delete a task and its subtasks', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
   { name: 'complete_task', description: 'Mark a task as done (sets status to the done status of its project)', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
   { name: 'reopen_task', description: 'Reopen a completed task (sets status back to the default status)', inputSchema: { type: 'object', properties: { task_id: str('Task ID') }, required: ['task_id'] } },
@@ -865,6 +881,10 @@ const tools: ToolDef[] = [
   { name: 'create_label', description: 'Create a new label in a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), name: str('Label name'), color: str('Label color (hex, e.g. "#22c55e")') }, required: ['project_id', 'name'] } },
   { name: 'assign_label_to_task', description: 'Assign a label to a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
   { name: 'remove_label_from_task', description: 'Remove a label from a task', inputSchema: { type: 'object', properties: { task_id: str('Task ID'), label_id: str('Label ID') }, required: ['task_id', 'label_id'] } },
+  { name: 'update_status', description: 'Update a project status', inputSchema: { type: 'object', properties: { status_id: str('Status ID'), name: str('Name'), color: str('Color'), icon: str('Icon'), order_index: num('Position'), is_done: bool('Completed status') }, required: ['status_id'] } },
+  { name: 'delete_status', description: 'Reassign tasks then soft-delete a status', inputSchema: { type: 'object', properties: { status_id: str('Status to delete'), reassign_to_status_id: str('Replacement in the same project') }, required: ['status_id', 'reassign_to_status_id'] } },
+  { name: 'reorder_statuses', description: 'Reorder all active project statuses', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), status_ids: { type: 'array', description: 'All status IDs in order', items: { type: 'string' } } }, required: ['project_id', 'status_ids'] } },
+  { name: 'ensure_statuses', description: 'Create only missing status names, case-insensitively', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), names: { type: 'array', description: 'Required names', items: { type: 'string' } } }, required: ['project_id', 'names'] } },
   { name: 'list_statuses', description: 'List all statuses for a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID') }, required: ['project_id'] } },
   { name: 'create_status', description: 'Create a new status in a project', inputSchema: { type: 'object', properties: { project_id: str('Project ID'), name: str('Status name'), color: str('Status color (hex, e.g. "#22c55e"). Defaults to #888888'), icon: str('Status icon name (e.g. "circle", "check-circle-2"). Defaults to "circle"'), order_index: num('Sort position; defaults to last (max existing + 1)'), is_done: bool('Whether this status marks a task as done (default false)') }, required: ['project_id', 'name'] } },
   { name: 'search_tasks', description: 'Search tasks with filters. All filters are optional and combined with AND.', inputSchema: { type: 'object', properties: { project_id: str('Filter by project ID'), status_id: str('Filter by status ID'), priority: num('Filter by exact priority (0-4)'), label_id: str('Filter by label ID'), due_before: str('Tasks due before this date (ISO 8601)'), due_after: str('Tasks due after this date (ISO 8601)'), keyword: str('Search keyword (matches title and description)'), label_logic: str('Label filter logic: "any" (OR, default) or "all" (AND)'), exclude_label_id: str('Exclude tasks with this label'), exclude_status_id: str('Exclude tasks with this status'), exclude_priority: num('Exclude tasks with this priority (0-4)') } } },
@@ -886,7 +906,7 @@ const tools: ToolDef[] = [
 
 // ── Handler Factory ────────────────────────────────────────────────────
 
-function createHandlers(repos: Repos, userId: string) {
+export function createHandlers(repos: Repos, userId: string) {
   async function logActivity(
     taskId: string, uId: string, action: string,
     oldValue?: string | null, newValue?: string | null, projectId?: string
@@ -903,7 +923,7 @@ function createHandlers(repos: Repos, userId: string) {
     ownerId: string, defaultStatusId: string,
     targetLabels: Array<{ id: string; name: string; color: string }>
   ) {
-    const subtasks = await repos.tasks.findSubtasks(templateParentId)
+    const subtasks = await repos.tasks.findSubtasks(templateParentId, true)
     for (const subtask of subtasks) {
       const subtaskId = crypto.randomUUID()
       await repos.tasks.create({
@@ -928,6 +948,7 @@ function createHandlers(repos: Repos, userId: string) {
             target = newLabel
           }
         }
+        if (!target) throw new Error('Failed to resolve copied label')
         await repos.tasks.addLabel(subtaskId, target.id)
       }
       await copyTemplateSubtasks(subtask.id, subtaskId, projectId, ownerId, defaultStatusId, targetLabels)
@@ -944,7 +965,8 @@ function createHandlers(repos: Repos, userId: string) {
         id: crypto.randomUUID(), project_id: projectId, owner_id: userId,
         title: requireStr(args, 'title'), status_id: defaultStatus.id,
         description: optStr(args, 'description') ?? null, priority: optNum(args, 'priority') ?? 0,
-        due_date: optStr(args, 'due_date') ?? null, parent_id: optStr(args, 'parent_id') ?? null
+        due_date: optStr(args, 'due_date') ?? null, parent_id: optStr(args, 'parent_id') ?? null,
+        reference_url: optStr(args, 'reference_url') ?? null
       })
       await logActivity(task.id, userId, 'created', null, null, projectId)
       return task
@@ -968,6 +990,7 @@ function createHandlers(repos: Repos, userId: string) {
       const priority = optNum(args, 'priority'); if (priority !== undefined) input.priority = priority
       const dueDate = optStr(args, 'due_date'); if (dueDate !== undefined) input.due_date = dueDate === '' ? null : dueDate
       const statusId = optStr(args, 'status_id'); if (statusId !== undefined) input.status_id = statusId
+      const referenceUrl = optStr(args, 'reference_url'); if (referenceUrl !== undefined) input.reference_url = referenceUrl || null
       const result = await repos.tasks.update(taskId, input)
       if (!result) throw new Error(`Task not found: ${taskId}`)
       if (title !== undefined && title !== oldTask.title) await logActivity(taskId, userId, 'title_changed', oldTask.title, title, oldTask.project_id)
@@ -982,7 +1005,7 @@ function createHandlers(repos: Repos, userId: string) {
       const task = await repos.tasks.findById(taskId)
       if (!task) throw new Error(`Task not found: ${taskId}`)
       await logActivity(taskId, userId, 'deleted', task.title, null, task.project_id)
-      const subtasks = await repos.tasks.findSubtasks(taskId)
+      const subtasks = await repos.tasks.findSubtasks(taskId, true)
       for (const sub of subtasks) await repos.tasks.delete(sub.id)
       await repos.tasks.delete(taskId)
       return { deleted: true, task_id: taskId }
@@ -1162,25 +1185,22 @@ function createHandlers(repos: Repos, userId: string) {
       await logActivity(taskId, userId, 'label_removed', label?.name ?? labelId, null, task?.project_id)
       return { removed: true, task_id: taskId, label_id: labelId }
     },
+    async update_status(args) { return await repos.statuses.update(requireStr(args, 'status_id'), args) },
+    async delete_status(args) { return await repos.statuses.remove(requireStr(args, 'status_id'), requireStr(args, 'reassign_to_status_id')) },
+    async reorder_statuses(args) {
+      if (!Array.isArray(args.status_ids) || args.status_ids.some((id) => typeof id !== 'string')) throw new Error('status_ids must be an array of strings')
+      return await repos.statuses.reorder(requireStr(args, 'project_id'), args.status_ids as string[])
+    },
+    async ensure_statuses(args) {
+      if (!Array.isArray(args.names) || args.names.some((name) => typeof name !== 'string')) throw new Error('names must be an array of strings')
+      return await repos.statuses.ensure(requireStr(args, 'project_id'), args.names as string[])
+    },
     async list_statuses(args) { return await repos.statuses.findByProjectId(requireStr(args, 'project_id')) },
     async create_status(args) {
-      const projectId = requireStr(args, 'project_id')
-      const name = requireStr(args, 'name')
-      let orderIndex = optNum(args, 'order_index')
-      if (orderIndex === undefined) {
-        // findByProjectId returns [] for a project the caller is not a member of,
-        // so this yields 0 — but the authorization rejection still happens inside
-        // repos.statuses.create (scope.isMember), so no row is ever written for a
-        // foreign project. When authorized, this sorts the new status last.
-        const existing = await repos.statuses.findByProjectId(projectId)
-        orderIndex = computeNextOrderIndex(existing)
-      }
-      // repos.statuses.create re-checks membership and rejects with the same typed
-      // "Project not found" error convention used by the other scoped write tools.
       return await repos.statuses.create({
-        id: crypto.randomUUID(), project_id: projectId, name,
+        id: crypto.randomUUID(), project_id: requireStr(args, 'project_id'), name: requireStr(args, 'name'),
         color: optStr(args, 'color'), icon: optStr(args, 'icon'),
-        order_index: orderIndex, is_done: optBool(args, 'is_done')
+        order_index: optNum(args, 'order_index'), is_done: optBool(args, 'is_done')
       })
     },
     async search_tasks(args) {
@@ -1222,6 +1242,7 @@ function createHandlers(repos: Repos, userId: string) {
           if (existing) { await repos.labels.addToProject(projectId, existing.id); targetLabels.push(existing); target = existing }
           else { const created = await repos.labels.create({ id: crypto.randomUUID(), project_id: projectId, name: tl.name, color: tl.color }); targetLabels.push(created); target = created }
         }
+        if (!target) throw new Error('Failed to resolve copied label')
         await repos.tasks.addLabel(newId, target.id)
       }
       await copyTemplateSubtasks(templateId, newId, projectId, userId, defaultStatus.id, targetLabels)

@@ -136,7 +136,6 @@ export function initUpdater(): void {
   })
 
   ipcMain.handle('updater:getVersion', () => {
-    const { app } = require('electron') as typeof import('electron')
     return app.getVersion()
   })
 

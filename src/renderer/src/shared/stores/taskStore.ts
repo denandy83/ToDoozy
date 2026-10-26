@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react'
+import { sortSubtasksForDisplay } from '../utils/sortTasks'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type {
@@ -334,22 +335,23 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
   async hydrateAllForUser(userId: string): Promise<void> {
     // Cross-project hydration for views that span every project (Saved Views).
-    // Loads top-level + sub tasks AND their label mappings for ALL of the
-    // user's projects, then MERGES into the store (never resets, never toggles
-    // `loading`) so a view can match tasks from projects not visited this
-    // session without a jarring full reload. Gap A in the saved-view spec.
+    // Refresh every known project, preserving edits made while IPC reads run.
+    const initial = get()
+    const initialUser = getUserId()
     try {
       const allProjects = await window.api.projects.getProjectsForUser(userId)
       const [taskArrays, labelMappingArrays] = await Promise.all([
-        Promise.all(allProjects.map((p) => window.api.tasks.findByProjectId(p.id))),
+        Promise.all(allProjects.map((p) => window.api.tasks.findAllByProject(p.id, { includeTombstones: true }))),
         Promise.all(allProjects.map((p) => window.api.labels.findTaskLabelsByProject(p.id)))
       ])
+      if (getUserId() !== initialUser) return
       set((state) => {
-        const tasks = { ...state.tasks }
+        const projectIds = new Set(allProjects.map((p) => p.id))
+        const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
         for (const arr of taskArrays) {
-          for (const task of arr) tasks[task.id] = task
+          for (const task of arr) if (!task.deleted_at) tasks[task.id] = task
         }
-        const taskLabels = { ...state.taskLabels }
+        const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id)))
         for (const mappings of labelMappingArrays) {
           const grouped: Record<string, Label[]> = {}
           for (const m of mappings) {
@@ -361,9 +363,19 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             taskLabels[tid] = labels
           }
         }
+        for (const [id, task] of Object.entries(state.tasks)) {
+          if (task !== initial.tasks[id]) tasks[id] = task
+        }
+        for (const id of Object.keys(initial.tasks)) {
+          if (!state.tasks[id]) delete tasks[id]
+        }
+        for (const [id, labels] of Object.entries(state.taskLabels)) {
+          if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
+        }
         return { tasks, taskLabels }
       })
     } catch (err) {
+      if (getUserId() !== initialUser) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
       set({ error: message })
     }
@@ -438,16 +450,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
         // Cascade archive/unarchive to subtasks in store
         if (input.is_archived !== undefined) {
-          const subtasks = await window.api.tasks.findSubtasks(id)
-          if (subtasks.length > 0) {
-            set((state) => {
-              const updated = { ...state.tasks }
-              for (const st of subtasks) {
-                updated[st.id] = st
-              }
-              return { tasks: updated }
-            })
-          }
+          await get().hydrateAllForProject(task.project_id, getUserId())
         }
 
         // Check if a recurring task was moved to done status → create clone
@@ -1159,9 +1162,8 @@ export function useSubtasks(parentId: string): Task[] {
   const tasks = useTaskStore((s) => s.tasks)
   const prevRef = useRef<Task[]>([])
   return useMemo(() => {
-    const next = Object.values(tasks)
-      .filter((t) => t.parent_id === parentId)
-      .sort((a, b) => a.order_index - b.order_index)
+    const next = sortSubtasksForDisplay(Object.values(tasks)
+      .filter((t) => t.parent_id === parentId && !t.is_archived && !t.deleted_at))
     if (tasksArrayEqual(prevRef.current, next)) return prevRef.current
     prevRef.current = next
     return next
@@ -1172,7 +1174,7 @@ export function useChildCount(parentId: string): { total: number; done: number }
   const tasks = useTaskStore((s) => s.tasks)
   const prevRef = useRef<{ total: number; done: number }>({ total: 0, done: 0 })
   return useMemo(() => {
-    const children = Object.values(tasks).filter((t) => t.parent_id === parentId)
+    const children = Object.values(tasks).filter((t) => t.parent_id === parentId && !t.is_archived && !t.deleted_at)
     const done = children.filter((t) => t.completed_date !== null).length
     const next = { total: children.length, done }
     if (prevRef.current.total === next.total && prevRef.current.done === next.done) return prevRef.current

@@ -6,9 +6,8 @@ import {
   unsubscribeFromProject
 } from '../../services/SyncService'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
-import { useTaskStore, useStatusStore } from '../../shared/stores'
-import { useLabelStore } from '../../shared/stores/labelStore'
-import { placeholderEmail, isPlaceholderEmail } from '../../../../shared/placeholderUser'
+import { useTaskStore } from '../../shared/stores'
+import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
 import type { Project, User } from '../../../../shared/types'
 
 export interface SharedProjectMember {
@@ -127,132 +126,8 @@ export function useSharedProjectRealtime(
           }
         }
 
-        if (table === 'task') {
-          if (event === 'DELETE' && payload?.id) {
-            // Hard-delete fallback (e.g. 30-day purge job removed the row).
-            // Soft-deletes arrive as UPDATE with deleted_at set — handled below.
-            await window.api.tasks.hardDelete(payload.id as string).catch(() => {})
-          } else if ((event === 'INSERT' || event === 'UPDATE') && payload?.id) {
-            // Soft-delete propagation: an UPDATE with deleted_at !== null is a
-            // tombstone. Use applyRemote so the local row preserves the remote
-            // deleted_at + updated_at (no NOW() bump that would force a push back).
-            if (payload.deleted_at != null) {
-              await window.api.tasks.applyRemote({
-                id: payload.id as string,
-                project_id: payload.project_id as string,
-                owner_id: payload.owner_id as string,
-                assigned_to: (payload.assigned_to as string | null) ?? null,
-                title: payload.title as string,
-                description: (payload.description as string | null) ?? null,
-                status_id: payload.status_id as string,
-                priority: (payload.priority as number) ?? 0,
-                due_date: (payload.due_date as string | null) ?? null,
-                parent_id: (payload.parent_id as string | null) ?? null,
-                order_index: (payload.order_index as number) ?? 0,
-                is_template: (payload.is_template as number) ?? 0,
-                is_archived: (payload.is_archived as number) ?? 0,
-                is_in_my_day: (payload.is_in_my_day as number) ?? 0,
-                completed_date: (payload.completed_date as string | null) ?? null,
-                recurrence_rule: (payload.recurrence_rule as string | null) ?? null,
-                reference_url: (payload.reference_url as string | null) ?? null,
-                my_day_dismissed_date: (payload.my_day_dismissed_date as string | null) ?? null,
-                created_at: payload.created_at as string,
-                updated_at: payload.updated_at as string,
-                deleted_at: payload.deleted_at as string
-              }).catch(() => {})
-              return
-            }
-            // Upsert locally — check if exists
-            const existing = await window.api.tasks.findById(payload.id as string)
-            if (existing) {
-              await window.api.tasks.update(payload.id as string, {
-                title: payload.title as string,
-                description: payload.description as string | null,
-                status_id: payload.status_id as string,
-                priority: payload.priority as number,
-                due_date: payload.due_date as string | null,
-                parent_id: payload.parent_id as string | null,
-                order_index: payload.order_index as number,
-                assigned_to: payload.assigned_to as string | null,
-                is_archived: payload.is_archived as number,
-                completed_date: payload.completed_date as string | null,
-                recurrence_rule: payload.recurrence_rule as string | null,
-                reference_url: payload.reference_url as string | null
-              })
-            } else {
-              // Ensure owner + assigned user records exist for FK
-              const ownerId = payload.owner_id as string
-              const localOwner = await window.api.users.findById(ownerId)
-              if (!localOwner) {
-                await window.api.users.create({ id: ownerId, email: placeholderEmail(ownerId), display_name: null, avatar_url: null }).catch(() => {})
-              }
-              const assignedId = payload.assigned_to as string | null
-              if (assignedId) {
-                const localAssignee = await window.api.users.findById(assignedId)
-                if (!localAssignee) {
-                  await window.api.users.create({ id: assignedId, email: placeholderEmail(assignedId), display_name: null, avatar_url: null }).catch(() => {})
-                }
-              }
-              // If this is a subtask, ensure the parent exists locally or the
-              // parent_id FK will throw. Skip the insert if the parent is
-              // missing — the next syncProjectDown / pullNewTasks will pick
-              // it up in the correct parents-first order.
-              const parentId = payload.parent_id as string | null
-              if (parentId) {
-                const localParent = await window.api.tasks.findById(parentId)
-                if (!localParent) {
-                  console.warn(`[Realtime] Skipping subtask ${payload.id} — parent ${parentId} not synced yet`)
-                  return
-                }
-              }
-              await window.api.tasks.create({
-                id: payload.id as string,
-                project_id: payload.project_id as string,
-                owner_id: ownerId,
-                title: payload.title as string,
-                description: payload.description as string | null,
-                status_id: payload.status_id as string,
-                priority: payload.priority as number,
-                due_date: payload.due_date as string | null,
-                parent_id: payload.parent_id as string | null,
-                order_index: payload.order_index as number,
-                assigned_to: payload.assigned_to as string | null,
-                is_template: (payload.is_template as number) ?? 0,
-                is_archived: (payload.is_archived as number) ?? 0,
-                completed_date: payload.completed_date as string | null,
-                recurrence_rule: payload.recurrence_rule as string | null,
-                reference_url: payload.reference_url as string | null
-              })
-            }
-            // Sync labels from payload (check project labels first to avoid duplicates)
-            if (payload.label_names) {
-              const projLabels = await window.api.labels.findByProjectId(selectedProject.id)
-              const projLabelsByName = new Map(projLabels.map((l: { name: string; id: string }) => [l.name.toLowerCase(), l]))
-              const parsed: Array<string | { name: string; color: string }> = JSON.parse(payload.label_names as string)
-              for (const entry of parsed) {
-                const name = typeof entry === 'string' ? entry : entry.name
-                const color = typeof entry === 'string' ? '#888888' : entry.color
-                let label = projLabelsByName.get(name.toLowerCase()) as Awaited<ReturnType<typeof window.api.labels.findByName>> | undefined
-                if (!label) {
-                  label = await window.api.labels.findByName(userId, name)
-                }
-                if (!label) {
-                  label = await window.api.labels.create({ id: crypto.randomUUID(), user_id: userId, name, color })
-                }
-                await window.api.labels.addToProject(selectedProject.id, label.id).catch(() => {})
-                await window.api.tasks.addLabel(payload.id as string, label.id).catch(() => {})
-              }
-            }
-          }
-          // Refresh task store
-          useTaskStore.getState().hydrateAllForProject(selectedProject.id, userId)
-        }
-
-        if (table === 'status') {
-          // Full status re-sync is fine — statuses are few
-          useStatusStore.getState().hydrateStatuses(selectedProject.id)
-        }
-
+        // Task/status rows are applied once by remoteProjectRefresh for every
+        // subscribed project. Never run local CRUD (which stamps NOW) on remote rows.
         if (table === 'activity' && event === 'INSERT') {
           // Persist remote members' activity entries locally (idempotent by
           // id) and refresh the Detail panel if it's showing this task.
@@ -276,28 +151,7 @@ export function useSharedProjectRealtime(
           }
         }
 
-        if (table === 'project_label') {
-          // Remote tombstone or revival on the project↔label junction.
-          // Mirror the remote state locally and cascade to task_labels so
-          // the label disappears from tasks immediately. Without this,
-          // User A keeps seeing a label that User B removed until the
-          // next reconcile pass.
-          const projectId = (payload.project_id as string) ?? selectedProject.id
-          const labelId = payload.label_id as string | undefined
-          const remoteDeletedAt = (payload.deleted_at as string | null | undefined) ?? null
-          if (!labelId) return
-          await window.api.labels.applyRemoteProjectLabel({
-            project_id: projectId,
-            label_id: labelId,
-            created_at: (payload.created_at as string | null) ?? null,
-            deleted_at: remoteDeletedAt
-          }).catch(() => {})
-          if (remoteDeletedAt) {
-            await window.api.labels.softDeleteTaskLabelsForProjectLabel(projectId, labelId).catch(() => {})
-          }
-          await useTaskStore.getState().hydrateAllTaskLabels(projectId)
-          await useLabelStore.getState().hydrateLabels(projectId)
-        }
+
       })
     } else {
       setProjectMembers([])

@@ -748,10 +748,13 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     return rows.filter((row) => !isSettingSyncExcluded(row.key))
   },
 
-  async localGetById() {
-    // Settings have a composite PK; the generic reconcile loop falls back to
-    // localList rather than per-id lookups.
-    return null
+  async localGetById(id) {
+    const separator = id.indexOf(':')
+    if (separator < 1) return null
+    const userId = id.slice(0, separator)
+    const key = id.slice(separator + 1)
+    const rows = await settingsDescriptor.localList(userId, true)
+    return rows.find((row) => row.key === key) ?? null
   },
 
   async localApplyRemote(remote) {

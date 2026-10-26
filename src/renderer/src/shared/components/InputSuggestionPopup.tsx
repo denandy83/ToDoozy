@@ -49,13 +49,15 @@ export interface InputSuggestionPopupProps {
   position: { top: number; left: number }
   onSelect: (data: SuggestionData) => void
   onDismiss: () => void
+  footerHint?: string
 }
 
 export function InputSuggestionPopup({
   items,
   position,
   onSelect,
-  onDismiss
+  onDismiss,
+  footerHint
 }: InputSuggestionPopupProps): React.JSX.Element | null {
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -107,7 +109,7 @@ export function InputSuggestionPopup({
 
   // Clamp to viewport
   const adjustedLeft = Math.min(position.left, window.innerWidth - 240)
-  const adjustedTop = Math.min(position.top, window.innerHeight - items.length * 32 - 8)
+  const adjustedTop = Math.min(position.top, window.innerHeight - items.length * 32 - 8 - (footerHint ? 28 : 0))
 
   return createPortal(
     <div
@@ -147,6 +149,7 @@ export function InputSuggestionPopup({
           )}
         </button>
       ))}
+      {footerHint && <div className="px-3 py-1 text-xs text-muted">{footerHint}</div>}
     </div>,
     document.body
   )
