@@ -31,13 +31,13 @@ beforeEach(async () => {
   remote=new PGlite()
   await remote.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role; CREATE SCHEMA auth;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT null::uuid$$;
-    CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz);
+    CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz,is_archived integer DEFAULT 0,updated_at timestamptz DEFAULT now());
     CREATE TABLE statuses(id uuid PRIMARY KEY,project_id uuid,name text,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
-    CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz,deleted_at timestamptz);`)
-  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql']) {
+    CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz DEFAULT '2000-01-01',deleted_at timestamptz,owner_id uuid,assigned_to uuid,title text DEFAULT 'Occupied',description text,priority integer,due_date text,parent_id uuid,order_index float,is_in_my_day integer,is_template integer,is_archived integer DEFAULT 0,recurrence_rule text,reference_url text,my_day_dismissed_date text,created_at timestamptz);`)
+  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261026102717_project_archive_version.sql']) {
     await remote.exec(readFileSync(new URL(`../../../../supabase/migrations/${file}`,import.meta.url),'utf8'))
   }
-  await remote.query('INSERT INTO projects VALUES($1,$2,NULL)',[project,owner])
+  await remote.query('INSERT INTO projects(id,owner_id,deleted_at) VALUES($1,$2,NULL)',[project,owner])
   for (const status of repos.statuses.findByProjectId(project)) await remote.query('INSERT INTO statuses(id,project_id,name,is_done,is_default) VALUES($1,$2,$3,$4,$5)',[status.id,project,status.name,status.is_done,status.is_default])
   await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[task,project,source])
   fail=false; rpcCalls=0; setOnlineStatus(false)
@@ -52,9 +52,32 @@ beforeEach(async () => {
     }
   } } })
   pinned.client={ from(table:string) {
-    let rowId=''
-    const chain={ select() { return chain }, eq(_key:string,value:string) { rowId=value; return chain },
-      async maybeSingle() { await pinned.token!(); return { data:(await remote.query(`SELECT id,deleted_at FROM ${table} WHERE id=$1`,[rowId])).rows[0]??null,error:null } }
+    let columns='*', values: Array<Record<string,unknown>> | null=null
+    const filters: Array<[string,unknown,string]>=[]
+    const execute=async () => {
+      await pinned.token!()
+      const quote=(name:string):string => { if(!/^[a-z_]+$/.test(name)) throw new Error('Invalid fixture identifier'); return `"${name}"` }
+      try {
+        if(values) {
+          for(const row of values) {
+            const keys=Object.keys(row), params=Object.values(row)
+            await remote.query(`INSERT INTO ${quote(table)}(${keys.map(quote).join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')}) ON CONFLICT(id) DO UPDATE SET ${keys.filter((key)=>key!=='id').map((key)=>`${quote(key)}=excluded.${quote(key)}`).join(',')}`,params)
+          }
+          return {data:[],error:null}
+        }
+        const params:unknown[]=[]
+        const bind=(value:unknown):string => { params.push(value); return '$'+params.length }
+        const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:`${quote(key)}=${bind(value)}`).join(' AND ')
+        return {data:(await remote.query(`SELECT ${columns} FROM ${quote(table)}${where?' WHERE '+where:''}`,params)).rows,error:null}
+      } catch(error) { return {data:null,error:{message:String(error)}} }
+    }
+    const chain={
+      select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
+      is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
+      order() {return chain},limit() {return chain},
+      upsert(value:Array<Record<string,unknown>>) {values=value;return chain},
+      async maybeSingle() {const result=await execute();return {...result,data:result.data?.[0]??null}},
+      then(resolve:(value:unknown)=>unknown,reject:(error:unknown)=>unknown) {return execute().then(resolve,reject)}
     }; return chain
   }, async rpc(_name:string,args:Record<string,unknown>) {
     await pinned.token!(); rpcCalls++
@@ -63,7 +86,7 @@ beforeEach(async () => {
     catch(error) { return { data:null,error:{ message:String(error) } } }
   } } as unknown as SupabaseClient
 })
-afterEach(async () => { local.close(); await remote.close(); vi.unstubAllGlobals() })
+afterEach(async () => { vi.useRealTimers(); local.close(); await remote.close(); vi.unstubAllGlobals() })
 it.each(['default','chosen'])('delivers the actual desktop %s replacement atomically after offline failure/retry',async (mode) => {
   const target=mode==='chosen'?done:open
   if(mode==='chosen') expect(await useStatusStore.getState().reassignAndDelete(source,target)).toBe(true)
@@ -90,3 +113,35 @@ it('keeps default/done statuses and validates replacement before any local mutat
   expect(repos.syncQueue.count()).toBe(0)
   expect(repos.tasks.findById(task)?.status_id).toBe(source)
 })
+
+it.each(['queued','eager','newer-cloud','denied','same-tick'])('preserves post-deletion full task intent through %s delivery',async (mode) => {
+  const t1='2020-01-01T01:00:00.000Z',t10='2020-01-01T10:00:00.000Z',t11='2020-01-01T11:00:00.000Z'
+  local.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(t1,task)
+  local.prepare('UPDATE statuses SET updated_at=? WHERE id=?').run(t1,source)
+  await remote.query('UPDATE tasks SET updated_at=$1',[t1])
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(t10)
+  await useStatusStore.getState().reassignAndDelete(source,done)
+  vi.setSystemTime(mode==='same-tick'?t10:t11)
+  const row=repos.tasks.update(task,{title:'Pending title',description:'Pending description',due_date:'2020-02-01',priority:3})!
+  repos.syncQueue.enqueue('tasks',task,'UPDATE',JSON.stringify(row))
+  if(mode==='newer-cloud') await remote.query("UPDATE tasks SET title='Cloud newer',description='Cloud description',updated_at='2020-01-01T20:00Z'")
+  if(mode==='denied') await remote.query('UPDATE projects SET owner_id=$1',[id(99)])
+  vi.setSystemTime('2020-01-02T06:00:00.000Z')
+  setOnlineStatus(true)
+  if(mode==='eager') {
+    const {deleteStatusFromSupabase}=await import('./PersonalSyncService')
+    await deleteStatusFromSupabase(source)
+  } else await processSyncQueue()
+  const actual=(await remote.query('SELECT title,description,due_date,priority,status_id FROM tasks')).rows[0]
+  if(mode==='denied') {
+    expect(actual).toMatchObject({title:'Occupied',status_id:source})
+    expect(repos.syncQueue.count()).toBe(2)
+    expect(rpcCalls).toBe(0)
+  } else if(mode==='newer-cloud') {
+    expect(actual).toMatchObject({title:'Cloud newer',description:'Cloud description',status_id:done})
+    expect(repos.syncQueue.count()).toBe(0)
+  } else {
+    expect(actual).toMatchObject({title:'Pending title',description:'Pending description',due_date:'2020-02-01',priority:3,status_id:done})
+    expect(repos.syncQueue.count()).toBe(0)
+  }
+},15000)

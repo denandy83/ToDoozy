@@ -1,3 +1,4 @@
+import { LabelRepository } from './LabelRepository'
 import { randomUUID } from 'crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
@@ -251,7 +252,7 @@ export class TaskRepository {
       : null
     const now = input.is_archived !== undefined
       ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1, Date.parse(existing.archive_updated_at ?? '') + 1 || 0, Date.parse(archiveVersion ?? '') + 1 || 0)).toISOString()
-      : new Date().toISOString()
+      : new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
     const metadataChanged = TASK_UPDATABLE_COLUMNS.some((col) => col !== 'is_archived' && input[col] !== undefined && input[col] !== existing[col])
     const sets: string[] = ['updated_at = ?']
     const values: (string | number | null)[] = [metadataChanged ? now : existing.updated_at]
@@ -436,10 +437,11 @@ export class TaskRepository {
    * ensureLabelsExistLocally first. Returns the number of inserted pairs.
    */
   applyRemoteTaskLabels(taskId: string, labelIds: string[]): number {
-    const task = this.db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
+    const task = this.db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(taskId) as { id: string; project_id: string } | undefined
     if (!task) return 0
     let added = 0
     for (const labelId of labelIds) {
+      if (new LabelRepository(this.db).hasPendingProjectRemoval(task.project_id, labelId)) continue
       const label = this.db.prepare('SELECT id FROM labels WHERE id = ?').get(labelId)
       if (!label) continue
       const existing = this.db

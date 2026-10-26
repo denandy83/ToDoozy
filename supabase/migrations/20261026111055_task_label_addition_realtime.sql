@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION public.notify_task_label_addition()
 RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 BEGIN
-  IF NEW.deleted_at IS NULL THEN
+  IF NEW.deleted_at IS NULL AND (TG_OP = 'INSERT' OR OLD.deleted_at IS NOT NULL) THEN
     UPDATE public.tasks SET updated_at = updated_at WHERE id = NEW.task_id AND deleted_at IS NULL;
   END IF;
   RETURN NEW;

@@ -186,3 +186,30 @@ it.each([0, 1])('accepts modern metadata without reversing archive=%s and accept
     expect((await db.query('SELECT title,is_archived FROM tasks')).rows[0]).toEqual({ title: 'Newer metadata', is_archived: 1-state })
   } finally { await db.close() }
 }, 15000)
+
+it.each([0,1])('supports old MCP partial archive=%s without mutating legacy project tombstones or metadata',async(state)=>{
+  const db=new PGlite()
+  try {
+    await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role;
+      CREATE TABLE projects(id text PRIMARY KEY,name text,is_archived integer,updated_at timestamptz);
+      CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
+      INSERT INTO projects VALUES('p','Project',${1-state},'2020-01-01T01:00Z');
+      INSERT INTO tasks VALUES('t','p','Keep title',${1-state},'2020-01-01T01:00Z',NULL),('deleted','p','Deleted',${1-state},'2020-01-01T05:00Z','2020-01-01T05:00Z');`)
+    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql',import.meta.url),'utf8'))
+    await db.exec(`UPDATE tasks SET is_archived=${state},updated_at='2020-01-01T06:00Z' WHERE id='t';`)
+    expect((await db.query("SELECT is_archived,updated_at::text AS stamp FROM tasks WHERE id='t'")).rows[0]).toMatchObject({is_archived:state})
+    await db.exec(`UPDATE projects SET is_archived=${1-state},archive_updated_at='2020-01-01T10:00Z';
+      UPDATE tasks SET is_archived=${1-state},archive_updated_at='2020-01-01T10:00Z' WHERE id='t';
+      UPDATE tasks SET is_archived=${state},updated_at='2020-01-01T12:00Z' WHERE id='t';`)
+    const active=(await db.query("SELECT is_archived,updated_at::text AS stamp FROM tasks WHERE id='t'")).rows[0]
+    expect(active.is_archived).toBe(state)
+    expect(Date.parse(String(active.stamp))).toBe(Date.parse('2020-01-01T01:00Z'))
+    await db.exec(`UPDATE tasks SET updated_at=updated_at WHERE id='t';
+      UPDATE projects SET is_archived=${state},updated_at='2020-01-01T20:00Z';
+      UPDATE tasks SET is_archived=${state},updated_at='2020-01-01T20:00Z';`)
+    const deleted=(await db.query("SELECT is_archived,updated_at::text AS stamp,deleted_at FROM tasks WHERE id='deleted'")).rows[0]
+    expect(deleted.is_archived).toBe(1-state)
+    expect(Date.parse(String(deleted.stamp))).toBe(Date.parse('2020-01-01T05:00Z'))
+    expect(deleted.deleted_at).toBeTruthy()
+  } finally {await db.close()}
+},15000)

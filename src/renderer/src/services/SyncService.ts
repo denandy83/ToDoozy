@@ -575,11 +575,13 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
     const complete = async (item: Work): Promise<void> => {
       for (const entry of item.entries) { await api.sync.dequeue(entry.id); processed++ }
     }
+    const blockedTasks = new Set<string>()
     const handled = new Set<Work>()
     for (const item of work) {
       if (handled.has(item)) continue
+      if (item.entry.table_name === 'tasks' && blockedTasks.has(item.entry.row_id)) continue
       if (!item.special && item.descriptor) {
-        const tableItems = work.filter((candidate) => !candidate.special && candidate.descriptor && candidate.entry.table_name === item.entry.table_name)
+        const tableItems = work.filter((candidate) => !candidate.special && candidate.descriptor && candidate.entry.table_name === item.entry.table_name && !(candidate.entry.table_name === 'tasks' && blockedTasks.has(candidate.entry.row_id)))
         for (const candidate of tableItems) handled.add(candidate)
         for (let index = 0; index < tableItems.length; index += 200) {
           let pending = tableItems.slice(index, index + 200)
@@ -632,7 +634,15 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
           await complete(item)
           break
         }
-      } catch (error) { assertCurrent(); failure = error instanceof Error ? error.message : String(error) }
+      } catch (error) {
+        assertCurrent()
+        failure = error instanceof Error ? error.message : String(error)
+        if (item.payload.status_delete === true) {
+          const affected = Array.isArray(item.payload.tasks) ? item.payload.tasks as Array<{ id: string }>
+            : await api.tasks.findAllByProject(String(item.payload.project_id), { includeTombstones: true })
+          for (const task of affected) blockedTasks.add(task.id)
+        }
+      }
     }
     assertCurrent()
     const pendingCount = await api.sync.count()
@@ -1231,7 +1241,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
     for (const tl of remoteTl) {
       const exists = await api.labels.findById(tl.label_id).catch(() => null)
       if (!exists) continue
-      await api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+      await api.tasks.applyRemoteTaskLabels(tl.task_id, [tl.label_id]).catch(() => {})
     }
   }
 

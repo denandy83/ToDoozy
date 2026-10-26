@@ -17,7 +17,7 @@ import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import type { Task, Status, Label, ThemeConfig } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
-import { currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel } from './projectLabelIntent'
+import { currentProjectLink, projectLinkSuperseded } from './projectLabelIntent'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -534,17 +534,13 @@ export async function pushRemoveLabelFromProject(projectId: string, labelId: str
   return withSyncProducer(async (origin) => {
     const label = await origin.api.labels.findById(labelId)
     const payload = { projectId, labelId, labelName: label?.name, remove_project_label: true, deletedAt: new Date().toISOString(), expectedLink: await currentProjectLink(projectId, labelId, origin.api) }
-    try {
-      if (!(await hasLiveSession(origin, 'pushRemoveLabelFromProject', `${projectId}::${labelId}`))) {
-        await origin.api.sync.enqueue('task_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify(payload))
-        await refreshProducerPending(origin)
-        return
-      }
-      await removeRemoteProjectLabel((await origin.client())!, origin.api, payload)
-      await markSynced(origin)
-    } catch (error) {
-      await reportPushFailure(origin, 'pushRemoveLabelFromProject', error, 'task_labels', `${projectId}::${labelId}`, JSON.stringify(payload))
-    }
+    await origin.api.sync.enqueue('task_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify(payload))
+    const { processSyncQueue, getOnlineStatus } = await import('./SyncService')
+    if (!getOnlineStatus()) { await refreshProducerPending(origin); return }
+    const client = await origin.client()
+    if (!client) { await refreshProducerPending(origin); return }
+    if (!await origin.isCurrent()) return
+    await processSyncQueue({ api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
   })
 }
 
@@ -1393,7 +1389,7 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
 
             if (remoteTaskLabels) {
               for (const tl of remoteTaskLabels) {
-                await api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
+                await api.tasks.applyRemoteTaskLabels(tl.task_id, [tl.label_id]).catch(() => {})
               }
             }
 
@@ -1703,7 +1699,7 @@ async function ensureLabelsExistLocally(
   assertUser()
 
   const link = async (labelId: string): Promise<void> => {
-    if (projectId) await api.labels.addToProject(projectId, labelId).catch(() => {})
+    if (projectId) await api.labels.applyRemoteProjectLabel({ project_id: projectId, label_id: labelId, created_at: null, deleted_at: null }).catch(() => {})
   }
 
   const localLabels = new Map((await Promise.all(labelIds.map((id) => api.labels.findById(id))))
@@ -2061,9 +2057,11 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     }
 
     for (const project of allProjects.filter((p) => p.is_shared === 1)) {
-      await pullProjectMetadata(project.id, context)
+      await pullNewTasks(project.id, context)
       await pullActivity(project.id)
     }
+    const { processSyncQueue } = await import('./SyncService')
+    await processSyncQueue(context)
 
     // 3. User-scoped: labels, themes, settings, saved_views, project_areas, project_templates.
     for (const tableName of [
@@ -2169,7 +2167,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
             }
           }
           try {
-            await api.tasks.addLabel(p.task_id, resolvedLabelId)
+            await api.tasks.applyRemoteTaskLabels(p.task_id, [resolvedLabelId])
             tlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.
@@ -2643,7 +2641,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
           const labelExists = await api.labels.findById(remote.label_id)
           if (!labelExists) continue
           try {
-            await api.tasks.addLabel(remote.task_id, remote.label_id)
+            await api.tasks.applyRemoteTaskLabels(remote.task_id, [remote.label_id])
             shTlPulled++
           } catch {
             // addLabel is idempotent (UNIQUE constraint); ignore races.
@@ -2813,7 +2811,7 @@ export async function syncTaskLabel(taskId: string, labelId: string): Promise<vo
       }
     }
   }
-  await api.tasks.addLabel(taskId, labelId).catch(() => {})
+  await api.tasks.applyRemoteTaskLabels(taskId, [labelId]).catch(() => {})
 }
 
 // ── Realtime Subscriptions for All Projects ──────────────────────────

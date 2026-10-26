@@ -338,11 +338,16 @@ export class LabelRepository {
         }
       }
 
-      const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name='project_labels'").all() as Array<{ id: string; payload: string }>
+      const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ id: string; payload: string }>
       for (const command of commands) {
         const payload = JSON.parse(command.payload)
         if (payload.labelId !== fromId) continue
         payload.labelId = toId
+        if (Array.isArray(payload.siblingIds) && payload.siblingIds.includes(fromId)) payload.siblingIds = [...new Set([...payload.siblingIds, toId])]
+        if (payload.expectedLink) {
+          const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId, toId) as { created_at: string; deleted_at: string | null } | undefined
+          if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) payload.expectedLink = link
+        }
         this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
           .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
       }
@@ -586,12 +591,28 @@ export class LabelRepository {
    * Idempotent insert/upsert; preserves remote `deleted_at` for tombstone
    * propagation across devices.
    */
+  hasPendingProjectRemoval(projectId: string, labelId: string): boolean {
+    const name = this.findById(labelId)?.name.toLowerCase()
+    const commands = this.db.prepare("SELECT table_name,payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ table_name: string; payload: string }>
+    return commands.some((entry) => {
+      const intent = JSON.parse(entry.payload)
+      const removal = intent.deletedAt || (entry.table_name === 'task_labels' && intent.projectId && intent.labelId)
+      if (intent.projectId !== projectId || !removal) return false
+      const targetName = intent.labelName ?? this.findById(intent.labelId)?.name
+      if (intent.labelId !== labelId && !(entry.table_name === 'task_labels' && name && targetName?.toLowerCase() === name)) return false
+      const current = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, intent.labelId) as { created_at: string; deleted_at: string | null } | undefined
+      const expected = intent.expectedLink
+      return !current || !!current.deleted_at || (expected && current.created_at === expected.created_at && !expected.deleted_at)
+    })
+  }
+
   applyRemoteProjectLabel(remote: {
     project_id: string
     label_id: string
     created_at: string | null
     deleted_at: string | null
   }): void {
+    if (!remote.deleted_at && this.hasPendingProjectRemoval(remote.project_id, remote.label_id)) return
     this.db
       .prepare(
         `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)

@@ -511,3 +511,55 @@ describe('LabelRepository — consolidate', () => {
     expect(todoozyRows.map((r) => (r as { id: string }).id)).toEqual(['canon-todoozy'])
   })
 })
+
+import { TaskRepository } from './TaskRepository'
+it('keeps pending name-wide removals through project and task-link imports and canonical consolidation', () => {
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db)
+    const labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    seedTask(db,'pending-task',projectId,userId)
+    labels.create({id:'old',user_id:userId,name:'Remove me'})
+    labels.create({id:'foreign',user_id:'other',name:'Remove me'})
+    labels.addToProject(projectId,'old')
+    tasks.addLabel('pending-task','old')
+    labels.removeFromProject(projectId,'old')
+    const expected=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'old')!
+    const intent={projectId,labelId:'old',labelName:'Remove me',deletedAt:new Date().toISOString(),expectedLink:expected,remove_project_label:true}
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('remove','task_labels',`${projectId}::old`,'UPDATE',JSON.stringify(intent),new Date().toISOString())
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'old',created_at:'2020-01-01',deleted_at:null})
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'foreign',created_at:'2020-01-01',deleted_at:null})
+    tasks.applyRemoteTaskLabels('pending-task',['old','foreign'])
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    expect(labels.findByTaskId('pending-task')).toEqual([])
+    const canonical={...labels.findById('old')!,id:'canonical'}
+    labels.consolidate('old',canonical)
+    const queued=JSON.parse(String(db.prepare('SELECT payload FROM sync_queue WHERE id=?').get('remove')!.payload))
+    expect(queued.labelId).toBe('canonical')
+    expect(queued.expectedLink.deleted_at).toBeTruthy()
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'canonical',created_at:'2020-01-01',deleted_at:null})
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    labels.addToProject(projectId,'canonical')
+    expect(labels.hasPendingProjectRemoval(projectId,'canonical')).toBe(false)
+    expect(labels.findByProjectId(projectId).map((row)=>row.id)).toEqual(['canonical'])
+  } finally {db.close()}
+})
+
+it('keeps legacy queued project cleanup protected and remaps both cleanup identities',()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db)
+    labels.create({id:'legacy-removal',user_id:userId,name:'Legacy'})
+    labels.addToProject(projectId,'legacy-removal')
+    labels.removeFromProject(projectId,'legacy-removal')
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('legacy','task_labels',`${projectId}::legacy-removal`,'UPDATE',JSON.stringify({projectId,labelId:'legacy-removal',siblingIds:['legacy-removal']}),new Date().toISOString())
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'legacy-removal',created_at:'2020-01-01',deleted_at:null})
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    labels.consolidate('legacy-removal',{...labels.findById('legacy-removal')!,id:'canonical-legacy'})
+    const payload=JSON.parse(String(db.prepare('SELECT payload FROM sync_queue WHERE id=?').get('legacy')!.payload))
+    expect(payload.labelId).toBe('canonical-legacy')
+    expect(payload.siblingIds).toEqual(expect.arrayContaining(['legacy-removal','canonical-legacy']))
+    labels.addToProject(projectId,'canonical-legacy')
+    expect(labels.hasPendingProjectRemoval(projectId,'canonical-legacy')).toBe(false)
+  } finally {db.close()}
+})

@@ -5,7 +5,7 @@ import { migrations } from '../../../main/database/migrations'
 import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
-import { fullPull, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
+import { fullPull, reconcile, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
 import { syncProjectDown, processSyncQueue, setOnlineStatus } from './SyncService'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { replaySpecialEntry } from './syncQueueReplay'
@@ -23,6 +23,7 @@ let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>
 let context: SyncContext
 let rows: Record<string, Array<Record<string, unknown>>>
+let rejectedStatus: string | null
 let failedTable: string | null
 let pageCounts: Record<string, number>
 let projectId: string
@@ -74,6 +75,7 @@ function makeClient(): SupabaseClient {
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       then(resolve: (value: unknown) => unknown) {
         if (values) {
+          if (table === 'tasks' && rejectedStatus && values.some((row) => row.status_id === rejectedStatus)) return Promise.resolve(resolve({ data: null, error: { message: 'Status must be active and belong to the task project' } }))
           for (const value of values) {
             const existing = (rows[table] ?? []).find((row) => row.id === value.id)
             if (existing && Date.parse(String(value.updated_at)) >= Date.parse(String(existing.updated_at))) Object.assign(existing, value)
@@ -110,7 +112,7 @@ beforeEach(() => {
   repo.users.create({ id: 'u', email: 'u@example.invalid', display_name: null, avatar_url: null })
   repo.projects.create({ id: projectId, owner_id: 'u', name: 'Project' })
   repo.statuses.create({ id: 'open', project_id: projectId, name: 'Open' })
-  rows = {}; pageCounts = {}; failedTable = null
+  rows = {}; pageCounts = {}; failedTable = null; rejectedStatus = null
   const client = makeClient()
   const api = new Proxy({}, {
     get: (_, ns: keyof typeof repo) => new Proxy({}, {
@@ -332,4 +334,45 @@ it.each([0, 1])('discovers independent archive=%s changes below a later metadata
   db.prepare('UPDATE tasks SET is_archived=? WHERE id=?').run(1-state, 'choice')
   await pullNewTasks(projectId, context)
   expect(repo.tasks.findById('choice')?.is_archived).toBe(state)
+})
+
+it('refreshes shared task/status metadata during public reconcile before replaying retained archive intent',async()=>{
+  setOnlineStatus(true)
+  repo.projects.addMember(projectId,'u','owner')
+  repo.projects.update(projectId,{is_shared:1})
+  const task=repo.tasks.create({id:'recover',project_id:projectId,owner_id:'u',status_id:'open',title:'Local'})
+  db.prepare('UPDATE tasks SET updated_at=?,archive_updated_at=?,is_archived=1 WHERE id=?').run('2099-01-01T08:00:00.000Z','2099-01-01T12:00:00.000Z',task.id)
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open'),updated_at:'2099-01-01T09:00:00.000Z',deleted_at:'2099-01-01T09:00:00.000Z'},{...repo.statuses.findById('open'),id:'replacement',name:'Replacement',updated_at:'2099-01-01T09:00:00.000Z'}]
+  rows.tasks=[{...repo.tasks.findById(task.id),title:'Cloud newer metadata',status_id:'replacement',updated_at:'2099-01-01T09:00:00.000Z',archive_updated_at:'2099-01-01T10:00:00.000Z',is_archived:0}]
+  rejectedStatus='open'
+  repo.syncQueue.enqueue('tasks',task.id,'UPDATE',JSON.stringify(repo.tasks.findById(task.id)))
+  expect(await processSyncQueue(context)).toBe(0)
+  expect(repo.syncQueue.count()).toBe(1)
+  await reconcile('u')
+  expect(repo.syncQueue.count()).toBe(0)
+  expect(rows.tasks[0]).toMatchObject({title:'Cloud newer metadata',status_id:'replacement',is_archived:1,archive_updated_at:'2099-01-01T12:00:00.000Z'})
+  expect(repo.tasks.findById(task.id)).toMatchObject({status_id:'replacement',is_archived:1})
+})
+
+it.each(['startup','realtime'])('preserves pending project label removal through actual %s imports',async(path)=>{
+  repo.projects.addMember(projectId,'u','owner')
+  repo.labels.create({id:'pending-label',user_id:'u',name:'Pending'})
+  repo.labels.addToProject(projectId,'pending-label')
+  const task=repo.tasks.create({id:'label-task',project_id:projectId,owner_id:'u',status_id:'open',title:'Task'})
+  repo.tasks.addLabel(task.id,'pending-label')
+  repo.labels.removeFromProject(projectId,'pending-label')
+  const current=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'pending-label')!
+  repo.syncQueue.enqueue('task_labels',`${projectId}::pending-label`,'UPDATE',JSON.stringify({projectId,labelId:'pending-label',labelName:'Pending',remove_project_label:true,deletedAt:new Date().toISOString(),expectedLink:current}))
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  rows.tasks=[{...task}]
+  rows.user_labels=[{...repo.labels.findById('pending-label')}]
+  rows.project_labels=[{project_id:projectId,label_id:'pending-label',created_at:'2020-01-01T00:00:00.000Z',deleted_at:null}]
+  rows.task_labels=[{task_id:task.id,label_id:'pending-label',deleted_at:null}]
+  if(path==='startup') await syncProjectDown(projectId,'u')
+  else await refreshProjectLabels(projectId,context)
+  expect(db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'pending-label')?.deleted_at).toBe(current.deleted_at)
+  expect(repo.labels.findByTaskId(task.id)).toEqual([])
+  expect(repo.syncQueue.count()).toBe(1)
 })

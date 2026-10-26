@@ -189,11 +189,12 @@ export class StatusRepository {
       if (!source || source.deleted_at) return false
       if (source.is_default === 1 || source.is_done === 1) throw new Error('Default and done statuses must be retained')
       if (!target || target.deleted_at || target.id === statusId || target.project_id !== source.project_id) throw new Error('Replacement status must be active in the same project')
-      const now = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1)).toISOString()
+      const tasks = this.db.prepare('SELECT id, updated_at FROM tasks WHERE status_id=? AND deleted_at IS NULL').all(statusId) as Array<{ id: string; updated_at: string }>
+      const now = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1, ...tasks.map((task) => Date.parse(task.updated_at) + 1))).toISOString()
       this.db.prepare('UPDATE tasks SET status_id=?,completed_date=?,updated_at=? WHERE status_id=? AND deleted_at IS NULL')
         .run(targetStatusId, target.is_done === 1 ? now : null, now, statusId)
       this.db.prepare('UPDATE statuses SET deleted_at=?,updated_at=? WHERE id=?').run(now, now, statusId)
-      new SyncQueueRepository(this.db).enqueue('statuses', statusId, 'UPDATE', JSON.stringify({ id: statusId, project_id: source.project_id, status_delete: true, target_id: targetStatusId, updated_at: now }))
+      new SyncQueueRepository(this.db).enqueue('statuses', statusId, 'UPDATE', JSON.stringify({ id: statusId, project_id: source.project_id, status_delete: true, target_id: targetStatusId, updated_at: now, tasks }))
       return true
     })
   }

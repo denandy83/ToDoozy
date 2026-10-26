@@ -5,11 +5,12 @@ import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
 import { currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
+import { preserveStatusDeletionEdits, type StatusDeletionCommand } from './statusDeletionSync'
 import { writeProjectArchive } from './projectArchiveSync'
 
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
   row: Awaited<ReturnType<typeof api.statuses.findById>>
-  command: { status_delete: true; target_id: string; updated_at: string } | null
+  command: StatusDeletionCommand | null
 }> {
   const row = await api.statuses.findById(entry.row_id)
   const commands = (await api.sync.getQueue()).filter((item) => item.table_name === 'statuses' && item.row_id === entry.row_id)
@@ -20,7 +21,7 @@ async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Prom
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
 export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry, context?: SyncContext): Promise<boolean> {
   const api = context?.api ?? window.api
-  if (entry.table_name === 'project_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
+  if (entry.table_name === 'project_labels' || entry.table_name === 'task_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
   if (entry.table_name === 'statuses' && payload.status_delete === true) {
     const { row: current, command } = await statusDeleteIntent(entry, api)
@@ -31,9 +32,12 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       return true
     }
     if (!command) throw new Error('Status replacement intent missing')
-    const { data: remote, error } = await client.from('statuses').select('id, deleted_at').eq('id', entry.row_id).maybeSingle()
+    const { data: remote, error } = await client.from('statuses').select('id, deleted_at, is_default, is_done').eq('id', entry.row_id).maybeSingle()
     if (error) throw new Error(error.message)
     if (!remote || remote.deleted_at) return true
+    if (remote.is_default === 1 || remote.is_done === 1) throw new Error('Default and done statuses must be retained')
+    context?.assertCurrent()
+    await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command)
     context?.assertCurrent()
     await mutateProjectStatus(client, current.project_id, useAuthStore.getState().currentUser!.id, 'delete', { id: entry.row_id, target_id: command.target_id })
     return true
@@ -114,9 +118,13 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
 
 export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncContext): Promise<string> {
   const api = context.api
-  if (entry.table_name === 'project_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
+  if (entry.table_name === 'project_labels' || entry.table_name === 'task_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
   const payload = JSON.parse(entry.payload)
-  if (entry.table_name === 'statuses' && payload.status_delete === true) return JSON.stringify(await statusDeleteIntent(entry, api))
+  if (entry.table_name === 'statuses' && payload.status_delete === true) {
+    const intent = await statusDeleteIntent(entry, api)
+    const tasks = await Promise.all((intent.command?.tasks ?? []).map((task) => api.tasks.findById(task.id)))
+    return JSON.stringify([intent, tasks])
+  }
   if (entry.table_name === 'projects') {
     const project = await api.projects.findById(entry.row_id)
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })

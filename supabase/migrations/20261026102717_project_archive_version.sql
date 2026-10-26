@@ -57,16 +57,21 @@ FOR EACH ROW EXECUTE FUNCTION public.preserve_project_archive_version();
 
 CREATE TRIGGER a_task_archive_reset BEFORE UPDATE ON public.tasks
 FOR EACH STATEMENT EXECUTE FUNCTION public.project_archive_write_kind('archive', 'todoozy.task_archive_write_kind');
+CREATE TRIGGER b_task_archive_choice BEFORE UPDATE OF is_archived ON public.tasks
+FOR EACH STATEMENT EXECUTE FUNCTION public.project_archive_write_kind('archive-choice', 'todoozy.task_archive_write_kind');
 DO $$
 DECLARE metadata_columns text;
 BEGIN
   SELECT string_agg(quote_ident(attname), ',') INTO metadata_columns FROM pg_attribute
     WHERE attrelid = 'public.tasks'::regclass AND attnum > 0 AND NOT attisdropped
       AND attname NOT IN ('id', 'is_archived', 'updated_at', 'archive_updated_at');
-  EXECUTE 'CREATE TRIGGER b_task_archive_metadata BEFORE UPDATE OF ' || metadata_columns ||
+  EXECUTE 'CREATE TRIGGER c_task_archive_metadata BEFORE UPDATE OF ' || metadata_columns ||
     ' ON public.tasks FOR EACH STATEMENT EXECUTE FUNCTION public.project_archive_write_kind(''metadata'', ''todoozy.task_archive_write_kind'')';
 END;
 $$;
+
+CREATE TRIGGER d_task_archive_version BEFORE UPDATE OF archive_updated_at ON public.tasks
+FOR EACH STATEMENT EXECUTE FUNCTION public.project_archive_write_kind('versioned', 'todoozy.task_archive_write_kind');
 
 CREATE OR REPLACE FUNCTION public.preserve_task_archive_version()
 RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
@@ -77,6 +82,13 @@ BEGIN
   SELECT is_archived, archive_updated_at INTO project_state, project_version
     FROM public.projects WHERE id = NEW.project_id;
   IF TG_OP = 'UPDATE' THEN
+    IF OLD.deleted_at IS NOT NULL AND current_setting('todoozy.task_archive_write_kind', true) IN ('archive', 'archive-choice') THEN RETURN OLD; END IF;
+    IF current_setting('todoozy.task_archive_write_kind', true) = 'archive-choice'
+       AND NEW.archive_updated_at IS NOT DISTINCT FROM OLD.archive_updated_at
+       AND (project_version IS NULL OR NEW.updated_at > project_version) THEN
+      NEW.archive_updated_at := NEW.updated_at;
+      NEW.updated_at := OLD.updated_at;
+    END IF;
     IF OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL AND NEW.updated_at <= OLD.updated_at THEN RETURN OLD; END IF;
     IF NEW.deleted_at IS NOT NULL THEN
       IF NEW.updated_at < OLD.updated_at THEN RETURN OLD; END IF;
@@ -86,7 +98,7 @@ BEGIN
       NEW.is_archived := OLD.is_archived;
       NEW.archive_updated_at := OLD.archive_updated_at;
     END IF;
-    IF current_setting('todoozy.task_archive_write_kind', true) = 'archive'
+    IF current_setting('todoozy.task_archive_write_kind', true) IN ('archive', 'archive-choice')
        AND project_version IS NOT NULL AND NEW.updated_at <= project_version THEN
       NEW.updated_at := OLD.updated_at;
     END IF;
