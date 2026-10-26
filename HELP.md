@@ -83,7 +83,7 @@ Each project has configurable statuses (default: Not Started, In Progress, Done)
 1. Right-click a task → Add Subtask
 2. Or open the task and use the Subtasks section in the detail panel
 
-To make an existing task a subtask, drag it on top of another task (aim for the middle of the row).
+To make an existing task a subtask, drag it on top of another task (aim for the middle of the row). Active children keep their manual order; completed children follow, newest completion first. Archived children stay hidden in active task lists, and keyboard navigation follows the displayed order.
 
 ### Drag and drop
 - Drag a task up or down to reorder it within the same status group
@@ -111,7 +111,7 @@ Click any task to open the detail panel on the right (or bottom — configurable
 - **Due date** — click the date field; optionally set a time
 - **Recurrence** — repeat daily, weekly, monthly, or custom schedule (see Recurrence section below)
 - **Snooze** — hide the task until later (see Snooze section below)
-- **Reference URL** — attach a link to a related webpage, ticket, or document
+- **Reference URL** — attach a web link or a `file:///` URL. Bare domains receive `https://`; explicit schemes are preserved. Clicking a file reference reveals its existing local target in Finder on this Mac.
 - **Description** — full rich text editor (see below)
 - **Attachments** — attach files from your Mac (requires iCloud setup)
 - **Subtasks** — add, check off, and reorder subtasks
@@ -123,7 +123,7 @@ Press **Escape** to close the detail panel.
 
 ## Rich Text Description
 
-The description field is a full rich text editor.
+The description field is a full rich text editor. Only user edits are saved; opening or leaving an untouched editor does not rewrite the description. Incoming remote content cancels a stale pending save.
 
 **Formatting shortcuts:**
 - `**text**` or Cmd+B — Bold
@@ -153,7 +153,7 @@ Labels help you group tasks across projects. Labels are global — create once, 
 - Or go to Settings → Labels
 
 ### Filtering by label
-Use the filter bar at the top of any view to filter by label. See the **Filters** section above for all available filter types.
+Use the filter bar at the top of any view to filter by label. When filtering a project, matching nested subtasks remain visible with their ancestor path expanded. See the **Filters** section above for all available filter types.
 
 ### Managing labels (Settings → Labels)
 - Rename or change a label's color — applies everywhere
@@ -166,7 +166,7 @@ Use the filter bar at the top of any view to filter by label. See the **Filters*
 
 Press **Cmd+K** to open the command palette.
 
-Type to search by task title. Use operators to narrow results:
+Type to search task titles and descriptions. Opening the palette refreshes remote tasks across your known projects, including projects you have not opened this session. Locally saved tasks remain searchable while offline. Use operators to narrow results:
 - `p:high` — priority is High (options: low, normal, high, urgent)
 - `l:work` — has the "work" label
 - `s:done` — status contains "done"
@@ -554,15 +554,12 @@ Log in on a new device and all your data — tasks, projects, settings, themes, 
 
 ## Integrations
 
-### Search across projects
-Open the command palette to search task titles and descriptions. Opening it refreshes remote tasks across your known projects, including projects you have not opened this session. Locally saved tasks remain searchable while offline. When filtering a project by label, matching nested subtasks remain visible with their ancestor path expanded.
-
 ### MCP — AI Integration
 The Model Context Protocol lets Claude (or any MCP-compatible AI) manage your tasks directly through natural language.
 
 **Setup:** Go to **Settings → About → Integrations**. Enable the MCP server and copy the config JSON — paste it into your AI client's MCP configuration.
 
-**Capabilities:** Full CRUD for tasks, subtasks, projects, labels, and statuses. Search with filters, manage My Day, deploy templates, reorder tasks, and create saved views. AI-made changes appear in the activity timeline alongside user actions.
+**Capabilities:** Full CRUD for tasks, subtasks, projects, labels, and statuses. Search with filters, manage My Day, deploy templates, reorder tasks, and create saved views. AI-made changes appear in the activity timeline alongside user actions. Remote MCP status changes require the project owner; deleting a status requires a replacement in the same project and reassigns its tasks atomically. Task updates reject statuses belonging to another project.
 
 ### Telegram Bot
 Add tasks from Telegram using smart input syntax:

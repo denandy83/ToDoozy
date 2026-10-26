@@ -8,7 +8,7 @@ A keyboard-driven task manager built as a native macOS Electron app. ToDoozy com
 
 | Layer | Technology |
 |-------|-----------|
-| Shell | Electron 41 (main + renderer + preload) |
+| Shell | Electron (main + renderer + preload; version in [package.json](package.json)) |
 | UI | React 19, TypeScript 5 (strict), Tailwind CSS 4 |
 | State | Zustand 5 (zero prop-drilling) |
 | Database | SQLite via node:sqlite (Node.js built-in), versioned migrations |
@@ -73,7 +73,9 @@ npm run test
 npm run build
 ```
 
-**Requirements:** macOS, Node.js, a Supabase project (credentials in `.env`).
+**Requirements:** macOS, the Node.js version pinned in [CI](.github/workflows/ci.yml), Python 3 for database snapshots, and a Supabase project (public client settings in `.env`).
+
+Database snapshots use SQLite backup to include WAL data. The helper selects the most recently modified populated per-user database, falling back to the legacy database; use `./dev-db.sh create feature --source /path/to/account.db` to choose explicitly. It retains the five newest copies per kind. A database copy does not isolate cloud sync; use synthetic accounts and configuration for testing.
 
 Copy `.env.example` to `.env` and set the project's URL and public publishable key (or legacy anon key). These client settings are embedded in the app. Production builds reject missing configuration and server-side keys. Never use a service-role or secret key here.
 

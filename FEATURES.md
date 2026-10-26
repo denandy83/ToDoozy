@@ -178,7 +178,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ### Task Reference URL
 - Each task has an optional `reference_url` field for linking to external resources (PRs, docs, tickets, etc.)
 - Detail panel shows an editable URL input below the title; URLs auto-prefix `https://` if no protocol is provided
-- Task rows display a clickable link icon when a reference URL is set, opening it in the default browser
+- Task rows display a clickable reference icon; see [Task Details](HELP.md#task-details) for web and local-file handling.
 - Autosave with 1s debounce; X button to clear the URL
 - **Status:** Complete (2026-03-30, Story #34)
 
@@ -225,7 +225,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete (updated 2026-04-11, Story #60)
 
 ### Command Palette
-- Cmd+K modal; substring match by default
+- Cmd+K modal; see [Search](HELP.md#search-command-palette) for search scope and remote refresh behavior.
 - Operators: `p:high`, `l:work`, `s:done`, `due:today`, `has:subtasks` (combinable)
 - Results show priority dot, badge, title, labels, status, due date
 - "Include archived" checkbox to search across archived tasks
@@ -315,11 +315,11 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete (2026-04-08, Story #58)
 
 ### Project Archive & Restore
-- Archive a whole project: `archiveWithTasks` transactionally sets `is_archived` on the project AND all its non-deleted tasks; project disappears from the sidebar (undo toast)
+- See [Archive and restore a project](HELP.md#archive-and-restore-a-project) for owner permissions, member visibility and the persistent restore route.
 - Archive view groups archived tasks under project headers with a "Project Archived" badge; hover reveals Restore / Delete buttons
 - Shift+click on Delete skips the confirmation toast (when enabled in Settings → General)
 - The default project can be archived too
-- Restore brings the project and all its tasks back; archive state syncs to Supabase (`pushProjectArchive`)
+- Archive intent is queued transactionally with local changes and has its own version, separate from metadata; newer individual task archive choices survive older project actions.
 - **Status:** Complete (v1.7.0, Story #67)
 
 ---

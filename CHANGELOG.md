@@ -4,7 +4,9 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
-## v1.10.0
+## v1.10.0 (unreleased)
+
+Release and backend activation remain gated by the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade).
 
 - **Project-label delivery** — Overlapping eager, queued, upload and reconciliation writes recheck current local intent after delivery; failed repair remains queued. Family clocks use the same accented-name comparison as the UI.
 - **Bot release validation** — The candidate container uses Node 22.23.2, matching CI, and generated bot output is excluded from lint without excluding handwritten sources.
