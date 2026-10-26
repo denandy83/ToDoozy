@@ -360,9 +360,20 @@ it('refreshes shared task/status metadata during public reconcile before replayi
     rows.user_labels.push({...label})
     rows.project_labels.push({project_id,label_id:label.id,created_at:'2020-01-01T20:00:00Z',deleted_at:null})
   }
+  const canonical=repo.labels.create({id:'displayed-canonical',user_id:'u',name:'Canonical removal'})
+  repo.labels.applyRemoteProjectLabel({project_id:projectId,label_id:canonical.id,created_at:'2020-01-01T00:00:00Z',deleted_at:null})
+  repo.tasks.applyRemoteTaskLabels(task.id,[canonical.id])
+  rows.user_labels.push({...canonical},{...canonical,id:'foreign-assignment',user_id:'other'})
+  rows.project_labels.push({project_id:projectId,label_id:canonical.id,created_at:'2020-01-01T00:00:00Z',deleted_at:null},{project_id:projectId,label_id:'foreign-assignment',created_at:'2020-01-01T00:00:00Z',deleted_at:null})
+  rows.task_labels=[{task_id:task.id,label_id:'foreign-assignment',deleted_at:null}]
+  repo.tasks.removeLabel(task.id,canonical.id)
   await reconcile('u')
+  expect(repo.tasks.getLabels(task.id)).toEqual([])
+  expect(rows.task_labels).toEqual([])
+  expect(rows.project_labels.filter((row)=>row.label_id===canonical.id || row.label_id==='foreign-assignment').every((row)=>row.deleted_at===null)).toBe(true)
+  expect(rows.user_labels.find((row)=>row.id==='foreign-assignment')?.user_id).toBe('other')
   for(const project_id of [projectId,personal.id]) {
-    expect(repo.labels.findByProjectId(project_id).map((row)=>row.id)).toEqual([project_id+'-label'])
+    expect(repo.labels.findByProjectId(project_id).map((row)=>row.id).sort()).toEqual((project_id===projectId?[project_id+'-label',canonical.id,'foreign-assignment']:[project_id+'-label']).sort())
     expect(rows.project_labels.find((row)=>row.project_id===project_id)).toMatchObject({deleted_at:null,created_at:'2020-01-01T20:00:00Z'})
   }
   expect(repo.syncQueue.count()).toBe(0)

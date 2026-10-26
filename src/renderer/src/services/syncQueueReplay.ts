@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
 import { currentProjectLabelFamily, currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
 import { preserveStatusDeletionEdits, type StatusDeletionCommand } from './statusDeletionSync'
-import { syncTaskLabelChoices } from './taskLabelAdditions'
+import { orderTaskLabelWrites, syncTaskLabelChoices } from './taskLabelAdditions'
 import { writeProjectArchive } from './projectArchiveSync'
 
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
@@ -24,6 +24,7 @@ async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Prom
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
 export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry, context?: SyncContext): Promise<boolean> {
   const api = context?.api ?? window.api
+  const labelScope=async(): Promise<string>=>context?.scope ?? await (async()=>{const origin=await window.api.sync.captureContext();return `${origin.userId}:${origin.generation}`})()
   if (entry.table_name === 'project_labels' || entry.table_name === 'task_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
   if (entry.table_name === 'statuses' && payload.status_delete === true) {
@@ -68,7 +69,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       const actor = useAuthStore.getState().currentUser?.id
       if (label && actor && label.user_id === actor) {
         const { pushLabel } = await import('./PersonalSyncService')
-        const canonical = await pushLabel(label,actor,{ api,userId:actor,client:async()=>client,assertCurrent:()=>context?.assertCurrent(),isCurrent:context?.isCurrent ?? (async()=>true),scope:async()=>context?.scope ?? '' })
+        const canonical = await pushLabel(label,actor,{ api,userId:actor,client:async()=>client,assertCurrent:()=>context?.assertCurrent(),isCurrent:context?.isCurrent ?? (async()=>true),scope:labelScope })
         if (!canonical) throw new Error('Project label definition remains pending')
         if (canonical !== payload.labelId) return replaySpecialEntry(client,entry,context)
       }
@@ -90,21 +91,22 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     if (error) throw new Error(error.message)
     if (payload.addition && current && !current.deleted_at) {
       const tasks = await api.tasks.findAllByProject(String(payload.projectId))
-      await syncTaskLabelChoices(client, tasks.map((task) => task.id), api)
+      await syncTaskLabelChoices(client, tasks.map((task) => task.id), api, await labelScope())
     }
     return true
   }
   if (entry.table_name === 'task_labels' && payload.remove_project_label === true) {
-    await removeRemoteProjectLabel(client, api, payload as unknown as ProjectLabelRemoval)
+    await removeRemoteProjectLabel(client, api, payload as unknown as ProjectLabelRemoval, await labelScope())
     return true
   }
   if (entry.table_name === 'task_labels') {
     if (typeof payload.task_id === 'string' && payload.assignment_intent === true) {
-      await syncTaskLabelChoices(client,[payload.task_id],api)
+      await syncTaskLabelChoices(client,[payload.task_id],api,await labelScope())
     } else if (typeof payload.task_id === 'string') {
       // Read the current local intent: older failed label commands may have
       // been superseded while offline. Never replay them over a newer edit.
       const taskId = payload.task_id
+      await orderTaskLabelWrites(await labelScope(),[taskId],async()=>{
       const delivered = await api.tasks.getLabelState(taskId)
       const local = await api.tasks.getLabels(taskId)
       const { data: remote, error } = await readAll(() => client.from('task_labels').select('label_id').eq('task_id', taskId), ['label_id'])
@@ -122,21 +124,15 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
         if (removeError) throw new Error(removeError.message)
       }
       await api.tasks.acknowledgeLabelState(taskId,delivered)
+      })
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {
-      const current = await currentProjectLink(payload.projectId, payload.labelId, api)
-      if ('expectedLink' in payload) {
-        if (projectLinkSuperseded(current, payload.expectedLink as Awaited<ReturnType<typeof currentProjectLink>>)) return true
-      } else if (!current?.deleted_at) return true
-      const { data: tasks, error } = await readAll(() => client.from('tasks').select('id').eq('project_id', payload.projectId))
-      if (error) throw new Error(error.message)
-      if (tasks?.length) {
-        const labelIds = Array.isArray(payload.siblingIds) ? payload.siblingIds : [payload.labelId]
-        for (let index = 0; index < tasks.length; index += 200) {
-          const { error: removeError } = await client.from('task_labels').delete()
-            .in('task_id', tasks.slice(index, index + 200).map((task) => task.id)).in('label_id', labelIds)
-          if (removeError) throw new Error(removeError.message)
-        }
-      }
+      const current = await currentProjectLink(payload.projectId,payload.labelId,api)
+      if (!('expectedLink' in payload) && !current?.deleted_at) return true
+      await removeRemoteProjectLabel(client,api,{
+        projectId:payload.projectId,labelId:payload.labelId,
+        deletedAt:String(payload.deletedAt ?? current?.deleted_at ?? entry.created_at),
+        expectedLink:'expectedLink' in payload ? payload.expectedLink as ProjectLabelRemoval['expectedLink'] : current
+      },await labelScope())
     } else {
       throw new Error('Unrecognized task-label retry payload')
     }

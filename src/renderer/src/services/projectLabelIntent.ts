@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readAll } from './readAll'
-import { syncTaskLabelChoices } from './taskLabelAdditions'
+import { orderTaskLabelWrites, syncTaskLabelChoices } from './taskLabelAdditions'
 import type { TodoozyAPI } from '../../../preload/index.d'
 
 export async function currentProjectLink(projectId: string, labelId: string, api: TodoozyAPI): Promise<{ created_at: string; deleted_at: string | null } | null> {
@@ -39,14 +39,17 @@ export function projectLinkSuperseded(current: Awaited<ReturnType<typeof current
   return !!current && !current.deleted_at && JSON.stringify(current) !== JSON.stringify(expected)
 }
 
-export async function removeRemoteProjectLabel(client: SupabaseClient, api: TodoozyAPI, intent: ProjectLabelRemoval): Promise<void> {
-  const restoreReaddition = async (): Promise<boolean> => {
+export async function removeRemoteProjectLabel(client: SupabaseClient, api: TodoozyAPI, intent: ProjectLabelRemoval, scope: string): Promise<void> {
+  const currentAdditions = async (): Promise<Awaited<ReturnType<typeof currentProjectLabelFamily>>> => {
     const additions = (await api.sync.getQueue()).filter((entry) => entry.table_name === 'project_labels').map((entry) => JSON.parse(entry.payload))
-    const latest = (await currentProjectLabelFamily(intent.projectId, intent.labelId, api, intent.labelName)).filter((link) => !link.deleted_at && (
+    return (await currentProjectLabelFamily(intent.projectId, intent.labelId, api, intent.labelName)).filter((link) => !link.deleted_at && (
       (link.label_id === intent.labelId && projectLinkSuperseded({created_at:link.created_at,deleted_at:link.deleted_at}, intent.expectedLink)) ||
       Date.parse(link.created_at) > Date.parse(intent.deletedAt) ||
       additions.some((entry) => entry.addition && entry.projectId === intent.projectId && entry.labelId === link.label_id && entry.createdAt === link.created_at)
     ))
+  }
+  const restoreReaddition = async (): Promise<boolean> => {
+    const latest=await currentAdditions()
     if (!latest.length) return false
     for (let index = 0; index < latest.length; index += 200) {
       const { error } = await client.from('project_labels').upsert(latest.slice(index,index+200).map((link) => ({
@@ -55,7 +58,7 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
       if (error) throw new Error(error.message)
     }
     const localTasks = await api.tasks.findAllByProject(intent.projectId)
-    await syncTaskLabelChoices(client, localTasks.map((task) => task.id), api)
+    await syncTaskLabelChoices(client, localTasks.map((task) => task.id), api, scope)
     return true
   }
   if (await restoreReaddition()) return
@@ -90,8 +93,11 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
   if (await restoreReaddition()) return
   for (let index = 0; index < tasks.length; index += 200) {
     for (let labelIndex = 0; labelIndex < ids.length; labelIndex += 200) {
-      const { error } = await client.from('task_labels').delete().in('task_id', tasks.slice(index, index + 200).map((task) => task.id)).in('label_id', ids.slice(labelIndex, labelIndex + 200))
-      if (error) throw new Error(error.message)
+      await orderTaskLabelWrites(scope,tasks.slice(index,index+200).map((task)=>String(task.id)),async(ready)=>{
+        if ((await currentAdditions()).length) return
+        const { error } = await client.from('task_labels').delete().in('task_id',ready).in('label_id',ids.slice(labelIndex,labelIndex+200))
+        if (error) throw new Error(error.message)
+      })
     }
   }
   await restoreReaddition()

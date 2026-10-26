@@ -32,6 +32,8 @@ let beforeRpc: (() => Promise<void>) | null, afterRpc: (() => Promise<void>) | n
 let beforeLabelWrite: (()=>Promise<void>) | null
 let taskUpdates: Array<Record<string,unknown>>
 let afterLabelSnapshot: (()=>Promise<void>) | null
+let beforeAssignmentWrite: (()=>Promise<void>) | null
+let assignmentBatches: number[], paletteReads: number, failDefinitions: boolean
 
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url,_key,options) => { pinned.token=options.accessToken; return pinned.client }) }))
@@ -56,7 +58,7 @@ beforeEach(async () => {
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT null::uuid$$;
     CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz,name text DEFAULT 'Shared',color text,icon text,description text,is_archived integer DEFAULT 0,updated_at timestamptz DEFAULT now());
     CREATE TABLE statuses(id uuid PRIMARY KEY,project_id uuid,name text,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
-    CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz DEFAULT '2000-01-01',deleted_at timestamptz,owner_id uuid,assigned_to uuid,title text DEFAULT 'Occupied',description text,priority integer,due_date text,parent_id uuid,order_index float,is_in_my_day integer,is_template integer,is_archived integer DEFAULT 0,recurrence_rule text,reference_url text,my_day_dismissed_date text,created_at timestamptz);
+    CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz DEFAULT '2000-01-01',deleted_at timestamptz,owner_id uuid,assigned_to uuid,title text DEFAULT 'Occupied',description text,priority integer,due_date text,parent_id uuid,order_index float,is_in_my_day integer,is_template integer,is_archived integer DEFAULT 0,recurrence_rule text,reference_url text,my_day_dismissed_date text,created_at timestamptz,label_names text);
     CREATE TABLE task_labels(task_id uuid,label_id uuid,deleted_at timestamptz,PRIMARY KEY(task_id,label_id));
     CREATE TABLE user_labels(id uuid PRIMARY KEY,user_id uuid,name text,color text,order_index integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE project_labels(project_id uuid,label_id uuid,created_at timestamptz,deleted_at timestamptz,PRIMARY KEY(project_id,label_id));
@@ -70,7 +72,7 @@ beforeEach(async () => {
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
   }
   await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[task,project,source])
-  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; setOnlineStatus(false)
+  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; beforeAssignmentWrite=null; assignmentBatches=[];paletteReads=0;failDefinitions=false; setOnlineStatus(false)
   useAuthStore.setState({ currentUser: { id: owner } as never })
   useStatusStore.setState({ statuses: Object.fromEntries(repos.statuses.findByProjectId(project).map((row) => [row.id,row])), error: null })
   vi.mocked(requireSession).mockResolvedValue({ user: { id: owner }, access_token: 'synthetic-owner' } as Session)
@@ -87,6 +89,12 @@ beforeEach(async () => {
       await pinned.token!()
       const quote=(name:string):string => { if(!/^[a-z_]+$/.test(name)) throw new Error('Invalid fixture identifier'); return `"${name}"` }
       try {
+        if(table==='user_labels' && !values && failDefinitions) throw new Error('synthetic identity read failure')
+        if(table==='project_labels' && !values && !patch && !removing) paletteReads++
+        if(table==='task_labels' && (values || removing)) {
+          if(values) assignmentBatches.push(values.length)
+          if(beforeAssignmentWrite) {const hook=beforeAssignmentWrite;beforeAssignmentWrite=null;await hook()}
+        }
         if(table==='tasks' && (values || patch) && (failTaskWrites || (failRecovery && patch))) throw new Error('synthetic task transport failure')
         if(values) {
           if(table==='user_labels' && beforeLabelWrite) {const hook=beforeLabelWrite;beforeLabelWrite=null;await hook()}
@@ -304,7 +312,7 @@ it('public reconnect reconciliation delivers personal and shared cloud-only stat
     vi.spyOn(descriptor,'remoteMaxUpdatedAt').mockResolvedValue(null)
   }
   await useStatusStore.getState().reassignAndDelete(source,done)
-  await remote.query('INSERT INTO tasks SELECT $1,project_id,status_id,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at FROM tasks WHERE id=$2',[id(90),task])
+  await remote.query('INSERT INTO tasks(id,project_id,status_id,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at) SELECT $1,project_id,status_id,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at FROM tasks WHERE id=$2',[id(90),task])
   const sharedProject=id(91),sharedOpen=id(92),sharedSource=id(93),sharedDone=id(94),sharedTask=id(95)
   repos.projects.create({id:sharedProject,owner_id:owner,name:'Shared reconnect'})
   repos.projects.update(sharedProject,{is_shared:1})
@@ -314,7 +322,7 @@ it('public reconnect reconciliation delivers personal and shared cloud-only stat
     const keys=Object.keys(row)
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(row))
   }
-  await remote.query('INSERT INTO tasks SELECT $1,$2,$3,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at FROM tasks WHERE id=$4',[sharedTask,sharedProject,sharedSource,task])
+  await remote.query('INSERT INTO tasks(id,project_id,status_id,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at) SELECT $1,$2,$3,completed_date,updated_at,deleted_at,owner_id,assigned_to,title,description,priority,due_date,parent_id,order_index,is_in_my_day,is_template,is_archived,recurrence_rule,reference_url,my_day_dismissed_date,created_at,archive_updated_at FROM tasks WHERE id=$4',[sharedTask,sharedProject,sharedSource,task])
   repos.statuses.reassignAndDelete(sharedSource,sharedDone)
   setOnlineStatus(true)
   vi.stubGlobal('navigator',{onLine:true})
@@ -434,7 +442,7 @@ it.each(['empty','one','pending-add','pending-remove','ack-during-read','databas
   await remote.query('DELETE FROM task_labels'+(mode==='one'?' WHERE label_id=$1':''),mode==='one'?[ids[0]]:[])
   if(mode==='pending-add') repos.tasks.addLabel(task,ids[0])
   if(mode==='pending-remove') {repos.tasks.removeLabel(task,ids[0]);await context.client.from('task_labels').upsert({task_id:task,label_id:ids[0],deleted_at:null})}
-  if(mode==='ack-during-read') afterLabelSnapshot=async()=>{repos.tasks.addLabel(task,ids[0]);await syncTaskLabelChoices(context.client,[task],context.api)}
+  if(mode==='ack-during-read') afterLabelSnapshot=async()=>{repos.tasks.addLabel(task,ids[0]);await syncTaskLabelChoices(context.client,[task],context.api,context.scope)}
   if(mode==='database-switch') afterLabelSnapshot=async()=>{await invoke('auth:switchDatabase',owner)}
   const {pullTaskLabelsForTasks}=await import('./PersonalSyncService')
   await pullTaskLabelsForTasks([task],owner,context)
@@ -470,4 +478,123 @@ it.each([0,1])('metadata edits do not recreate unseen assignment removals (share
   await flushTaskBatch(task)
   await processSyncQueue()
   expect((await remote.query<{label_id:string}>('SELECT label_id FROM task_labels')).rows.map((row)=>row.label_id)).toEqual([ids[1]])
+},15000)
+
+it.each([0,1].flatMap((shared)=>['add','remove'].flatMap((first)=>['held','sequential'].map((timing)=>({shared,first,timing})))) )('orders actual $first writes against opposite choices ($timing, shared=$shared)',async({shared,first,timing})=>{
+  const labels=await seedSettledAssignments(), labelId=labels[0]
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  const {pullTaskLabelsForTasks,pullNewTasks}=await import('./PersonalSyncService')
+  setOnlineStatus(true)
+  let release!: ()=>void,started!: ()=>void
+  const gate=new Promise<void>((resolve)=>{release=resolve}),entered=new Promise<void>((resolve)=>{started=resolve})
+  if(timing==='held') beforeAssignmentWrite=async()=>{started();await gate}
+  const older=first==='add'?useTaskStore.getState().addLabel(task,labelId):useTaskStore.getState().removeLabel(task,labelId)
+  try {
+    if(timing==='held') await entered
+    else {await older;await processSyncQueue()}
+    const newer=first==='add'?useTaskStore.getState().removeLabel(task,labelId):useTaskStore.getState().addLabel(task,labelId)
+    if(timing==='held') {
+      await vi.waitFor(()=>{
+        const state=repos.tasks.getLabelState(task).find((row)=>row.label_id===labelId)!
+        expect(state.sync_pending).toBe(1)
+        expect(!!state.deleted_at).toBe(first==='add')
+      })
+      release()
+    }
+    await older;await newer
+    await processSyncQueue();await processSyncQueue()
+    await pullTaskLabelsForTasks([task],owner,await captureSyncContext())
+    await pullNewTasks(project,await captureSyncContext())
+    await useTaskStore.getState().hydrateTaskLabels(task)
+    const cloud=(await remote.query<{label_id:string}>('SELECT label_id FROM task_labels WHERE task_id=$1 ORDER BY label_id',[task])).rows.map((row)=>row.label_id)
+    const expected=first==='add'?[labels[1]]:labels
+    expect(cloud).toEqual(expected)
+    expect(repos.tasks.getLabels(task).map((row)=>row.label_id)).toEqual(expected)
+    expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id).sort()).toEqual(expected)
+    expect(repos.tasks.getLabelState(task).every((row)=>row.sync_pending===0)).toBe(true)
+    expect(repos.syncQueue.count()).toBe(0)
+  } finally {release?.()}
+},15000)
+it('allows an unrelated task to finish while another assignment write is held',async()=>{
+  const labels=await seedSettledAssignments()
+  const other=repos.tasks.create({id:id(301),project_id:project,owner_id:owner,status_id:source,title:'Unrelated'})
+  const context=await captureSyncContext()
+  await context.client.from('tasks').upsert(other)
+  repos.tasks.applyRemoteTaskLabels(other.id,labels)
+  await context.client.from('task_labels').upsert(labels.map((label_id)=>({task_id:other.id,label_id,deleted_at:null})))
+  useTaskStore.setState((state)=>({tasks:{...state.tasks,[other.id]:other}}))
+  await useTaskStore.getState().hydrateTaskLabels(other.id)
+  let release!:()=>void,started!:()=>void
+  const gate=new Promise<void>((resolve)=>{release=resolve}),entered=new Promise<void>((resolve)=>{started=resolve})
+  beforeAssignmentWrite=async()=>{started();await gate}
+  setOnlineStatus(true)
+  await useTaskStore.getState().removeLabel(task,labels[0])
+  await entered
+  try {
+    await useTaskStore.getState().removeLabel(other.id,labels[0])
+    await vi.waitFor(()=>expect(repos.tasks.getLabelState(other.id).every((row)=>!row.sync_pending)).toBe(true))
+    expect(repos.tasks.getLabelState(task).some((row)=>row.sync_pending)).toBe(true)
+    expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[other.id,labels[0]])).rows).toHaveLength(0)
+  } finally {release()}
+  await processSyncQueue();await processSyncQueue()
+},15000)
+it.each([0,1].flatMap((shared)=>['single','bulk'].map((path)=>({shared,path}))))('removes displayed canonical assignments using their actual foreign IDs ($path, shared=$shared)',async({shared,path})=>{
+  const labels=await seedSettledAssignments(), foreign=id(801), other=id(802)
+  const canonical=repos.labels.findById(labels[0])!
+  const context=await captureSyncContext()
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  await context.client.from('user_labels').upsert({...canonical,id:foreign,user_id:id(999)})
+  await context.client.from('project_labels').upsert({project_id:project,label_id:foreign,created_at:canonical.created_at,deleted_at:null})
+  await remote.query('DELETE FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,labels[0]])
+  await context.client.from('task_labels').upsert({task_id:task,label_id:foreign,deleted_at:null})
+  const otherTask=repos.tasks.create({id:other,project_id:project,owner_id:owner,status_id:source,title:'Other assignment'})
+  await context.client.from('tasks').upsert(otherTask)
+  await context.client.from('task_labels').upsert({task_id:other,label_id:foreign,deleted_at:null})
+  const {pullTaskLabelsForTasks,pullNewTasks}=await import('./PersonalSyncService')
+  await pullTaskLabelsForTasks([task],owner,context)
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  expect(useTaskStore.getState().taskLabels[task].some((row)=>row.id===labels[0])).toBe(true)
+  setOnlineStatus(true)
+  if(path==='single') await useTaskStore.getState().removeLabel(task,labels[0])
+  else await useTaskStore.getState().bulkRemoveLabel([task],labels[0])
+  await processSyncQueue();await processSyncQueue()
+  await pullTaskLabelsForTasks([task],owner,context)
+  await pullNewTasks(project,context)
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id)).toEqual([labels[1]])
+  expect((await remote.query<{label_id:string}>('SELECT label_id FROM task_labels WHERE task_id=$1',[task])).rows.map((row)=>row.label_id)).toEqual([labels[1]])
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[other,foreign])).rows).toHaveLength(1)
+  expect((await remote.query('SELECT * FROM project_labels WHERE project_id=$1 AND label_id=$2 AND deleted_at IS NULL',[project,foreign])).rows).toHaveLength(1)
+  expect((await remote.query<{user_id:string}>('SELECT user_id FROM user_labels WHERE id=$1',[foreign])).rows[0].user_id).toBe(id(999))
+  expect(repos.syncQueue.count()).toBe(0)
+},15000)
+it('batches 500 explicit additions using one palette read and three bounded writes',async()=>{
+  const labels=await seedSettledAssignments(),context=await captureSyncContext()
+  const tasks=Array.from({length:500},(_,index)=>repos.tasks.create({id:id(2000+index),project_id:project,owner_id:owner,status_id:source,title:'Batch '+index}))
+  await context.client.from('tasks').upsert(tasks)
+  for(const row of tasks) repos.tasks.addLabel(row.id,labels[0])
+  paletteReads=0;assignmentBatches=[]
+  await syncTaskLabelChoices(context.client,tasks.map((row)=>row.id),context.api,context.scope)
+  expect(paletteReads).toBe(1)
+  expect(assignmentBatches).toEqual([200,200,100])
+  expect((await remote.query<{n:number}>('SELECT count(*)::int AS n FROM task_labels WHERE task_id=ANY($1)',[tasks.map((row)=>row.id)])).rows[0].n).toBe(500)
+  expect(tasks.every((task)=>repos.tasks.getLabelState(task.id).every((row)=>!row.sync_pending))).toBe(true)
+  setOnlineStatus(true)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+},15000)
+
+it('retains canonical removal intent when cloud identity resolution fails',async()=>{
+  const labels=await seedSettledAssignments(),context=await captureSyncContext()
+  repos.tasks.removeLabel(task,labels[0])
+  failDefinitions=true
+  await expect(syncTaskLabelChoices(context.client,[task],context.api,context.scope)).rejects.toThrow(/identity read failure/)
+  expect(repos.tasks.getLabelState(task).find((row)=>row.label_id===labels[0])?.sync_pending).toBe(1)
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,labels[0]])).rows).toHaveLength(1)
+  failDefinitions=false
+  await syncTaskLabelChoices(context.client,[task],context.api,context.scope)
+  setOnlineStatus(true)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,labels[0]])).rows).toHaveLength(0)
 },15000)

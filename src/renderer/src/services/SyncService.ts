@@ -469,7 +469,7 @@ export async function syncTaskChange(
       } else {
         // syncTaskToSupabase throws on error; the catch routes it.
         await syncTaskToSupabase(supabase, task, labelData ?? [])
-      await syncTaskLabelChoices(supabase, [task.id], origin.api)
+      await syncTaskLabelChoices(supabase, [task.id], origin.api, await origin.scope())
       }
       await markSynced(origin)
     } catch (err) {
@@ -604,7 +604,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
                     if (!await pushLabel(row as Label, producer.userId!, producer)) throw new Error(error.message)
                   }
                 }
-                if (item.entry.table_name === 'tasks') await syncTaskLabelChoices(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api)
+                if (item.entry.table_name === 'tasks') await syncTaskLabelChoices(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api, context.scope)
               }
               const changed: Work[] = []
               for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {

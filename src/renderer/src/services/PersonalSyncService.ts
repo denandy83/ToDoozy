@@ -216,7 +216,7 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
       } else {
         await markSynced(origin)
         logEvent('info', 'sync', `Pushed task "${task.title}"`, `id=${task.id} project=${task.project_id}`)
-        await syncTaskLabelChoices(supabase,[task.id],origin.api)
+        await syncTaskLabelChoices(supabase,[task.id],origin.api,await origin.scope())
         // Flag pushes of is_archived on shared projects — after the v1.4.3 fix this
         // should never happen from auto-archive, so any occurrence warrants a look.
         if (task.is_archived === 1) {
@@ -2413,7 +2413,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     for (const project of allProjects) {
       const ids=(await api.tasks.findAllByProject(project.id)).map((task)=>task.id)
       totalPulled += await pullTaskLabelsForTasks(ids,userId,context)
-      await syncTaskLabelChoices(supabase,ids,api)
+      await syncTaskLabelChoices(supabase,ids,api,context.scope)
     }
     await processSyncQueue(context)
 
