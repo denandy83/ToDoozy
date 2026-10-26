@@ -587,8 +587,32 @@ it.each([0,1])('preserves a genuine later re-add across active/tombstone imports
       expect(labels.hasPendingProjectRemoval(projectId,'readd')).toBe(false)
     }
     db.prepare('DELETE FROM sync_queue').run()
-    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at:String(expected.deleted_at)})
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at:new Date(Date.parse(String(active.created_at))+1).toISOString()})
     labels.softDeleteTaskLabelsForProjectLabel(projectId,'readd')
     expect(labels.findByTaskId('readd-task')).toEqual([])
+  } finally {db.close()}
+})
+
+it('persists task-driven addition identity before imports even after removal acknowledgement',()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    seedTask(db,'addition-task',projectId,userId)
+    labels.create({id:'addition',user_id:userId,name:'Again'})
+    labels.addToProject(projectId,'addition')
+    labels.removeFromProject(projectId,'addition')
+    const removed=labels.getProjectLabelsForOwner(userId).find((row)=>row.label_id==='addition')!
+    db.prepare('DELETE FROM sync_queue').run()
+    tasks.addLabel('addition-task','addition')
+    const active=labels.getProjectLabelsForOwner(userId).find((row)=>row.label_id==='addition')!
+    expect(Date.parse(active.created_at)).toBeGreaterThan(Date.parse(removed.deleted_at!))
+    const queued=db.prepare("SELECT payload FROM sync_queue WHERE table_name='project_labels'").get()!
+    expect(JSON.parse(String(queued.payload))).toMatchObject({projectId,labelId:'addition',addition:true,createdAt:active.created_at})
+    for(const deleted_at of [removed.deleted_at,null]) {
+      labels.applyRemoteProjectLabel({...removed,deleted_at})
+      if(deleted_at) labels.softDeleteTaskLabelsForProjectLabel(projectId,'addition')
+      expect(labels.findByTaskId('addition-task').map((row)=>row.id)).toEqual(['addition'])
+      expect(labels.hasPendingProjectAddition(projectId,'addition')).toBe(true)
+    }
   } finally {db.close()}
 })

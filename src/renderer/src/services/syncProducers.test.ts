@@ -119,7 +119,7 @@ async function invoke(kind: string) {
   if (kind === 'project-label') return pushProjectLabel('p', 'l', null)
   if (kind === 'shared-task') return syncTaskChange(repo.tasks.findById('t')!, 'UPDATE')
   if (kind === 'shared-status') return syncStatusChange(repo.statuses.findById('s')!, 'UPDATE')
-  if (kind === 'shared-delete-task') return syncTaskChange(repo.tasks.findById('t')!, 'DELETE')
+  if (kind === 'shared-delete-task') { const task=repo.tasks.findById('t')!;repo.tasks.delete('t');return syncTaskChange(task, 'DELETE') }
   if (kind === 'shared-route') { repo.projects.update('p', { is_shared: 1 }); return syncIfShared(repo.tasks.findById('t')!, 'UPDATE') }
   if (kind === 'saved-view') return pushSavedView({ id: 'v', user_id: 'a', name: 'A secret view', filter_config: '{}', project_id: 'p', sidebar_order: 0, color: null })
   pushSetting('theme', 'A secret setting', 'a')
@@ -259,7 +259,7 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
   stage = 'labels'
   const repo = repos[0]
   repo.projects.update('p', { is_shared: 1 })
-  repo.labels.addToProject('p', 'l')
+  repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'l',created_at:'2020-01-01T00:00:00Z',deleted_at:null})
   repo.tasks.addLabel('t', 'l')
   const junction = new Set(['t:remote-only'])
   const calls: string[] = []
@@ -347,6 +347,7 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
     setOnlineStatus(true)
     await processSyncQueue()
   }
+  if(mode==='removed') await processSyncQueue()
   expect(palette).toEqual(new Set(mode === 'removed' ? [] : path === 'bulk' ? ['p:c', 'p2:c'] : ['p:c']))
   expect(junction).toEqual(new Set(mode === 'removed' ? ['t:remote-only'] : path === 'bulk' ? ['t:remote-only', 't:c', 't2:c'] : ['t:remote-only', 't:c']))
   expect(repo.syncQueue.count()).toBe(0)
@@ -356,6 +357,7 @@ it.each(['online', 'offline'])('does not revive a removed remote palette during 
   stage = 'labels'
   const repo = repos[0]
   repo.projects.update('p', { is_shared: 1 })
+  repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'l',created_at:'2020-01-01T00:00:00Z',deleted_at:null})
   repo.tasks.addLabel('t', 'l')
   useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: { t: [repo.labels.findById('l')!] }, showDetailPanel: false })
   const writes: string[] = []
@@ -427,14 +429,15 @@ it('uploads actual persisted reorder versions from the store', async () => {
 })
 
 import { pushRemoveLabelFromProject } from './PersonalSyncService'
-it.each(['online', 'offline', 'failure', 'readd', 'racing-readd'])('keeps cloud-only project label removals durable: %s', async (mode) => {
+it.each(['online', 'offline', 'failure', 'readd', 'racing-readd', 'sibling-readd'])('keeps cloud-only project label removals durable: %s', async (mode) => {
   stage = 'removal'
   const repo = repos[0]
   repo.projects.update('p', { is_shared: 1 })
   repo.labels.addToProject('p', 'l')
   repo.labels.removeFromProject('p', 'l')
   repo.labels.create({ id: 'known', user_id: 'other', name: 'Private label' })
-  repo.labels.addToProject('p', 'known')
+  repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'known',created_at:'2020-01-01T00:00:00Z',deleted_at:null})
+  if(mode==='sibling-readd') repo.labels.removeFromProject('p','known')
   const palette = new Map<string, string | null>([['l', null], ['known', null], ['cloud-only', null], ['unrelated', null]])
   const pairs = new Set(['t:l', 't:known', 'remote:cloud-only', 'remote:unrelated'])
   let fail = mode === 'failure' || mode === 'readd'
@@ -451,8 +454,10 @@ it.each(['online', 'offline', 'failure', 'readd', 'racing-readd'])('keeps cloud-
       await network.token!()
       if (operation === 'upsert') {
         if (fail) return { data: null, error: { message: 'synthetic removal failure' } }
-        for (const row of payload as Array<{ label_id: string; deleted_at: string }>) palette.set(row.label_id, row.deleted_at)
-        if (mode === 'racing-readd' && !raced) { raced = true; repo.labels.addToProject('p', 'l') }
+        if(table==='task_labels') for(const row of (Array.isArray(payload)?payload:[payload]) as Array<{task_id:string;label_id:string}>) pairs.add(`${row.task_id}:${row.label_id}`)
+        if(table==='project_labels') for (const row of (Array.isArray(payload)?payload:[payload]) as Array<{ label_id: string; deleted_at: string }>) palette.set(row.label_id, row.deleted_at)
+        if(table==='project_labels' && mode==='sibling-readd' && !raced && repo.syncQueue.findAll().filter((entry)=>entry.table_name==='task_labels').length===1) {raced=true;repo.labels.addToProject('p','l');repo.tasks.addLabel('t','l')}
+        if (table==='project_labels' && mode === 'racing-readd' && !raced) { raced = true; repo.labels.addToProject('p', 'l') }
       } else if (operation === 'delete') {
         for (const task of taskIds) for (const label of labelIds) pairs.delete(`${task}:${label}`)
       }
@@ -469,9 +474,10 @@ it.each(['online', 'offline', 'failure', 'readd', 'racing-readd'])('keeps cloud-
     vi.mocked(requireSession).mockResolvedValue({ user: { id: 'a' }, access_token: 'synthetic-a' } as Session)
     await processSyncQueue()
   }
+  await processSyncQueue()
   expect(repo.syncQueue.count()).toBe(0)
   expect(palette.get('unrelated')).toBeNull()
-  if (mode === 'readd' || mode === 'racing-readd') {
+  if (mode === 'readd' || mode === 'racing-readd' || mode === 'sibling-readd') {
     expect(palette.get('l')).toBeNull()
     expect(pairs.has('t:l')).toBe(true)
   } else {

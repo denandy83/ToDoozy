@@ -399,6 +399,7 @@ export class TaskRepository {
 
   // Label assignments
   addLabel(taskId: string, labelId: string): void {
+    if (!this.db.isTransaction) return withTransaction(this.db, () => this.addLabel(taskId, labelId))
     // Upsert (not INSERT OR IGNORE) so that a previously tombstoned row
     // gets revived. Without `deleted_at = NULL`, a label that was
     // soft-deleted (e.g. via LabelRepository.removeFromProject's cascade
@@ -412,7 +413,7 @@ export class TaskRepository {
          ON CONFLICT(task_id, label_id) DO UPDATE SET deleted_at = NULL`
       )
       .run(taskId, labelId)
-    this.ensureProjectLabel(taskId, labelId)
+    this.ensureProjectLabel(taskId, labelId, true)
   }
 
   /**
@@ -424,15 +425,18 @@ export class TaskRepository {
    * lockstep with task_labels — called by both the user-facing addLabel and the
    * sync-pull applyRemoteTaskLabels, so no add path (renderer, duplicate,
    * template, MCP echo, reconcile) can leave a label orphaned from its project.
-   * Revives a tombstoned link (DO UPDATE SET deleted_at = NULL): if a label is
-   * actively on a task, it belongs in that project's palette.
    */
-  private ensureProjectLabel(taskId: string, labelId: string): void {
+  private ensureProjectLabel(taskId: string, labelId: string, local = false): void {
+    if (local) {
+      const task = this.findById(taskId)
+      if (task) new LabelRepository(this.db).addToProject(task.project_id, labelId)
+      return
+    }
     this.db
       .prepare(
         `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
          SELECT t.project_id, ?, datetime('now'), NULL FROM tasks t WHERE t.id = ?
-         ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL`
+         ON CONFLICT(project_id, label_id) DO NOTHING`
       )
       .run(labelId, taskId)
   }
@@ -457,6 +461,8 @@ export class TaskRepository {
     let added = 0
     for (const labelId of labelIds) {
       if (new LabelRepository(this.db).hasPendingProjectRemoval(task.project_id, labelId)) continue
+      const projectLink = this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(task.project_id, labelId) as { deleted_at: string | null } | undefined
+      if (projectLink?.deleted_at) continue
       const label = this.db.prepare('SELECT id FROM labels WHERE id = ?').get(labelId)
       if (!label) continue
       const existing = this.db

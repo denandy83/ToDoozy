@@ -4,8 +4,9 @@ import { readAll } from './readAll'
 import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
-import { currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
+import { currentProjectLabelFamily, currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
 import { preserveStatusDeletionEdits, type StatusDeletionCommand } from './statusDeletionSync'
+import { pushTaskLabelAdditions } from './taskLabelAdditions'
 import { writeProjectArchive } from './projectArchiveSync'
 
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
@@ -41,7 +42,6 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       return true
     }
     if (remote.deleted_at) {
-      if (!command.rpc_tasks) throw new Error('Status deletion recovery snapshot missing')
       await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command, commandId, String(remote.deleted_at))
       return true
     }
@@ -63,14 +63,28 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     return true
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {
+    if (payload.addition) {
+      const label = await api.labels.findById(String(payload.labelId))
+      const actor = useAuthStore.getState().currentUser?.id
+      if (label && actor && label.user_id === actor) {
+        const { pushLabel } = await import('./PersonalSyncService')
+        const canonical = await pushLabel(label,actor,{ api,userId:actor,client:async()=>client,assertCurrent:()=>context?.assertCurrent(),isCurrent:context?.isCurrent ?? (async()=>true),scope:async()=>context?.scope ?? '' })
+        if (!canonical) throw new Error('Project label definition remains pending')
+        if (canonical !== payload.labelId) return replaySpecialEntry(client,entry,context)
+      }
+    }
     const current = await currentProjectLink(payload.projectId, String(payload.labelId), api)
     if (payload.deletedAt && 'expectedLink' in payload && projectLinkSuperseded(current, payload.expectedLink as Awaited<ReturnType<typeof currentProjectLink>>)) return true
     if (!current && !payload.deletedAt) return true
     const { error } = await client.from('project_labels').upsert({
       project_id: payload.projectId, label_id: payload.labelId,
-      created_at: new Date().toISOString(), deleted_at: payload.deletedAt && 'expectedLink' in payload ? payload.deletedAt : current!.deleted_at
+      created_at: current?.created_at ?? payload.createdAt ?? entry.created_at, deleted_at: payload.deletedAt && 'expectedLink' in payload ? payload.deletedAt : current!.deleted_at
     }, { onConflict: 'project_id,label_id' })
     if (error) throw new Error(error.message)
+    if (payload.addition && current && !current.deleted_at) {
+      const tasks = await api.tasks.findAllByProject(String(payload.projectId))
+      await pushTaskLabelAdditions(client, tasks.map((task) => task.id), api)
+    }
     return true
   }
   if (entry.table_name === 'task_labels' && payload.remove_project_label === true) {
@@ -143,6 +157,7 @@ export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncCon
     return JSON.stringify([project ?? null, tasks.map(({ id, is_archived, archive_updated_at, updated_at, deleted_at }) => ({ id, is_archived, archive_updated_at, updated_at, deleted_at })).sort((a, b) => a.id.localeCompare(b.id))])
   }
   if (typeof payload.task_id === 'string') return JSON.stringify((await api.tasks.getLabels(payload.task_id)).map((row) => row.label_id).sort())
-  if (typeof payload.projectId === 'string') return JSON.stringify(await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null)
+  if (payload.remove_project_label === true) return JSON.stringify(await currentProjectLabelFamily(payload.projectId, String(payload.labelId), api, payload.labelName))
+  if (typeof payload.projectId === 'string') return JSON.stringify([await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null, payload.addition ? await Promise.all((await api.tasks.findAllByProject(payload.projectId)).map(async (task) => [task.id, await api.tasks.getLabels(task.id)])) : null])
   return entry.payload
 }

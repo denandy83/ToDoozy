@@ -363,7 +363,6 @@ it.each(['startup','realtime'])('preserves pending project label removal through
   repo.tasks.addLabel(task.id,'pending-label')
   repo.labels.removeFromProject(projectId,'pending-label')
   const current=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'pending-label')!
-  repo.syncQueue.enqueue('task_labels',`${projectId}::pending-label`,'UPDATE',JSON.stringify({projectId,labelId:'pending-label',labelName:'Pending',remove_project_label:true,deletedAt:new Date().toISOString(),expectedLink:current}))
   rows.projects=[{...repo.projects.findById(projectId)}]
   rows.statuses=[{...repo.statuses.findById('open')}]
   rows.tasks=[{...task}]

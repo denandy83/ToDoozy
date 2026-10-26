@@ -14,6 +14,19 @@ export async function currentProjectLink(projectId: string, labelId: string, api
 }
 
 
+export async function currentProjectLabelFamily(projectId: string, labelId: string, api: TodoozyAPI, labelName?: string): Promise<Array<{ label_id: string; created_at: string; deleted_at: string | null }>> {
+  const project = await api.projects.findById(projectId)
+  if (!project) return []
+  const name = labelName ?? (await api.labels.findById(labelId))?.name
+  const links = project.is_shared === 1 ? await api.labels.getProjectLabelsForSharedProjects() : await api.labels.getProjectLabelsForOwner(project.owner_id)
+  const family = []
+  for (const link of links.filter((row) => row.project_id === projectId)) {
+    if (link.label_id === labelId || (name && (await api.labels.findById(link.label_id))?.name.toLowerCase() === name.toLowerCase())) family.push(link)
+  }
+  return family.sort((a,b) => a.label_id.localeCompare(b.label_id))
+}
+
+
 export interface ProjectLabelRemoval {
   projectId: string
   labelId: string
@@ -27,14 +40,20 @@ export function projectLinkSuperseded(current: Awaited<ReturnType<typeof current
 }
 
 export async function removeRemoteProjectLabel(client: SupabaseClient, api: TodoozyAPI, intent: ProjectLabelRemoval): Promise<void> {
-  const current = (): ReturnType<typeof currentProjectLink> => currentProjectLink(intent.projectId, intent.labelId, api)
   const restoreReaddition = async (): Promise<boolean> => {
-    const latest = await current()
-    if (!projectLinkSuperseded(latest, intent.expectedLink)) return false
-    const { error } = await client.from('project_labels').upsert([{
-      project_id: intent.projectId, label_id: intent.labelId, created_at: latest!.created_at, deleted_at: null
-    }], { onConflict: 'project_id,label_id' })
-    if (error) throw new Error(error.message)
+    const additions = (await api.sync.getQueue()).filter((entry) => entry.table_name === 'project_labels').map((entry) => JSON.parse(entry.payload))
+    const latest = (await currentProjectLabelFamily(intent.projectId, intent.labelId, api, intent.labelName)).filter((link) => !link.deleted_at && (
+      (link.label_id === intent.labelId && projectLinkSuperseded({created_at:link.created_at,deleted_at:link.deleted_at}, intent.expectedLink)) ||
+      Date.parse(link.created_at) > Date.parse(intent.deletedAt) ||
+      additions.some((entry) => entry.addition && entry.projectId === intent.projectId && entry.labelId === link.label_id && entry.createdAt === link.created_at)
+    ))
+    if (!latest.length) return false
+    for (let index = 0; index < latest.length; index += 200) {
+      const { error } = await client.from('project_labels').upsert(latest.slice(index,index+200).map((link) => ({
+        project_id: intent.projectId, label_id: link.label_id, created_at: link.created_at, deleted_at: null
+      })), { onConflict: 'project_id,label_id' })
+      if (error) throw new Error(error.message)
+    }
     const localTasks = await api.tasks.findAllByProject(intent.projectId)
     await pushTaskLabelAdditions(client, localTasks.map((task) => task.id), api)
     return true

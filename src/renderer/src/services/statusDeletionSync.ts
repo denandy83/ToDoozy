@@ -7,7 +7,7 @@ export interface StatusDeletionCommand {
   status_delete: true
   target_id: string
   updated_at: string
-  tasks?: Array<{ id: string; updated_at: string }>
+  tasks?: Array<{ id: string; updated_at: string } & Partial<Task>>
   rpc_tasks?: Array<Record<string, unknown>>
   task_recoveries?: Array<{ row: Task; local_updated_at: string }>
 }
@@ -42,10 +42,11 @@ export async function preserveStatusDeletionEdits(client: SupabaseClient, api: T
         continue
       }
       if (current && Date.parse(String(current.updated_at)) >= Date.parse(version)) {
-        const before = command.rpc_tasks?.find((row) => row.id === id)
+        const before = (command.rpc_tasks?.find((row) => row.id === id) ?? command.tasks?.find((row) => row.id === id && row.title !== undefined)) as Record<string, unknown> | undefined
+        if (rpcAt && String(current.updated_at) === rpcAt && !before) throw new Error('Pending task edit requires a status deletion baseline')
         const rpcOnly = rpcAt && String(current.updated_at) === rpcAt && current.status_id === command.target_id && before &&
           Date.parse(String(before.updated_at)) < Date.parse(version) &&
-          Object.keys(before).every((key) => ['updated_at', 'status_id', 'completed_date'].includes(key) || JSON.stringify(before[key]) === JSON.stringify(current[key]))
+          Object.keys(before).every((key) => ['updated_at', 'status_id', 'completed_date'].includes(key) || (['created_at','archive_updated_at','deleted_at'].includes(key) && before[key] != null && current[key] != null ? Date.parse(String(before[key])) === Date.parse(String(current[key])) : JSON.stringify(before[key]) === JSON.stringify(current[key])))
         if (!rpcOnly) continue
         const promoted = { ...local, updated_at: new Date(Math.max(Date.parse(local.updated_at), Date.parse(String(current.updated_at)) + 1)).toISOString() }
         command.task_recoveries = [...(command.task_recoveries ?? []).filter(({ row }) => row.id !== id), { row: promoted, local_updated_at: local.updated_at }]

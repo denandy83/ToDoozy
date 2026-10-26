@@ -456,10 +456,11 @@ export async function syncTaskChange(
       if (!supabase) { await origin.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task)); await refreshProducerPending(origin); return }
 
       if (operation === 'DELETE') {
-        const now = new Date().toISOString()
+        const local = await origin.api.tasks.findById(task.id)
+        if (!local?.deleted_at) throw new Error('Task deletion intent missing')
         const { error } = await supabase
           .from('tasks')
-          .update({ deleted_at: now, updated_at: now })
+          .update({ deleted_at: local.deleted_at, updated_at: local.updated_at })
           .eq('id', task.id)
         if (error) {
           await reportPushFailure(origin, 'syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
@@ -573,7 +574,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
     })
     type Work = typeof work[number]
     const complete = async (item: Work): Promise<void> => {
-      for (const entry of item.entries) { await api.sync.dequeue(entry.id); processed++ }
+      for (const entry of item.entries) { if (await api.sync.dequeue(entry.id)) processed++ }
     }
     const blockedTasks = new Set<string>()
     const handled = new Set<Work>()

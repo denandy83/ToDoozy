@@ -484,16 +484,21 @@ export async function pushProjectLabel(
         if (projectLinkSuperseded(current, expectedLink!)) return
       } else {
         if (!current) return
-        deletedAt = current.deleted_at
+        if (current.deleted_at) return
       }
       const supabase = (await origin.client())!
+      if (!deletedAt && (await origin.api.sync.getQueue()).some((entry) => entry.table_name === 'project_labels' && JSON.parse(entry.payload).addition && JSON.parse(entry.payload).projectId === projectId && JSON.parse(entry.payload).labelId === labelId)) {
+        const { processSyncQueue } = await import('./SyncService')
+        await processSyncQueue({api:origin.api,client:supabase,assertCurrent:origin.assertCurrent,isCurrent:origin.isCurrent,scope:await origin.scope()})
+        return
+      }
       const { error } = await supabase
         .from('project_labels')
         .upsert(
           {
             project_id: projectId,
             label_id: labelId,
-            created_at: new Date().toISOString(),
+            created_at: current?.created_at ?? new Date().toISOString(),
             deleted_at: deletedAt
           },
           { onConflict: 'project_id,label_id' }
@@ -533,9 +538,7 @@ export async function pushProjectLabel(
  */
 export async function pushRemoveLabelFromProject(projectId: string, labelId: string): Promise<void> {
   return withSyncProducer(async (origin) => {
-    const label = await origin.api.labels.findById(labelId)
-    const payload = { projectId, labelId, labelName: label?.name, remove_project_label: true, deletedAt: new Date().toISOString(), expectedLink: await currentProjectLink(projectId, labelId, origin.api) }
-    await origin.api.sync.enqueue('task_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify(payload))
+    if (!(await origin.api.sync.getQueue()).some((entry) => { const intent = JSON.parse(entry.payload); return entry.table_name === 'task_labels' && intent.remove_project_label && intent.projectId === projectId && intent.labelId === labelId })) return
     const { processSyncQueue, getOnlineStatus } = await import('./SyncService')
     if (!getOnlineStatus()) { await refreshProducerPending(origin); return }
     const client = await origin.client()

@@ -2,7 +2,7 @@ import { SyncQueueRepository } from './SyncQueueRepository'
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
-import type { Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
+import type { Task, Status, CreateStatusInput, UpdateStatusInput } from '../../shared/types'
 
 export class StatusRepository {
   constructor(private db: DatabaseSync) {}
@@ -190,7 +190,7 @@ export class StatusRepository {
       if (!source || source.deleted_at) return false
       if (source.is_default === 1 || source.is_done === 1) throw new Error('Default and done statuses must be retained')
       if (!target || target.deleted_at || target.id === statusId || target.project_id !== source.project_id) throw new Error('Replacement status must be active in the same project')
-      const tasks = this.db.prepare('SELECT id, updated_at FROM tasks WHERE status_id=? AND deleted_at IS NULL').all(statusId) as Array<{ id: string; updated_at: string }>
+      const tasks = this.db.prepare('SELECT * FROM tasks WHERE status_id=? AND deleted_at IS NULL').all(statusId) as unknown as Task[]
       const now = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1, ...tasks.map((task) => Date.parse(task.updated_at) + 1))).toISOString()
       this.db.prepare('UPDATE tasks SET status_id=?,completed_date=?,updated_at=? WHERE status_id=? AND deleted_at IS NULL')
         .run(targetStatusId, target.is_done === 1 ? now : null, now, statusId)
