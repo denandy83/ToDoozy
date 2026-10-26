@@ -362,3 +362,19 @@ describe('ProjectRepository — archive/unarchive', () => {
     expect(repo.archiveWithTasks('does-not-exist')).toBeUndefined()
   })
 })
+
+describe('remote archive intent', () => {
+  it('persists incoming archive and restore on inserts and updates', () => {
+    const db = createTestDb()
+    try {
+      const owner = seedUser(db)
+      const repo = new ProjectRepository(db)
+      const original = makeProject(repo, owner, 'source')
+      const archived = { ...original, id: 'remote', is_archived: 1, updated_at: '2090-01-01T00:00:00Z' }
+      expect(repo.applyRemote(archived).is_archived).toBe(1)
+      expect(repo.applyRemote({ ...archived, is_archived: 0, updated_at: '2090-01-02T00:00:00Z' }).is_archived).toBe(0)
+      expect(repo.applyRemote({ ...archived, updated_at: '2090-01-03T00:00:00Z' }).is_archived).toBe(1)
+      expect(repo.applyRemote({ ...original, id: 'restored', is_archived: 0 }).is_archived).toBe(0)
+    } finally { db.close() }
+  })
+})

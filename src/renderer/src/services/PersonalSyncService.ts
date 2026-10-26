@@ -1,3 +1,4 @@
+import type { SyncContext } from './syncContext'
 import { writeProjectArchive } from './projectArchiveSync'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
@@ -1711,9 +1712,10 @@ export async function fullPull(userId: string): Promise<void> {
 /**
  * Pull project metadata (name, color, icon) from Supabase if newer than local.
  */
-export async function pullProjectMetadata(projectId: string): Promise<boolean> {
+export async function pullProjectMetadata(projectId: string, context?: SyncContext): Promise<boolean> {
+  const api = context?.api ?? window.api
   try {
-    const supabase = await getSupabase()
+    const supabase = (context?.client ?? await getSupabase())
     const { data: remote, error } = await supabase
       .from('projects')
       .select('name, color, icon, description, updated_at, is_archived')
@@ -1726,11 +1728,11 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
     }
     if (!remote) return false
 
-    const local = await window.api.projects.findById(projectId)
+    const local = await api.projects.findById(projectId)
     if (!local) return false
 
     if (Date.parse(remote.updated_at) > Date.parse(local.updated_at)) {
-      await window.api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
+      await api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
       return true
     }
     return false
@@ -1744,9 +1746,10 @@ export async function pullProjectMetadata(projectId: string): Promise<boolean> {
  * Pull statuses from Supabase and upsert locally.
  * Must run before pullNewTasks to satisfy FK constraints.
  */
-export async function pullStatuses(projectId: string): Promise<number> {
+export async function pullStatuses(projectId: string, context?: SyncContext): Promise<number> {
+  const api = context?.api ?? window.api
   try {
-    const supabase = await getSupabase()
+    const supabase = (context?.client ?? await getSupabase())
     const since = lastPullAt.get(`statuses:${projectId}`)
     let query = supabase.from('statuses').select('*').eq('project_id', projectId)
     if (since) query = query.gt('updated_at', since)
@@ -1758,15 +1761,16 @@ export async function pullStatuses(projectId: string): Promise<number> {
 
     let changed = 0
     for (const rs of remoteStatuses) {
-      const existing = await window.api.statuses.findById(rs.id)
+      const existing = await api.statuses.findById(rs.id)
       if (!existing || Date.parse(rs.updated_at) > Date.parse(existing.updated_at)) {
-        await window.api.statuses.applyRemote(rs)
+        await api.statuses.applyRemote(rs)
         changed++
       }
       // No "local newer → push" branch (same reasoning as pullNewTasks).
     }
     const pName = projectNameCache.get(projectId) ?? projectId
     if (changed > 0) console.log(`[PersonalSync] Synced ${changed} statuses for "${pName}"`)
+    context?.assertCurrent()
     const watermark = pullWatermark(remoteStatuses)
     if (watermark) lastPullAt.set(`statuses:${projectId}`, watermark)
     return changed
@@ -1806,11 +1810,13 @@ export async function pullStatuses(projectId: string): Promise<number> {
 async function ensureLabelsExistLocally(
   labelIds: string[],
   projectId: string | null,
-  expectedUserId?: string
+  expectedUserId?: string,
+  context?: SyncContext
 ): Promise<Map<string, string>> {
+  const api = context?.api ?? window.api
   const remap = new Map<string, string>()
   if (labelIds.length === 0) return remap
-  const supabase = await getSupabase()
+  const supabase = (context?.client ?? await getSupabase())
   const { useAuthStore } = await import('../shared/stores/authStore')
   const ownerId = useAuthStore.getState().currentUser?.id ?? null
   const assertUser = (): void => {
@@ -1819,10 +1825,10 @@ async function ensureLabelsExistLocally(
   assertUser()
 
   const link = async (labelId: string): Promise<void> => {
-    if (projectId) await window.api.labels.addToProject(projectId, labelId).catch(() => {})
+    if (projectId) await api.labels.addToProject(projectId, labelId).catch(() => {})
   }
 
-  const localLabels = new Map((await Promise.all(labelIds.map((id) => window.api.labels.findById(id))))
+  const localLabels = new Map((await Promise.all(labelIds.map((id) => api.labels.findById(id))))
     .filter((label): label is Label => !!label).map((label) => [label.id, label]))
   const missing = labelIds.filter((id) => !localLabels.has(id))
   const remoteLabels = new Map<string, Label>()
@@ -1840,7 +1846,7 @@ async function ensureLabelsExistLocally(
       if (!ownerId || localLabel.user_id === ownerId || localLabel.user_id == null) {
         await link(localLabel.id)
       } else {
-        const own = await window.api.labels.adopt(ownerId, localLabel)
+        const own = await api.labels.adopt(ownerId, localLabel)
         await link(own.id)
         if (own.id !== labelId) remap.set(labelId, own.id)
       }
@@ -1853,13 +1859,13 @@ async function ensureLabelsExistLocally(
     if (!ownerId || remoteLabel.user_id === ownerId) {
       // Our own label (from another device), or no signed-in user to enforce
       // ownership: store the remote row faithfully, preserving its id.
-      await window.api.labels.applyRemote(remoteLabel as Label).catch(() => {})
+      await api.labels.applyRemote(remoteLabel as Label).catch(() => {})
       await link(labelId)
       continue
     }
 
     // Foreign / null-owner label → current user must own a same-name copy.
-    const own = await window.api.labels.adopt(ownerId, remoteLabel as Label)
+    const own = await api.labels.adopt(ownerId, remoteLabel as Label)
     await link(own.id)
     if (own.id !== labelId) remap.set(labelId, own.id)
   }
@@ -1876,22 +1882,23 @@ async function ensureLabelsExistLocally(
  * updated_at doesn't advance (which is why pullNewTasks never sees it).
  * Returns the number of newly applied label assignments.
  */
-export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string): Promise<number> {
+export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string, context?: SyncContext): Promise<number> {
+  const api = context?.api ?? window.api
   if (!taskIds.length) return 0
   try {
-    const supabase = await getSupabase()
+    const supabase = (context?.client ?? await getSupabase())
     const { data: pairs, error } = await supabase.from('task_labels').select('task_id, label_id')
       .in('task_id', taskIds).is('deleted_at', null)
     if (error) throw new Error(error.message)
     if (!pairs?.length) return 0
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
-    const remap = await ensureLabelsExistLocally(labelIds, null, expectedUserId)
+    const remap = await ensureLabelsExistLocally(labelIds, null, expectedUserId, context)
     let added = 0
     const { useAuthStore } = await import('../shared/stores/authStore')
     for (const taskId of taskIds) {
       if (expectedUserId && useAuthStore.getState().currentUser?.id !== expectedUserId) return added
       const resolved = [...new Set(pairs.filter((p) => p.task_id === taskId).map((p) => remap.get(p.label_id) ?? p.label_id))]
-      added += await window.api.tasks.applyRemoteTaskLabels(taskId, resolved)
+      added += await api.tasks.applyRemoteTaskLabels(taskId, resolved)
     }
     return added
   } catch (err) {
@@ -1911,12 +1918,13 @@ function pullWatermark(rows: Array<{ updated_at?: string }>): string | null {
   return dates.length ? new Date(Math.max(...dates) - 1).toISOString() : null
 }
 
-export async function pullNewTasks(projectId: string): Promise<number> {
+export async function pullNewTasks(projectId: string, context?: SyncContext): Promise<number> {
+  const api = context?.api ?? window.api
   try {
     // Ensure statuses exist locally before inserting tasks (FK constraint)
-    await pullStatuses(projectId)
+    await pullStatuses(projectId, context)
 
-    const supabase = await getSupabase()
+    const supabase = (context?.client ?? await getSupabase())
     const since = lastPullAt.get(`tasks:${projectId}`)
     let query = supabase.from('tasks').select('*').eq('project_id', projectId)
     if (since) query = query.gt('updated_at', since)
@@ -1949,26 +1957,26 @@ export async function pullNewTasks(projectId: string): Promise<number> {
 
     for (const rt of orderedRemoteTasks) {
       if (recentlyDeletedIds.has(rt.id)) continue
-      const existing = await window.api.tasks.findById(rt.id)
+      const existing = await api.tasks.findById(rt.id)
       if (!existing) {
         // New task — create locally
         const ownerId = rt.owner_id as string
-        const localOwner = await window.api.users.findById(ownerId)
+        const localOwner = await api.users.findById(ownerId)
         if (!localOwner) {
-          await window.api.users.create({ id: ownerId, email: placeholderEmail(ownerId), display_name: null, avatar_url: null }).catch((e) => console.warn('[PersonalSync] Failed to create local user:', e))
+          await api.users.create({ id: ownerId, email: placeholderEmail(ownerId), display_name: null, avatar_url: null }).catch((e) => console.warn('[PersonalSync] Failed to create local user:', e))
         }
         // Same for assigned_to, which is also a users FK.
         if (rt.assigned_to) {
           const assignedId = rt.assigned_to as string
-          const localAssignee = await window.api.users.findById(assignedId)
+          const localAssignee = await api.users.findById(assignedId)
           if (!localAssignee) {
-            await window.api.users.create({ id: assignedId, email: placeholderEmail(assignedId), display_name: null, avatar_url: null }).catch(() => {})
+            await api.users.create({ id: assignedId, email: placeholderEmail(assignedId), display_name: null, avatar_url: null }).catch(() => {})
           }
         }
         try {
           // applyRemote preserves remote timestamps; tasks.create would stamp NOW
           // into updated_at and trigger a redundant push on the next pull.
-          await window.api.tasks.applyRemote({
+          await api.tasks.applyRemote({
             id: rt.id,
             project_id: rt.project_id,
             owner_id: ownerId,
@@ -2000,7 +2008,7 @@ export async function pullNewTasks(projectId: string): Promise<number> {
       } else if (rt.updated_at && existing.updated_at && Date.parse(rt.updated_at) > Date.parse(existing.updated_at)) {
         // Remote is newer — update locally (preserve remote timestamps via applyRemote)
         try {
-          await window.api.tasks.applyRemote({
+          await api.tasks.applyRemote({
             id: rt.id,
             project_id: rt.project_id,
             owner_id: existing.owner_id,
@@ -2037,12 +2045,13 @@ export async function pullNewTasks(projectId: string): Promise<number> {
     }
 
     // Also handles task label events whose task updated_at did not advance.
-    if (touchedTaskIds.length) await pullTaskLabelsForTasks(touchedTaskIds)
+    if (touchedTaskIds.length) await pullTaskLabelsForTasks(touchedTaskIds, undefined, context)
 
     const pName = projectNameCache.get(projectId) ?? projectId
     if (pulled > 0) {
       console.log(`[PersonalSync] "${pName}": ${pulled} pulled`)
     }
+    context?.assertCurrent()
     const watermark = pullWatermark(remoteTasks)
     if (!failed && watermark) lastPullAt.set(`tasks:${projectId}`, watermark)
     // Supabase responded successfully — clear any auth failure state

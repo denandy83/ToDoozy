@@ -345,6 +345,8 @@ export interface NotificationsAPI {
 }
 
 export interface SyncAPI {
+  captureContext(): Promise<{ generation: number; userId: string | null }>
+  invokeContext(context: { generation: number; userId: string | null }, channel: string, args: unknown[]): Promise<unknown>
   getQueue(): Promise<SyncQueueEntry[]>
   enqueue(tableName: string, rowId: string, operation: SyncOperation, payload: string): Promise<SyncQueueEntry>
   dequeue(id: string): Promise<boolean>
@@ -447,6 +449,7 @@ export interface UpdaterAPI {
 }
 
 export interface ProjectAreasAPI {
+  findById(id: string): Promise<ProjectArea | null>
   findByUserId(userId: string): Promise<ProjectArea[]>
   create(input: CreateProjectAreaInput): Promise<ProjectArea>
   update(id: string, input: UpdateProjectAreaInput): Promise<ProjectArea | null>

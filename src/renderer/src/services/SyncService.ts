@@ -1,4 +1,6 @@
-import { replaySpecialEntry } from './syncQueueReplay'
+import { useAuthStore } from '../shared/stores/authStore'
+import { captureSyncContext } from './syncContext'
+import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
  * SyncService — manages write-through to Supabase and Realtime subscriptions
@@ -13,7 +15,6 @@ import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
 import { getCachedProjectName } from './PersonalSyncService'
 import { SYNC_TABLES } from './syncTables'
-import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
@@ -53,21 +54,24 @@ export function setRealtimeCallback(cb: RealtimeCallback): void {
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
+  const context = await captureSyncContext()
   const supabase = await getSupabase()
+  context.assertCurrent()
   const channel = supabase
     .channel(`project:${projectId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
-      scheduleRemoteProjectRefresh(projectId)
+      try { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) } catch { return }
     })
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void window.api.tasks.hardDelete(data.id).then(() => scheduleRemoteProjectRefresh(projectId))
+          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
             .catch((error) => logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)))
         } else {
           scheduleRemoteProjectRefresh(projectId, typeof data.id === 'string' ? data.id : undefined)
@@ -79,11 +83,12 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'statuses', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void window.api.statuses.hardDelete(data.id).then(() => scheduleRemoteProjectRefresh(projectId))
+          void context.api.statuses.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
             .catch((error) => logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)))
         } else scheduleRemoteProjectRefresh(projectId)
         onChangeCallback?.('status', payload.eventType, data)
@@ -93,6 +98,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_members', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
@@ -110,6 +116,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_labels', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
@@ -552,82 +559,75 @@ export function processSyncQueue(): Promise<number> {
 }
 
 async function drainSyncQueue(): Promise<number> {
-  const queue = await window.api.sync.getQueue()
-  if (!queue.length) return 0
-  if (!isOnline || !await requireSession()) {
-    await useSyncStore.getState().refreshPendingCount()
-    useSyncStore.getState().setStatus('offline')
+  let processed = 0
+  let context: Awaited<ReturnType<typeof captureSyncContext>>
+  const userId = useAuthStore.getState().currentUser?.id
+  try { context = await captureSyncContext() } catch {
+    if (useAuthStore.getState().currentUser?.id === userId) useSyncStore.getState().setStatus('offline')
     return 0
   }
-  const supabase = await getSupabase()
-  let processed = 0
-  let failure: string | null = null
-  // Coalesce superseded intents before grouping. Re-read current SQLite rows:
-  // a failed old snapshot must never overwrite a later successful edit.
-  const groups = new Map<string, typeof queue>()
-  for (const entry of queue) {
-    const key = `${entry.table_name}:${entry.row_id}`
-    groups.set(key, [...(groups.get(key) ?? []), entry])
-  }
-  const batches = new Map<string, Array<{ ids: string[]; payload: Record<string, unknown> }>>()
-  const specials: Array<{ entry: (typeof queue)[number]; ids: string[] }> = []
-  for (const entries of groups.values()) {
-    const entry = entries[entries.length - 1]
-    const ids = entries.map((item) => item.id)
-    try {
-      let payload = JSON.parse(entry.payload) as Record<string, unknown>
+  const { api, client: supabase, assertCurrent } = context
+  try {
+    const queue = await api.sync.getQueue()
+    if (!queue.length || !isOnline) return 0
+    const groups = new Map<string, typeof queue>()
+    for (const entry of queue) {
+      const key = `${entry.table_name}:${entry.row_id}`
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+    let failure: string | null = null
+    const priority = ['projects', 'user_labels', 'statuses', 'tasks']
+    const ordered = [...groups.values()].sort((a, b) =>
+      (priority.indexOf(a[0].table_name) + 1 || 99) - (priority.indexOf(b[0].table_name) + 1 || 99))
+    for (const entries of ordered) {
+      let entry = entries[entries.length - 1]
+      const payload = JSON.parse(entry.payload) as Record<string, unknown>
       const archive = entries.some((item) => JSON.parse(item.payload).archive_with_tasks === true)
-      if (entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive) {
-        specials.push({ entry: archive ? { ...entry, payload: JSON.stringify({ ...payload, archive_with_tasks: true }) } : entry, ids })
-        continue
-      }
+      if (archive) entry = { ...entry, payload: JSON.stringify({ ...payload, archive_with_tasks: true }) }
+      const special = entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive
       const descriptor = Object.values(SYNC_TABLES).find((item) => item?.remoteName === entry.table_name)
-      const current = descriptor ? await descriptor.localGetById(entry.row_id) : null
-      if (current && descriptor) {
-        payload = descriptor.toRemote(current) as Record<string, unknown>
-      } else if (entry.operation === 'DELETE' || payload.deleted_at || descriptor) {
-        const deletedAt = payload.deleted_at ?? entry.created_at
-        specials.push({ entry: { ...entry, payload: JSON.stringify({ id: entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, ids })
-        continue
+      const snapshot = async (): Promise<string> => {
+        assertCurrent()
+        return special ? specialEntryIntent(entry, context) : JSON.stringify((descriptor ? await descriptor.localGetById(entry.row_id, api) : payload) ?? null)
       }
-      const batch = batches.get(entry.table_name) ?? []
-      batch.push({ ids, payload })
-      batches.set(entry.table_name, batch)
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error)
+      try {
+        while (isOnline) {
+          const before = await snapshot()
+          assertCurrent()
+          if (special) {
+            if (!await replaySpecialEntry(supabase, entry, context)) throw new Error('Unsupported queued operation')
+          } else {
+            const current = JSON.parse(before)
+            if (current && descriptor) {
+              const { error } = await supabase.from(entry.table_name).upsert([descriptor.toRemote(current)])
+              if (error) throw new Error(error.message)
+            } else {
+              const deletedAt = payload.deleted_at ?? entry.created_at
+              const tombstone = { ...entry, payload: JSON.stringify({ id: entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }
+              if (!await replaySpecialEntry(supabase, descriptor ? tombstone : entry, context)) throw new Error('Unsupported queued operation')
+            }
+          }
+          if (before !== await snapshot()) continue
+          for (const item of entries) {
+            await api.sync.dequeue(item.id)
+            processed++
+          }
+          break
+        }
+      } catch (error) {
+        assertCurrent()
+        failure = error instanceof Error ? error.message : String(error)
+      }
     }
-  }
-  const dequeue = async (ids: string[]): Promise<void> => {
-    for (const id of ids) { await window.api.sync.dequeue(id); processed++ }
-  }
-  // Definitions/parents before their dependent rows and junctions.
-  const priority = ['projects', 'user_labels', 'statuses', 'tasks']
-  const ordered = [...batches].sort(([a], [b]) => (priority.indexOf(a) + 1 || 99) - (priority.indexOf(b) + 1 || 99))
-  for (const [table, entries] of ordered) {
-    try {
-      const { error } = await supabase.from(table).upsert(entries.map((entry) => entry.payload))
-      if (error) throw new Error(error.message)
-      await dequeue(entries.flatMap((entry) => entry.ids))
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error)
+    assertCurrent()
+    await useSyncStore.getState().refreshPendingCount()
+    assertCurrent()
+    if (useSyncStore.getState().pendingCount > 0) useSyncStore.getState().setError(failure ?? 'Changes are still waiting to sync')
+    else {
+      useSyncStore.getState().setError(null)
+      useSyncStore.getState().setLastSynced()
     }
-  }
-  for (const { entry, ids } of specials) {
-    try {
-      if (!await replaySpecialEntry(supabase, entry)) throw new Error('Unsupported queued operation')
-      await dequeue(ids)
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error)
-    }
-  }
-  await useSyncStore.getState().refreshPendingCount()
-  if (useSyncStore.getState().pendingCount > 0) {
-    useSyncStore.getState().setError(failure ?? 'Changes are still waiting to sync')
-  } else {
-    useSyncStore.getState().setError(null)
-    useSyncStore.getState().setLastSynced()
-    if (processed) logEvent('info', 'sync', `Sync queue drained: ${processed} items pushed`)
-  }
+  } catch { return processed }
   return processed
 }
 

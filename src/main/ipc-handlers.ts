@@ -22,6 +22,13 @@ import {
 import { validateExternalUrl } from './shell-url'
 
 let repos: Repositories | null = null
+let databaseGeneration = 0
+let databaseUserId: string | null = null
+const databaseHandlers = new Map<string, Parameters<typeof ipcMain.handle>[1]>()
+function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {
+  if (/^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync):/.test(channel)) databaseHandlers.set(channel, listener)
+  ipcMain.handle(channel, listener)
+}
 
 function getRepos(): Repositories {
   if (!repos) {
@@ -93,6 +100,8 @@ function registerAuthHandlers(): void {
   })
 
   ipcMain.handle('auth:clearSession', () => {
+    databaseGeneration++
+    databaseUserId = null
     clearEncryptedSession()
   })
 
@@ -154,6 +163,8 @@ function registerAuthHandlers(): void {
   })
 
   ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
+    databaseGeneration++
+    databaseUserId = userId
     switchDatabase(userId, email)
     // Reset repos so they use the new DB
     repos = null
@@ -223,212 +234,219 @@ function registerAuthHandlers(): void {
 }
 
 export function registerIpcHandlers(): void {
+  ipcMain.handle('sync:captureContext', () => ({ generation: databaseGeneration, userId: databaseUserId }))
+  ipcMain.handle('sync:invokeContext', (event, context, channel: string, args: unknown[]) => {
+    if (context.generation !== databaseGeneration || context.userId !== databaseUserId) throw new Error('Sync database changed')
+    const listener = databaseHandlers.get(channel)
+    if (!listener) throw new Error('Unsupported sync database operation')
+    return listener(event, ...args)
+  })
   registerAuthHandlers()
 
   // ── Tasks ──────────────────────────────────────────────────────────
-  ipcMain.handle('tasks:findById', (_e, id: string) => {
+  handle('tasks:findById', (_e, id: string) => {
     return getRepos().tasks.findById(id) ?? null
   })
 
-  ipcMain.handle('tasks:findByProjectId', (_e, projectId: string) => {
+  handle('tasks:findByProjectId', (_e, projectId: string) => {
     return getRepos().tasks.findByProjectId(projectId)
   })
 
-  ipcMain.handle('tasks:findByStatusId', (_e, statusId: string) => {
+  handle('tasks:findByStatusId', (_e, statusId: string) => {
     return getRepos().tasks.findByStatusId(statusId)
   })
 
-  ipcMain.handle('tasks:findMyDay', (_e, userId: string) => {
+  handle('tasks:findMyDay', (_e, userId: string) => {
     return getRepos().tasks.findMyDay(userId)
   })
 
-  ipcMain.handle('tasks:autoAddMyDay', (_e, userId: string, mode: string) => {
+  handle('tasks:autoAddMyDay', (_e, userId: string, mode: string) => {
     return getRepos().tasks.autoAddMyDayTasks(userId, mode as 'off' | 'due_today' | 'due_today_or_overdue')
   })
 
-  ipcMain.handle('tasks:findArchived', (_e, projectId: string) => {
+  handle('tasks:findArchived', (_e, projectId: string) => {
     return getRepos().tasks.findArchived(projectId)
   })
 
-  ipcMain.handle('tasks:findTemplates', (_e, projectId: string) => {
+  handle('tasks:findTemplates', (_e, projectId: string) => {
     return getRepos().tasks.findTemplates(projectId)
   })
 
-  ipcMain.handle('tasks:findSubtasks', (_e, parentId: string) => {
+  handle('tasks:findSubtasks', (_e, parentId: string) => {
     return getRepos().tasks.findSubtasks(parentId)
   })
 
-  ipcMain.handle('tasks:getSubtaskCount', (_e, parentId: string) => {
+  handle('tasks:getSubtaskCount', (_e, parentId: string) => {
     return getRepos().tasks.getSubtaskCount(parentId)
   })
 
-  ipcMain.handle('tasks:create', (_e, input: Parameters<Repositories['tasks']['create']>[0]) => {
+  handle('tasks:create', (_e, input: Parameters<Repositories['tasks']['create']>[0]) => {
     return getRepos().tasks.create(input)
   })
 
-  ipcMain.handle('tasks:applyRemote', (_e, task: Parameters<Repositories['tasks']['applyRemoteTask']>[0]) => {
+  handle('tasks:applyRemote', (_e, task: Parameters<Repositories['tasks']['applyRemoteTask']>[0]) => {
     return getRepos().tasks.applyRemoteTask(task)
   })
 
-  ipcMain.handle(
+  handle(
     'tasks:update',
     (_e, id: string, input: Parameters<Repositories['tasks']['update']>[1]) => {
       return getRepos().tasks.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('tasks:delete', (_e, id: string) => {
+  handle('tasks:delete', (_e, id: string) => {
     return getRepos().tasks.delete(id)
   })
 
-  ipcMain.handle('tasks:hardDelete', (_e, id: string) => {
+  handle('tasks:hardDelete', (_e, id: string) => {
     return getRepos().tasks.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'tasks:findAllByProject',
     (_e, projectId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().tasks.findAllByProject(projectId, options ?? {})
     }
   )
 
-  ipcMain.handle('tasks:findMaxUpdatedAt', (_e, projectId: string) => {
+  handle('tasks:findMaxUpdatedAt', (_e, projectId: string) => {
     return getRepos().tasks.findMaxUpdatedAt(projectId)
   })
 
-  ipcMain.handle('tasks:reorder', (_e, taskIds: string[]) => {
+  handle('tasks:reorder', (_e, taskIds: string[]) => {
     return getRepos().tasks.reorder(taskIds)
   })
 
-  ipcMain.handle('tasks:addLabel', (_e, taskId: string, labelId: string) => {
+  handle('tasks:addLabel', (_e, taskId: string, labelId: string) => {
     return getRepos().tasks.addLabel(taskId, labelId)
   })
 
-  ipcMain.handle('tasks:removeLabel', (_e, taskId: string, labelId: string) => {
+  handle('tasks:removeLabel', (_e, taskId: string, labelId: string) => {
     return getRepos().tasks.removeLabel(taskId, labelId)
   })
 
-  ipcMain.handle('tasks:applyRemoteTaskLabels', (_e, taskId: string, labelIds: string[]) => {
+  handle('tasks:applyRemoteTaskLabels', (_e, taskId: string, labelIds: string[]) => {
     return getRepos().tasks.applyRemoteTaskLabels(taskId, labelIds)
   })
 
-  ipcMain.handle('tasks:getLabels', (_e, taskId: string) => {
+  handle('tasks:getLabels', (_e, taskId: string) => {
     return getRepos().tasks.getLabels(taskId)
   })
 
-  ipcMain.handle('tasks:getTaskLabelsForUser', (_e, userId: string) => {
+  handle('tasks:getTaskLabelsForUser', (_e, userId: string) => {
     return getRepos().tasks.getTaskLabelsForUser(userId)
   })
 
-  ipcMain.handle('tasks:getTaskLabelsForSharedProjects', () => {
+  handle('tasks:getTaskLabelsForSharedProjects', () => {
     return getRepos().tasks.getTaskLabelsForSharedProjects()
   })
 
-  ipcMain.handle('tasks:duplicate', (_e, id: string, newId: string) => {
+  handle('tasks:duplicate', (_e, id: string, newId: string) => {
     return getRepos().tasks.duplicate(id, newId) ?? null
   })
 
-  ipcMain.handle('tasks:findAllTemplates', (_e, userId: string) => {
+  handle('tasks:findAllTemplates', (_e, userId: string) => {
     return getRepos().tasks.findAllTemplates(userId)
   })
 
-  ipcMain.handle('tasks:saveAsTemplate', (_e, id: string, newId: string) => {
+  handle('tasks:saveAsTemplate', (_e, id: string, newId: string) => {
     return getRepos().tasks.saveAsTemplate(id, newId) ?? null
   })
 
-  ipcMain.handle('tasks:completeRecurring', (_e, taskId: string) => {
+  handle('tasks:completeRecurring', (_e, taskId: string) => {
     return getRepos().tasks.completeRecurringTask(taskId)
   })
 
   // ── Labels ─────────────────────────────────────────────────────────
-  ipcMain.handle('labels:findById', (_e, id: string) => {
+  handle('labels:findById', (_e, id: string) => {
     return getRepos().labels.findById(id) ?? null
   })
 
-  ipcMain.handle('labels:findByIds', (_e, ids: string[]) => {
+  handle('labels:findByIds', (_e, ids: string[]) => {
     return getRepos().labels.findByIds(ids)
   })
 
-  ipcMain.handle('labels:findAll', (_e, userId: string) => {
+  handle('labels:findAll', (_e, userId: string) => {
     return getRepos().labels.findAllForUser(userId)
   })
 
-  ipcMain.handle('labels:findByProjectId', (_e, projectId: string) => {
+  handle('labels:findByProjectId', (_e, projectId: string) => {
     return getRepos().labels.findByProjectId(projectId)
   })
 
-  ipcMain.handle('labels:findByName', (_e, userId: string, name: string) => {
+  handle('labels:findByName', (_e, userId: string, name: string) => {
     return getRepos().labels.findByName(userId, name) ?? null
   })
 
-  ipcMain.handle(
+  handle(
     'labels:adopt',
     (_e, userId: string, foreignLabel: Parameters<Repositories['labels']['adopt']>[1]) => {
       return getRepos().labels.adopt(userId, foreignLabel)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'labels:create',
     (_e, input: Parameters<Repositories['labels']['create']>[0]) => {
       return getRepos().labels.create(input)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'labels:update',
     (_e, id: string, input: Parameters<Repositories['labels']['update']>[1]) => {
       return getRepos().labels.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('labels:delete', (_e, id: string) => {
+  handle('labels:delete', (_e, id: string) => {
     return getRepos().labels.delete(id)
   })
 
-  ipcMain.handle('labels:hardDelete', (_e, id: string) => {
+  handle('labels:hardDelete', (_e, id: string) => {
     return getRepos().labels.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'labels:findAllByUser',
     (_e, userId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().labels.findAllByUser(userId, options ?? {})
     }
   )
 
-  ipcMain.handle('labels:findMaxUpdatedAt', (_e, userId: string) => {
+  handle('labels:findMaxUpdatedAt', (_e, userId: string) => {
     return getRepos().labels.findMaxUpdatedAt(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'labels:applyRemote',
     (_e, label: Parameters<Repositories['labels']['applyRemote']>[0]) => {
       return getRepos().labels.applyRemote(label)
     }
   )
 
-  ipcMain.handle('labels:consolidate', (_e, fromId: string, canonical: Parameters<Repositories['labels']['consolidate']>[1]) => {
+  handle('labels:consolidate', (_e, fromId: string, canonical: Parameters<Repositories['labels']['consolidate']>[1]) => {
     return getRepos().labels.consolidate(fromId, canonical)
   })
 
-  ipcMain.handle('labels:removeFromProject', (_e, projectId: string, labelId: string) => {
+  handle('labels:removeFromProject', (_e, projectId: string, labelId: string) => {
     return getRepos().labels.removeFromProject(projectId, labelId)
   })
 
-  ipcMain.handle('labels:addToProject', (_e, projectId: string, labelId: string) => {
+  handle('labels:addToProject', (_e, projectId: string, labelId: string) => {
     return getRepos().labels.addToProject(projectId, labelId)
   })
 
-  ipcMain.handle('labels:getProjectLabelsForOwner', (_e, userId: string) => {
+  handle('labels:getProjectLabelsForOwner', (_e, userId: string) => {
     return getRepos().labels.getProjectLabelsForOwner(userId)
   })
 
-  ipcMain.handle('labels:getProjectLabelsForSharedProjects', () => {
+  handle('labels:getProjectLabelsForSharedProjects', () => {
     return getRepos().labels.getProjectLabelsForSharedProjects()
   })
 
-  ipcMain.handle(
+  handle(
     'labels:applyRemoteProjectLabel',
     (
       _e,
@@ -443,189 +461,189 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'labels:softDeleteTaskLabelsForProjectLabel',
     (_e, projectId: string, labelId: string) => {
       return getRepos().labels.softDeleteTaskLabelsForProjectLabel(projectId, labelId)
     }
   )
 
-  ipcMain.handle('labels:findByTaskId', (_e, taskId: string) => {
+  handle('labels:findByTaskId', (_e, taskId: string) => {
     return getRepos().labels.findByTaskId(taskId)
   })
 
-  ipcMain.handle('labels:findTaskLabelsByProject', (_e, projectId: string) => {
+  handle('labels:findTaskLabelsByProject', (_e, projectId: string) => {
     return getRepos().labels.findTaskLabelsByProject(projectId)
   })
 
-  ipcMain.handle('labels:reorder', (_e, labelIds: string[]) => {
+  handle('labels:reorder', (_e, labelIds: string[]) => {
     return getRepos().labels.reorder(labelIds)
   })
 
-  ipcMain.handle('labels:findAllWithUsage', (_e, userId: string) => {
+  handle('labels:findAllWithUsage', (_e, userId: string) => {
     return getRepos().labels.findAllWithUsage(userId)
   })
 
-  ipcMain.handle('labels:findProjectsUsingLabel', (_e, userId: string, labelId: string) => {
+  handle('labels:findProjectsUsingLabel', (_e, userId: string, labelId: string) => {
     return getRepos().labels.findProjectsUsingLabel(userId, labelId)
   })
 
-  ipcMain.handle('labels:findActiveLabelsForProject', (_e, projectId: string) => {
+  handle('labels:findActiveLabelsForProject', (_e, projectId: string) => {
     return getRepos().labels.findActiveLabelsForProject(projectId)
   })
 
   // ── Projects ───────────────────────────────────────────────────────
-  ipcMain.handle('projects:findById', (_e, id: string) => {
+  handle('projects:findById', (_e, id: string) => {
     return getRepos().projects.findById(id) ?? null
   })
 
-  ipcMain.handle('projects:findByOwnerId', (_e, ownerId: string) => {
+  handle('projects:findByOwnerId', (_e, ownerId: string) => {
     return getRepos().projects.findByOwnerId(ownerId)
   })
 
-  ipcMain.handle('projects:findDefault', (_e, ownerId: string) => {
+  handle('projects:findDefault', (_e, ownerId: string) => {
     return getRepos().projects.findDefault(ownerId) ?? null
   })
 
-  ipcMain.handle(
+  handle(
     'projects:create',
     (_e, input: Parameters<Repositories['projects']['create']>[0]) => {
       return getRepos().projects.create(input)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'projects:update',
     (_e, id: string, input: Parameters<Repositories['projects']['update']>[1]) => {
       return getRepos().projects.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('projects:delete', (_e, id: string) => {
+  handle('projects:delete', (_e, id: string) => {
     return getRepos().projects.delete(id)
   })
 
-  ipcMain.handle('projects:hardDelete', (_e, id: string) => {
+  handle('projects:hardDelete', (_e, id: string) => {
     return getRepos().projects.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'projects:findAllByOwner',
     (_e, ownerId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().projects.findAllByOwner(ownerId, options ?? {})
     }
   )
 
-  ipcMain.handle('projects:findMaxUpdatedAt', (_e, ownerId: string) => {
+  handle('projects:findMaxUpdatedAt', (_e, ownerId: string) => {
     return getRepos().projects.findMaxUpdatedAt(ownerId)
   })
 
-  ipcMain.handle(
+  handle(
     'projects:applyRemote',
     (_e, project: Parameters<Repositories['projects']['applyRemote']>[0]) => {
       return getRepos().projects.applyRemote(project)
     }
   )
 
-  ipcMain.handle('projects:list', (_e, userId: string) => {
+  handle('projects:list', (_e, userId: string) => {
     return getRepos().projects.getProjectsForUser(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'projects:addMember',
     (_e, projectId: string, userId: string, role: string, invitedBy?: string) => {
       return getRepos().projects.addMember(projectId, userId, role, invitedBy)
     }
   )
 
-  ipcMain.handle('projects:removeMember', (_e, projectId: string, userId: string) => {
+  handle('projects:removeMember', (_e, projectId: string, userId: string) => {
     return getRepos().projects.removeMember(projectId, userId)
   })
 
-  ipcMain.handle('projects:updateMember', (_e, projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }) => {
+  handle('projects:updateMember', (_e, projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }) => {
     return getRepos().projects.updateMember(projectId, userId, updates)
   })
 
-  ipcMain.handle('projects:getMembers', (_e, projectId: string) => {
+  handle('projects:getMembers', (_e, projectId: string) => {
     return getRepos().projects.getMembers(projectId)
   })
 
-  ipcMain.handle('projects:getProjectsForUser', (_e, userId: string) => {
+  handle('projects:getProjectsForUser', (_e, userId: string) => {
     return getRepos().projects.getProjectsForUser(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'projects:updateSidebarOrder',
     (_e, updates: Array<{ id: string; sidebar_order: number }>) => {
       return getRepos().projects.updateSidebarOrder(updates)
     }
   )
 
-  ipcMain.handle('projects:archiveWithTasks', (_e, id: string) => {
+  handle('projects:archiveWithTasks', (_e, id: string) => {
     return getRepos().projects.archiveWithTasks(id)
   })
-  ipcMain.handle('projects:unarchiveWithTasks', (_e, id: string) => {
+  handle('projects:unarchiveWithTasks', (_e, id: string) => {
     return getRepos().projects.unarchiveWithTasks(id)
   })
 
   // ── Statuses ───────────────────────────────────────────────────────
-  ipcMain.handle('statuses:findById', (_e, id: string) => {
+  handle('statuses:findById', (_e, id: string) => {
     return getRepos().statuses.findById(id) ?? null
   })
 
-  ipcMain.handle('statuses:findByProjectId', (_e, projectId: string) => {
+  handle('statuses:findByProjectId', (_e, projectId: string) => {
     return getRepos().statuses.findByProjectId(projectId)
   })
 
-  ipcMain.handle('statuses:findDefault', (_e, projectId: string) => {
+  handle('statuses:findDefault', (_e, projectId: string) => {
     return getRepos().statuses.findDefault(projectId) ?? null
   })
 
-  ipcMain.handle('statuses:findDone', (_e, projectId: string) => {
+  handle('statuses:findDone', (_e, projectId: string) => {
     return getRepos().statuses.findDone(projectId) ?? null
   })
 
-  ipcMain.handle(
+  handle(
     'statuses:create',
     (_e, input: Parameters<Repositories['statuses']['create']>[0]) => {
       return getRepos().statuses.create(input)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'statuses:update',
     (_e, id: string, input: Parameters<Repositories['statuses']['update']>[1]) => {
       return getRepos().statuses.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('statuses:delete', (_e, id: string) => {
+  handle('statuses:delete', (_e, id: string) => {
     return getRepos().statuses.delete(id)
   })
 
-  ipcMain.handle('statuses:hardDelete', (_e, id: string) => {
+  handle('statuses:hardDelete', (_e, id: string) => {
     return getRepos().statuses.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'statuses:findAllByProject',
     (_e, projectId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().statuses.findAllByProject(projectId, options ?? {})
     }
   )
 
-  ipcMain.handle('statuses:findMaxUpdatedAt', (_e, projectId: string) => {
+  handle('statuses:findMaxUpdatedAt', (_e, projectId: string) => {
     return getRepos().statuses.findMaxUpdatedAt(projectId)
   })
 
-  ipcMain.handle(
+  handle(
     'statuses:applyRemote',
     (_e, status: Parameters<Repositories['statuses']['applyRemote']>[0]) => {
       return getRepos().statuses.applyRemote(status)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'statuses:reassignAndDelete',
     (_e, statusId: string, targetStatusId: string) => {
       return getRepos().statuses.reassignAndDelete(statusId, targetStatusId)
@@ -633,30 +651,30 @@ export function registerIpcHandlers(): void {
   )
 
   // ── Users ──────────────────────────────────────────────────────────
-  ipcMain.handle('users:findById', (_e, id: string) => {
+  handle('users:findById', (_e, id: string) => {
     return getRepos().users.findById(id) ?? null
   })
 
-  ipcMain.handle('users:findByEmail', (_e, email: string) => {
+  handle('users:findByEmail', (_e, email: string) => {
     return getRepos().users.findByEmail(email) ?? null
   })
 
-  ipcMain.handle('users:create', (_e, input: Parameters<Repositories['users']['create']>[0]) => {
+  handle('users:create', (_e, input: Parameters<Repositories['users']['create']>[0]) => {
     return getRepos().users.create(input)
   })
 
-  ipcMain.handle(
+  handle(
     'users:update',
     (_e, id: string, input: Parameters<Repositories['users']['update']>[1]) => {
       return getRepos().users.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('users:delete', (_e, id: string) => {
+  handle('users:delete', (_e, id: string) => {
     return getRepos().users.delete(id)
   })
 
-  ipcMain.handle('users:list', () => {
+  handle('users:list', () => {
     return getRepos().users.list()
   })
 
@@ -696,166 +714,166 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Settings ───────────────────────────────────────────────────────
-  ipcMain.handle('settings:get', (_e, userId: string, key: string) => {
+  handle('settings:get', (_e, userId: string, key: string) => {
     return getRepos().settings.get(userId, key)
   })
 
-  ipcMain.handle('settings:set', (_e, userId: string, key: string, value: string | null) => {
+  handle('settings:set', (_e, userId: string, key: string, value: string | null) => {
     return getRepos().settings.set(userId, key, value)
   })
 
-  ipcMain.handle('settings:getAll', (_e, userId: string) => {
+  handle('settings:getAll', (_e, userId: string) => {
     return getRepos().settings.getAll(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'settings:getMultiple',
     (_e, userId: string, keys: string[]) => {
       return getRepos().settings.getMultiple(userId, keys)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'settings:setMultiple',
     (_e, userId: string, settings: Parameters<Repositories['settings']['setMultiple']>[1]) => {
       return getRepos().settings.setMultiple(userId, settings)
     }
   )
 
-  ipcMain.handle('settings:delete', (_e, userId: string, key: string) => {
+  handle('settings:delete', (_e, userId: string, key: string) => {
     return getRepos().settings.delete(userId, key)
   })
 
-  ipcMain.handle('settings:hardDelete', (_e, userId: string, key: string) => {
+  handle('settings:hardDelete', (_e, userId: string, key: string) => {
     return getRepos().settings.hardDelete(userId, key)
   })
 
-  ipcMain.handle(
+  handle(
     'settings:findAllByUser',
     (_e, userId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().settings.findAllByUser(userId, options ?? {})
     }
   )
 
-  ipcMain.handle('settings:findMaxUpdatedAt', (_e, userId: string) => {
+  handle('settings:findMaxUpdatedAt', (_e, userId: string) => {
     return getRepos().settings.findMaxUpdatedAt(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'settings:applyRemote',
     (_e, setting: Parameters<Repositories['settings']['applyRemote']>[0]) => {
       return getRepos().settings.applyRemote(setting)
     }
   )
 
-  ipcMain.handle('settings:findRaw', (_e, userId: string, key: string) => {
+  handle('settings:findRaw', (_e, userId: string, key: string) => {
     return getRepos().settings.findRaw(userId, key) ?? null
   })
 
   // ── Themes ─────────────────────────────────────────────────────────
-  ipcMain.handle('themes:findById', (_e, id: string) => {
+  handle('themes:findById', (_e, id: string) => {
     return getRepos().themes.findById(id) ?? null
   })
 
-  ipcMain.handle('themes:list', (_e, userId: string) => {
+  handle('themes:list', (_e, userId: string) => {
     return getRepos().themes.list(userId)
   })
 
-  ipcMain.handle('themes:listByMode', (_e, mode: string, userId: string) => {
+  handle('themes:listByMode', (_e, mode: string, userId: string) => {
     return getRepos().themes.listByMode(mode, userId)
   })
 
-  ipcMain.handle(
+  handle(
     'themes:create',
     (_e, input: Parameters<Repositories['themes']['create']>[0]) => {
       return getRepos().themes.create(input)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'themes:update',
     (_e, id: string, input: Parameters<Repositories['themes']['update']>[1]) => {
       return getRepos().themes.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('themes:delete', (_e, id: string) => {
+  handle('themes:delete', (_e, id: string) => {
     return getRepos().themes.delete(id)
   })
 
-  ipcMain.handle('themes:hardDelete', (_e, id: string) => {
+  handle('themes:hardDelete', (_e, id: string) => {
     return getRepos().themes.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'themes:findAllByOwner',
     (_e, ownerId: string, options?: { includeTombstones?: boolean; sinceUpdatedAt?: string | null }) => {
       return getRepos().themes.findAllByOwner(ownerId, options ?? {})
     }
   )
 
-  ipcMain.handle('themes:findMaxUpdatedAt', (_e, ownerId: string) => {
+  handle('themes:findMaxUpdatedAt', (_e, ownerId: string) => {
     return getRepos().themes.findMaxUpdatedAt(ownerId)
   })
 
-  ipcMain.handle(
+  handle(
     'themes:applyRemote',
     (_e, theme: Parameters<Repositories['themes']['applyRemote']>[0]) => {
       return getRepos().themes.applyRemote(theme)
     }
   )
 
-  ipcMain.handle('themes:getConfig', (_e, id: string) => {
+  handle('themes:getConfig', (_e, id: string) => {
     return getRepos().themes.getConfig(id) ?? null
   })
 
   // ── Project Templates ────────────────────────────────────────────
-  ipcMain.handle('projectTemplates:findById', (_e, id: string) => {
+  handle('projectTemplates:findById', (_e, id: string) => {
     return getRepos().projectTemplates.findById(id) ?? null
   })
 
-  ipcMain.handle('projectTemplates:findByOwnerId', (_e, ownerId: string) => {
+  handle('projectTemplates:findByOwnerId', (_e, ownerId: string) => {
     return getRepos().projectTemplates.findByOwnerId(ownerId)
   })
 
-  ipcMain.handle('projectTemplates:findAll', (_e, userId: string) => {
+  handle('projectTemplates:findAll', (_e, userId: string) => {
     return getRepos().projectTemplates.findByOwnerId(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'projectTemplates:create',
     (_e, input: Parameters<Repositories['projectTemplates']['create']>[0]) => {
       return getRepos().projectTemplates.create(input)
     }
   )
 
-  ipcMain.handle(
+  handle(
     'projectTemplates:update',
     (_e, id: string, input: Parameters<Repositories['projectTemplates']['update']>[1]) => {
       return getRepos().projectTemplates.update(id, input) ?? null
     }
   )
 
-  ipcMain.handle('projectTemplates:delete', (_e, id: string) => {
+  handle('projectTemplates:delete', (_e, id: string) => {
     return getRepos().projectTemplates.delete(id)
   })
 
-  ipcMain.handle('projectTemplates:hardDelete', (_e, id: string) => {
+  handle('projectTemplates:hardDelete', (_e, id: string) => {
     return getRepos().projectTemplates.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'projectTemplates:findAllByOwner',
     (_e, ownerId: string, options?: { includeTombstones?: boolean }) => {
       return getRepos().projectTemplates.findAllByOwner(ownerId, options ?? {})
     }
   )
 
-  ipcMain.handle('projectTemplates:findMaxUpdatedAt', (_e, ownerId: string) => {
+  handle('projectTemplates:findMaxUpdatedAt', (_e, ownerId: string) => {
     return getRepos().projectTemplates.findMaxUpdatedAt(ownerId)
   })
 
-  ipcMain.handle(
+  handle(
     'projectTemplates:applyRemote',
     (_e, template: Parameters<Repositories['projectTemplates']['applyRemote']>[0]) => {
       return getRepos().projectTemplates.applyRemote(template)
@@ -1080,23 +1098,23 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Sync Queue ────────────────────────────────────────────────────
-  ipcMain.handle('sync:getQueue', () => {
+  handle('sync:getQueue', () => {
     return getRepos().syncQueue.findAll()
   })
 
-  ipcMain.handle('sync:enqueue', (_e, tableName: string, rowId: string, operation: string, payload: string) => {
+  handle('sync:enqueue', (_e, tableName: string, rowId: string, operation: string, payload: string) => {
     return getRepos().syncQueue.enqueue(tableName, rowId, operation as 'INSERT' | 'UPDATE' | 'DELETE', payload)
   })
 
-  ipcMain.handle('sync:dequeue', (_e, id: string) => {
+  handle('sync:dequeue', (_e, id: string) => {
     return getRepos().syncQueue.dequeue(id)
   })
 
-  ipcMain.handle('sync:clear', () => {
+  handle('sync:clear', () => {
     return getRepos().syncQueue.clear()
   })
 
-  ipcMain.handle('sync:count', () => {
+  handle('sync:count', () => {
     return getRepos().syncQueue.count()
   })
 
@@ -1157,35 +1175,37 @@ export function registerIpcHandlers(): void {
 
   // ── Release Notes ──────────────────────────────────────────────────
   // ── Project Areas ────────────────────────────────────────────────
-  ipcMain.handle('projectAreas:findByUserId', (_e, userId: string) => {
+  handle('projectAreas:findById', (_e, id: string) => getRepos().projectAreas.findById(id) ?? null)
+
+  handle('projectAreas:findByUserId', (_e, userId: string) => {
     return getRepos().projectAreas.findByUserId(userId)
   })
 
-  ipcMain.handle('projectAreas:create', (_e, input: import('../shared/types').CreateProjectAreaInput) => {
+  handle('projectAreas:create', (_e, input: import('../shared/types').CreateProjectAreaInput) => {
     return getRepos().projectAreas.create(input)
   })
 
-  ipcMain.handle('projectAreas:update', (_e, id: string, input: import('../shared/types').UpdateProjectAreaInput) => {
+  handle('projectAreas:update', (_e, id: string, input: import('../shared/types').UpdateProjectAreaInput) => {
     return getRepos().projectAreas.update(id, input)
   })
 
-  ipcMain.handle('projectAreas:delete', (_e, id: string) => {
+  handle('projectAreas:delete', (_e, id: string) => {
     return getRepos().projectAreas.delete(id)
   })
 
-  ipcMain.handle('projectAreas:reorder', (_e, areaIds: string[]) => {
+  handle('projectAreas:reorder', (_e, areaIds: string[]) => {
     return getRepos().projectAreas.reorder(areaIds)
   })
 
-  ipcMain.handle('projectAreas:assignProject', (_e, projectId: string, areaId: string | null) => {
+  handle('projectAreas:assignProject', (_e, projectId: string, areaId: string | null) => {
     return getRepos().projectAreas.assignProject(projectId, areaId)
   })
 
-  ipcMain.handle('projectAreas:hardDelete', (_e, id: string) => {
+  handle('projectAreas:hardDelete', (_e, id: string) => {
     return getRepos().projectAreas.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'projectAreas:findAllByUser',
     (
       _e,
@@ -1196,11 +1216,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('projectAreas:findMaxUpdatedAt', (_e, userId: string) => {
+  handle('projectAreas:findMaxUpdatedAt', (_e, userId: string) => {
     return getRepos().projectAreas.findMaxUpdatedAt(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'projectAreas:applyRemote',
     (_e, remote: import('../shared/types').ProjectArea) => {
       return getRepos().projectAreas.applyRemote(remote)
@@ -1253,39 +1273,39 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Saved Views ──────────────────────────────────────────────────
-  ipcMain.handle('savedViews:findById', (_e, id: string) => {
+  handle('savedViews:findById', (_e, id: string) => {
     return getRepos().savedViews.findById(id) ?? null
   })
 
-  ipcMain.handle('savedViews:findByUserId', (_e, userId: string) => {
+  handle('savedViews:findByUserId', (_e, userId: string) => {
     return getRepos().savedViews.findByUserId(userId)
   })
 
-  ipcMain.handle('savedViews:create', (_e, input: import('../shared/types').CreateSavedViewInput) => {
+  handle('savedViews:create', (_e, input: import('../shared/types').CreateSavedViewInput) => {
     return getRepos().savedViews.create(input)
   })
 
-  ipcMain.handle('savedViews:update', (_e, id: string, input: import('../shared/types').UpdateSavedViewInput) => {
+  handle('savedViews:update', (_e, id: string, input: import('../shared/types').UpdateSavedViewInput) => {
     return getRepos().savedViews.update(id, input)
   })
 
-  ipcMain.handle('savedViews:delete', (_e, id: string) => {
+  handle('savedViews:delete', (_e, id: string) => {
     return getRepos().savedViews.delete(id)
   })
 
-  ipcMain.handle('savedViews:reorder', (_e, viewIds: string[]) => {
+  handle('savedViews:reorder', (_e, viewIds: string[]) => {
     return getRepos().savedViews.reorder(viewIds)
   })
 
-  ipcMain.handle('savedViews:countMatching', (_e, filterConfig: string, userId: string) => {
+  handle('savedViews:countMatching', (_e, filterConfig: string, userId: string) => {
     return getRepos().savedViews.countMatchingTasks(filterConfig, userId)
   })
 
-  ipcMain.handle('savedViews:hardDelete', (_e, id: string) => {
+  handle('savedViews:hardDelete', (_e, id: string) => {
     return getRepos().savedViews.hardDelete(id)
   })
 
-  ipcMain.handle(
+  handle(
     'savedViews:findAllByUser',
     (
       _e,
@@ -1296,11 +1316,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('savedViews:findMaxUpdatedAt', (_e, userId: string) => {
+  handle('savedViews:findMaxUpdatedAt', (_e, userId: string) => {
     return getRepos().savedViews.findMaxUpdatedAt(userId)
   })
 
-  ipcMain.handle('savedViews:applyRemote', (_e, remote: import('../shared/types').SavedView) => {
+  handle('savedViews:applyRemote', (_e, remote: import('../shared/types').SavedView) => {
     return getRepos().savedViews.applyRemote(remote)
   })
 

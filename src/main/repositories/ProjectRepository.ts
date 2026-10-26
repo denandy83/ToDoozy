@@ -184,10 +184,10 @@ export class ProjectRepository {
       .prepare(
         `INSERT INTO projects (
           id, name, description, color, icon, owner_id, is_default, is_shared, sidebar_order,
-          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit,
+          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit, is_archived,
           created_at, updated_at, deleted_at
         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            description = excluded.description,
@@ -200,6 +200,7 @@ export class ProjectRepository {
            auto_archive_enabled = excluded.auto_archive_enabled,
            auto_archive_value = excluded.auto_archive_value,
            auto_archive_unit = excluded.auto_archive_unit,
+           is_archived = excluded.is_archived,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
            deleted_at = excluded.deleted_at`
@@ -218,6 +219,7 @@ export class ProjectRepository {
         remote.auto_archive_enabled,
         remote.auto_archive_value,
         remote.auto_archive_unit,
+        remote.is_archived ?? 0,
         toCanonicalIso(remote.created_at),
         toCanonicalIso(remote.updated_at),
         toCanonicalIso(remote.deleted_at ?? null)

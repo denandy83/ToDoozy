@@ -51,7 +51,7 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
 
   // Local-side ops (renderer calls window.api.* under the hood)
   localList(scopeId: string, includeTombstones: boolean): Promise<TLocal[]>
-  localGetById(id: string): Promise<TLocal | null>
+  localGetById(id: string, api?: typeof window.api): Promise<TLocal | null>
   /** Upsert with the remote's `updated_at` and `deleted_at` preserved (no NOW() bump). */
   localApplyRemote(remote: TRemote): Promise<void>
   /** Returns max(updated_at) on local active rows, or null if empty. */
@@ -116,8 +116,8 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
     return window.api.tasks.findAllByProject(projectId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.tasks.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.tasks.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -231,8 +231,8 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
     return window.api.statuses.findAllByProject(projectId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.statuses.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.statuses.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -308,8 +308,8 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
     return window.api.projects.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.projects.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.projects.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -464,8 +464,8 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     return window.api.labels.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.labels.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.labels.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -615,8 +615,8 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     return window.api.themes.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.themes.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.themes.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -748,13 +748,13 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     return rows.filter((row) => !isSettingSyncExcluded(row.key))
   },
 
-  async localGetById(id) {
+  async localGetById(id, api = window.api) {
     const separator = id.indexOf(':')
     if (separator < 1) return null
     const userId = id.slice(0, separator)
     const key = id.slice(separator + 1)
-    const rows = await settingsDescriptor.localList(userId, true)
-    return rows.find((row) => row.key === key) ?? null
+    const rows = await api.settings.findAllByUser(userId, { includeTombstones: true })
+    return isSettingSyncExcluded(key) ? null : rows.find((row) => row.key === key) ?? null
   },
 
   async localApplyRemote(remote) {
@@ -855,8 +855,8 @@ const savedViewsDescriptor: SyncTableDescriptor<SavedView, RemoteSavedView> = {
     return window.api.savedViews.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    const view = await window.api.savedViews.findById(id)
+  async localGetById(id, api = window.api) {
+    const view = await api.savedViews.findById(id)
     return view ?? null
   },
 
@@ -969,13 +969,8 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
     return window.api.projectAreas.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    // Find via list — there's no findById exposed for areas. The reconcile loop
-    // primarily uses localList, so this is a thin best-effort shim.
-    const row = (await window.api.projectAreas.findAllByUser('', { includeTombstones: true })).find(
-      (a) => a.id === id
-    )
-    return row ?? null
+  async localGetById(id, api = window.api) {
+    return api.projectAreas.findById(id)
   },
 
   async localApplyRemote(remote) {
@@ -1074,8 +1069,8 @@ const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTe
     return window.api.projectTemplates.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return (await window.api.projectTemplates.findById(id)) ?? null
+  async localGetById(id, api = window.api) {
+    return (await api.projectTemplates.findById(id)) ?? null
   },
 
   async localApplyRemote(remote) {

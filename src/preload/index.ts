@@ -291,6 +291,8 @@ const api: TodoozyAPI = {
   },
 
   sync: {
+    captureContext: () => ipcRenderer.invoke('sync:captureContext'),
+    invokeContext: (context, channel, args) => ipcRenderer.invoke('sync:invokeContext', context, channel, args),
     getQueue: () => ipcRenderer.invoke('sync:getQueue'),
     enqueue: (tableName, rowId, operation, payload) =>
       ipcRenderer.invoke('sync:enqueue', tableName, rowId, operation, payload),
@@ -332,6 +334,7 @@ const api: TodoozyAPI = {
   },
 
   projectAreas: {
+    findById: (id) => ipcRenderer.invoke('projectAreas:findById', id),
     findByUserId: (userId) => ipcRenderer.invoke('projectAreas:findByUserId', userId),
     create: (input) => ipcRenderer.invoke('projectAreas:create', input),
     update: (id, input) => ipcRenderer.invoke('projectAreas:update', id, input),

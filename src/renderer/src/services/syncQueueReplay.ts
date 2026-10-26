@@ -1,27 +1,29 @@
+import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
 import { writeProjectArchive } from './projectArchiveSync'
 
-async function currentProjectLink(projectId: string, labelId: string): Promise<{ deleted_at: string | null } | undefined> {
-  const project = await window.api.projects.findById(projectId)
+async function currentProjectLink(projectId: string, labelId: string, api = window.api): Promise<{ deleted_at: string | null } | undefined> {
+  const project = await api.projects.findById(projectId)
   if (!project) return undefined
   const links = project.is_shared === 1
-    ? await window.api.labels.getProjectLabelsForSharedProjects()
-    : await window.api.labels.getProjectLabelsForOwner(project.owner_id)
+    ? await api.labels.getProjectLabelsForSharedProjects()
+    : await api.labels.getProjectLabelsForOwner(project.owner_id)
   return links.find((link) => link.project_id === projectId && link.label_id === labelId)
 }
 
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
-export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry): Promise<boolean> {
+export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry, context?: SyncContext): Promise<boolean> {
+  const api = context?.api ?? window.api
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
   if (entry.table_name === 'projects' && payload.archive_with_tasks === true) {
-    const current = await window.api.projects.findById(entry.row_id)
+    const current = await api.projects.findById(entry.row_id)
     if (!current || current.deleted_at) return true
     await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at)
     return true
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {
-    const current = await currentProjectLink(payload.projectId, String(payload.labelId))
+    const current = await currentProjectLink(payload.projectId, String(payload.labelId), api)
     if (!current) return true
     const { error } = await client.from('project_labels').upsert({
       project_id: payload.projectId, label_id: payload.labelId,
@@ -35,7 +37,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       // Read the current local intent: older failed label commands may have
       // been superseded while offline. Never replay them over a newer edit.
       const taskId = payload.task_id
-      const local = await window.api.tasks.getLabels(taskId)
+      const local = await api.tasks.getLabels(taskId)
       const { data: remote, error } = await client.from('task_labels').select('label_id').eq('task_id', taskId)
       if (error) throw new Error(error.message)
       const localIds = new Set(local.map((link) => link.label_id))
@@ -51,7 +53,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
         if (removeError) throw new Error(removeError.message)
       }
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {
-      const current = await currentProjectLink(payload.projectId, payload.labelId)
+      const current = await currentProjectLink(payload.projectId, payload.labelId, api)
       if (!current?.deleted_at) return true
       const { data: tasks, error } = await client.from('tasks').select('id').eq('project_id', payload.projectId)
       if (error) throw new Error(error.message)
@@ -74,4 +76,13 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     return true
   }
   return false
+}
+
+export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncContext): Promise<string> {
+  const payload = JSON.parse(entry.payload)
+  const api = context.api
+  if (entry.table_name === 'projects') return JSON.stringify(await api.projects.findById(entry.row_id) ?? null)
+  if (typeof payload.task_id === 'string') return JSON.stringify((await api.tasks.getLabels(payload.task_id)).map((row) => row.label_id).sort())
+  if (typeof payload.projectId === 'string') return JSON.stringify(await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null)
+  return entry.payload
 }
