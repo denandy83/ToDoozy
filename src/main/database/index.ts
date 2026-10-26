@@ -17,7 +17,7 @@ let currentDbPath: string | null = null
  */
 function wrapStatement(stmt: StatementSync): StatementSync {
   return new Proxy(stmt, {
-    get(target, prop, receiver) {
+    get(target, prop) {
       if (prop === 'run') {
         return (...args: Parameters<StatementSync['run']>): ReturnType<StatementSync['run']> => {
           const result = target.run(...args)
@@ -25,7 +25,7 @@ function wrapStatement(stmt: StatementSync): StatementSync {
           return result
         }
       }
-      const value = Reflect.get(target, prop, receiver)
+      const value = Reflect.get(target, prop, target)
       return typeof value === 'function' ? value.bind(target) : value
     }
   }) as StatementSync
@@ -43,7 +43,7 @@ function wrapStatement(stmt: StatementSync): StatementSync {
  */
 function wrapDatabaseForWriteTracking(raw: DatabaseSync): DatabaseSync {
   return new Proxy(raw, {
-    get(target, prop, receiver) {
+    get(target, prop) {
       if (prop === 'prepare') {
         return (sql: string): StatementSync => wrapStatement(target.prepare(sql))
       }
@@ -53,7 +53,8 @@ function wrapDatabaseForWriteTracking(raw: DatabaseSync): DatabaseSync {
           if (isMutatingExec(sql)) markLocalWrite()
         }
       }
-      const value = Reflect.get(target, prop, receiver)
+      // Native SQLite getters require the real handle as their receiver.
+      const value = Reflect.get(target, prop, target)
       return typeof value === 'function' ? value.bind(target) : value
     }
   }) as DatabaseSync
