@@ -78,3 +78,35 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
     expect((await db.query("UPDATE projects SET is_archived=1,archive_updated_at='2026-01-03' RETURNING is_archived")).rows[0].is_archived).toBe(1)
   } finally { vi.useRealTimers(); await db.close() }
 }, 15000)
+
+it.each([0, 1])('keeps metadata versions independent of archive inheritance=%s', async (state) => {
+  const db = new PGlite()
+  try {
+    await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+      CREATE TABLE projects(id text PRIMARY KEY,name text,description text,is_archived integer,updated_at timestamptz);
+      CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,description text,status_id text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
+      INSERT INTO projects VALUES ('p','New','New description',${state},'2026-01-01T20:00Z');
+      INSERT INTO tasks VALUES ('t','p','New','New description','new-status',${state},'2026-01-01T20:00Z',NULL);`)
+    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T10:00Z';
+      INSERT INTO tasks VALUES ('t','p','Old','Old description','old-status',${1 - state},'2026-01-01T05:00Z',NULL)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,status_id=excluded.status_id,is_archived=excluded.is_archived,updated_at=excluded.updated_at;
+      INSERT INTO projects VALUES ('p','Old','Old description',${1 - state},'2026-01-01T05:00Z','2026-01-02T06:00Z')
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,is_archived=excluded.is_archived,updated_at=excluded.updated_at,archive_updated_at=excluded.archive_updated_at;`)
+    const task = (await db.query('SELECT *,updated_at::text AS stamp FROM tasks')).rows[0]
+    expect(task).toMatchObject({ title: 'New', description: 'New description', status_id: 'new-status', is_archived: state })
+    expect(Date.parse(String(task.stamp))).toBe(Date.parse('2026-01-01T20:00Z'))
+    const project = (await db.query('SELECT *,updated_at::text AS stamp,archive_updated_at::text AS version FROM projects')).rows[0]
+    expect(project).toMatchObject({ name: 'New', description: 'New description', is_archived: 1 - state })
+    expect(Date.parse(String(project.stamp))).toBe(Date.parse('2026-01-01T20:00Z'))
+    expect(Date.parse(String(project.version))).toBe(Date.parse('2026-01-02T06:00Z'))
+    await db.exec(`UPDATE tasks SET title='Newer metadata', updated_at='2026-01-01T21:00Z';`)
+    const inherited = (await db.query('SELECT *,updated_at::text AS stamp FROM tasks')).rows[0]
+    expect(inherited).toMatchObject({ title: 'Newer metadata', is_archived: 1 - state })
+    expect(Date.parse(String(inherited.stamp))).toBe(Date.parse('2026-01-01T21:00Z'))
+    await db.exec(`UPDATE tasks SET title='Latest metadata',updated_at='2026-01-01T22:00Z';
+      UPDATE projects SET name='Stale metadata',updated_at='2026-01-01T04:00Z';`)
+    expect((await db.query('SELECT title FROM tasks')).rows[0].title).toBe('Latest metadata')
+    expect((await db.query('SELECT name FROM projects')).rows[0].name).toBe('New')
+  } finally { await db.close() }
+}, 15000)

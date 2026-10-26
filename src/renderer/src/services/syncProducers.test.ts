@@ -266,6 +266,8 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
   let failAddition = mode === 'failure'
   network.client = { from(table: string) {
     const chain: Record<string, unknown> = {}
+    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    chain.then = (resolve: (value: unknown) => unknown) => resolve({ data: [{ label_id: 'l' }], error: null })
     chain.upsert = (rows: unknown) => {
       chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
         await network.token!()
@@ -290,5 +292,69 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
     expect(repo.syncQueue.count()).toBe(0)
   }
   expect(junction).toEqual(new Set(['t:remote-only', 't:l']))
-  expect(calls.indexOf('project_labels')).toBeLessThan(calls.indexOf('task_labels'))
+  expect(calls).not.toContain('project_labels')
+})
+
+it.each(['online', 'offline', 'failure'])('keeps explicit canonical label additions durable through store entry points: %s', async (mode) => {
+  stage = 'labels'
+  const repo = repos[0]
+  repo.projects.update('p', { is_shared: 1 })
+  repo.labels.create({ id: 'foreign', user_id: 'other', name: 'Private label' })
+  useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: {}, showDetailPanel: false })
+  const palette = new Set<string>(), junction = new Set(['t:remote-only'])
+  let fail = mode === 'failure'
+  network.client = { from(table: string) {
+    let payload: unknown, operation = 'select'
+    const chain: Record<string, unknown> = {}
+    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    chain.upsert = (value: unknown) => { payload = value; operation = 'upsert'; return chain }
+    chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
+      await network.token!()
+      if (operation === 'select') return { data: [...palette].map((label_id) => ({ label_id })), error: null }
+      if (table === 'project_labels' && fail) return { data: null, error: { message: 'synthetic palette failure' } }
+      const values = Array.isArray(payload) ? payload : [payload]
+      if (table === 'project_labels') for (const row of values) palette.add(row.label_id)
+      if (table === 'task_labels') for (const row of values) junction.add(`${row.task_id}:${row.label_id}`)
+      return { data: [], error: null }
+    })().then(resolve, reject)
+    return chain
+  } } as unknown as SupabaseClient
+  if (mode === 'offline') { setOnlineStatus(false); vi.mocked(requireSession).mockResolvedValue(null) }
+  await useTaskStore.getState().addLabel('t', 'foreign')
+  await vi.advanceTimersByTimeAsync(1)
+  if (mode !== 'online') {
+    expect(repo.syncQueue.count()).toBeGreaterThan(0)
+    fail = false
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: 'a' }, access_token: 'synthetic-a' } as Session)
+    setOnlineStatus(true)
+    await processSyncQueue()
+  }
+  expect(palette).toEqual(new Set(['l']))
+  expect(junction).toEqual(new Set(['t:remote-only', 't:l']))
+  expect(repo.syncQueue.count()).toBe(0)
+})
+
+it.each(['online', 'offline'])('does not revive a removed remote palette during a generic %s title edit', async (mode) => {
+  stage = 'labels'
+  const repo = repos[0]
+  repo.projects.update('p', { is_shared: 1 })
+  repo.tasks.addLabel('t', 'l')
+  useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: { t: [repo.labels.findById('l')!] }, showDetailPanel: false })
+  const writes: string[] = []
+  network.client = { from(table: string) {
+    const chain: Record<string, unknown> = {}
+    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    chain.upsert = () => { writes.push(table); return chain }
+    chain.then = (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null })
+    return chain
+  } } as unknown as SupabaseClient
+  setOnlineStatus(mode === 'online')
+  await useTaskStore.getState().updateTask('t', { title: 'Fresh title' })
+  await vi.advanceTimersByTimeAsync(1)
+  setOnlineStatus(true)
+  await processSyncQueue()
+  expect(writes).toContain('tasks')
+  expect(writes).not.toContain('project_labels')
+  expect(writes).not.toContain('task_labels')
+  expect(repo.syncQueue.count()).toBe(0)
 })

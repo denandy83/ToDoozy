@@ -28,6 +28,7 @@ FOR EACH STATEMENT EXECUTE FUNCTION public.project_archive_write_kind('versioned
 CREATE OR REPLACE FUNCTION public.preserve_project_archive_version()
 RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 DECLARE kind text := current_setting('todoozy.project_archive_write_kind', true);
+  archive_state integer; archive_version timestamptz;
 BEGIN
   IF kind = 'legacy' AND NEW.updated_at > coalesce(OLD.archive_updated_at, '-infinity'::timestamptz) THEN
     NEW.archive_updated_at := NEW.updated_at;
@@ -36,31 +37,32 @@ BEGIN
     NEW.is_archived := OLD.is_archived;
     NEW.archive_updated_at := OLD.archive_updated_at;
   END IF;
-  NEW.updated_at := greatest(OLD.updated_at, NEW.updated_at, NEW.archive_updated_at);
+  IF NEW.updated_at < OLD.updated_at THEN
+    archive_state := NEW.is_archived;
+    archive_version := NEW.archive_updated_at;
+    NEW := OLD;
+    NEW.is_archived := archive_state;
+    NEW.archive_updated_at := archive_version;
+  END IF;
   RETURN NEW;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.preserve_project_archive_version() FROM PUBLIC, anon, authenticated, service_role;
 CREATE TRIGGER preserve_project_archive_version
-BEFORE UPDATE OF is_archived, archive_updated_at ON public.projects
+BEFORE UPDATE ON public.projects
 FOR EACH ROW EXECUTE FUNCTION public.preserve_project_archive_version();
 
 CREATE OR REPLACE FUNCTION public.preserve_task_archive_version()
 RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 DECLARE project_state integer; project_version timestamptz;
 BEGIN
+  IF NEW.updated_at < OLD.updated_at THEN RETURN OLD; END IF;
   IF OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL AND NEW.updated_at <= OLD.updated_at THEN RETURN OLD; END IF;
   IF NEW.deleted_at IS NOT NULL THEN RETURN NEW; END IF;
-  IF NEW.updated_at < OLD.updated_at THEN
-    NEW.is_archived := OLD.is_archived;
-    NEW.updated_at := OLD.updated_at;
-    RETURN NEW;
-  END IF;
   SELECT is_archived, archive_updated_at INTO project_state, project_version
     FROM public.projects WHERE id = NEW.project_id;
   IF project_version IS NOT NULL AND NEW.updated_at <= project_version THEN
     NEW.is_archived := project_state;
-    NEW.updated_at := greatest(NEW.updated_at, project_version);
   END IF;
   RETURN NEW;
 END;

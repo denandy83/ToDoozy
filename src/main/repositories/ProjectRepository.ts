@@ -165,72 +165,78 @@ export class ProjectRepository {
    * Skips when local row's updated_at is newer (LWW).
    */
   applyRemote(remote: Project): Project {
-    const existing = this.findById(remote.id)
-    // LWW via numeric epoch — local SQLite stores ISO `Z` form, Supabase
-    // returns `+00:00` form; lexical compare flags equal instants as drift.
-    const metadataNewer = !existing || Date.parse(remote.updated_at) > Date.parse(existing.updated_at)
-    const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) >= Date.parse(existing.archive_updated_at))
-    if (!metadataNewer && (!archiveNewer || remote.is_archived === existing?.is_archived)) return existing!
-    const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote
-    remote = { ...(metadataNewer ? remote : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
-    // `is_shared` is a local-only derived cache (computed from
-    // project_members membership). Preserve the existing local value, or
-    // default to 0 for brand-new rows — sync down for shared projects
-    // sets it to 1 explicitly elsewhere.
-    const isShared = existing?.is_shared ?? 0
-    // `sidebar_order` is a per-device preference, not synced state. The
-    // ON CONFLICT clause uses COALESCE(projects.sidebar_order, excluded.…)
-    // so an existing local value is never clobbered by the owner's ordering
-    // (which would otherwise push a shared project past the sidebar's
-    // MAX_VISIBLE_PROJECTS cutoff on the member's device). Brand-new rows
-    // still take the remote value via the INSERT VALUES below.
-    this.db
-      .prepare(
-        `INSERT INTO projects (
-          id, name, description, color, icon, owner_id, is_default, is_shared, sidebar_order,
-          area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit, is_archived, archive_updated_at,
-          created_at, updated_at, deleted_at
+    return withTransaction(this.db, () => {
+      const existing = this.findById(remote.id)
+      // LWW via numeric epoch — local SQLite stores ISO `Z` form, Supabase
+      // returns `+00:00` form; lexical compare flags equal instants as drift.
+      const metadataNewer = !existing || Date.parse(remote.updated_at) > Date.parse(existing.updated_at)
+      const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) >= Date.parse(existing.archive_updated_at))
+      if (archiveNewer && !remote.deleted_at) {
+        this.db.prepare(`UPDATE tasks SET is_archived=? WHERE project_id=? AND deleted_at IS NULL
+          AND julianday(updated_at) <= julianday(?)`).run(remote.is_archived, remote.id, remote.archive_updated_at!)
+      }
+      if (!metadataNewer && (!archiveNewer || (Date.parse(remote.archive_updated_at!) === Date.parse(existing?.archive_updated_at ?? '') && remote.is_archived === existing?.is_archived))) return existing!
+      const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote
+      remote = { ...(metadataNewer ? remote : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
+      // `is_shared` is a local-only derived cache (computed from
+      // project_members membership). Preserve the existing local value, or
+      // default to 0 for brand-new rows — sync down for shared projects
+      // sets it to 1 explicitly elsewhere.
+      const isShared = existing?.is_shared ?? 0
+      // `sidebar_order` is a per-device preference, not synced state. The
+      // ON CONFLICT clause uses COALESCE(projects.sidebar_order, excluded.…)
+      // so an existing local value is never clobbered by the owner's ordering
+      // (which would otherwise push a shared project past the sidebar's
+      // MAX_VISIBLE_PROJECTS cutoff on the member's device). Brand-new rows
+      // still take the remote value via the INSERT VALUES below.
+      this.db
+        .prepare(
+          `INSERT INTO projects (
+            id, name, description, color, icon, owner_id, is_default, is_shared, sidebar_order,
+            area_id, auto_archive_enabled, auto_archive_value, auto_archive_unit, is_archived, archive_updated_at,
+            created_at, updated_at, deleted_at
+          )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             description = excluded.description,
+             color = excluded.color,
+             icon = excluded.icon,
+             owner_id = excluded.owner_id,
+             is_default = excluded.is_default,
+             sidebar_order = COALESCE(projects.sidebar_order, excluded.sidebar_order),
+             area_id = excluded.area_id,
+             auto_archive_enabled = excluded.auto_archive_enabled,
+             auto_archive_value = excluded.auto_archive_value,
+             auto_archive_unit = excluded.auto_archive_unit,
+             is_archived = excluded.is_archived,
+             archive_updated_at = excluded.archive_updated_at,
+             created_at = excluded.created_at,
+             updated_at = excluded.updated_at,
+             deleted_at = excluded.deleted_at`
         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           name = excluded.name,
-           description = excluded.description,
-           color = excluded.color,
-           icon = excluded.icon,
-           owner_id = excluded.owner_id,
-           is_default = excluded.is_default,
-           sidebar_order = COALESCE(projects.sidebar_order, excluded.sidebar_order),
-           area_id = excluded.area_id,
-           auto_archive_enabled = excluded.auto_archive_enabled,
-           auto_archive_value = excluded.auto_archive_value,
-           auto_archive_unit = excluded.auto_archive_unit,
-           is_archived = excluded.is_archived,
-           archive_updated_at = excluded.archive_updated_at,
-           created_at = excluded.created_at,
-           updated_at = excluded.updated_at,
-           deleted_at = excluded.deleted_at`
-      )
-      .run(
-        remote.id,
-        remote.name,
-        remote.description,
-        remote.color,
-        remote.icon,
-        remote.owner_id,
-        remote.is_default ?? 0,
-        isShared,
-        remote.sidebar_order ?? 0,
-        remote.area_id ?? null,
-        remote.auto_archive_enabled,
-        remote.auto_archive_value,
-        remote.auto_archive_unit,
-        remote.is_archived ?? 0,
-        toCanonicalIso(remote.archive_updated_at ?? null),
-        toCanonicalIso(remote.created_at),
-        toCanonicalIso(remote.updated_at),
-        toCanonicalIso(remote.deleted_at ?? null)
-      )
-    return this.findById(remote.id)!
+        .run(
+          remote.id,
+          remote.name,
+          remote.description,
+          remote.color,
+          remote.icon,
+          remote.owner_id,
+          remote.is_default ?? 0,
+          isShared,
+          remote.sidebar_order ?? 0,
+          remote.area_id ?? null,
+          remote.auto_archive_enabled,
+          remote.auto_archive_value,
+          remote.auto_archive_unit,
+          remote.is_archived ?? 0,
+          toCanonicalIso(remote.archive_updated_at ?? null),
+          toCanonicalIso(remote.created_at),
+          toCanonicalIso(remote.updated_at),
+          toCanonicalIso(remote.deleted_at ?? null)
+        )
+      return this.findById(remote.id)!
+    })
   }
 
   /**

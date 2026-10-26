@@ -33,24 +33,18 @@ function getUserId(): string {
  * the color) if they don't have one yet. Returns the label id to actually link.
  * Mine-already / legacy-null-owner / unknown ids pass through unchanged.
  */
-async function resolveLabelForCurrentUser(taskId: string, labelId: string, origin: SyncProducer): Promise<string> {
+async function resolveLabelForCurrentUser(labelId: string, origin: SyncProducer): Promise<string> {
   const userId = origin.userId ?? ''
   if (!userId) return labelId
   const label = await origin.api.labels.findById(labelId).catch(() => null)
   if (!label || label.user_id === userId || label.user_id == null) return labelId
-  const projectId = useTaskStore.getState().tasks[taskId]?.project_id
   const mine = await origin.api.labels.findByName(userId, label.name).catch(() => null)
   if (mine) {
-    if (projectId) await origin.api.labels.addToProject(projectId, mine.id).catch(() => {})
     return mine.id
   }
   const created = await origin.api.labels.adopt(userId, label)
-  if (projectId) await origin.api.labels.addToProject(projectId, created.id)
   await requireProducerCurrent(origin)
   useLabelStore.setState((state) => ({ labels: { ...state.labels, [created.id]: created } }))
-  const { pushLabel, pushProjectLabel } = await import('../../services/PersonalSyncService')
-  await pushLabel(created, userId, origin)
-  if (projectId) await pushProjectLabel(projectId, created.id, null, origin)
   return created.id
 }
 
@@ -750,8 +744,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       // Resolve to the current user's own same-name label before linking, so
       // we never attach another member's label id to this user's task (#d5b138b1).
-      const linkId = await resolveLabelForCurrentUser(taskId, labelId, origin)
+      const linkId = await resolveLabelForCurrentUser(labelId, origin)
       await api.tasks.addLabel(taskId, linkId)
+      const projectId = (await api.tasks.findById(taskId))?.project_id
+      const { pushProjectLabel } = await import('../../services/PersonalSyncService')
+      if (projectId) await pushProjectLabel(projectId, linkId, null, origin)
       await get().hydrateTaskLabels(taskId, origin)
       const labels = get().taskLabels[taskId] ?? []
       const added = labels.find((l) => l.id === linkId)
@@ -1003,7 +1000,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const origin = captureSyncProducer()
     const api = origin.api
     try {
-      await Promise.all(ids.map((id) => api.tasks.addLabel(id, labelId)))
+      const linkId = await resolveLabelForCurrentUser(labelId, origin)
+      await Promise.all(ids.map((id) => api.tasks.addLabel(id, linkId)))
+      const { pushProjectLabel } = await import('../../services/PersonalSyncService')
+      const projectIds = new Set((await Promise.all(ids.map((id) => api.tasks.findById(id)))).filter((task) => !!task).map((task) => task.project_id))
+      for (const projectId of projectIds) await pushProjectLabel(projectId, linkId, null, origin)
       // Re-hydrate labels for affected tasks
       const labelResults: Record<string, Label[]> = {}
       for (const id of ids) {

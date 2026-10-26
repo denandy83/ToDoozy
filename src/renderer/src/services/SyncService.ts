@@ -550,7 +550,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
       groups.set(key, [...(groups.get(key) ?? []), entry])
     }
     let failure: string | null = null
-    const priority = ['projects', 'user_labels', 'statuses', 'tasks']
+    const priority = ['projects', 'user_labels', 'statuses', 'project_labels', 'tasks']
     const ordered = [...groups.values()].sort((a, b) =>
       (priority.indexOf(a[0].table_name) + 1 || 99) - (priority.indexOf(b[0].table_name) + 1 || 99))
     const work = ordered.map((entries) => {

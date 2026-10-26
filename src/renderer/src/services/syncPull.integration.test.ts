@@ -6,7 +6,7 @@ import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { fullPull, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
-import { syncProjectDown } from './SyncService'
+import { syncProjectDown, processSyncQueue, setOnlineStatus } from './SyncService'
 import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshSearchIndex } from './searchSync'
 import { refreshProjectLabels } from './remoteProjectRefresh'
@@ -50,8 +50,11 @@ function makeClient(): SupabaseClient {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
     let limit = 1000, columns = '*'
+    let patch: Record<string, unknown> | null = null
     let remove = false
     const chain = {
+      update(value: Record<string, unknown>) { patch = value; return chain },
+      lte(key: string, value: string) { filters.push((row) => String(row[key]) <= value); return chain },
       delete() { remove = true; return chain },
       select(value = '*') { columns = value; return chain },
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return chain },
@@ -63,6 +66,11 @@ function makeClient(): SupabaseClient {
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       then(resolve: (value: unknown) => unknown) {
+        if (patch) {
+          const selected = (rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)))
+          if (table !== 'projects') for (const row of selected) Object.assign(row, patch)
+          return Promise.resolve(resolve({ data: selected, error: null }))
+        }
         if (remove) {
           rows[table] = (rows[table] ?? []).filter((row) => !filters.every((filter) => filter(row)))
           return Promise.resolve(resolve({ data: [], error: null }))
@@ -92,6 +100,11 @@ beforeEach(() => {
   const api = new Proxy({}, {
     get: (_, ns: keyof typeof repo) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
+        if (String(ns) === 'sync') {
+          if (method === 'getQueue') return repo.syncQueue.findAll()
+          if (method === 'count') return repo.syncQueue.count()
+          if (method === 'dequeue') return repo.syncQueue.dequeue(String(args[0]))
+        }
         const target = repo[ns] as unknown as Record<string, (...args: unknown[]) => unknown>
         return target[ns === 'tasks' && method === 'applyRemote' ? 'applyRemoteTask' : method](...args)
       }
@@ -212,3 +225,56 @@ it.each([0, 1].flatMap((archived) => ['startup', 'search', 'full', 'incremental'
     expect(repo.tasks.findById(task.id)).toMatchObject({ deleted_at: t5, updated_at: t5 })
   }
 )
+
+it.each([0, 1].flatMap((archived) => ['startup', 'search', 'full', 'incremental'].map((path) => ({ archived, path }))))(
+  'preserves newer metadata during $path archive inheritance=$archived', async ({ archived, path }) => {
+    const t1 = '2026-01-01T01:00:00.000Z', t8 = '2026-01-01T08:00:00.000Z', t10 = '2026-01-01T10:00:00.000Z'
+    const task = repo.tasks.create({ id: 'edited', project_id: projectId, owner_id: 'u', title: 'New', description: 'New description', status_id: 'open' })
+    db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(t8, task.id)
+    db.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(t8, projectId)
+    rows.projects = [{ ...repo.projects.findById(projectId), is_archived: archived, archive_updated_at: t10, updated_at: t1, name: 'Old name' }]
+    rows.project_members = [{ project_id: projectId, user_id: 'u' }]
+    rows.tasks = [{ ...task, title: 'Old', description: 'Old description', is_archived: archived ? 0 : 1, updated_at: t1 }]
+    repo.projects.addMember(projectId, 'u', 'owner')
+    if (path === 'startup') await syncProjectDown(projectId, 'u')
+    else if (path === 'search') await refreshSearchIndex('u')
+    else if (path === 'full') {
+      const imported = `${projectId}-imported`
+      rows.projects = [{ ...rows.projects[0], id: imported }]
+      rows.project_members = [{ project_id: imported, user_id: 'u' }]
+      rows.statuses = [{ ...repo.statuses.findById('open'), id: 'full-open', project_id: imported }]
+      rows.tasks = [{ ...rows.tasks[0], project_id: imported, status_id: 'full-open' }]
+      await fullPull('u')
+      expect(repo.projects.findById(imported)?.archive_updated_at).toBe(t10)
+    } else {
+      repo.projects.applyRemote(rows.projects[0] as never)
+      await pullNewTasks(projectId, context)
+    }
+    expect(repo.tasks.findById(task.id)).toMatchObject({ title: 'New', description: 'New description', status_id: 'open', updated_at: t8, is_archived: path === 'full' ? task.is_archived : archived })
+    if (path !== 'full') expect(repo.projects.findById(projectId)).toMatchObject({ name: 'Project', updated_at: t8, archive_updated_at: t10 })
+    const current = repo.tasks.findById(task.id)!
+    repo.tasks.applyRemoteTask({ ...current, title: 'Later metadata', updated_at: '2026-01-01T09:00:00.000Z' })
+    expect(repo.tasks.findById(task.id)?.title).toBe('Later metadata')
+  }
+)
+
+it.each([0, 1])('converges rejected equal-version archive=%s before queue completion and subsequent pull', async (state) => {
+  setOnlineStatus(true)
+  const t10 = '2026-01-01T10:00:00.000Z', t11 = '2026-01-01T11:00:00.000Z'
+  db.prepare('UPDATE projects SET updated_at=?,archive_updated_at=?,is_archived=? WHERE id=?').run(t10, t10, state, projectId)
+  for (const id of ['affected', 'later', 'deleted']) {
+    repo.tasks.create({ id, project_id: projectId, owner_id: 'u', status_id: 'open', title: id })
+    db.prepare('UPDATE tasks SET updated_at=?,is_archived=?,deleted_at=? WHERE id=?').run(id === 'later' ? t11 : t10, state, id === 'deleted' ? t10 : null, id)
+  }
+  repo.syncQueue.enqueue('projects', projectId, 'UPDATE', JSON.stringify({ id: projectId, archive_with_tasks: true, is_archived: state }))
+  rows.projects = [{ ...repo.projects.findById(projectId), is_archived: 1 - state }]
+  rows.tasks = [{ ...repo.tasks.findById('affected'), is_archived: 1 - state }, { ...repo.tasks.findById('later') }]
+  expect(await processSyncQueue(context)).toBe(1)
+  expect(repo.syncQueue.count()).toBe(0)
+  expect(repo.tasks.findById('affected')).toMatchObject({ is_archived: 1 - state, updated_at: t10 })
+  expect(repo.tasks.findById('later')).toMatchObject({ is_archived: state, updated_at: t11 })
+  expect(repo.tasks.findById('deleted')).toMatchObject({ is_archived: state, deleted_at: t10 })
+  await pullNewTasks(projectId, context)
+  expect(repo.tasks.findById('affected')?.is_archived).toBe(1 - state)
+  expect(repo.tasks.findById('later')?.is_archived).toBe(state)
+})

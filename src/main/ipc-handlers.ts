@@ -26,7 +26,7 @@ let databaseGeneration = 0
 let databaseUserId: string | null = null
 const databaseHandlers = new Map<string, Parameters<typeof ipcMain.handle>[1]>()
 function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {
-  if (/^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync):/.test(channel)) databaseHandlers.set(channel, listener)
+  if (channel === 'activityLog:create' || /^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync):/.test(channel)) databaseHandlers.set(channel, listener)
   ipcMain.handle(channel, listener)
 }
 
@@ -691,7 +691,7 @@ export function registerIpcHandlers(): void {
     return getRepos().activityLog.findByUserId(userId)
   })
 
-  ipcMain.handle(
+  handle(
     'activityLog:create',
     (_e, input: Parameters<Repositories['activityLog']['create']>[0]) => {
       return getRepos().activityLog.create(input)
