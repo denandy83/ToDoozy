@@ -4,6 +4,7 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskLabel,
+  TaskLabelSyncState,
   Label,
   TaskLabelMapping,
   CreateLabelInput,
@@ -66,7 +67,9 @@ export interface TasksAPI {
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
-  applyRemoteTaskLabels(taskId: string, labelIds: string[]): Promise<number>
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): Promise<number>
+  getLabelState(taskId: string): Promise<TaskLabelSyncState[]>
+  acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): Promise<void>
   getLabels(taskId: string): Promise<TaskLabel[]>
   getTaskLabelsForUser(userId: string): Promise<TaskLabel[]>
   getTaskLabelsForSharedProjects(): Promise<TaskLabel[]>

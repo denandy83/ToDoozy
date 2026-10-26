@@ -77,8 +77,9 @@ function makeClient(): SupabaseClient {
         if (values) {
           if (table === 'tasks' && rejectedStatus && values.some((row) => row.status_id === rejectedStatus)) return Promise.resolve(resolve({ data: null, error: { message: 'Status must be active and belong to the task project' } }))
           for (const value of values) {
-            const existing = (rows[table] ?? []).find((row) => row.id === value.id)
-            if (existing && Date.parse(String(value.updated_at)) >= Date.parse(String(existing.updated_at))) Object.assign(existing, value)
+            const keys=table==='task_labels'?['task_id','label_id']:table==='project_labels'?['project_id','label_id']:['id']
+            const existing = (rows[table] ?? []).find((row) => keys.every((key)=>row[key]===value[key]))
+            if (existing && (table.endsWith('_labels') || Date.parse(String(value.updated_at)) >= Date.parse(String(existing.updated_at)))) Object.assign(existing, value)
             else if (!existing) (rows[table] ??= []).push({ ...value })
           }
           return Promise.resolve(resolve({ data: [], error: null }))
@@ -349,7 +350,21 @@ it('refreshes shared task/status metadata during public reconcile before replayi
   repo.syncQueue.enqueue('tasks',task.id,'UPDATE',JSON.stringify(repo.tasks.findById(task.id)))
   expect(await processSyncQueue(context)).toBe(0)
   expect(repo.syncQueue.count()).toBe(1)
+  const personal=repo.projects.create({id:'personal-label-project',owner_id:'u',name:'Personal'})
+  repo.projects.addMember(personal.id,'u','owner')
+  rows.projects.push({...personal})
+  rows.project_labels=[];rows.user_labels=[]
+  for(const project_id of [projectId,personal.id]) {
+    const label=repo.labels.create({id:project_id+'-label',user_id:'u',name:project_id+' Label'})
+    repo.labels.applyRemoteProjectLabel({project_id,label_id:label.id,created_at:'2020-01-01T00:00:00Z',deleted_at:'2020-01-01T10:00:00Z'})
+    rows.user_labels.push({...label})
+    rows.project_labels.push({project_id,label_id:label.id,created_at:'2020-01-01T20:00:00Z',deleted_at:null})
+  }
   await reconcile('u')
+  for(const project_id of [projectId,personal.id]) {
+    expect(repo.labels.findByProjectId(project_id).map((row)=>row.id)).toEqual([project_id+'-label'])
+    expect(rows.project_labels.find((row)=>row.project_id===project_id)).toMatchObject({deleted_at:null,created_at:'2020-01-01T20:00:00Z'})
+  }
   expect(repo.syncQueue.count()).toBe(0)
   expect(rows.tasks[0]).toMatchObject({title:'Cloud newer metadata',status_id:'replacement',is_archived:1,archive_updated_at:'2099-01-01T12:00:00.000Z'})
   expect(repo.tasks.findById(task.id)).toMatchObject({status_id:'replacement',is_archived:1})
@@ -373,5 +388,24 @@ it.each(['startup','realtime'])('preserves pending project label removal through
   else await refreshProjectLabels(projectId,context)
   expect(db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'pending-label')?.deleted_at).toBe(current.deleted_at)
   expect(repo.labels.findByTaskId(task.id)).toEqual([])
-  expect(repo.syncQueue.count()).toBe(1)
+  expect(repo.syncQueue.findAll().filter((entry)=>JSON.parse(entry.payload).remove_project_label)).toHaveLength(1)
+  expect(repo.syncQueue.findAll().filter((entry)=>JSON.parse(entry.payload).assignment_intent)).toHaveLength(1)
+})
+
+it.each(['complete','second-page-failure'])('converges a 502-to-501 assignment snapshot only after a full read (%s)',async(mode)=>{
+  const task=repo.tasks.create({id:'paged-labels',project_id:projectId,owner_id:'u',status_id:'open',title:'Paged'})
+  const ids=Array.from({length:502},(_,index)=>'page-label-'+String(index).padStart(4,'0'))
+  rows.user_labels=[]
+  for(const id of ids) {
+    const label=repo.labels.create({id,user_id:'u',name:id})
+    rows.user_labels.push({...label})
+    repo.labels.applyRemoteProjectLabel({project_id:projectId,label_id:id,created_at:task.created_at,deleted_at:null})
+  }
+  repo.tasks.applyRemoteTaskLabels(task.id,ids)
+  rows.task_labels=ids.slice(0,501).map((label_id)=>({task_id:task.id,label_id,deleted_at:null}))
+  if(mode==='second-page-failure') failedTable='task_labels'
+  await pullTaskLabelsForTasks([task.id],'u',context)
+  expect(pageCounts.task_labels).toBe(2)
+  expect(repo.tasks.getLabels(task.id)).toHaveLength(mode==='complete'?501:502)
+  expect(repo.labels.findByProjectId(projectId)).toHaveLength(502)
 })

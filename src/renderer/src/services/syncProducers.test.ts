@@ -282,7 +282,7 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
   } } as unknown as SupabaseClient
   setOnlineStatus(mode !== 'offline')
   await syncTaskChange(repo.tasks.findById('t')!, 'UPDATE')
-  if (mode === 'online') expect(repo.syncQueue.count()).toBe(0)
+  if (mode === 'online') {await processSyncQueue();expect(repo.syncQueue.count()).toBe(0)}
   else {
     expect(junction.has('t:l')).toBe(false)
     expect(repo.syncQueue.count()).toBeGreaterThan(0)
@@ -292,7 +292,7 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
     expect(repo.syncQueue.count()).toBe(0)
   }
   expect(junction).toEqual(new Set(['t:remote-only', 't:l']))
-  expect(calls).not.toContain('project_labels')
+  expect(calls).toContain('project_labels')
 })
 
 it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single', 'bulk'].flatMap((path) => ['existing', 'adopted'].map((resolution) => ({ mode, path, resolution })))))('keeps consolidated additions durable: $mode/$path/$resolution', async ({ mode, path, resolution }) => {
@@ -358,7 +358,7 @@ it.each(['online', 'offline'])('does not revive a removed remote palette during 
   const repo = repos[0]
   repo.projects.update('p', { is_shared: 1 })
   repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'l',created_at:'2020-01-01T00:00:00Z',deleted_at:null})
-  repo.tasks.addLabel('t', 'l')
+  repo.tasks.applyRemoteTaskLabels('t',['l'])
   useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: { t: [repo.labels.findById('l')!] }, showDetailPanel: false })
   const writes: string[] = []
   network.client = { from(table: string) {

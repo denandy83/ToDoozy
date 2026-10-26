@@ -13,6 +13,8 @@ import { useTaskStore } from '../shared/stores/taskStore'
 import type { TodoozyAPI } from '../../../preload/index.d'
 import { captureSyncContext } from './syncContext'
 import { SYNC_TABLES } from './syncTables'
+import { syncTaskLabelChoices } from './taskLabelAdditions'
+import { flush as flushTaskBatch } from './TaskBatchSyncManager'
 import { logEvent } from '../shared/stores/logStore'
 
 const ipc = vi.hoisted(() => ({ handlers: new Map<string, (...args: unknown[]) => unknown>(), database: null as unknown as DatabaseSync }))
@@ -29,6 +31,7 @@ const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(c
 let beforeRpc: (() => Promise<void>) | null, afterRpc: (() => Promise<void>) | null, failTaskWrites: boolean, failRecovery: boolean, failRecoveryResponse: boolean
 let beforeLabelWrite: (()=>Promise<void>) | null
 let taskUpdates: Array<Record<string,unknown>>
+let afterLabelSnapshot: (()=>Promise<void>) | null
 
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url,_key,options) => { pinned.token=options.accessToken; return pinned.client }) }))
@@ -67,7 +70,7 @@ beforeEach(async () => {
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
   }
   await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[task,project,source])
-  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; setOnlineStatus(false)
+  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; setOnlineStatus(false)
   useAuthStore.setState({ currentUser: { id: owner } as never })
   useStatusStore.setState({ statuses: Object.fromEntries(repos.statuses.findByProjectId(project).map((row) => [row.id,row])), error: null })
   vi.mocked(requireSession).mockResolvedValue({ user: { id: owner }, access_token: 'synthetic-owner' } as Session)
@@ -78,7 +81,7 @@ beforeEach(async () => {
   vi.stubGlobal('window',{api:api as TodoozyAPI})
   useTaskStore.setState({tasks:{[task]:repos.tasks.findById(task)!},taskLabels:{},showDetailPanel:false})
   pinned.client={ from(table:string) {
-    let columns='*', values: Array<Record<string,unknown>> | null=null, patch: Record<string,unknown> | null=null
+    let columns='*', values: Array<Record<string,unknown>> | null=null, patch: Record<string,unknown> | null=null, removing=false
     const filters: Array<[string,unknown,string]>=[]
     const execute=async () => {
       await pinned.token!()
@@ -97,18 +100,22 @@ beforeEach(async () => {
         const params:unknown[]=patch?Object.values(patch):[]
         const bind=(value:unknown):string => { params.push(value); return '$'+params.length }
         const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:`${quote(key)}=${bind(value)}`).join(' AND ')
+        if(removing) return {data:(await remote.query(`DELETE FROM ${quote(table)} WHERE ${where} RETURNING *`,params)).rows,error:null}
         if(patch) {
           const result=await remote.query(`UPDATE ${quote(table)} SET ${Object.keys(patch).map((key,index)=>`${quote(key)}=$${index+1}`).join(',')} WHERE ${where} RETURNING id`,params)
           if(failRecoveryResponse) {failRecoveryResponse=false;throw new Error('synthetic lost recovery response')}
           return {data:JSON.parse(JSON.stringify(result.rows)),error:null}
         }
-        return {data:JSON.parse(JSON.stringify((await remote.query(`SELECT ${columns} FROM ${quote(table)}${where?' WHERE '+where:''}`,params)).rows)),error:null}
+        const result=JSON.parse(JSON.stringify((await remote.query(`SELECT ${columns} FROM ${quote(table)}${where?' WHERE '+where:''}`,params)).rows))
+        if(table==='task_labels' && afterLabelSnapshot) {const hook=afterLabelSnapshot;afterLabelSnapshot=null;await hook()}
+        return {data:result,error:null}
       } catch(error) { return {data:null,error:{message:String(error)}} }
     }
     const chain={
       select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
       is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
       order() {return chain},limit() {return chain},or() {return chain},
+      delete() {removing=true;return chain},
       update(value:Record<string,unknown>) {patch=value;if(table==='tasks') taskUpdates.push(value);return chain},
       upsert(value:Array<Record<string,unknown>> | Record<string,unknown>) {values=Array.isArray(value)?value:[value];return chain},
       async maybeSingle() {const result=await execute();return {...result,data:result.data?.[0]??null}},
@@ -354,14 +361,12 @@ it.each(['unchanged','edit','delete','newer-cloud','failure','denied'])('converg
   else if(mode!=='unchanged') await assertPulledIntent(mode==='delete'?'delete':'edit')
 },15000)
 
-it.each(['refresh','import'])('protects actual task-store project-label re-add throughout preflight and %s',async(mode)=>{
+it.each(['refresh','import'].flatMap((mode)=>['removed','active-cache'].map((cache)=>({mode,cache}))))('protects actual task-store project-label re-add throughout $mode with $cache',async({mode,cache})=>{
   await prepareStoreRace()
   const labelId=id(70)
   const label=repos.labels.create({id:labelId,user_id:owner,name:'Re-add me'})
-  repos.labels.addToProject(project,labelId)
-  repos.labels.removeFromProject(project,labelId)
-  const removed=repos.labels.getProjectLabelsForSharedProjects().find((row)=>row.label_id===labelId)!
-  repos.syncQueue.clear()
+  const removed={project_id:project,label_id:labelId,created_at:'2020-01-01T00:00:00.000Z',deleted_at:'2020-01-01T10:00:00.000Z'}
+  repos.labels.applyRemoteProjectLabel({...removed,deleted_at:cache==='active-cache'?null:removed.deleted_at})
   const client=await captureSyncContext()
   await client.client.from('user_labels').upsert(label)
   await client.client.from('project_labels').upsert(removed)
@@ -405,4 +410,64 @@ it.each(['single','bulk'])('uses persisted shared %s tombstones across authentic
   const actual=(await remote.query<{title:string;deleted_at:string|null}>('SELECT title,deleted_at FROM tasks')).rows[0]
   expect(actual).toMatchObject({title:'Newer member edit',deleted_at:null})
   expect(repos.tasks.findById(task)?.updated_at).toBe(deleted.updated_at)
+},15000)
+
+async function seedSettledAssignments(): Promise<string[]> {
+  await prepareStoreRace()
+  const context=await captureSyncContext()
+  const ids=[id(71),id(72)]
+  for(const labelId of ids) {
+    const label=repos.labels.create({id:labelId,user_id:owner,name:'Assignment '+labelId})
+    await context.client.from('user_labels').upsert(label)
+    const link={project_id:project,label_id:labelId,created_at:'2020-01-01T00:00:00.000Z',deleted_at:null}
+    repos.labels.applyRemoteProjectLabel(link)
+    await context.client.from('project_labels').upsert(link)
+  }
+  repos.tasks.applyRemoteTaskLabels(task,ids)
+  await context.client.from('task_labels').upsert(ids.map((label_id)=>({task_id:task,label_id,deleted_at:null})))
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  return ids
+}
+it.each(['empty','one','pending-add','pending-remove','ack-during-read','database-switch'])('applies complete assignment snapshots safely (%s)',async(mode)=>{
+  const ids=await seedSettledAssignments()
+  const context=await captureSyncContext()
+  await remote.query('DELETE FROM task_labels'+(mode==='one'?' WHERE label_id=$1':''),mode==='one'?[ids[0]]:[])
+  if(mode==='pending-add') repos.tasks.addLabel(task,ids[0])
+  if(mode==='pending-remove') {repos.tasks.removeLabel(task,ids[0]);await context.client.from('task_labels').upsert({task_id:task,label_id:ids[0],deleted_at:null})}
+  if(mode==='ack-during-read') afterLabelSnapshot=async()=>{repos.tasks.addLabel(task,ids[0]);await syncTaskLabelChoices(context.client,[task],context.api)}
+  if(mode==='database-switch') afterLabelSnapshot=async()=>{await invoke('auth:switchDatabase',owner)}
+  const {pullTaskLabelsForTasks}=await import('./PersonalSyncService')
+  await pullTaskLabelsForTasks([task],owner,context)
+  const actual=repos.tasks.getLabels(task).map((row)=>row.label_id)
+  expect(actual).toEqual(mode==='database-switch'?ids:mode==='one'?[ids[1]]:mode==='pending-add'||mode==='ack-during-read'?[ids[0]]:[])
+  expect(repos.labels.findByProjectId(project).map((row)=>row.id).sort()).toEqual(ids)
+},15000)
+it.each([0,1].flatMap((shared)=>['offline','buffered'].map((delivery)=>({shared,delivery}))))('delivers actual $delivery task-only removal (shared=$shared)',async({shared,delivery})=>{
+  const ids=await seedSettledAssignments()
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  setOnlineStatus(delivery==='buffered')
+  if(delivery==='offline') vi.mocked(requireSession).mockResolvedValue(null)
+  if(delivery==='buffered') useTaskStore.setState({lastSelectedTaskId:task,showDetailPanel:true})
+  await useTaskStore.getState().removeLabel(task,ids[0])
+  const {pullTaskLabelsForTasks}=await import('./PersonalSyncService')
+  vi.mocked(requireSession).mockResolvedValue({user:{id:owner},access_token:'synthetic-owner'} as Session)
+  await pullTaskLabelsForTasks([task],owner,await captureSyncContext())
+  expect(repos.tasks.getLabels(task).map((row)=>row.label_id)).toEqual([ids[1]])
+  setOnlineStatus(true)
+  if(delivery==='buffered') await flushTaskBatch(task)
+  await processSyncQueue();await processSyncQueue()
+  expect((await remote.query<{label_id:string}>('SELECT label_id FROM task_labels ORDER BY label_id')).rows.map((row)=>row.label_id)).toEqual([ids[1]])
+  expect(repos.syncQueue.count()).toBe(0)
+  expect(repos.labels.findByProjectId(project)).toHaveLength(2)
+},15000)
+it.each([0,1])('metadata edits do not recreate unseen assignment removals (shared=%s)',async(shared)=>{
+  const ids=await seedSettledAssignments()
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  await remote.query('DELETE FROM task_labels WHERE label_id=$1',[ids[0]])
+  setOnlineStatus(true)
+  useTaskStore.setState({lastSelectedTaskId:task,showDetailPanel:true})
+  await useTaskStore.getState().updateTask(task,{title:'Metadata only'})
+  await flushTaskBatch(task)
+  await processSyncQueue()
+  expect((await remote.query<{label_id:string}>('SELECT label_id FROM task_labels')).rows.map((row)=>row.label_id)).toEqual([ids[1]])
 },15000)

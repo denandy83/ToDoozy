@@ -1,3 +1,4 @@
+import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { requireSession } from './sessionRecovery'
 import { useAuthStore } from '../shared/stores/authStore'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
@@ -176,7 +177,6 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
   return withSyncProducer(async (origin) => {
     if (!(await hasLiveSession(origin, 'pushTask', `task=${task.id}`))) {
       await origin.api.sync.enqueue('tasks', task.id, 'UPDATE', JSON.stringify(task))
-      await origin.api.sync.enqueue('task_labels', task.id, 'UPDATE', JSON.stringify({ task_id: task.id }))
       await refreshProducerPending(origin)
       if (await origin.isCurrent() && useSyncStore.getState().status === 'synced') useSyncStore.getState().setStatus('syncing')
       return
@@ -186,14 +186,6 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
 
       // Ensure the project exists in Supabase (RLS requires project_members entry)
       await ensureProjectInSupabase(task.project_id, origin)
-
-      // task_labels is the source of truth; we used to also write a denormalized
-      // `tasks.label_names` JSON for the shared-project Realtime fast-path, but
-      // it caused rename drift and isn't needed once realtime handlers query the
-      // junction directly. We still load labelIds here for the post-push junction
-      // diff below.
-      const taskLabels = await origin.api.tasks.getLabels(task.id)
-      const labelIds = taskLabels.map((tl) => tl.label_id)
 
       const payload = {
         id: task.id,
@@ -224,41 +216,7 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
       } else {
         await markSynced(origin)
         logEvent('info', 'sync', `Pushed task "${task.title}"`, `id=${task.id} project=${task.project_id}`)
-        // Sync the task_labels junction — the tasks.label_names JSON is denormalized
-        // metadata only; the junction is what cross-device task_labels reads use.
-        // Diff local vs remote and apply both directions so add/remove on this device
-        // propagates to Supabase.
-        try {
-          const { data: remoteTaskLabels, error: labelReadError } = await readAll(() => supabase
-            .from('task_labels')
-            .select('label_id').is('deleted_at', null)
-            .eq('task_id', task.id), ['label_id'])
-          if (labelReadError) throw new Error(labelReadError.message)
-          const remoteLabelIds = new Set<string>((remoteTaskLabels ?? []).map((r) => r.label_id as string))
-          const localLabelIds = new Set<string>(labelIds)
-          const toInsert = labelIds.filter((id) => !remoteLabelIds.has(id))
-          const toDelete = [...remoteLabelIds].filter((id) => !localLabelIds.has(id))
-          if (toInsert.length > 0) {
-            const { error: insertErr } = await supabase
-              .from('task_labels')
-              .upsert(toInsert.map((labelId) => ({ task_id: task.id, label_id: labelId, deleted_at: null })))
-            if (insertErr) {
-              await reportPushFailure(origin, 'pushTaskLabels', insertErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, insert: toInsert }))
-            }
-          }
-          if (toDelete.length > 0) {
-            const { error: deleteErr } = await supabase
-              .from('task_labels')
-              .delete()
-              .eq('task_id', task.id)
-              .in('label_id', toDelete)
-            if (deleteErr) {
-              await reportPushFailure(origin, 'pushTaskLabels', deleteErr, 'task_labels', task.id, JSON.stringify({ task_id: task.id, delete: toDelete }))
-            }
-          }
-        } catch (e) {
-          await reportPushFailure(origin, 'pushTaskLabels', e, 'task_labels', task.id, JSON.stringify({ task_id: task.id }))
-        }
+        await syncTaskLabelChoices(supabase,[task.id],origin.api)
         // Flag pushes of is_archived on shared projects — after the v1.4.3 fix this
         // should never happen from auto-archive, so any occurrence warrants a look.
         if (task.is_archived === 1) {
@@ -1157,12 +1115,17 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
       // junction is the source of truth, with proper tombstones + LWW).
       const projectLabels = await api.labels.findByProjectId(project.id)
       if (projectLabels.length > 0) {
-        const rows = projectLabels.map((l) => ({
-          project_id: project.id,
-          label_id: l.id,
-          created_at: new Date().toISOString(),
-          deleted_at: null
-        }))
+        const {data: cloudLinks}=await readAll(()=>supabase.from('project_labels').select('*').eq('project_id',project.id),['project_id','label_id'])
+        const rows: Array<{project_id:string;label_id:string;created_at:string;deleted_at:null}>=[]
+        for (const label of projectLabels) {
+          const local=await currentProjectLink(project.id,label.id,api)
+          const remote=cloudLinks.find((link)=>link.label_id===label.id)
+          if (local && remote && Date.parse(String(remote.deleted_at ?? remote.created_at))>Date.parse(local.deleted_at ?? local.created_at)) {
+            await api.labels.applyRemoteProjectLabel(remote as unknown as {project_id:string;label_id:string;created_at:string|null;deleted_at:string|null})
+            if (remote.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(project.id,label.id)
+          } else if(local && !local.deleted_at) rows.push({project_id:project.id,label_id:label.id,created_at:local.created_at,deleted_at:null})
+        }
+        if (rows.length) {
         const { error: plErr } = await supabase
           .from('project_labels')
           .upsert(rows, { onConflict: 'project_id,label_id' })
@@ -1173,6 +1136,7 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
             `fullUpload: push project_labels failed for ${project.name}`,
             plErr.message
           )
+        }
         }
       }
 
@@ -1245,29 +1209,6 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
         } catch { /* skip themes with invalid config */ }
       }
     } catch { /* themes might not exist */ }
-
-    // 7. Push task_labels (junction table) — collect every (task_id, label_id)
-    // pair across all projects, then batch-upsert in chunks instead of one
-    // request per row (was O(rows) round-trips). Identical rows (same active
-    // tasks via findByProjectId) and identical conflict target (composite PK
-    // task_id,label_id) as the previous per-row upserts; mirrors the chunked
-    // upsert the reconcile path already uses.
-    const taskLabelRows: Array<{ task_id: string; label_id: string }> = []
-    for (const project of projects) {
-      const tasks = await api.tasks.findByProjectId(project.id)
-      for (const task of tasks) {
-        const taskLabels = await api.tasks.getLabels(task.id)
-        for (const tl of taskLabels) {
-          taskLabelRows.push({ task_id: tl.task_id, label_id: tl.label_id })
-        }
-      }
-    }
-    for (const chunk of chunkArray(taskLabelRows, 500)) {
-      const { error: tlErr } = await supabase
-        .from('task_labels')
-        .upsert(chunk, { onConflict: 'task_id,label_id' })
-      if (tlErr) console.error('[PersonalSync] pushTaskLabel error:', tlErr.message)
-    }
 
     // Verify sync by checking counts
     const { count: sbProjects } = await supabase.from('project_members').select('*', { count: 'exact', head: true }).eq('user_id', userId)
@@ -1385,17 +1326,7 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
               }
             }
 
-            // Sync task_labels (junction table)
-            const { data: remoteTaskLabels } = await readAllIn(tasks.map((t) => t.id), (ids) => supabase
-              .from('task_labels')
-              .select('task_id, label_id')
-              .in('task_id', ids), ['task_id', 'label_id'])
-
-            if (remoteTaskLabels) {
-              for (const tl of remoteTaskLabels) {
-                await api.tasks.applyRemoteTaskLabels(tl.task_id, [tl.label_id]).catch(() => {})
-              }
-            }
+            await pullTaskLabelsForTasks(tasks.map((task)=>task.id),userId,context)
 
             // Pull project↔label links from the project_labels junction
             // (preserves tombstones). The legacy projects.label_data JSON
@@ -1766,10 +1697,10 @@ export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?:
     context ??= await captureSyncContext()
     const api = context.api
     const supabase = context.client
+    const snapshots = new Map(await Promise.all(taskIds.map(async (id)=>[id,await api.tasks.getLabelState(id)] as const)))
     const { data: pairs, error } = await readAllIn(taskIds, (ids) => supabase.from('task_labels').select('task_id, label_id')
       .in('task_id', ids).is('deleted_at', null), ['task_id', 'label_id'])
     if (error) throw new Error(error.message)
-    if (!pairs?.length) return 0
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
     const remap = await ensureLabelsExistLocally(labelIds, null, expectedUserId, context)
     let added = 0
@@ -1777,7 +1708,7 @@ export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?:
     for (const taskId of taskIds) {
       if (expectedUserId && useAuthStore.getState().currentUser?.id !== expectedUserId) return added
       const resolved = [...new Set(pairs.filter((p) => p.task_id === taskId).map((p) => remap.get(p.label_id) ?? p.label_id))]
-      added += await api.tasks.applyRemoteTaskLabels(taskId, resolved)
+      added += await api.tasks.applyRemoteTaskLabels(taskId, resolved, snapshots.get(taskId))
     }
     return added
   } catch (err) {
@@ -2084,115 +2015,6 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
       await runTable(tableName, userId)
     }
 
-    // 4. task_labels junction — composite-PK with no updated_at, so it doesn't
-    // fit reconcileTable's high-water-mark flow. Diff via key-set.
-    try {
-      const localPairs = await api.tasks.getTaskLabelsForUser(userId)
-      const pairKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
-      const localKeySet = new Set<string>(localPairs.map((p) => pairKey(p.task_id, p.label_id)))
-
-      const personalTaskIds = new Set<string>()
-      for (const project of personalProjects) {
-        const tasks = await api.tasks.findByProjectId(project.id)
-        const archived = await api.tasks.findArchived(project.id)
-        const templates = await api.tasks.findTemplates(project.id)
-        for (const t of [...tasks, ...archived, ...templates]) personalTaskIds.add(t.id)
-      }
-
-      const taskIdList = [...personalTaskIds]
-      const remotePairs: Array<{ task_id: string; label_id: string }> = []
-      const chunkSize = 500
-      let fetchOk = true
-      for (let i = 0; i < taskIdList.length; i += chunkSize) {
-        const chunk = taskIdList.slice(i, i + chunkSize)
-        const { data, error: tlErr } = await readAll(() => supabase
-          .from('task_labels')
-          .select('task_id, label_id')
-          .in('task_id', chunk), ['task_id', 'label_id'])
-        if (tlErr) {
-          logEvent('error', 'sync', `Reconcile: list remote task_labels failed`, `err=${tlErr.message}`)
-          fetchOk = false
-          break
-        }
-        if (data) remotePairs.push(...data)
-      }
-
-      if (fetchOk) {
-        const remoteKeySet = new Set<string>(remotePairs.map((p) => pairKey(p.task_id, p.label_id)))
-
-        const missingInRemote = localPairs.filter((p) => !remoteKeySet.has(pairKey(p.task_id, p.label_id)))
-        if (missingInRemote.length > 0) {
-          // Diagnostic: log the first few pairs we think are missing remotely so
-          // a recurring "31 pushed" loop can be traced — compare these against
-          // remote to find why our SELECT didn't return them (RLS, FK, etc.).
-          const sample = missingInRemote.slice(0, 5).map((p) => `${p.task_id}::${p.label_id}`).join(',')
-          logEvent('info', 'sync', `Reconcile: task_labels diff — local=${localPairs.length} remote=${remotePairs.length} missingInRemote=${missingInRemote.length}`, `sample=${sample}`)
-        }
-        let tlPushed = 0
-        for (let i = 0; i < missingInRemote.length; i += chunkSize) {
-          const chunk = missingInRemote.slice(i, i + chunkSize)
-          // Use .select() to get back the rows that were actually upserted —
-          // if RLS or a constraint silently drops rows, returned.length < chunk.length.
-          const { data: returned, error: upsertErr } = await supabase
-            .from('task_labels')
-            .upsert(chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })), {
-              onConflict: 'task_id,label_id'
-            })
-            .select()
-          if (upsertErr) {
-            logEvent('error', 'sync', `Reconcile: push task_labels failed`, `err=${upsertErr.message}`)
-            break
-          }
-          const actuallyInserted = returned?.length ?? 0
-          if (actuallyInserted < chunk.length) {
-            logEvent('warn', 'sync', `Reconcile: task_labels partial push — sent=${chunk.length} accepted=${actuallyInserted}`, 'rows silently dropped (likely RLS or FK)')
-          }
-          tlPushed += actuallyInserted
-        }
-        totalPushed += tlPushed
-
-        const missingInLocal = remotePairs.filter((p) => !localKeySet.has(pairKey(p.task_id, p.label_id)))
-        let tlPulled = 0
-        for (const p of missingInLocal) {
-          let resolvedLabelId = p.label_id
-          const localLabel = await api.labels.findById(p.label_id)
-          if (!localLabel) {
-            // Label ID not found locally — may have been created by MCP with a different UUID
-            // than the local canonical. Try to remap by name.
-            const { data: remoteLabel } = await supabase
-              .from('user_labels')
-              .select('name')
-              .eq('id', p.label_id)
-              .maybeSingle()
-            if (remoteLabel?.name) {
-              const canonical = await api.labels.findByName(userId, remoteLabel.name)
-              if (canonical) {
-                resolvedLabelId = canonical.id
-              } else {
-                continue
-              }
-            } else {
-              continue
-            }
-          }
-          try {
-            await api.tasks.applyRemoteTaskLabels(p.task_id, [resolvedLabelId])
-            tlPulled++
-          } catch {
-            // addLabel is idempotent (UNIQUE constraint); ignore races.
-          }
-        }
-        totalPulled += tlPulled
-
-        if (tlPushed > 0 || tlPulled > 0) {
-          logEvent('info', 'sync', `Reconcile: task_labels`, `pushed=${tlPushed} pulled=${tlPulled}`)
-        }
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      logEvent('error', 'sync', `Reconcile: task_labels diff failed`, msg)
-    }
-
     // 5. project_labels junction — composite-PK with no updated_at, same
     // shape as task_labels. Diff by key set, push deltas, pull missing rows
     // (with tombstone propagation).
@@ -2257,11 +2079,9 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
               created_at: local.created_at,
               deleted_at: local.deleted_at
             })
-          } else if ((local.deleted_at ?? null) !== (remote.deleted_at ?? null)) {
-            // LWW on tombstone state — we don't have updated_at on the
-            // junction, so use the most-recently-tombstoned wins.
-            const localDelMs = local.deleted_at ? Date.parse(local.deleted_at) : 0
-            const remoteDelMs = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+          } else {
+            const localDelMs = Date.parse(local.deleted_at ?? local.created_at)
+            const remoteDelMs = Date.parse(remote.deleted_at ?? remote.created_at ?? '')
             if (localDelMs > remoteDelMs) {
               toPush.push({
                 project_id: local.project_id,
@@ -2313,8 +2133,8 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
           const key = pairKey(remote.project_id, remote.label_id)
           const local = localByKey.get(key)
           if (local) {
-            const localDelMs = local.deleted_at ? Date.parse(local.deleted_at) : 0
-            const remoteDelMs = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+            const localDelMs = Date.parse(local.deleted_at ?? local.created_at)
+            const remoteDelMs = Date.parse(remote.deleted_at ?? remote.created_at ?? '')
             if (remoteDelMs <= localDelMs) continue
           }
           const labelExists = await api.labels.findById(remote.label_id)
@@ -2363,105 +2183,9 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
       const sharedProjects = allProjects.filter((p) => p.is_shared === 1)
       if (sharedProjects.length > 0) {
         const sharedProjectIds = sharedProjects.map((p) => p.id)
-        const tlPairKey = (taskId: string, labelId: string): string => `${taskId}::${labelId}`
         const plPairKey = (projectId: string, labelId: string): string =>
           `${projectId}::${labelId}`
         const chunkSize = 500
-
-        // Collect all task IDs across all shared projects (active + archived + templates).
-        const sharedTaskIds: string[] = []
-        for (const project of sharedProjects) {
-          const tasks = await api.tasks.findByProjectId(project.id)
-          const archived = await api.tasks.findArchived(project.id)
-          const templates = await api.tasks.findTemplates(project.id)
-          for (const t of [...tasks, ...archived, ...templates]) sharedTaskIds.push(t.id)
-        }
-
-        // ── task_labels (shared) ──────────────────────────────────────────
-        const localSharedTl = await api.tasks.getTaskLabelsForSharedProjects()
-        const localSharedTlSet = new Set<string>(
-          localSharedTl.map((p) => tlPairKey(p.task_id, p.label_id))
-        )
-
-        const remoteSharedTl: Array<{ task_id: string; label_id: string }> = []
-        let tlFetchOk = true
-        for (let i = 0; i < sharedTaskIds.length; i += chunkSize) {
-          const chunk = sharedTaskIds.slice(i, i + chunkSize)
-          if (chunk.length === 0) break
-          const { data, error: tlErr } = await readAll(() => supabase
-            .from('task_labels')
-            .select('task_id, label_id')
-            .in('task_id', chunk), ['task_id', 'label_id'])
-          if (tlErr) {
-            logEvent(
-              'error',
-              'sync',
-              'Reconcile: list shared task_labels failed',
-              `err=${tlErr.message}`
-            )
-            tlFetchOk = false
-            break
-          }
-          if (data) remoteSharedTl.push(...data)
-        }
-
-        let shTlPushed = 0
-        let shTlPulled = 0
-        const tlMissingLocal: Array<{ task_id: string; label_id: string }> = []
-        if (tlFetchOk) {
-          const remoteSharedTlSet = new Set<string>(
-            remoteSharedTl.map((p) => tlPairKey(p.task_id, p.label_id))
-          )
-
-          const tlToPush = localSharedTl.filter(
-            (p) => !remoteSharedTlSet.has(tlPairKey(p.task_id, p.label_id))
-          )
-          if (tlToPush.length > 0) {
-            const sample = tlToPush
-              .slice(0, 5)
-              .map((p) => `${p.task_id}::${p.label_id}`)
-              .join(',')
-            logEvent(
-              'info',
-              'sync',
-              `Reconcile: shared task_labels diff — local=${localSharedTl.length} remote=${remoteSharedTl.length} toPush=${tlToPush.length}`,
-              `sample=${sample}`
-            )
-            for (let i = 0; i < tlToPush.length; i += chunkSize) {
-              const chunk = tlToPush.slice(i, i + chunkSize)
-              const { data: returned, error: upsertErr } = await supabase
-                .from('task_labels')
-                .upsert(
-                  chunk.map((p) => ({ task_id: p.task_id, label_id: p.label_id })),
-                  { onConflict: 'task_id,label_id' }
-                )
-                .select()
-              if (upsertErr) {
-                logEvent(
-                  'error',
-                  'sync',
-                  'Reconcile: push shared task_labels failed',
-                  `err=${upsertErr.message}`
-                )
-                break
-              }
-              const accepted = returned?.length ?? 0
-              if (accepted < chunk.length) {
-                logEvent(
-                  'warn',
-                  'sync',
-                  `Reconcile: shared task_labels partial push — sent=${chunk.length} accepted=${accepted}`,
-                  'rows silently dropped (likely RLS or FK)'
-                )
-              }
-              shTlPushed += accepted
-            }
-          }
-
-          for (const r of remoteSharedTl) {
-            if (!localSharedTlSet.has(tlPairKey(r.task_id, r.label_id))) tlMissingLocal.push(r)
-          }
-        }
 
         // ── project_labels (shared) ───────────────────────────────────────
         const localSharedPl = await api.labels.getProjectLabelsForSharedProjects()
@@ -2528,9 +2252,9 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
                 created_at: local.created_at,
                 deleted_at: local.deleted_at
               })
-            } else if ((local.deleted_at ?? null) !== (remote.deleted_at ?? null)) {
-              const localDel = local.deleted_at ? Date.parse(local.deleted_at) : 0
-              const remoteDel = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+            } else {
+              const localDel = Date.parse(local.deleted_at ?? local.created_at)
+              const remoteDel = Date.parse(remote.deleted_at ?? remote.created_at ?? '')
               if (localDel > remoteDel) {
                 plToPush.push({
                   project_id: local.project_id,
@@ -2575,8 +2299,8 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
             if (!local) {
               plToApply.push(remote)
             } else {
-              const localDel = local.deleted_at ? Date.parse(local.deleted_at) : 0
-              const remoteDel = remote.deleted_at ? Date.parse(remote.deleted_at) : 0
+              const localDel = Date.parse(local.deleted_at ?? local.created_at)
+              const remoteDel = Date.parse(remote.deleted_at ?? remote.created_at ?? '')
               if (remoteDel > localDel) plToApply.push(remote)
             }
           }
@@ -2586,10 +2310,9 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
         // Both junction tables can reference labels owned by collaborators.
         // Collect label_ids from pull candidates and fetch any rows that
         // aren't on this device yet from `user_labels`. RLS may filter; the
-        // shTlPulled / shPlPulled counts below will reflect what actually
+        // Pull counts below reflect what actually
         // landed.
         const referencedLabelIds = new Set<string>()
-        for (const r of tlMissingLocal) referencedLabelIds.add(r.label_id)
         for (const r of plToApply) referencedLabelIds.add(r.label_id)
 
         let shLabelsPulled = 0
@@ -2646,16 +2369,6 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
         }
 
         // ── Apply pulls now that referenced labels exist locally ──────────
-        for (const remote of tlMissingLocal) {
-          const labelExists = await api.labels.findById(remote.label_id)
-          if (!labelExists) continue
-          try {
-            await api.tasks.applyRemoteTaskLabels(remote.task_id, [remote.label_id])
-            shTlPulled++
-          } catch {
-            // addLabel is idempotent (UNIQUE constraint); ignore races.
-          }
-        }
         for (const remote of plToApply) {
           const labelExists = await api.labels.findById(remote.label_id)
           if (!labelExists) continue
@@ -2676,12 +2389,10 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
           shPlPulled++
         }
 
-        totalPushed += shTlPushed + shPlPushed
-        totalPulled += shTlPulled + shPlPulled + shLabelsPulled
+        totalPushed += shPlPushed
+        totalPulled += shPlPulled + shLabelsPulled
 
         if (
-          shTlPushed > 0 ||
-          shTlPulled > 0 ||
           shPlPushed > 0 ||
           shPlPulled > 0 ||
           shLabelsPulled > 0
@@ -2690,7 +2401,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
             'info',
             'sync',
             'Reconcile: shared-project labels',
-            `task_labels=${shTlPushed}/${shTlPulled} project_labels=${shPlPushed}/${shPlPulled} labels=0/${shLabelsPulled} (push/pull)`
+            `project_labels=${shPlPushed}/${shPlPulled} labels=0/${shLabelsPulled} (push/pull)`
           )
         }
       }
@@ -2698,6 +2409,13 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
       const msg = e instanceof Error ? e.message : String(e)
       logEvent('error', 'sync', 'Reconcile: shared-project labels failed', msg)
     }
+
+    for (const project of allProjects) {
+      const ids=(await api.tasks.findAllByProject(project.id)).map((task)=>task.id)
+      totalPulled += await pullTaskLabelsForTasks(ids,userId,context)
+      await syncTaskLabelChoices(supabase,ids,api)
+    }
+    await processSyncQueue(context)
 
     if (totalPushed > 0 || totalPulled > 0) {
       logEvent('info', 'sync', `Reconcile complete: ${totalPushed} pushed, ${totalPulled} pulled`)
@@ -2799,28 +2517,8 @@ export async function initSync(userId: string): Promise<void> {
  * Sync a single task_label from Supabase — ensures the label exists locally first.
  * Used by Realtime handler when a task_label INSERT is detected.
  */
-export async function syncTaskLabel(taskId: string, labelId: string): Promise<void> {
-  const context = await captureSyncContext()
-  const { api, client: supabase } = context
-  // Ensure label exists locally
-  const localLabel = await api.labels.findById(labelId)
-  if (!localLabel) {
-    const { data: remoteLabel } = await supabase.from('user_labels').select('*').eq('id', labelId).single()
-    if (remoteLabel) {
-      const { useAuthStore } = await import('../shared/stores/authStore')
-      const userId = useAuthStore.getState().currentUser?.id ?? remoteLabel.user_id ?? null
-      const sameName = userId ? await api.labels.findByName(userId, remoteLabel.name) : undefined
-      if (!sameName && userId) {
-        await api.labels.create({
-          id: remoteLabel.id,
-          user_id: userId,
-          name: remoteLabel.name,
-          color: remoteLabel.color
-        }).catch(() => {})
-      }
-    }
-  }
-  await api.tasks.applyRemoteTaskLabels(taskId, [labelId]).catch(() => {})
+export async function syncTaskLabel(taskId: string): Promise<void> {
+  await pullTaskLabelsForTasks([taskId])
 }
 
 // ── Realtime Subscriptions for All Projects ──────────────────────────

@@ -15,10 +15,11 @@ vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDataba
 vi.mock('./quick-add', () => ({ hideQuickAddWindow: vi.fn() }))
 vi.mock('./index', () => ({ registerQuickAddShortcut: vi.fn(), registerAppToggleShortcut: vi.fn(), getMainWindow: vi.fn() }))
 vi.mock('./tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
-vi.mock('../renderer/src/services/PersonalSyncService', () => ({ pushTask: vi.fn(), deleteTaskFromSupabase: vi.fn(), pushProjectLabel: vi.fn() }))
+vi.mock('../renderer/src/services/PersonalSyncService', () => ({ pushTask: vi.fn(), deleteTaskFromSupabase: vi.fn(), pushProjectLabel: vi.fn(), pushRemoveLabelFromProject: vi.fn() }))
 vi.mock('../renderer/src/shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from './ipc-handlers'
 import { useTaskStore } from '../renderer/src/shared/stores/taskStore'
+import { useLabelStore } from '../renderer/src/shared/stores/labelStore'
 import { useAuthStore } from '../renderer/src/shared/stores/authStore'
 import { captureSyncProducer } from '../renderer/src/services/syncContext'
 
@@ -80,4 +81,23 @@ it.each(['account', 'database'])('rejects stale activity after a %s switch witho
 it('does not permit unrelated activity channels through the guarded registry', async () => {
   const context = await window.api.sync.captureContext()
   await expect(invoke('sync:invokeContext', context, 'activityLog:deleteByTaskId', ['t'])).rejects.toThrow('Unsupported')
+})
+
+it('project label removal preserves chips and associations cached for another project',async()=>{
+  const repo=repositories[0]
+  repo.projects.create({id:'q',owner_id:'a',name:'Other project'})
+  repo.statuses.create({id:'qs',project_id:'q',name:'Open'})
+  const p=repo.tasks.create({id:'p-task',project_id:'p',owner_id:'a',status_id:'s',title:'P'})
+  const q=repo.tasks.create({id:'q-task',project_id:'q',owner_id:'a',status_id:'qs',title:'Q'})
+  repo.tasks.addLabel(p.id,'l');repo.tasks.addLabel(q.id,'l')
+  const label=repo.labels.findById('l')!
+  const before=repo.tasks.getLabelState(q.id)
+  useTaskStore.setState({tasks:{[p.id]:p,[q.id]:q},taskLabels:{[p.id]:[label],[q.id]:[label]}})
+  useLabelStore.setState({labels:{l:label},projectLabels:{p:new Set(['l']),q:new Set(['l'])}})
+  expect(await useLabelStore.getState().removeFromProject('p','l')).toBe(true)
+  expect(useTaskStore.getState().taskLabels[p.id]).toEqual([])
+  expect(useTaskStore.getState().taskLabels[q.id]).toEqual([label])
+  expect(repo.tasks.getLabelState(q.id)).toEqual(before)
+  expect(repo.labels.findByProjectId('q')).toEqual([label])
+  expect(repo.labels.findById('l')).toEqual(label)
 })

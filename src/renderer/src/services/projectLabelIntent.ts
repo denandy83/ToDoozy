@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readAll } from './readAll'
-import { pushTaskLabelAdditions } from './taskLabelAdditions'
+import { syncTaskLabelChoices } from './taskLabelAdditions'
 import type { TodoozyAPI } from '../../../preload/index.d'
 
 export async function currentProjectLink(projectId: string, labelId: string, api: TodoozyAPI): Promise<{ created_at: string; deleted_at: string | null } | null> {
@@ -55,7 +55,7 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
       if (error) throw new Error(error.message)
     }
     const localTasks = await api.tasks.findAllByProject(intent.projectId)
-    await pushTaskLabelAdditions(client, localTasks.map((task) => task.id), api)
+    await syncTaskLabelChoices(client, localTasks.map((task) => task.id), api)
     return true
   }
   if (await restoreReaddition()) return
@@ -66,11 +66,19 @@ export async function removeRemoteProjectLabel(client: SupabaseClient, api: Todo
     if (error) throw new Error(error.message)
     name = data?.name
   }
-  const { data } = await readAll(() => client.from('project_labels').select('label_id, user_labels!inner(name)').eq('project_id', intent.projectId), ['label_id'])
+  const { data } = await readAll(() => client.from('project_labels').select('label_id,created_at,deleted_at,user_labels!inner(name)').eq('project_id', intent.projectId), ['label_id'])
   const ids = [...new Set([intent.labelId, ...data.filter((row) => {
     const label = Array.isArray(row.user_labels) ? row.user_labels[0] : row.user_labels
     return name && (label as { name?: string })?.name?.toLowerCase() === name.toLowerCase()
   }).map((row) => String(row.label_id))])]
+  for (const link of data.filter((row)=>ids.includes(String(row.label_id)) && !row.deleted_at && Date.parse(String(row.created_at))>Date.parse(intent.deletedAt))) {
+    if (!await api.labels.findById(String(link.label_id))) {
+      const {data: label,error} = await client.from('user_labels').select('*').eq('id',link.label_id).maybeSingle()
+      if (error) throw new Error(error.message)
+      if (label) await api.labels.applyRemote(label)
+    }
+    await api.labels.applyRemoteProjectLabel({project_id:intent.projectId,label_id:String(link.label_id),created_at:String(link.created_at),deleted_at:null})
+  }
   if (await restoreReaddition()) return
   for (let index = 0; index < ids.length; index += 200) {
     const { error } = await client.from('project_labels').upsert(ids.slice(index, index + 200).map((label_id) => ({

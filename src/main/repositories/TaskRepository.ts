@@ -1,7 +1,8 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
 import { LabelRepository } from './LabelRepository'
 import { randomUUID } from 'crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
+import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel, TaskLabelSyncState } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
@@ -414,6 +415,7 @@ export class TaskRepository {
       )
       .run(taskId, labelId)
     this.ensureProjectLabel(taskId, labelId, true)
+    this.recordLabelIntent(taskId,labelId)
   }
 
   /**
@@ -435,70 +437,62 @@ export class TaskRepository {
     this.db
       .prepare(
         `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
-         SELECT t.project_id, ?, datetime('now'), NULL FROM tasks t WHERE t.id = ?
+         SELECT t.project_id, ?, '1970-01-01T00:00:00.000Z', NULL FROM tasks t WHERE t.id = ?
          ON CONFLICT(project_id, label_id) DO NOTHING`
       )
       .run(labelId, taskId)
   }
 
-  /**
-   * Apply remote task_labels rows for one task (Realtime targeted pull).
-   * Additive + tombstone-aware, deliberately NOT a strict replace-set:
-   * - missing pair → insert active
-   * - locally tombstoned pair → left alone; a local remove whose push is
-   *   still in flight must not be resurrected by the echo of our own
-   *   task-row push
-   * - local-active pairs absent from remote are KEPT — they may be local
-   *   adds whose pushTask hasn't completed; deleting them here would lose
-   *   data. Remote removals converge via the project_labels cascade and
-   *   the reconcile key-set diff.
-   * Skips label ids without a local labels row (FK) — callers run
-   * ensureLabelsExistLocally first. Returns the number of inserted pairs.
-   */
-  applyRemoteTaskLabels(taskId: string, labelIds: string[]): number {
-    const task = this.db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(taskId) as { id: string; project_id: string } | undefined
+  getLabelState(taskId: string): TaskLabelSyncState[] {
+    return this.db.prepare('SELECT * FROM task_labels WHERE task_id=? ORDER BY label_id').all(taskId) as unknown as TaskLabelSyncState[]
+  }
+
+  acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): void {
+    for (const row of delivered) this.db.prepare('UPDATE task_labels SET sync_pending=0 WHERE task_id=? AND label_id=? AND local_version=?').run(taskId,row.label_id,row.local_version)
+  }
+
+  private recordLabelIntent(taskId: string, labelId: string): void {
+    this.db.prepare('UPDATE task_labels SET local_version=(SELECT COALESCE(MAX(local_version),0)+1 FROM task_labels),sync_pending=1 WHERE task_id=? AND label_id=?').run(taskId,labelId)
+    new SyncQueueRepository(this.db).enqueue('task_labels',taskId,'UPDATE',JSON.stringify({task_id:taskId,assignment_intent:true}))
+  }
+
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): number {
+    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.applyRemoteTaskLabels(taskId,labelIds,baseline))
+    const task = this.findById(taskId)
     if (!task) return 0
-    let added = 0
-    for (const labelId of labelIds) {
-      if (new LabelRepository(this.db).hasPendingProjectRemoval(task.project_id, labelId)) continue
-      const projectLink = this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(task.project_id, labelId) as { deleted_at: string | null } | undefined
-      if (projectLink?.deleted_at) continue
-      const label = this.db.prepare('SELECT id FROM labels WHERE id = ?').get(labelId)
-      if (!label) continue
-      const existing = this.db
-        .prepare('SELECT deleted_at FROM task_labels WHERE task_id = ? AND label_id = ?')
-        .get(taskId, labelId) as { deleted_at: string | null } | undefined
-      if (existing) continue
-      this.db
-        .prepare('INSERT INTO task_labels (task_id, label_id, deleted_at) VALUES (?, ?, NULL)')
-        .run(taskId, labelId)
-      // Keep the junction in lockstep: a remote task_labels row may arrive
-      // without a remote project_labels row (the original drift source), which
-      // would render the label invisible locally. ensureProjectLabel guarantees
-      // the link exists so the pulled label actually shows.
-      this.ensureProjectLabel(taskId, labelId)
-      added++
+    const current = this.getLabelState(taskId)
+    const before = new Map(baseline?.map((row)=>[row.label_id,row]))
+    const existing = new Map(current.map((row)=>[row.label_id,row]))
+    const incoming = new Set(labelIds)
+    let changed = 0
+    for (const id of new Set([...labelIds,...(baseline ? current.map((row)=>row.label_id) : [])])) {
+      const row=existing.get(id), captured=before.get(id)
+      if (row?.sync_pending || captured?.sync_pending || (baseline && row?.local_version !== captured?.local_version)) continue
+      if (!incoming.has(id)) {
+        if (row && !row.deleted_at) {this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=local_version+1 WHERE task_id=? AND label_id=?').run(new Date().toISOString(),taskId,id);changed++}
+        continue
+      }
+      if (new LabelRepository(this.db).hasPendingProjectRemoval(task.project_id,id)) continue
+      const palette=this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(task.project_id,id) as {deleted_at:string|null}|undefined
+      if (palette?.deleted_at || !this.db.prepare('SELECT id FROM labels WHERE id=?').get(id)) continue
+      if (row && (!baseline || !row.deleted_at)) continue
+      this.db.prepare('INSERT INTO task_labels(task_id,label_id,deleted_at) VALUES(?,?,NULL) ON CONFLICT(task_id,label_id) DO UPDATE SET deleted_at=NULL,local_version=task_labels.local_version+1').run(taskId,id)
+      this.ensureProjectLabel(taskId,id)
+      changed++
     }
-    return added
+    return changed
   }
 
   removeLabel(taskId: string, labelId: string): boolean {
-    // Soft-delete to match the read paths' `tl.deleted_at IS NULL` filter
-    // and to keep parity with LabelRepository.removeFromProject (which
-    // also soft-deletes via UPDATE). A hard DELETE would still hide the
-    // row from reads but couldn't be revived by a later addLabel.
-    const now = new Date().toISOString()
-    const result = this.db
-      .prepare(
-        'UPDATE task_labels SET deleted_at = ? WHERE task_id = ? AND label_id = ? AND deleted_at IS NULL'
-      )
-      .run(now, taskId, labelId)
-    return result.changes > 0
+    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.removeLabel(taskId,labelId))
+    const result=this.db.prepare('UPDATE task_labels SET deleted_at=? WHERE task_id=? AND label_id=? AND deleted_at IS NULL').run(new Date().toISOString(),taskId,labelId)
+    if (result.changes>0) this.recordLabelIntent(taskId,labelId)
+    return result.changes>0
   }
 
   getLabels(taskId: string): TaskLabel[] {
     return this.db
-      .prepare('SELECT * FROM task_labels WHERE task_id = ? AND deleted_at IS NULL')
+      .prepare('SELECT task_id,label_id,deleted_at FROM task_labels WHERE task_id = ? AND deleted_at IS NULL')
       .all(taskId) as unknown as TaskLabel[]
   }
 

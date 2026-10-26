@@ -1,4 +1,4 @@
-import { pushTaskLabelAdditions } from './taskLabelAdditions'
+import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
@@ -469,7 +469,7 @@ export async function syncTaskChange(
       } else {
         // syncTaskToSupabase throws on error; the catch routes it.
         await syncTaskToSupabase(supabase, task, labelData ?? [])
-      await pushTaskLabelAdditions(supabase, [task.id], origin.api)
+      await syncTaskLabelChoices(supabase, [task.id], origin.api)
       }
       await markSynced(origin)
     } catch (err) {
@@ -604,7 +604,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
                     if (!await pushLabel(row as Label, producer.userId!, producer)) throw new Error(error.message)
                   }
                 }
-                if (item.entry.table_name === 'tasks') await pushTaskLabelAdditions(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api)
+                if (item.entry.table_name === 'tasks') await syncTaskLabelChoices(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api)
               }
               const changed: Work[] = []
               for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
@@ -1222,28 +1222,9 @@ export async function syncProjectDown(projectId: string, userId: string, context
     }
   }
 
-  // Pull task_labels rows for all the tasks we just synced. The remote
-  // task_labels table has no `deleted_at` column — a removal is a hard
-  // DELETE on Supabase — so a row missing here means it was deleted and
-  // we should not re-insert it. addLabel revives tombstoned local rows
-  // when a row IS present remotely, so the two halves balance out.
-  if (remoteTasks && remoteTasks.length > 0) {
-    const taskIdList = remoteTasks.map((t) => t.id as string)
-    const remoteTl: Array<{ task_id: string; label_id: string }> = []
-    const chunkSize = 500
-    for (let i = 0; i < taskIdList.length; i += chunkSize) {
-      const chunk = taskIdList.slice(i, i + chunkSize)
-      const { data } = await readAll(() => supabase
-        .from('task_labels')
-        .select('task_id, label_id')
-        .in('task_id', chunk), ['task_id', 'label_id'])
-      if (data) remoteTl.push(...(data as Array<{ task_id: string; label_id: string }>))
-    }
-    for (const tl of remoteTl) {
-      const exists = await api.labels.findById(tl.label_id).catch(() => null)
-      if (!exists) continue
-      await api.tasks.applyRemoteTaskLabels(tl.task_id, [tl.label_id]).catch(() => {})
-    }
+  if (remoteTasks?.length) {
+    const { pullTaskLabelsForTasks } = await import('./PersonalSyncService')
+    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context)
   }
 
   // Delete local tasks that no longer exist in Supabase

@@ -311,6 +311,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         useTaskStore.setState((s) => {
           const updated: Record<string, Label[]> = {}
           for (const [taskId, labels] of Object.entries(s.taskLabels)) {
+            if (s.tasks[taskId]?.project_id !== projectId) {updated[taskId]=labels;continue}
             updated[taskId] = targetName
               ? labels.filter((l) => l.name.toLowerCase() !== targetName)
               : labels.filter((l) => !idsToUnlink.includes(l.id))

@@ -25,8 +25,10 @@ const api: TodoozyAPI = {
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
-    applyRemoteTaskLabels: (taskId, labelIds) =>
-      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds),
+    applyRemoteTaskLabels: (taskId, labelIds, baseline) =>
+      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline),
+    getLabelState: (taskId) => ipcRenderer.invoke('tasks:getLabelState',taskId),
+    acknowledgeLabelState: (taskId,delivered) => ipcRenderer.invoke('tasks:acknowledgeLabelState',taskId,delivered),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     getTaskLabelsForUser: (userId) => ipcRenderer.invoke('tasks:getTaskLabelsForUser', userId),
     getTaskLabelsForSharedProjects: () =>

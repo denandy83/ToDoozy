@@ -145,6 +145,8 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
     statuses: { findByProjectId: statusesFindByProjectId },
     tasks: {
       findByProjectId: empty, findArchived: empty, findTemplates: empty,
+      getLabelState: empty,
+      acknowledgeLabelState: async()=>undefined,
       getLabels: empty
     },
     projectAreas: { findByUserId: empty },

@@ -610,3 +610,24 @@ it.each(['unchanged','edit','delete'])('rebases a recovered sync version while r
     else expect(Date.parse(result.updated_at)).toBeGreaterThan(Date.parse(appliedAt))
   } finally {db.close()}
 })
+
+it('remaps pending assignment identity and acknowledges only the canonical delivered version',()=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId,statusId}=seedFixtures(db),tasks=new TaskRepository(db),labels=new LabelRepository(db)
+    const task=makeTask(tasks,projectId,userId,statusId,'canonical-intent')
+    const label=labels.create({id:'assignment-old',user_id:userId,name:'Assignment'})
+    tasks.applyRemoteTaskLabels(task.id,[label.id])
+    tasks.removeLabel(task.id,label.id)
+    const before=tasks.getLabelState(task.id)
+    labels.consolidate(label.id,{...label,id:'assignment-canonical'})
+    tasks.acknowledgeLabelState(task.id,before)
+    expect(tasks.getLabelState(task.id)[0]).toMatchObject({label_id:'assignment-canonical',sync_pending:1,local_version:before[0].local_version})
+    const canonical=tasks.getLabelState(task.id)
+    tasks.acknowledgeLabelState(task.id,canonical)
+    tasks.addLabel(task.id,'assignment-canonical')
+    tasks.acknowledgeLabelState(task.id,canonical)
+    expect(tasks.getLabelState(task.id)[0].sync_pending).toBe(1)
+    expect(tasks.getLabels(task.id).map((row)=>row.label_id)).toEqual(['assignment-canonical'])
+  } finally {db.close()}
+})

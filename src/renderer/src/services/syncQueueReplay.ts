@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SyncQueueEntry } from '../../../shared/types'
 import { currentProjectLabelFamily, currentProjectLink, projectLinkSuperseded, removeRemoteProjectLabel, type ProjectLabelRemoval } from './projectLabelIntent'
 import { preserveStatusDeletionEdits, type StatusDeletionCommand } from './statusDeletionSync'
-import { pushTaskLabelAdditions } from './taskLabelAdditions'
+import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { writeProjectArchive } from './projectArchiveSync'
 
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
@@ -76,6 +76,13 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     const current = await currentProjectLink(payload.projectId, String(payload.labelId), api)
     if (payload.deletedAt && 'expectedLink' in payload && projectLinkSuperseded(current, payload.expectedLink as Awaited<ReturnType<typeof currentProjectLink>>)) return true
     if (!current && !payload.deletedAt) return true
+    const { data: links } = await readAll(()=>client.from('project_labels').select('*').eq('project_id',payload.projectId).eq('label_id',payload.labelId),['project_id','label_id'])
+    const remote = links[0]
+    if (current && remote && Date.parse(String(remote.deleted_at ?? remote.created_at))>Date.parse(current.deleted_at ?? current.created_at)) {
+      await api.labels.applyRemoteProjectLabel(remote as unknown as {project_id:string;label_id:string;created_at:string|null;deleted_at:string|null})
+      if (remote.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(payload.projectId,String(payload.labelId))
+      return true
+    }
     const { error } = await client.from('project_labels').upsert({
       project_id: payload.projectId, label_id: payload.labelId,
       created_at: current?.created_at ?? payload.createdAt ?? entry.created_at, deleted_at: payload.deletedAt && 'expectedLink' in payload ? payload.deletedAt : current!.deleted_at
@@ -83,7 +90,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     if (error) throw new Error(error.message)
     if (payload.addition && current && !current.deleted_at) {
       const tasks = await api.tasks.findAllByProject(String(payload.projectId))
-      await pushTaskLabelAdditions(client, tasks.map((task) => task.id), api)
+      await syncTaskLabelChoices(client, tasks.map((task) => task.id), api)
     }
     return true
   }
@@ -92,10 +99,13 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
     return true
   }
   if (entry.table_name === 'task_labels') {
-    if (typeof payload.task_id === 'string') {
+    if (typeof payload.task_id === 'string' && payload.assignment_intent === true) {
+      await syncTaskLabelChoices(client,[payload.task_id],api)
+    } else if (typeof payload.task_id === 'string') {
       // Read the current local intent: older failed label commands may have
       // been superseded while offline. Never replay them over a newer edit.
       const taskId = payload.task_id
+      const delivered = await api.tasks.getLabelState(taskId)
       const local = await api.tasks.getLabels(taskId)
       const { data: remote, error } = await readAll(() => client.from('task_labels').select('label_id').eq('task_id', taskId), ['label_id'])
       if (error) throw new Error(error.message)
@@ -111,6 +121,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
         const { error: removeError } = await client.from('task_labels').delete().eq('task_id', taskId).in('label_id', removed.slice(index, index + 200))
         if (removeError) throw new Error(removeError.message)
       }
+      await api.tasks.acknowledgeLabelState(taskId,delivered)
     } else if (typeof payload.projectId === 'string' && typeof payload.labelId === 'string') {
       const current = await currentProjectLink(payload.projectId, payload.labelId, api)
       if ('expectedLink' in payload) {
@@ -156,7 +167,7 @@ export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncCon
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
     return JSON.stringify([project ?? null, tasks.map(({ id, is_archived, archive_updated_at, updated_at, deleted_at }) => ({ id, is_archived, archive_updated_at, updated_at, deleted_at })).sort((a, b) => a.id.localeCompare(b.id))])
   }
-  if (typeof payload.task_id === 'string') return JSON.stringify((await api.tasks.getLabels(payload.task_id)).map((row) => row.label_id).sort())
+  if (typeof payload.task_id === 'string') return JSON.stringify(await api.tasks.getLabelState(payload.task_id))
   if (payload.remove_project_label === true) return JSON.stringify(await currentProjectLabelFamily(payload.projectId, String(payload.labelId), api, payload.labelName))
   if (typeof payload.projectId === 'string') return JSON.stringify([await currentProjectLink(payload.projectId, String(payload.labelId), api) ?? null, payload.addition ? await Promise.all((await api.tasks.findAllByProject(payload.projectId)).map(async (task) => [task.id, await api.tasks.getLabels(task.id)])) : null])
   return entry.payload

@@ -328,9 +328,9 @@ export function registerIpcHandlers(): void {
     return getRepos().tasks.removeLabel(taskId, labelId)
   })
 
-  handle('tasks:applyRemoteTaskLabels', (_e, taskId: string, labelIds: string[]) => {
-    return getRepos().tasks.applyRemoteTaskLabels(taskId, labelIds)
-  })
+  handle('tasks:applyRemoteTaskLabels', (_e, ...args: Parameters<Repositories['tasks']['applyRemoteTaskLabels']>) => getRepos().tasks.applyRemoteTaskLabels(...args))
+  handle('tasks:getLabelState', (_e,taskId: string) => getRepos().tasks.getLabelState(taskId))
+  handle('tasks:acknowledgeLabelState', (_e,...args: Parameters<Repositories['tasks']['acknowledgeLabelState']>) => getRepos().tasks.acknowledgeLabelState(...args))
 
   handle('tasks:getLabels', (_e, taskId: string) => {
     return getRepos().tasks.getLabels(taskId)

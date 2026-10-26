@@ -104,6 +104,11 @@ export interface TaskLabel {
   deleted_at: string | null
 }
 
+export interface TaskLabelSyncState extends TaskLabel {
+  local_version: number
+  sync_pending: number
+}
+
 export interface TaskLabelMapping extends Label {
   task_id: string
 }
