@@ -9,7 +9,7 @@ await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT null::uuid $$;
 CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz);
 CREATE TABLE statuses(id uuid PRIMARY KEY, project_id uuid REFERENCES projects(id), name text NOT NULL,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
-CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date timestamptz,updated_at timestamptz,deleted_at timestamptz);`);
+CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz,deleted_at timestamptz);`);
 const migration=readFileSync(new URL('../../migrations/20261025222717_atomic_status_management.sql', import.meta.url),'utf8'); await db.exec(migration);
 const project='00000000-0000-0000-0000-000000000001', actor='00000000-0000-0000-0000-000000000002';
 const a='00000000-0000-0000-0000-000000000003', b='00000000-0000-0000-0000-000000000004', c='00000000-0000-0000-0000-000000000005';
@@ -32,14 +32,19 @@ assert.equal((await mutate('reorder',{status_ids:[c,b,a]}))[2].name,'Renamed');
 const tid='00000000-0000-0000-0000-000000000006';
 await db.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[tid,project,c]);
 await mutate('delete',{id:c,target_id:b});
-const task=(await db.query('SELECT * FROM tasks WHERE id=$1',[tid])).rows[0];assert.equal(task.status_id,b);assert.ok(task.completed_date);
+const assertIsoCompletion = (value: unknown) => {
+  assert.equal(typeof value, 'string');
+  assert.match(value as string, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(new Date(value as string).toISOString(), value);
+};
+const task=(await db.query('SELECT * FROM tasks WHERE id=$1',[tid])).rows[0];assert.equal(task.status_id,b);assertIsoCompletion(task.completed_date);
 await assert.rejects(mutate('reorder',{status_ids:[a,b,c]}),/exactly once/);
 assert.equal((await mutate('ensure',{names:['QA',' qa ','QA','']})).created_count,1);
 assert.equal((await mutate('ensure',{names:['QA']})).created_count,0);
 // Missing done flag recovery sets existing tasks' completion timestamps atomically.
 await db.query('UPDATE statuses SET is_done=0 WHERE id=$1',[b]);
 await db.query('UPDATE tasks SET completed_date=NULL WHERE id=$1',[tid]);
-await mutate('update',{id:b,is_done:true}); assert.ok((await db.query('SELECT completed_date FROM tasks WHERE id=$1',[tid])).rows[0].completed_date);
+await mutate('update',{id:b,is_done:true}); assertIsoCompletion((await db.query('SELECT completed_date FROM tasks WHERE id=$1',[tid])).rows[0].completed_date);
 await db.exec('GRANT USAGE ON SCHEMA public,auth TO authenticated; GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated; SET ROLE authenticated');
 await assert.rejects(mutate('ensure',{names:['Forged']}),/Invalid status actor/);
 await db.exec('RESET ROLE');

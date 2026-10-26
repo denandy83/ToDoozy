@@ -14,6 +14,7 @@ DECLARE
   next_order integer;
   status_name text;
   changed_at timestamptz;
+  completed_at text;
 BEGIN
   IF p_actor IS NULL OR (current_user NOT IN ('postgres', 'service_role') AND p_actor IS DISTINCT FROM auth.uid()) THEN
     RAISE EXCEPTION 'Invalid status actor';
@@ -24,6 +25,8 @@ BEGIN
   PERFORM 1 FROM public.statuses WHERE project_id = p_project_id ORDER BY id FOR UPDATE;
 
   changed_at := clock_timestamp();
+  -- completed_date is text in the deployed schema; match the app's ISO UTC format.
+  completed_at := to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
 
   IF p_action = 'reorder' THEN
     SELECT array_agg(value::uuid) INTO ids FROM jsonb_array_elements_text(p_input->'status_ids');
@@ -88,7 +91,7 @@ BEGIN
       icon = coalesce(p_input->>'icon', current_status.icon), order_index = coalesce((p_input->>'order_index')::integer, current_status.order_index),
       is_done = next_done, updated_at = changed_at WHERE id = current_status.id RETURNING to_jsonb(statuses.*) INTO result;
     IF next_done IS DISTINCT FROM current_status.is_done THEN
-      UPDATE public.tasks SET completed_date = CASE WHEN next_done = 1 THEN changed_at ELSE NULL END,
+      UPDATE public.tasks SET completed_date = CASE WHEN next_done = 1 THEN completed_at ELSE NULL END,
         updated_at = changed_at WHERE project_id = p_project_id AND status_id = current_status.id AND deleted_at IS NULL;
     END IF;
     RETURN result;
@@ -97,7 +100,7 @@ BEGIN
     SELECT * INTO target_status FROM public.statuses WHERE id = (p_input->>'target_id')::uuid
       AND project_id = p_project_id AND id <> current_status.id AND deleted_at IS NULL;
     IF NOT FOUND THEN RAISE EXCEPTION 'Replacement status must be a different active status in the same project'; END IF;
-    UPDATE public.tasks SET status_id = target_status.id, completed_date = CASE WHEN target_status.is_done = 1 THEN changed_at ELSE NULL END,
+    UPDATE public.tasks SET status_id = target_status.id, completed_date = CASE WHEN target_status.is_done = 1 THEN completed_at ELSE NULL END,
       updated_at = changed_at WHERE project_id = p_project_id AND status_id = current_status.id AND deleted_at IS NULL;
     UPDATE public.statuses SET deleted_at = changed_at, updated_at = changed_at WHERE id = current_status.id;
     RETURN jsonb_build_object('deleted', true, 'status_id', current_status.id, 'reassign_to_status_id', target_status.id);
