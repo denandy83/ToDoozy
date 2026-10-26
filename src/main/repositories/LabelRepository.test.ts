@@ -639,3 +639,59 @@ it('orders family removals and later additions after valid imported clocks',()=>
     expect(db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE label_id=?').get(original.id)).toMatchObject({created_at:'2032-01-01T00:00:00.002Z',deleted_at:null})
   } finally {now.mockRestore();db.close()}
 })
+
+it.each(['source','target'].flatMap((newest)=>['add','remove'].flatMap((choice)=>[0,1].flatMap((sourcePending)=>[0,1].map((targetPending)=>({newest,choice,sourcePending,targetPending}))))))('preserves complete assignment state during consolidation ($newest/$choice, pending $sourcePending/$targetPending)',async({newest,choice,sourcePending,targetPending})=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db)
+    const labels=new LabelRepository(db)
+    const {TaskRepository}=await import('./TaskRepository')
+    const tasks=new TaskRepository(db)
+    seedTask(db,'merge-task',projectId,userId)
+    labels.create({id:'merge-source',user_id:userId,name:'Étiquette',project_id:projectId})
+    labels.create({id:'merge-target',user_id:userId,name:'étiquette',project_id:projectId})
+    tasks.applyRemoteTaskLabels('merge-task',['merge-source','merge-target'])
+    const newer=newest==='source'?'merge-source':'merge-target',older=newest==='source'?'merge-target':'merge-source'
+    if(choice==='add') tasks.removeLabel('merge-task',older)
+    else tasks.addLabel('merge-task',older)
+    if(choice==='add') tasks.addLabel('merge-task',newer)
+    else tasks.removeLabel('merge-task',newer)
+    for(const [label_id,pending] of [['merge-source',sourcePending],['merge-target',targetPending]] as const) {
+      if(!pending) tasks.acknowledgeLabelState('merge-task',[tasks.getLabelState('merge-task').find((row)=>row.label_id===label_id)!])
+    }
+    const receipts=tasks.getLabelState('merge-task'),winner=receipts.find((row)=>row.label_id===newer)!
+    labels.consolidate('merge-source',labels.findById('merge-target')!)
+    const after=tasks.getLabelState('merge-task')
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({label_id:'merge-target',deleted_at:winner.deleted_at})
+    expect(after[0].local_version).toBeGreaterThanOrEqual(winner.local_version)
+    const needsDelivery=newest==='source'||!!sourcePending||!!targetPending
+    expect(after[0].sync_pending).toBe(needsDelivery?1:0)
+    tasks.acknowledgeLabelState('merge-task',receipts)
+    expect(tasks.getLabelState('merge-task')[0].sync_pending).toBe(needsDelivery?1:0)
+    if(needsDelivery) expect(db.prepare("SELECT COUNT(*) AS count FROM sync_queue WHERE table_name='task_labels' AND row_id='merge-task'").get()!.count).toBeGreaterThan(0)
+  } finally {db.close()}
+})
+
+it('requeues an acknowledged source-only assignment under a fresh physical receipt identity',async()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db)
+    const {TaskRepository}=await import('./TaskRepository'),tasks=new TaskRepository(db)
+    seedTask(db,'physical-task',projectId,userId)
+    const source=labels.create({id:'physical-source',user_id:userId,name:'Physical',project_id:projectId})
+    tasks.addLabel('physical-task',source.id)
+    const [receipt]=tasks.getLabelState('physical-task')
+    tasks.acknowledgeLabelState('physical-task',[receipt])
+    labels.consolidate(source.id,{...source,id:'physical-canonical'})
+    const [next]=tasks.getLabelState('physical-task')
+    expect(next).toMatchObject({label_id:'physical-canonical',deleted_at:null,sync_pending:1})
+    expect(next.local_version).toBeGreaterThan(receipt.local_version)
+    tasks.acknowledgeLabelState('physical-task',[receipt,{...receipt,label_id:'physical-canonical'}])
+    expect(tasks.getLabelState('physical-task')[0].sync_pending).toBe(1)
+    tasks.acknowledgeLabelState('physical-task',[next])
+    expect(tasks.getLabelState('physical-task')[0].sync_pending).toBe(0)
+    labels.consolidate(source.id,{...source,id:'physical-canonical'})
+    expect(tasks.getLabelState('physical-task')[0]).toEqual({...next,sync_pending:0})
+  } finally {db.close()}
+})

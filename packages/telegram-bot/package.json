@@ -13,14 +13,29 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "chrono-node": "^2.9.0",
-    "node-telegram-bot-api": "^0.66.0",
+    "node-telegram-bot-api": "0.66.0",
     "rrule": "^2.8.1",
-    "uuid": "^11.1.0"
+    "uuid": "11.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",
     "@types/node-telegram-bot-api": "^0.64.7",
     "@types/uuid": "^10.0.0",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "@cypress/request": {
+      ".": "4.0.1",
+      "form-data": "4.0.6"
+    },
+    "request": {
+      ".": "npm:@cypress/request@4.0.1",
+      "form-data": "4.0.6"
+    },
+    "@types/request": {
+      "form-data": "2.5.6"
+    },
+    "ws": "8.21.0",
+    "qs": "6.16.0"
   }
 }

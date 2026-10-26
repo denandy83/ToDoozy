@@ -313,18 +313,21 @@ export class LabelRepository {
         .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
         .all(fromId) as Array<{ task_id: string }>
       for (const row of taskRows) {
-        const exists = this.db
-          .prepare('SELECT 1 FROM task_labels WHERE task_id = ? AND label_id = ?')
-          .get(row.task_id, toId)
-        if (exists) {
-          const source = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,fromId) as {deleted_at:string|null;local_version:number;sync_pending:number}
-          const target = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,toId) as {local_version:number;sync_pending:number}
-          if (source.sync_pending && (!target.sync_pending || source.local_version>target.local_version)) this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=?,sync_pending=1 WHERE task_id=? AND label_id=?').run(source.deleted_at,source.local_version,row.task_id,toId)
+        const source = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,fromId) as {deleted_at:string|null;local_version:number;sync_pending:number}
+        const target = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,toId) as typeof source | undefined
+        const winner = !target || source.local_version>target.local_version || (source.local_version===target.local_version && source.sync_pending && !target.sync_pending) ? source : target
+        const needsDelivery = winner===source || !!source.sync_pending || !!target?.sync_pending
+        const version = needsDelivery
+          ? Number((this.db.prepare('SELECT COALESCE(MAX(local_version),0)+1 AS version FROM task_labels').get() as {version:number}).version)
+          : winner.local_version
+        if (target) {
+          this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=?,sync_pending=? WHERE task_id=? AND label_id=?').run(winner.deleted_at,version,needsDelivery?1:0,row.task_id,toId)
           this.db.prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?').run(row.task_id, fromId)
         } else {
-          this.db.prepare('UPDATE task_labels SET label_id = ? WHERE task_id = ? AND label_id = ?').run(toId, row.task_id, fromId)
+          this.db.prepare('UPDATE task_labels SET label_id=?,local_version=?,sync_pending=1 WHERE task_id=? AND label_id=?').run(toId,version,row.task_id,fromId)
           taskRemaps++
         }
+        if (needsDelivery) new SyncQueueRepository(this.db).enqueue('task_labels',row.task_id,'UPDATE',JSON.stringify({task_id:row.task_id,assignment_intent:true}))
       }
 
       const projectRows = this.db

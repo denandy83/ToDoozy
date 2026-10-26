@@ -120,7 +120,7 @@ beforeEach(async () => {
         }
         const params:unknown[]=patch?Object.values(patch):[]
         const bind=(value:unknown):string => { params.push(value); return '$'+params.length }
-        const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:`${quote(key)}=${bind(value)}`).join(' AND ')
+        const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:op==='ILIKE'?`${quote(key)} ILIKE ${bind(value)}`:`${quote(key)}=${bind(value)}`).join(' AND ')
         if(removing) {
           const data=(await remote.query(`DELETE FROM ${quote(table)} WHERE ${where} RETURNING *`,params)).rows
           if(table==='task_labels') assignmentCompletions.push('delete')
@@ -140,6 +140,7 @@ beforeEach(async () => {
       } catch(error) { return {data:null,error:{message:String(error)}} }
     }
     const chain={
+      ilike(key:string,value:string) {filters.push([key,value,'ILIKE']);return chain},
       select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
       is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
       order() {return chain},limit() {return chain},or() {return chain},
@@ -862,4 +863,60 @@ it.each([0,1].flatMap((shared)=>['remove-wins','acknowledged-add','failed-retry'
   }
   setOnlineStatus(true);await processSyncQueue();await processSyncQueue()
   await assertTaskFamilyResult(family,mode!=='remove-wins')
+},15000)
+
+it.each([0,1].flatMap((shared)=>['source','target'].flatMap((newest)=>['add','remove'].flatMap((choice)=>[0,1].flatMap((sourcePending)=>[0,1].map((targetPending)=>({shared,newest,choice,sourcePending,targetPending})))))))('delivers consolidated complete assignment choice ($newest/$choice, pending $sourcePending/$targetPending, shared=$shared)',async({shared,newest,choice,sourcePending,targetPending})=>{
+  const family=await seedTaskFamily('Family',shared)
+  const newer=newest==='source'?family.foreign:family.canonical,older=newest==='source'?family.canonical:family.foreign
+  const context=await captureSyncContext()
+  const mutate=async(labelId:string,active:boolean):Promise<void>=>{
+    if(active) await window.api.tasks.addLabel(task,labelId)
+    else await window.api.tasks.removeLabel(task,labelId)
+  }
+  await mutate(older,choice!=='add');await mutate(newer,choice==='add')
+  const receipts=repos.tasks.getLabelState(task).filter((row)=>row.label_id!==family.unrelated)
+  for(const receipt of [...receipts].sort((a,b)=>a.local_version-b.local_version)) {
+    const pending=receipt.label_id===family.foreign?sourcePending:targetPending
+    if(!pending) {
+      if(receipt.deleted_at) await context.client.from('task_labels').delete().eq('task_id',task).in('label_id',[family.canonical,family.foreign])
+      else await context.client.from('task_labels').upsert({task_id:task,label_id:receipt.label_id,deleted_at:null})
+      await window.api.tasks.acknowledgeLabelState(task,[receipt])
+    }
+  }
+  const winning=repos.tasks.getLabelState(task).find((row)=>row.label_id===newer)!
+  await remote.exec('CREATE UNIQUE INDEX labels_owner_name ON user_labels(user_id,lower(name)) WHERE deleted_at IS NULL')
+  const definition=repos.labels.findById(family.foreign)!
+  if(newest==='source') {
+    const {pushLabel}=await import('./PersonalSyncService')
+    expect(await pushLabel(definition,owner,{api:context.api,userId:owner,client:async()=>context.client,assertCurrent:context.assertCurrent,isCurrent:context.isCurrent,scope:async()=>context.scope})).toBe(family.canonical)
+  } else await SYNC_TABLES.labels!.remoteUpsert({...definition,user_id:owner},context)
+  expect(repos.labels.findById(family.foreign)).toBeUndefined()
+  const remapped=repos.tasks.getLabelState(task).find((row)=>row.label_id===family.canonical)!
+  expect(remapped.deleted_at).toBe(winning.deleted_at)
+  expect(remapped.local_version).toBeGreaterThanOrEqual(winning.local_version)
+  await window.api.tasks.acknowledgeLabelState(task,receipts)
+  expect(repos.tasks.getLabelState(task).find((row)=>row.label_id===family.canonical)?.sync_pending).toBe(remapped.sync_pending)
+  setOnlineStatus(true);await processSyncQueue();await processSyncQueue()
+  const {pullTaskLabelsForTasks,reconcile}=await import('./PersonalSyncService')
+  await pullTaskLabelsForTasks([task],owner,context);await reconcile(owner)
+  await processSyncQueue();await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  expect(repos.labels.findByTaskId(task).map((row)=>row.id).sort()).toEqual([family.unrelated,...(choice==='add'?[family.canonical]:[])].sort())
+  const cloud=(await remote.query<{label_id:string}>('SELECT label_id FROM task_labels WHERE task_id=$1',[task])).rows.map((row)=>row.label_id)
+  expect(cloud.includes(family.canonical)).toBe(choice==='add')
+  if(choice==='remove') expect(cloud).toEqual([family.unrelated])
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[family.other,family.foreign])).rows).toHaveLength(1)
+  const observer=new DatabaseSync(':memory:');observer.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)')
+  try {
+    for(const migrate of migrations) migrate(observer)
+    const fresh=createRepositories(observer)
+    for(const user of repos.users.list()) fresh.users.create(user)
+    fresh.projects.applyRemote(repos.projects.findById(project)!)
+    for(const status of repos.statuses.findByProjectId(project)) fresh.statuses.applyRemote(status)
+    fresh.tasks.applyRemoteTask(repos.tasks.findById(task)!)
+    fresh.labels.applyRemote(repos.labels.findById(family.canonical)!)
+    const api=new Proxy({}, {get:(_,ns:keyof typeof fresh)=>new Proxy({}, {get:(_,method:string)=>async(...args:unknown[])=>(fresh[ns] as unknown as Record<string,(...args:unknown[])=>unknown>)[method](...args)})}) as TodoozyAPI
+    await pullTaskLabelsForTasks([task],owner,{...context,api})
+    expect(fresh.labels.findByTaskId(task).map((row)=>row.id).sort()).toEqual([family.unrelated,...(choice==='add'?[family.canonical]:[])].sort())
+  } finally {observer.close()}
 },15000)

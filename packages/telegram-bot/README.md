@@ -72,3 +72,16 @@ candidate, an authorized operator should:
 
 No desktop/MCP writer or pending SQL activation is included in bot deployment.
 Their separately documented coordinated paused-writer rollout still applies.
+
+## Dependency audit scope
+
+The desktop and bot have separate manifests and lockfiles; audit both with
+`npm audit` from the root and `npm --prefix packages/telegram-bot audit`, including
+dev dependencies. The bot lock retains SDK 0.66.0 and uses the maintained Cypress
+request implementation for both its injected transport and the legacy request
+peer, with patched compatible form-data, qs, ws and uuid versions. Overrides are
+compatibility constraints, not audit exclusions. Installed advisories do not by
+themselves establish exploitation of the bot's used API paths. Repeat clean
+`npm ci`, dependency-tree checks, both audits, bot checks and synthetic localhost
+transport/production-pruned consumer checks before rollout. No live Telegram or
+container deployment is implied by these checks.
