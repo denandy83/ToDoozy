@@ -38,6 +38,8 @@ let projectBatches: number[]
 let failProjectWriteNumber: number | null
 let beforeAssignmentWrite: (()=>Promise<void>) | null
 let assignmentBatches: number[], paletteReads: number, failDefinitions: boolean
+let assignmentSchedule: 'delete-last' | 'add-last' | null, failAssignments: boolean
+let assignmentCompletions: string[]
 
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url,_key,options) => { pinned.token=options.accessToken; return pinned.client }) }))
@@ -76,7 +78,7 @@ beforeEach(async () => {
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
   }
   await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[task,project,source])
-  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; beforeAssignmentWrite=null; beforeProjectWrite=null;projectBatches=[];failProjectWriteNumber=null; assignmentBatches=[];paletteReads=0;failDefinitions=false; setOnlineStatus(false)
+  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; beforeAssignmentWrite=null; beforeProjectWrite=null;projectBatches=[];failProjectWriteNumber=null; assignmentBatches=[];paletteReads=0;failDefinitions=false;assignmentSchedule=null;failAssignments=false;assignmentCompletions=[]; setOnlineStatus(false)
   useAuthStore.setState({ currentUser: { id: owner } as never })
   useStatusStore.setState({ statuses: Object.fromEntries(repos.statuses.findByProjectId(project).map((row) => [row.id,row])), error: null })
   vi.mocked(requireSession).mockResolvedValue({ user: { id: owner }, access_token: 'synthetic-owner' } as Session)
@@ -99,6 +101,8 @@ beforeEach(async () => {
         if(table==='task_labels' && (values || removing)) {
           if(values) assignmentBatches.push(values.length)
           if(beforeAssignmentWrite) {const hook=beforeAssignmentWrite;beforeAssignmentWrite=null;await hook()}
+          if(failAssignments) throw new Error('Synthetic assignment failure')
+          if((assignmentSchedule==='delete-last' && removing) || (assignmentSchedule==='add-last' && values)) await new Promise((resolve)=>setTimeout(resolve,40))
         }
         if(table==='tasks' && (values || patch) && (failTaskWrites || (failRecovery && patch))) throw new Error('synthetic task transport failure')
         if(values) {
@@ -111,12 +115,17 @@ beforeEach(async () => {
             const conflicts=table==='project_labels'?['project_id','label_id']:table==='task_labels'?['task_id','label_id']:['id']
             await remote.query(`INSERT INTO ${quote(table)}(${keys.map(quote).join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')}) ON CONFLICT(${conflicts.map(quote).join(',')}) DO UPDATE SET ${keys.filter((key)=>!conflicts.includes(key)).map((key)=>`${quote(key)}=excluded.${quote(key)}`).join(',')}`,params)
           }
+          if(table==='task_labels') assignmentCompletions.push('add')
           return {data:[],error:null}
         }
         const params:unknown[]=patch?Object.values(patch):[]
         const bind=(value:unknown):string => { params.push(value); return '$'+params.length }
         const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:`${quote(key)}=${bind(value)}`).join(' AND ')
-        if(removing) return {data:(await remote.query(`DELETE FROM ${quote(table)} WHERE ${where} RETURNING *`,params)).rows,error:null}
+        if(removing) {
+          const data=(await remote.query(`DELETE FROM ${quote(table)} WHERE ${where} RETURNING *`,params)).rows
+          if(table==='task_labels') assignmentCompletions.push('delete')
+          return {data,error:null}
+        }
         if(patch) {
           const result=await remote.query(`UPDATE ${quote(table)} SET ${Object.keys(patch).map((key,index)=>`${quote(key)}=$${index+1}`).join(',')} WHERE ${where} RETURNING id`,params)
           if(failRecoveryResponse) {failRecoveryResponse=false;throw new Error('synthetic lost recovery response')}
@@ -740,4 +749,117 @@ it.each([0,1].flatMap((shared)=>['Family','Étiquette'].map((name)=>({shared,nam
   expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id)).toContain(canonical)
   expect((await remote.query<{deleted_at:string|null}>('SELECT deleted_at FROM project_labels WHERE label_id=$1',[canonical])).rows[0].deleted_at).toBeNull()
   expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[task,canonical])).rows).toHaveLength(1)
+},15000)
+
+let familySequence=0
+async function seedTaskFamily(name:string,shared:number): Promise<{canonical:string;foreign:string;unrelated:string;other:string}> {
+  const labels=await seedSettledAssignments(),canonical=labels[0],foreign=id(981),other=id(982)
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.parse('2100-01-01T00:00:00Z')+(++familySequence)*120_000)
+  repos.labels.update(canonical,{name})
+  repos.projects.addMember(project,owner,'owner')
+  local.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,project)
+  repos.users.create({id:id(983),email:'family-owner@example.invalid',display_name:null,avatar_url:null})
+  const definition={...repos.labels.findById(canonical)!,id:foreign,user_id:id(983),name:name.toLowerCase()}
+  repos.labels.applyRemote(definition)
+  const context=await captureSyncContext()
+  await context.client.from('user_labels').upsert([repos.labels.findById(canonical)!,definition])
+  const palette={project_id:project,label_id:foreign,created_at:'2020-01-01T00:00:00.000Z',deleted_at:null}
+  repos.labels.applyRemoteProjectLabel(palette);await context.client.from('project_labels').upsert(palette)
+  repos.tasks.applyRemoteTaskLabels(task,[foreign])
+  await context.client.from('task_labels').upsert({task_id:task,label_id:foreign,deleted_at:null})
+  await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[other,project,source])
+  await context.client.from('task_labels').upsert({task_id:other,label_id:foreign,deleted_at:null})
+  await remote.query('INSERT INTO projects(id,owner_id) VALUES($1,$2)',[id(984),id(983)])
+  await remote.query('INSERT INTO statuses(id,project_id,is_done,is_default) VALUES($1,$2,0,1)',[id(985),id(984)])
+  await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[id(986),id(984),id(985)])
+  await context.client.from('task_labels').upsert({task_id:id(986),label_id:foreign,deleted_at:null})
+  await useLabelStore.getState().hydrateLabels(project)
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id).sort()).toEqual([canonical,labels[1],foreign].sort())
+  return {canonical,foreign,unrelated:labels[1],other}
+}
+async function assertTaskFamilyResult(family:Awaited<ReturnType<typeof seedTaskFamily>>,active:boolean):Promise<void> {
+  const context=await captureSyncContext()
+  const {pullTaskLabelsForTasks,reconcile}=await import('./PersonalSyncService')
+  await pullTaskLabelsForTasks([task],owner,context)
+  await reconcile(owner);await processSyncQueue();await processSyncQueue()
+  await useTaskStore.getState().hydrateTaskLabels(task)
+  const expected=[family.unrelated,...(active?[family.canonical]:[])].sort()
+  const cloud=(await remote.query<{label_id:string}>('SELECT label_id FROM task_labels WHERE task_id=$1 ORDER BY label_id',[task])).rows.map((row)=>row.label_id)
+  expect(cloud).toEqual(expected)
+  expect(useTaskStore.getState().taskLabels[task].map((row)=>row.id).sort()).toEqual(expected)
+  expect(repos.tasks.getLabelState(task).every((row)=>!row.sync_pending)).toBe(true)
+  expect(repos.syncQueue.count()).toBe(0)
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[family.other,family.foreign])).rows).toHaveLength(1)
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1 AND label_id=$2',[id(986),family.foreign])).rows).toHaveLength(1)
+  expect(repos.labels.findByProjectId(project).map((row)=>row.id).sort()).toEqual([family.canonical,family.foreign,family.unrelated].sort())
+  const observer=new DatabaseSync(':memory:');observer.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)')
+  try {
+    for(const migrate of migrations) migrate(observer)
+    const fresh=createRepositories(observer)
+    for(const user of repos.users.list()) fresh.users.create(user)
+    fresh.projects.applyRemote(repos.projects.findById(project)!)
+    for(const status of repos.statuses.findByProjectId(project)) fresh.statuses.applyRemote(status)
+    fresh.tasks.applyRemoteTask(repos.tasks.findById(task)!)
+    for(const label of [family.canonical,family.foreign,family.unrelated]) fresh.labels.applyRemote(repos.labels.findById(label)!)
+    const links=JSON.parse(JSON.stringify((await remote.query('SELECT * FROM project_labels WHERE project_id=$1',[project])).rows)) as Array<{project_id:string;label_id:string;created_at:string;deleted_at:string|null}>
+    for(const link of links) fresh.labels.applyRemoteProjectLabel(link)
+    fresh.tasks.applyRemoteTaskLabels(task,cloud,[])
+    expect(fresh.labels.findByTaskId(task).map((row)=>row.id).sort()).toEqual(expected)
+  } finally {observer.close()}
+}
+
+it.each([0,1].flatMap((shared)=>['Family','Étiquette'].flatMap((name)=>['single','bulk'].flatMap((path)=>['delete-last','add-last'].map((order)=>({shared,name,path,order}))))))('keeps newer $name assignment after queued $path family removal ($order, shared=$shared)',async({shared,name,path,order})=>{
+  const family=await seedTaskFamily(name,shared)
+  vi.mocked(requireSession).mockResolvedValue(null)
+  setOnlineStatus(false)
+  if(path==='single') await useTaskStore.getState().removeLabel(task,family.canonical)
+  else await useTaskStore.getState().bulkRemoveLabel([task],family.canonical)
+  if(path==='single') await useTaskStore.getState().addLabel(task,family.canonical)
+  else await useTaskStore.getState().bulkAddLabel([task],family.canonical)
+  await new Promise((resolve)=>setTimeout(resolve,25))
+  expect((await remote.query('SELECT * FROM task_labels WHERE task_id=$1',[task])).rows).toHaveLength(3)
+  const state=repos.tasks.getLabelState(task)
+  expect(state.find((row)=>row.label_id===family.canonical)!.local_version).toBeGreaterThan(state.find((row)=>row.label_id===family.foreign)!.local_version)
+  assignmentCompletions=[]
+  assignmentSchedule=order as 'delete-last'|'add-last'
+  vi.mocked(requireSession).mockResolvedValue({user:{id:owner},access_token:'synthetic-owner'} as Session)
+  setOnlineStatus(true);await processSyncQueue();await processSyncQueue()
+  expect(assignmentCompletions.slice(0,2)).toEqual(order==='delete-last'?['add','delete']:['delete','add'])
+  await assertTaskFamilyResult(family,true)
+},15000)
+
+it.each([0,1].flatMap((shared)=>['remove-wins','acknowledged-add','failed-retry','during-read'].map((mode)=>({shared,mode}))))('resolves complete current assignment family versions ($mode, shared=$shared)',async({shared,mode})=>{
+  const family=await seedTaskFamily('Étiquette',shared)
+  vi.mocked(requireSession).mockResolvedValue(null);setOnlineStatus(false)
+  if(mode==='remove-wins') {
+    await useTaskStore.getState().addLabel(task,family.canonical)
+    await useTaskStore.getState().removeLabel(task,family.canonical)
+  } else {
+    await useTaskStore.getState().removeLabel(task,family.canonical)
+    if(mode!=='during-read') await useTaskStore.getState().addLabel(task,family.canonical)
+  }
+  await new Promise((resolve)=>setTimeout(resolve,25))
+  vi.mocked(requireSession).mockResolvedValue({user:{id:owner},access_token:'synthetic-owner'} as Session)
+  const context=await captureSyncContext()
+  if(mode==='acknowledged-add') {
+    const choice=repos.tasks.getLabelState(task).find((row)=>row.label_id===family.canonical)!
+    await context.client.from('task_labels').upsert({task_id:task,label_id:family.canonical,deleted_at:null})
+    await window.api.tasks.acknowledgeLabelState(task,[choice])
+    expect(repos.tasks.getLabelState(task).find((row)=>row.label_id===family.canonical)?.sync_pending).toBe(0)
+  }
+  if(mode==='during-read') afterLabelSnapshot=async()=>{
+    vi.mocked(requireSession).mockResolvedValue(null)
+    await useTaskStore.getState().addLabel(task,family.canonical)
+    vi.mocked(requireSession).mockResolvedValue({user:{id:owner},access_token:'synthetic-owner'} as Session)
+  }
+  if(mode==='failed-retry') {
+    failAssignments=true
+    await expect(syncTaskLabelChoices(context.client,[task],context.api,context.scope)).rejects.toThrow('Synthetic assignment failure')
+    expect(repos.tasks.getLabelState(task).some((row)=>row.sync_pending)).toBe(true)
+    expect(repos.syncQueue.count()).toBeGreaterThan(0)
+    failAssignments=false
+  }
+  setOnlineStatus(true);await processSyncQueue();await processSyncQueue()
+  await assertTaskFamilyResult(family,mode!=='remove-wins')
 },15000)
