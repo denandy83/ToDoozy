@@ -169,8 +169,8 @@ export class ProjectRepository {
     // LWW via numeric epoch — local SQLite stores ISO `Z` form, Supabase
     // returns `+00:00` form; lexical compare flags equal instants as drift.
     const metadataNewer = !existing || Date.parse(remote.updated_at) > Date.parse(existing.updated_at)
-    const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) > Date.parse(existing.archive_updated_at))
-    if (!metadataNewer && !archiveNewer) return existing!
+    const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) >= Date.parse(existing.archive_updated_at))
+    if (!metadataNewer && (!archiveNewer || remote.is_archived === existing?.is_archived)) return existing!
     const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote
     remote = { ...(metadataNewer ? remote : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
     // `is_shared` is a local-only derived cache (computed from

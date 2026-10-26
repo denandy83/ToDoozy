@@ -303,7 +303,7 @@ export async function deleteTaskFromSupabase(taskId: string, producer?: SyncProd
 /**
  * Push a status to Supabase.
  */
-export async function pushStatus(status: Status): Promise<void> {
+export async function pushStatus(status: Status, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const payload = {
       id: status.id,
@@ -335,7 +335,7 @@ export async function pushStatus(status: Status): Promise<void> {
     } catch (err) {
       await reportPushFailure(origin, 'pushStatus', err, 'statuses', status.id, JSON.stringify(payload))
     }
-  })
+  }, producer)
 }
 
 /**
@@ -1007,26 +1007,17 @@ export async function deleteSettingFromSupabase(key: string, userId: string): Pr
  * Soft-delete a status in Supabase by setting deleted_at. Hard-DELETE is reserved
  * for the 30-day purge job — a soft tombstone propagates via Realtime UPDATE.
  */
-export async function deleteStatusFromSupabase(statusId: string): Promise<void> {
+export async function deleteStatusFromSupabase(statusId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
-    const now = new Date().toISOString()
-    if (!(await hasLiveSession(origin, 'deleteStatus', `id=${statusId}`))) return
-    try {
-      const supabase = (await origin.client())!
-      const { error } = await supabase
-        .from('statuses')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', statusId)
-      if (error) {
-        await reportPushFailure(origin, 'deleteStatus', error, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
-      } else {
-        logEvent('info', 'sync', `Soft-deleted status`, `id=${statusId}`)
-        await markSynced(origin)
-      }
-    } catch (err) {
-      await reportPushFailure(origin, 'deleteStatus', err, 'statuses', statusId, JSON.stringify({ id: statusId, deleted_at: now }), 'UPDATE')
-    }
-  })
+    const queue = await origin.api.sync.getQueue()
+    if (!queue.some((entry) => entry.table_name === 'statuses' && entry.row_id === statusId && JSON.parse(entry.payload).status_delete === true)) throw new Error('Status deletion requires a durable replacement')
+    const { processSyncQueue, getOnlineStatus } = await import('./SyncService')
+    if (!getOnlineStatus()) { await refreshProducerPending(origin); return }
+    const client = await origin.client()
+    if (!client) { await refreshProducerPending(origin); return }
+    if (!await origin.isCurrent()) return
+    await processSyncQueue({ api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+  }, producer)
 }
 
 /**

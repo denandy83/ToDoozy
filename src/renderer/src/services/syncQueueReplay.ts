@@ -1,3 +1,5 @@
+import { mutateProjectStatus } from '../../../../supabase/functions/mcp/statusRpc'
+import { useAuthStore } from '../shared/stores/authStore'
 import { readAll } from './readAll'
 import type { SyncContext } from './syncContext'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -13,17 +15,43 @@ async function currentProjectLink(projectId: string, labelId: string, api = wind
   return links.find((link) => link.project_id === projectId && link.label_id === labelId)
 }
 
+async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
+  row: Awaited<ReturnType<typeof api.statuses.findById>>
+  command: { status_delete: true; target_id: string; updated_at: string } | null
+}> {
+  const row = await api.statuses.findById(entry.row_id)
+  const commands = (await api.sync.getQueue()).filter((item) => item.table_name === 'statuses' && item.row_id === entry.row_id)
+    .map((item) => JSON.parse(item.payload)).filter((payload) => payload.status_delete === true && Date.parse(payload.updated_at) === Date.parse(row?.updated_at ?? ''))
+  return { row, command: commands.at(-1) ?? null }
+}
+
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
 export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueueEntry, context?: SyncContext): Promise<boolean> {
   const api = context?.api ?? window.api
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
+  if (entry.table_name === 'statuses' && payload.status_delete === true) {
+    const { row: current, command } = await statusDeleteIntent(entry, api)
+    if (!current) return true
+    if (!current.deleted_at) {
+      const { error } = await client.from('statuses').upsert(current)
+      if (error) throw new Error(error.message)
+      return true
+    }
+    if (!command) throw new Error('Status replacement intent missing')
+    const { data: remote, error } = await client.from('statuses').select('id, deleted_at').eq('id', entry.row_id).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!remote || remote.deleted_at) return true
+    context?.assertCurrent()
+    await mutateProjectStatus(client, current.project_id, useAuthStore.getState().currentUser!.id, 'delete', { id: entry.row_id, target_id: command.target_id })
+    return true
+  }
   if (entry.table_name === 'projects' && payload.archive_with_tasks === true) {
     const current = await api.projects.findById(entry.row_id)
     if (!current || current.deleted_at) return true
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })
     if (!current.archive_updated_at) throw new Error('Archive action version missing')
     const applied = await writeProjectArchive(client, entry.row_id, current.is_archived ?? 0, current.updated_at, tasks, current.archive_updated_at)
-    if (Date.parse(applied.archive_updated_at) > Date.parse(current.archive_updated_at)) await api.projects.applyRemote({ ...current, ...applied })
+    if (Date.parse(applied.archive_updated_at) > Date.parse(current.archive_updated_at) || applied.is_archived !== current.is_archived) await api.projects.applyRemote({ ...current, ...applied })
     return true
   }
   if (entry.table_name === 'project_labels' && typeof payload.projectId === 'string') {
@@ -87,6 +115,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
 export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncContext): Promise<string> {
   const payload = JSON.parse(entry.payload)
   const api = context.api
+  if (entry.table_name === 'statuses' && payload.status_delete === true) return JSON.stringify(await statusDeleteIntent(entry, api))
   if (entry.table_name === 'projects') {
     const project = await api.projects.findById(entry.row_id)
     const tasks = await api.tasks.findAllByProject(entry.row_id, { includeTombstones: true })

@@ -8,7 +8,7 @@ export async function writeProjectArchive(client: SupabaseClient, projectId: str
   if (error) throw new Error(error.message)
   if (!data?.length) throw new Error('Only the project owner can archive or restore this project')
   const applied = { is_archived: data[0].is_archived ?? isArchived, archive_updated_at: data[0].archive_updated_at ?? archiveAt }
-  if (Date.parse(applied.archive_updated_at) > Date.parse(archiveAt)) return applied
+  if (Date.parse(applied.archive_updated_at) > Date.parse(archiveAt) || applied.is_archived !== isArchived) return applied
   const localTasks = new Map(tasks.map((task) => [task.id, task]))
   const { data: remoteTasks } = await readAll(() => client.from('tasks').select('id').eq('project_id', projectId).is('deleted_at', null))
   const groups = new Map<string, { patch: { is_archived: number; updated_at: string }; ids: string[] }>()

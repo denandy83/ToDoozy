@@ -317,3 +317,27 @@ describe('queue integration with isolated account databases', () => {
     expect(repositories[1].labels.findById('l')).toBeUndefined()
   })
 })
+
+it.each(['tasks', 'statuses', 'user_settings'])('replays 500 current %s values in bounded batches and retains only failed batches', async (table) => {
+  const values = new Map(Array.from({ length: 500 }, (_, index) => {
+    const id = table === 'user_settings' ? `u:key${index}` : `id-${index}`
+    return [id, { ...local, id, title: 'Current', name: 'Current', key: `key${index}`, value: 'Current', user_id: 'u' }]
+  }))
+  queue = [...values.keys()].map((id) => ({ ...entry(`q-${id}`, table, { id }), row_id: id }))
+  if (table === 'tasks') vi.mocked(window.api.tasks.findById).mockImplementation(async (id) => values.get(id) as Task)
+  if (table === 'statuses') (window.api as unknown as { statuses: unknown }).statuses = { findById: async (id: string) => values.get(id) }
+  if (table === 'user_settings') vi.mocked(window.api.settings.findAllByUser).mockResolvedValue([...values.values()] as never)
+  let calls = 0, fail = true
+  const sizes: number[] = []
+  const client = { from() {
+    return { upsert: async (rows: unknown[]) => { sizes.push(rows.length); calls++; return { data: null, error: fail && calls === 2 ? { message: 'Batch failed' } : null } } }
+  } } as unknown as SupabaseClient
+  pinned.client = client
+  expect(await processSyncQueue()).toBe(300)
+  expect(sizes).toEqual([200, 200, 100])
+  expect(queue).toHaveLength(200)
+  fail = false
+  expect(await processSyncQueue()).toBe(200)
+  expect(queue).toHaveLength(0)
+  expect(sizes).toEqual([200, 200, 100, 200])
+})

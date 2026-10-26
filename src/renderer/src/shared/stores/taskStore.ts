@@ -1,4 +1,4 @@
-import { withSyncProducer } from '../../services/syncContext'
+import { withSyncProducer, captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { reportPushFailure } from '../../services/syncFeedback'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
@@ -33,31 +33,31 @@ function getUserId(): string {
  * the color) if they don't have one yet. Returns the label id to actually link.
  * Mine-already / legacy-null-owner / unknown ids pass through unchanged.
  */
-async function resolveLabelForCurrentUser(taskId: string, labelId: string): Promise<string> {
-  const userId = getUserId()
+async function resolveLabelForCurrentUser(taskId: string, labelId: string, origin: SyncProducer): Promise<string> {
+  const userId = origin.userId ?? ''
   if (!userId) return labelId
-  const label = await window.api.labels.findById(labelId).catch(() => null)
+  const label = await origin.api.labels.findById(labelId).catch(() => null)
   if (!label || label.user_id === userId || label.user_id == null) return labelId
   const projectId = useTaskStore.getState().tasks[taskId]?.project_id
-  const mine = await window.api.labels.findByName(userId, label.name).catch(() => null)
+  const mine = await origin.api.labels.findByName(userId, label.name).catch(() => null)
   if (mine) {
-    if (projectId) await window.api.labels.addToProject(projectId, mine.id).catch(() => {})
+    if (projectId) await origin.api.labels.addToProject(projectId, mine.id).catch(() => {})
     return mine.id
   }
-  const created = await useLabelStore.getState().createLabel({
-    id: crypto.randomUUID(),
-    user_id: userId,
-    name: label.name,
-    color: label.color,
-    project_id: projectId
-  })
+  const created = await origin.api.labels.adopt(userId, label)
+  if (projectId) await origin.api.labels.addToProject(projectId, created.id)
+  await requireProducerCurrent(origin)
+  useLabelStore.setState((state) => ({ labels: { ...state.labels, [created.id]: created } }))
+  const { pushLabel, pushProjectLabel } = await import('../../services/PersonalSyncService')
+  await pushLabel(created, userId, origin)
+  if (projectId) await pushProjectLabel(projectId, created.id, null, origin)
   return created.id
 }
 
-function logTaskActivity(taskId: string, action: string, oldValue: string | null, newValue: string | null): void {
-  const userId = getUserId()
+function logTaskActivity(taskId: string, action: string, oldValue: string | null, newValue: string | null, origin: SyncProducer): void {
+  const userId = origin.userId ?? ''
   if (!userId) return
-  window.api.activityLog.create({
+  origin.api.activityLog.create({
     id: crypto.randomUUID(),
     task_id: taskId,
     user_id: userId,
@@ -74,18 +74,18 @@ function logTaskActivity(taskId: string, action: string, oldValue: string | null
  * Dynamic import avoids a static taskStore → savedViewStore → viewStore →
  * taskStore cycle; the recount is debounced so the import latency is irrelevant.
  */
-function scheduleSavedViewRecount(): void {
-  const userId = getUserId()
+function scheduleSavedViewRecount(origin: SyncProducer): void {
+  const userId = origin.userId ?? ''
   if (!userId) return
   import('./savedViewStore')
-    .then(({ useSavedViewStore }) => useSavedViewStore.getState().scheduleRecount(userId))
+    .then(async ({ useSavedViewStore }) => { if (await origin.isCurrent()) useSavedViewStore.getState().scheduleRecount(userId) })
     .catch(() => {})
 }
 
 // Sync task changes to Supabase for ALL projects (shared and personal).
 // Exported for TaskBatchSyncManager, which flushes batched detail-panel
 // edits through the same shared/personal routing (story #92).
-export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
+export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 'DELETE', producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
   try {
     const project = await origin.api.projects.findById(task.project_id)
@@ -96,10 +96,10 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
       const { syncTaskChange } = await import('../../services/SyncService')
       let labelData: Array<{ name: string; color: string }> | undefined
       if (operation !== 'DELETE') {
-        const taskLabels = await origin.api.tasks.getLabels(task.id)
+        const links = await origin.api.tasks.getLabels(task.id)
         labelData = []
-        for (const tl of taskLabels) {
-          const label = await origin.api.labels.findById(tl.label_id)
+        for (const link of links) {
+          const label = await origin.api.labels.findById(link.label_id)
           if (label) labelData.push({ name: label.name, color: label.color })
         }
       }
@@ -116,7 +116,7 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
   } catch (err) {
     await reportPushFailure(origin, 'syncIfShared', err, 'tasks', task.id, JSON.stringify(task), operation)
   }
-  })
+  }, producer)
 }
 
 /**
@@ -169,7 +169,7 @@ interface TaskActions {
   hydrateMyDay(userId: string): Promise<void>
   hydrateArchived(projectId: string): Promise<void>
   hydrateTemplates(projectId: string): Promise<void>
-  hydrateAllForProject(projectId: string, userId: string): Promise<void>
+  hydrateAllForProject(projectId: string, userId: string, producer?: SyncProducer): Promise<void>
   hydrateAllForUser(userId: string): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
@@ -180,7 +180,7 @@ interface TaskActions {
   createSubtask(parentId: string, input: CreateTaskInput): Promise<Task>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
-  hydrateTaskLabels(taskId: string): Promise<void>
+  hydrateTaskLabels(taskId: string, producer?: SyncProducer): Promise<void>
   hydrateAllTaskLabels(projectId: string): Promise<void>
   setCurrentTask(id: string | null): void
   navigateTask(id: string): void
@@ -311,8 +311,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllForProject(_projectId: string, userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateAllForProject(_projectId: string, userId: string, producer?: SyncProducer): Promise<void> {
+    const { api, isCurrent } = producer ?? hydrationContext()
     set({ loading: true, error: null })
     try {
       // Load all projects' tasks for accurate sidebar counts
@@ -389,27 +389,34 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async createTask(input: CreateTaskInput): Promise<Task> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const task = await window.api.tasks.create(input)
+      const task = await api.tasks.create(input)
+      await requireProducerCurrent(origin)
       set((state) => ({
         tasks: { ...state.tasks, [task.id]: task }
       }))
-      syncIfShared(task, 'INSERT')
-      logTaskActivity(task.id, 'created', null, null)
-      scheduleSavedViewRecount()
+      syncIfShared(task, 'INSERT', origin)
+      logTaskActivity(task.id, 'created', null, null, origin)
+      scheduleSavedViewRecount(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create task'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<Task | null> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       const oldTask = get().tasks[id]
-      const task = await window.api.tasks.update(id, input)
+      const task = await api.tasks.update(id, input)
       if (task) {
+        await requireProducerCurrent(origin)
         set((state) => ({
           tasks: { ...state.tasks, [task.id]: task }
         }))
@@ -417,66 +424,70 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         // Log activity for each changed field
         if (oldTask) {
           if (input.title !== undefined && input.title !== oldTask.title) {
-            logTaskActivity(id, 'title_changed', oldTask.title, input.title)
+            logTaskActivity(id, 'title_changed', oldTask.title, input.title, origin)
           }
           if (input.status_id !== undefined && input.status_id !== oldTask.status_id) {
             const [oldStatus, newStatus] = await Promise.all([
-              window.api.statuses.findById(oldTask.status_id),
-              window.api.statuses.findById(input.status_id)
+              api.statuses.findById(oldTask.status_id),
+              api.statuses.findById(input.status_id)
             ])
-            logTaskActivity(id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '')
+            logTaskActivity(id, 'status_changed', oldStatus?.name ?? '', newStatus?.name ?? '', origin)
+            await requireProducerCurrent(origin)
             window.api.tray.refresh()
           }
           if (input.priority !== undefined && input.priority !== oldTask.priority) {
             const names = ['None', 'Low', 'Normal', 'High', 'Urgent']
-            logTaskActivity(id, 'priority_changed', names[oldTask.priority] ?? '', names[input.priority] ?? '')
+            logTaskActivity(id, 'priority_changed', names[oldTask.priority] ?? '', names[input.priority] ?? '', origin)
           }
           if (input.due_date !== undefined && input.due_date !== oldTask.due_date) {
-            logTaskActivity(id, 'due_date_changed', oldTask.due_date ?? '', input.due_date ?? '')
+            logTaskActivity(id, 'due_date_changed', oldTask.due_date ?? '', input.due_date ?? '', origin)
           }
           if (input.is_archived !== undefined && input.is_archived !== oldTask.is_archived) {
-            logTaskActivity(id, input.is_archived === 1 ? 'archived' : 'unarchived', null, null)
+            logTaskActivity(id, input.is_archived === 1 ? 'archived' : 'unarchived', null, null, origin)
           }
           if (input.assigned_to !== undefined && input.assigned_to !== oldTask.assigned_to) {
-            logTaskActivity(id, 'assigned', oldTask.assigned_to ?? '', input.assigned_to ?? 'unassigned')
+            logTaskActivity(id, 'assigned', oldTask.assigned_to ?? '', input.assigned_to ?? 'unassigned', origin)
           }
           if (input.recurrence_rule !== undefined && input.recurrence_rule !== oldTask.recurrence_rule) {
-            logTaskActivity(id, 'recurrence_changed', oldTask.recurrence_rule ?? '', input.recurrence_rule ?? '')
+            logTaskActivity(id, 'recurrence_changed', oldTask.recurrence_rule ?? '', input.recurrence_rule ?? '', origin)
           }
           if (input.reference_url !== undefined && input.reference_url !== oldTask.reference_url) {
-            logTaskActivity(id, 'reference_url_changed', oldTask.reference_url ?? '', input.reference_url ?? '')
+            logTaskActivity(id, 'reference_url_changed', oldTask.reference_url ?? '', input.reference_url ?? '', origin)
           }
           if (input.is_in_my_day !== undefined && input.is_in_my_day !== oldTask.is_in_my_day) {
-            logTaskActivity(id, input.is_in_my_day === 1 ? 'pinned_to_my_day' : 'unpinned_from_my_day', null, null)
+            logTaskActivity(id, input.is_in_my_day === 1 ? 'pinned_to_my_day' : 'unpinned_from_my_day', null, null, origin)
+            await requireProducerCurrent(origin)
             window.api.tray.refresh()
           }
           if (input.project_id !== undefined && input.project_id !== oldTask.project_id) {
-            logTaskActivity(id, 'moved_to_project', oldTask.project_id, input.project_id)
+            logTaskActivity(id, 'moved_to_project', oldTask.project_id, input.project_id, origin)
           }
         }
 
         // Cascade archive/unarchive to subtasks in store
         if (input.is_archived !== undefined) {
-          await get().hydrateAllForProject(task.project_id, getUserId())
+          await get().hydrateAllForProject(task.project_id, origin.userId ?? '', origin)
         }
 
         // Check if a recurring task was moved to done status → create clone
         if (input.status_id && task.recurrence_rule) {
-          const status = await window.api.statuses.findById(input.status_id)
+          const status = await api.statuses.findById(input.status_id)
           if (status && status.is_done === 1) {
             try {
-              const result = await window.api.tasks.completeRecurring(task.id)
+              const result = await api.tasks.completeRecurring(task.id)
               if (result) {
                 // Load the new task into the store
-                const newTask = await window.api.tasks.findById(result.id)
+                const newTask = await api.tasks.findById(result.id)
                 if (newTask) {
+                  await requireProducerCurrent(origin)
                   set((state) => ({
                     tasks: { ...state.tasks, [newTask.id]: newTask },
                     lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id }
                   }))
                   // Also load subtasks of the new task
-                  const subtasks = await window.api.tasks.findSubtasks(result.id)
+                  const subtasks = await api.tasks.findSubtasks(result.id)
                   if (subtasks.length > 0) {
+                    await requireProducerCurrent(origin)
                     set((state) => {
                       const updated = { ...state.tasks }
                       for (const st of subtasks) updated[st.id] = st
@@ -484,7 +495,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
                     })
                   }
                   // Load labels for the new task
-                  const labels = await window.api.labels.findByTaskId(result.id)
+                  const labels = await api.labels.findByTaskId(result.id)
+                  await requireProducerCurrent(origin)
                   set((state) => ({
                     taskLabels: { ...state.taskLabels, [result.id]: labels }
                   }))
@@ -500,8 +512,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         if (input.is_in_my_day === 1 && task.parent_id) {
           const parent = get().tasks[task.parent_id]
           if (parent && parent.is_in_my_day !== 1) {
-            const updatedParent = await window.api.tasks.update(parent.id, { is_in_my_day: 1 })
+            const updatedParent = await api.tasks.update(parent.id, { is_in_my_day: 1 })
             if (updatedParent) {
+              await requireProducerCurrent(origin)
               set((state) => ({
                 tasks: { ...state.tasks, [updatedParent.id]: updatedParent }
               }))
@@ -510,29 +523,33 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         }
         const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
         if (task.id === openTaskId && !isImmediateOp(input)) {
-          TaskBatchSyncManager.markPending(task.id)
+          await requireProducerCurrent(origin)
+          TaskBatchSyncManager.markPending(task.id, origin)
         } else {
           // An immediate push carries the full task row, so any buffered
           // edits ride along — drop the pending mark instead of pushing the
           // same state again at the next boundary.
           TaskBatchSyncManager.cancelPending(task.id)
-          syncIfShared(task, 'UPDATE')
+          syncIfShared(task, 'UPDATE', origin)
         }
-        scheduleSavedViewRecount()
+        scheduleSavedViewRecount(origin)
       }
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update task'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async deleteTask(id: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       // Capture task before deletion for sync
       const taskToDelete = get().tasks[id]
-      if (taskToDelete) logTaskActivity(id, 'deleted', taskToDelete.title, null)
+      if (taskToDelete) logTaskActivity(id, 'deleted', taskToDelete.title, null, origin)
 
       // Collect task IDs to clean up attachment files before DB cascade
       const idsForCleanup: string[] = [id]
@@ -546,8 +563,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       }
       collectChildIds(id)
 
-      const result = await window.api.tasks.delete(id)
+      const result = await api.tasks.delete(id)
       if (result) {
+
+        await requireProducerCurrent(origin)
 
         set((state) => {
           // Collect all descendant IDs (cascade delete in DB, mirror in store)
@@ -585,61 +604,70 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           }
         })
         TaskBatchSyncManager.cancelPending(id)
-        if (taskToDelete) syncIfShared(taskToDelete, 'DELETE')
-        scheduleSavedViewRecount()
+        if (taskToDelete) syncIfShared(taskToDelete, 'DELETE', origin)
+        scheduleSavedViewRecount(origin)
       }
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete task'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async duplicateTask(id: string, newId: string): Promise<Task | null> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const task = await window.api.tasks.duplicate(id, newId)
+      const task = await api.tasks.duplicate(id, newId)
       if (task) {
         // Re-hydrate all tasks for the project since subtasks were also created
-        const allTasks = await window.api.tasks.findByProjectId(task.project_id)
+        const allTasks = await api.tasks.findByProjectId(task.project_id)
         const taskMap: Record<string, Task> = {}
         for (const t of allTasks) {
           taskMap[t.id] = t
         }
+        await requireProducerCurrent(origin)
         set((state) => ({ tasks: { ...state.tasks, ...taskMap } }))
 
         // Also hydrate labels for the new task and its subtasks
-        const newTaskLabels = await window.api.labels.findByTaskId(task.id)
-        const subtasks = await window.api.tasks.findSubtasks(task.id)
+        const newTaskLabels = await api.labels.findByTaskId(task.id)
+        const subtasks = await api.tasks.findSubtasks(task.id)
         const labelUpdates: Record<string, import('../../../../shared/types').Label[]> = {
           [task.id]: newTaskLabels
         }
         for (const st of subtasks) {
-          labelUpdates[st.id] = await window.api.labels.findByTaskId(st.id)
+          labelUpdates[st.id] = await api.labels.findByTaskId(st.id)
         }
+        await requireProducerCurrent(origin)
         set((state) => ({ taskLabels: { ...state.taskLabels, ...labelUpdates } }))
 
         // Sync duplicated task + subtasks to Supabase
-        syncIfShared(task, 'INSERT')
+        syncIfShared(task, 'INSERT', origin)
         for (const st of subtasks) {
-          syncIfShared(st, 'INSERT')
+          syncIfShared(st, 'INSERT', origin)
         }
-        scheduleSavedViewRecount()
+        scheduleSavedViewRecount(origin)
       }
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to duplicate task'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async saveTaskAsTemplate(id: string, newId: string): Promise<Task | null> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const template = await window.api.tasks.saveAsTemplate(id, newId)
+      const template = await api.tasks.saveAsTemplate(id, newId)
       if (template) {
         // Re-hydrate templates globally
-        const allTemplates = await window.api.tasks.findAllTemplates(getUserId())
+        const allTemplates = await api.tasks.findAllTemplates(origin.userId ?? '')
+        await requireProducerCurrent(origin)
         set((state) => {
           const updated = { ...state.tasks }
           for (const t of allTemplates) {
@@ -649,19 +677,23 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         })
 
         // Sync template to Supabase
-        syncIfShared(template, 'INSERT')
+        syncIfShared(template, 'INSERT', origin)
       }
       return template
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save as template'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async reorderTasks(taskIds: string[]): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      await window.api.tasks.reorder(taskIds)
+      await api.tasks.reorder(taskIds)
+      await requireProducerCurrent(origin)
       set((state) => {
         const updated = { ...state.tasks }
         for (let i = 0; i < taskIds.length; i++) {
@@ -676,18 +708,22 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const currentTasks = get().tasks
       for (const id of taskIds) {
         const task = currentTasks[id]
-        if (task) syncIfShared(task, 'UPDATE')
+        if (task) syncIfShared(task, 'UPDATE', origin)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reorder tasks'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async createSubtask(parentId: string, input: CreateTaskInput): Promise<Task> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const task = await window.api.tasks.create({ ...input, parent_id: parentId })
+      const task = await api.tasks.create({ ...input, parent_id: parentId })
+      await requireProducerCurrent(origin)
       set((state) => {
         const newExpanded = new Set(state.expandedTaskIds)
         newExpanded.add(parentId)
@@ -696,50 +732,56 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           expandedTaskIds: newExpanded
         }
       })
-      syncIfShared(task, 'INSERT')
-      logTaskActivity(task.id, 'created', null, null)
-      scheduleSavedViewRecount()
+      syncIfShared(task, 'INSERT', origin)
+      logTaskActivity(task.id, 'created', null, null, origin)
+      scheduleSavedViewRecount(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create subtask'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async addLabel(taskId: string, labelId: string): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       // Resolve to the current user's own same-name label before linking, so
       // we never attach another member's label id to this user's task (#d5b138b1).
-      const linkId = await resolveLabelForCurrentUser(taskId, labelId)
-      await window.api.tasks.addLabel(taskId, linkId)
-      await get().hydrateTaskLabels(taskId)
+      const linkId = await resolveLabelForCurrentUser(taskId, labelId, origin)
+      await api.tasks.addLabel(taskId, linkId)
+      await get().hydrateTaskLabels(taskId, origin)
       const labels = get().taskLabels[taskId] ?? []
       const added = labels.find((l) => l.id === linkId)
-      logTaskActivity(taskId, 'label_added', null, added?.name ?? linkId)
+      logTaskActivity(taskId, 'label_added', null, added?.name ?? linkId, origin)
       const task = get().tasks[taskId]
       if (task) {
         const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
-        if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id)
-        else syncIfShared(task, 'UPDATE')
+        if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id, origin)
+        else syncIfShared(task, 'UPDATE', origin)
       }
-      scheduleSavedViewRecount()
+      scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
       console.error('[addLabel] threw', err)
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async removeLabel(taskId: string, labelId: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       const labels = get().taskLabels[taskId] ?? []
       let passedLabel: Label | undefined =
         labels.find((l) => l.id === labelId)
         ?? useLabelStore.getState().labels[labelId]
       if (!passedLabel) {
-        const fetched = await window.api.labels.findById(labelId).catch(() => null)
+        const fetched = await api.labels.findById(labelId).catch(() => null)
         if (fetched) passedLabel = fetched
       }
       const targetName = passedLabel?.name.toLowerCase() ?? null
@@ -749,31 +791,32 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
       let anyRemoved = false
       for (const l of toRemove) {
-        const result = await window.api.tasks.removeLabel(taskId, l.id)
+        const result = await api.tasks.removeLabel(taskId, l.id)
         if (result) anyRemoved = true
       }
-      await get().hydrateTaskLabels(taskId)
+      await get().hydrateTaskLabels(taskId, origin)
       if (anyRemoved) {
-        logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null)
+        logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null, origin)
         const task = get().tasks[taskId]
         if (task) {
           const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
-          if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id)
-          else syncIfShared(task, 'UPDATE')
+          if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id, origin)
+          else syncIfShared(task, 'UPDATE', origin)
         }
-        scheduleSavedViewRecount()
+        scheduleSavedViewRecount(origin)
       }
       return anyRemoved
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label'
       console.error('[removeLabel] threw', err)
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
-  async hydrateTaskLabels(taskId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateTaskLabels(taskId: string, producer?: SyncProducer): Promise<void> {
+    const { api, isCurrent } = producer ?? hydrationContext()
     try {
       const labels = await api.labels.findByTaskId(taskId)
       if (!await isCurrent()) return
@@ -872,10 +915,13 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async bulkUpdateTasks(ids: string[], input: UpdateTaskInput): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       const results = await Promise.all(
-        ids.map((id) => window.api.tasks.update(id, input))
+        ids.map((id) => api.tasks.update(id, input))
       )
+      await requireProducerCurrent(origin)
       set((state) => {
         const updated = { ...state.tasks }
         for (const task of results) {
@@ -885,26 +931,30 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       })
       // Sync all updated tasks to Supabase
       for (const task of results) {
-        if (task) syncIfShared(task, 'UPDATE')
+        if (task) syncIfShared(task, 'UPDATE', origin)
       }
-      scheduleSavedViewRecount()
+      scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to bulk update tasks'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async bulkDeleteTasks(ids: string[]): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       // Capture tasks before deletion for sync
       const tasksToDelete = ids.map((id) => get().tasks[id]).filter(Boolean) as Task[]
-      await Promise.all(ids.map((id) => window.api.tasks.delete(id)))
+      await Promise.all(ids.map((id) => api.tasks.delete(id)))
       // Sync deletions to Supabase
       for (const task of tasksToDelete) {
         TaskBatchSyncManager.cancelPending(task.id)
-        syncIfShared(task, 'DELETE')
+        syncIfShared(task, 'DELETE', origin)
       }
+      await requireProducerCurrent(origin)
       set((state) => {
         const idsToRemove = new Set<string>(ids)
         // Collect descendants
@@ -940,39 +990,46 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
           lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
         }
       })
-      scheduleSavedViewRecount()
+      scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to bulk delete tasks'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async bulkAddLabel(ids: string[], labelId: string): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      await Promise.all(ids.map((id) => window.api.tasks.addLabel(id, labelId)))
+      await Promise.all(ids.map((id) => api.tasks.addLabel(id, labelId)))
       // Re-hydrate labels for affected tasks
       const labelResults: Record<string, Label[]> = {}
       for (const id of ids) {
-        labelResults[id] = await window.api.labels.findByTaskId(id)
+        labelResults[id] = await api.labels.findByTaskId(id)
       }
+      await requireProducerCurrent(origin)
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...labelResults }
       }))
       // Sync affected tasks to Supabase (label_names changed)
       for (const id of ids) {
         const task = get().tasks[id]
-        if (task) syncIfShared(task, 'UPDATE')
+        if (task) syncIfShared(task, 'UPDATE', origin)
       }
-      scheduleSavedViewRecount()
+      scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label to tasks'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async bulkRemoveLabel(ids: string[], labelId: string): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
       // Same name-based-removal as the single-task path: in shared
       // projects the labelId may be the viewer's remapped label, while
@@ -986,24 +1043,26 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             ? taskLabels.filter((l) => l.name.toLowerCase() === targetName)
             : taskLabels.filter((l) => l.id === labelId)
           for (const l of toRemove) {
-            await window.api.tasks.removeLabel(id, l.id)
+            await api.tasks.removeLabel(id, l.id)
           }
         })
       )
       const labelResults: Record<string, Label[]> = {}
       for (const id of ids) {
-        labelResults[id] = await window.api.labels.findByTaskId(id)
+        labelResults[id] = await api.labels.findByTaskId(id)
       }
+      await requireProducerCurrent(origin)
       set((state) => ({
         taskLabels: { ...state.taskLabels, ...labelResults }
       }))
       for (const id of ids) {
         const task = get().tasks[id]
-        if (task) syncIfShared(task, 'UPDATE')
+        if (task) syncIfShared(task, 'UPDATE', origin)
       }
-      scheduleSavedViewRecount()
+      scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label from tasks'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }

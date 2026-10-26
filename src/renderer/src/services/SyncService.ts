@@ -1,3 +1,4 @@
+import { pushTaskLabelAdditions } from './taskLabelAdditions'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
@@ -466,6 +467,7 @@ export async function syncTaskChange(
       } else {
         // syncTaskToSupabase throws on error; the catch routes it.
         await syncTaskToSupabase(supabase, task, labelData ?? [])
+      await pushTaskLabelAdditions(supabase, [task.id], origin.api)
       }
       await markSynced(origin)
     } catch (err) {
@@ -483,6 +485,11 @@ export async function syncStatusChange(
   producer?: SyncProducer
 ): Promise<void> {
   return withSyncProducer(async (origin) => {
+      if (operation === 'DELETE') {
+        const { deleteStatusFromSupabase } = await import('./PersonalSyncService')
+        await deleteStatusFromSupabase(status.id, origin)
+        return
+      }
     try {
     if (!isOnline) {
       await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
@@ -493,19 +500,7 @@ export async function syncStatusChange(
     const supabase = await origin.client()
       if (!supabase) { await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status)); await refreshProducerPending(origin); return }
 
-      if (operation === 'DELETE') {
-        // Soft-delete: set deleted_at, keep the row. Hard-DELETE is reserved for the 30-day purge.
-        const now = new Date().toISOString()
-        const { error } = await supabase
-          .from('statuses')
-          .update({ deleted_at: now, updated_at: now })
-          .eq('id', status.id)
-        if (error) {
-          await reportPushFailure(origin, 'syncStatusChange:SOFT_DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id, deleted_at: now }), 'UPDATE')
-          return
-        }
-      } else {
-        const { error } = await supabase.from('statuses').upsert({
+       const { error } = await supabase.from('statuses').upsert({
           id: status.id,
           project_id: status.project_id,
           name: status.name,
@@ -522,7 +517,6 @@ export async function syncStatusChange(
           await reportPushFailure(origin, 'syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
           return
         }
-      }
       await markSynced(origin)
     } catch (err) {
       await reportPushFailure(origin, 'syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
@@ -559,45 +553,71 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
     const priority = ['projects', 'user_labels', 'statuses', 'tasks']
     const ordered = [...groups.values()].sort((a, b) =>
       (priority.indexOf(a[0].table_name) + 1 || 99) - (priority.indexOf(b[0].table_name) + 1 || 99))
-    for (const entries of ordered) {
+    const work = ordered.map((entries) => {
       let entry = entries[entries.length - 1]
+      const commands = entries.filter((item) => JSON.parse(item.payload).status_delete === true)
+      if (commands.length) entry = commands.sort((a, b) => Date.parse(JSON.parse(a.payload).updated_at) - Date.parse(JSON.parse(b.payload).updated_at)).at(-1)!
       const payload = JSON.parse(entry.payload) as Record<string, unknown>
       const archive = entries.some((item) => JSON.parse(item.payload).archive_with_tasks === true)
       if (archive) entry = { ...entry, payload: JSON.stringify({ ...payload, archive_with_tasks: true }) }
-      const special = entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive
+      const special = entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive || commands.length > 0
       const descriptor = Object.values(SYNC_TABLES).find((item) => item?.remoteName === entry.table_name)
       const snapshot = async (): Promise<string> => {
         assertCurrent()
-        return special ? specialEntryIntent(entry, context) : JSON.stringify((descriptor ? await descriptor.localGetById(entry.row_id, api) : payload) ?? null)
+        if (special) return specialEntryIntent(entry, context)
+        const row = descriptor ? await descriptor.localGetById(entry.row_id, api) : payload
+        return JSON.stringify({ row: row ?? null, labels: entry.table_name === 'tasks' && row ? (await api.tasks.getLabels(entry.row_id)).map((link) => link.label_id).sort() : [] })
+      }
+      return { entry, entries, payload, special, descriptor, snapshot }
+    })
+    type Work = typeof work[number]
+    const complete = async (item: Work): Promise<void> => {
+      for (const entry of item.entries) { await api.sync.dequeue(entry.id); processed++ }
+    }
+    const handled = new Set<Work>()
+    for (const item of work) {
+      if (handled.has(item)) continue
+      if (!item.special && item.descriptor) {
+        const tableItems = work.filter((candidate) => !candidate.special && candidate.descriptor && candidate.entry.table_name === item.entry.table_name)
+        for (const candidate of tableItems) handled.add(candidate)
+        for (let index = 0; index < tableItems.length; index += 200) {
+          let pending = tableItems.slice(index, index + 200)
+          try {
+            while (pending.length && isOnline) {
+              const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
+              const rows = snapshots.map((value) => JSON.parse(value).row)
+              const values = rows.filter(Boolean).map((row) => item.descriptor!.toRemote(row))
+              if (values.length) {
+                const { error } = await supabase.from(item.entry.table_name).upsert(values)
+                if (error) throw new Error(error.message)
+                if (item.entry.table_name === 'tasks') await pushTaskLabelAdditions(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api)
+              }
+              const changed: Work[] = []
+              for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
+                const candidate = pending[rowIndex]
+                if (!rows[rowIndex]) {
+                  const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
+                  await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)
+                }
+                if (snapshots[rowIndex] !== await candidate.snapshot()) changed.push(candidate)
+                else await complete(candidate)
+              }
+              pending = changed
+            }
+          } catch (error) { assertCurrent(); failure = error instanceof Error ? error.message : String(error) }
+        }
+        continue
       }
       try {
         while (isOnline) {
-          const before = await snapshot()
+          const before = await item.snapshot()
           assertCurrent()
-          if (special) {
-            if (!await replaySpecialEntry(supabase, entry, context)) throw new Error('Unsupported queued operation')
-          } else {
-            const current = JSON.parse(before)
-            if (current && descriptor) {
-              const { error } = await supabase.from(entry.table_name).upsert([descriptor.toRemote(current)])
-              if (error) throw new Error(error.message)
-            } else {
-              const deletedAt = payload.deleted_at ?? entry.created_at
-              const tombstone = { ...entry, payload: JSON.stringify({ id: entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }
-              if (!await replaySpecialEntry(supabase, descriptor ? tombstone : entry, context)) throw new Error('Unsupported queued operation')
-            }
-          }
-          if (before !== await snapshot()) continue
-          for (const item of entries) {
-            await api.sync.dequeue(item.id)
-            processed++
-          }
+          if (!await replaySpecialEntry(supabase, item.entry, context)) throw new Error('Unsupported queued operation')
+          if (before !== await item.snapshot()) continue
+          await complete(item)
           break
         }
-      } catch (error) {
-        assertCurrent()
-        failure = error instanceof Error ? error.message : String(error)
-      }
+      } catch (error) { assertCurrent(); failure = error instanceof Error ? error.message : String(error) }
     }
     assertCurrent()
     const pendingCount = await api.sync.count()

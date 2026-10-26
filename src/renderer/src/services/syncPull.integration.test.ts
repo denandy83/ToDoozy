@@ -8,6 +8,7 @@ import { getSupabase } from '../lib/supabase'
 import { fullPull, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
 import { syncProjectDown } from './SyncService'
 import { replaySpecialEntry } from './syncQueueReplay'
+import { refreshSearchIndex } from './searchSync'
 import { refreshProjectLabels } from './remoteProjectRefresh'
 import type { SyncContext } from './syncContext'
 
@@ -15,7 +16,7 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 vi.mock('./syncContext', () => ({ captureSyncContext: vi.fn(async () => context) }))
 vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateLabels: async () => {} }) } }))
-vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {} }) } }))
+vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))
 
 let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>
@@ -96,7 +97,7 @@ beforeEach(() => {
       }
     })
   })
-  context = { api: api as never, client, assertCurrent() {}, isCurrent: async () => true, scope: projectId }
+  context = { api: api as never, client, assertCurrent() { /* The fixture uses one fixed account and database. */ }, isCurrent: async () => true, scope: projectId }
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })
@@ -186,3 +187,28 @@ it('R4/review-1: reconciles every remote junction for one queued task', async ()
   expect(rows.task_labels).toHaveLength(0)
   expect(pageCounts.task_labels).toBe(3)
 })
+
+it.each([0, 1].flatMap((archived) => ['startup', 'search', 'full', 'incremental'].map((path) => ({ archived, path }))))(
+  'R15: original remote version cannot resurrect a local tombstone via $path archive=$archived', async ({ archived, path }) => {
+    const t1 = '2026-01-01T01:00:00.000Z', t5 = '2026-01-01T05:00:00.000Z', t10 = '2026-01-01T10:00:00.000Z'
+    const task = repo.tasks.create({ id: 'deleted', project_id: projectId, owner_id: 'u', title: 'Deleted', status_id: 'open' })
+    db.prepare('UPDATE tasks SET deleted_at=?,updated_at=? WHERE id=?').run(t5,t5,task.id)
+    db.prepare('UPDATE projects SET is_archived=?,archive_updated_at=?,updated_at=? WHERE id=?').run(archived,t10,t10,projectId)
+    rows.projects = [{ ...repo.projects.findById(projectId) }]
+    rows.project_members = [{ project_id: projectId, user_id: 'u' }]
+    rows.tasks = [{ ...task, is_archived: archived ? 0 : 1, updated_at: t1, deleted_at: null }]
+    if (path !== 'full') repo.projects.addMember(projectId,'u','owner')
+    if (path === 'startup') await syncProjectDown(projectId,'u')
+    else if (path === 'search') await refreshSearchIndex('u')
+    else if (path === 'full') {
+      const importedId = `${projectId}-imported`
+      rows.projects = [{ ...rows.projects[0], id: importedId }]
+      rows.project_members = [{ project_id: importedId, user_id: 'u' }]
+      rows.statuses = [{ ...repo.statuses.findById('open'), id: 'full-open', project_id: importedId }]
+      rows.tasks = [{ ...rows.tasks[0], project_id: importedId, status_id: 'full-open' }]
+      await fullPull('u')
+      expect(repo.projects.findById(importedId)?.archive_updated_at).toBe(t10)
+    } else await pullNewTasks(projectId,context)
+    expect(repo.tasks.findById(task.id)).toMatchObject({ deleted_at: t5, updated_at: t5 })
+  }
+)

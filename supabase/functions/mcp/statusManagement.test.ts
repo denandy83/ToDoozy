@@ -12,6 +12,7 @@ CREATE TABLE statuses(id uuid PRIMARY KEY, project_id uuid REFERENCES projects(i
 CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz,deleted_at timestamptz);`);
 const migration=readFileSync(new URL('../../migrations/20261026075322_atomic_status_management.sql', import.meta.url),'utf8'); await db.exec(migration);
 await db.exec(readFileSync(new URL('../../migrations/20261026094537_task_status_assignment_guard.sql', import.meta.url), 'utf8'));
+await db.exec(readFileSync(new URL('../../migrations/20261026105740_disable_legacy_status_consistency_guard.sql', import.meta.url), 'utf8'));
 const project='00000000-0000-0000-0000-000000000001', actor='00000000-0000-0000-0000-000000000002';
 const a='00000000-0000-0000-0000-000000000003', b='00000000-0000-0000-0000-000000000004', c='00000000-0000-0000-0000-000000000005';
 await db.query('INSERT INTO projects VALUES($1,$2,NULL)',[project,actor]);
@@ -80,7 +81,7 @@ it('guards all task insert/upsert/copy/update assignments and status interleavin
     await db.query(`INSERT INTO statuses(id,project_id,name,is_done,is_default) VALUES
       ($1,$4,'Open',0,1),($2,$4,'Custom',0,0),($3,$5,'Foreign',0,1)`, [open, custom, foreign, project, other])
     await db.query("INSERT INTO tasks(id,project_id,status_id,title,completed_date) VALUES($1,$2,$3,'legacy','legacy-value')", [id(8), project, foreign])
-    for (const file of ['20261026075322_atomic_status_management.sql', '20261026094537_task_status_assignment_guard.sql']) {
+    for (const file of ['20261026075322_atomic_status_management.sql', '20261026094537_task_status_assignment_guard.sql', '20261026105740_disable_legacy_status_consistency_guard.sql']) {
       await db.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'))
     }
     assert.equal((await db.query('SELECT completed_date FROM tasks WHERE id=$1', [id(8)])).rows[0].completed_date, 'legacy-value')
@@ -127,7 +128,11 @@ it('guards all task insert/upsert/copy/update assignments and status interleavin
     await insert(id(18), open)
     await db.exec('COMMIT')
     await db.query('UPDATE statuses SET is_done=0 WHERE id=$1', [open])
-    assert.equal((await db.query('SELECT completed_date FROM tasks WHERE id=$1', [id(18)])).rows[0].completed_date, null)
-    await assert.rejects(db.query('UPDATE statuses SET deleted_at=now() WHERE id=$1', [open]), /Reassign active tasks/)
+    assert.notEqual((await db.query('SELECT completed_date FROM tasks WHERE id=$1', [id(18)])).rows[0].completed_date, null)
+    await db.query('UPDATE statuses SET deleted_at=now() WHERE id=$1', [open])
+    await assert.rejects(insert(id(19), open), /active and belong/)
+    const triggers = await db.query<{ tgname: string; tgenabled: string }>("SELECT tgname::text,tgenabled::text FROM pg_trigger WHERE tgname IN ('enforce_task_status_assignment','enforce_status_task_consistency')")
+    assert.equal(triggers.rows.find((row) => row.tgname === 'enforce_status_task_consistency')!.tgenabled, 'D')
+    assert.equal(triggers.rows.find((row) => row.tgname === 'enforce_task_status_assignment')!.tgenabled, 'O')
   } finally { await db.close() }
 }, 15000)

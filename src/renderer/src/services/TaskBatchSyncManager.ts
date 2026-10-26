@@ -1,3 +1,4 @@
+import type { SyncProducer } from './syncContext'
 /**
  * Batches Supabase pushes for the task open in the Detail panel (story #92).
  * Local SQLite writes stay instant; the network push happens only at clear
@@ -13,7 +14,7 @@
 
 const SAFETY_FLUSH_MS = 30_000
 
-const pendingTaskIds = new Set<string>()
+const pendingTaskIds = new Map<string, SyncProducer>()
 const safetyTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Resolve the store module once and share the promise — concurrent flushes
@@ -33,8 +34,8 @@ export function pendingCount(): number {
 }
 
 /** Buffer a push for the task and (re)arm its 30s safety timer. */
-export function markPending(taskId: string): void {
-  pendingTaskIds.add(taskId)
+export function markPending(taskId: string, origin: SyncProducer): void {
+  pendingTaskIds.set(taskId, origin)
   const existing = safetyTimers.get(taskId)
   if (existing) clearTimeout(existing)
   safetyTimers.set(
@@ -66,14 +67,16 @@ export function cancelPending(taskId: string): void {
  */
 export async function flush(taskId: string): Promise<void> {
   if (!pendingTaskIds.has(taskId)) return
+  const origin = pendingTaskIds.get(taskId)!
   cancelPending(taskId)
-  const { useTaskStore, syncIfShared } = await getStoreModule()
-  const task = useTaskStore.getState().tasks[taskId]
-  if (!task) return
-  await syncIfShared(task, 'UPDATE')
+  if (!await origin.isCurrent()) return
+  const { syncIfShared } = await getStoreModule()
+  const task = await origin.api.tasks.findById(taskId)
+  if (!task || task.deleted_at || !await origin.isCurrent()) return
+  await syncIfShared(task, 'UPDATE', origin)
 }
 
 /** Flush every pending task — panel close, app blur, and quit boundaries. */
 export async function flushAll(): Promise<void> {
-  await Promise.all([...pendingTaskIds].map((id) => flush(id)))
+  await Promise.all([...pendingTaskIds.keys()].map((id) => flush(id)))
 }

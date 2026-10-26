@@ -25,6 +25,7 @@
     }
   },
   "include": [
+    "supabase/functions/mcp/statusRpc.ts",
     "src/main/**/*.ts",
     "src/renderer/src/**/*.ts",
     "src/renderer/src/**/*.tsx",

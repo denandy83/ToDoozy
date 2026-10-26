@@ -1,7 +1,7 @@
 import type { TodoozyAPI } from '../../../../preload/index.d'
 import { useAuthStore } from './authStore'
 
-export function hydrationContext() {
+export function hydrationContext(): { api: TodoozyAPI; isCurrent(): Promise<boolean> } {
   const user = useAuthStore.getState().currentUser
   const origin = window.api.sync.captureContext()
   const sameUser = (): boolean => useAuthStore.getState().currentUser === user

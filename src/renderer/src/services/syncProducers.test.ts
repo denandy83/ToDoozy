@@ -1,3 +1,5 @@
+import { useStatusStore } from '../shared/stores/statusStore'
+import * as TaskBatch from './TaskBatchSyncManager'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { SupabaseClient, Session } from '@supabase/supabase-js'
@@ -6,8 +8,8 @@ import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { requireSession } from './sessionRecovery'
-import { syncTaskChange, syncStatusChange, setOnlineStatus, syncProjectDown } from './SyncService'
-import { syncIfShared } from '../shared/stores/taskStore'
+import { syncTaskChange, syncStatusChange, setOnlineStatus, syncProjectDown, processSyncQueue } from './SyncService'
+import { useTaskStore, syncIfShared } from '../shared/stores/taskStore'
 import { pullProjectMetadata, pullNewTasks, pullStatuses, pullTaskLabelsForTask, fullPull, pushTask, pushStatus, pushLabel, pushProjectLabel, pushSetting, pushSavedView } from './PersonalSyncService'
 
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
@@ -108,7 +110,7 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); for (const db of databases) db.close() })
 
-const producers = ['task', 'status', 'label', 'project-label', 'setting', 'saved-view', 'shared-task', 'shared-status', 'shared-delete-task', 'shared-delete-status', 'shared-route']
+const producers = ['task', 'status', 'label', 'project-label', 'setting', 'saved-view', 'shared-task', 'shared-status', 'shared-delete-task', 'shared-route']
 async function invoke(kind: string) {
   const repo = repos[0]
   if (kind === 'task') return pushTask(repo.tasks.findById('t')!)
@@ -118,7 +120,6 @@ async function invoke(kind: string) {
   if (kind === 'shared-task') return syncTaskChange(repo.tasks.findById('t')!, 'UPDATE')
   if (kind === 'shared-status') return syncStatusChange(repo.statuses.findById('s')!, 'UPDATE')
   if (kind === 'shared-delete-task') return syncTaskChange(repo.tasks.findById('t')!, 'DELETE')
-  if (kind === 'shared-delete-status') return syncStatusChange(repo.statuses.findById('s')!, 'DELETE')
   if (kind === 'shared-route') { repo.projects.update('p', { is_shared: 1 }); return syncIfShared(repo.tasks.findById('t')!, 'UPDATE') }
   if (kind === 'saved-view') return pushSavedView({ id: 'v', user_id: 'a', name: 'A secret view', filter_config: '{}', project_id: 'p', sidebar_order: 0, color: null })
   pushSetting('theme', 'A secret setting', 'a')
@@ -171,7 +172,7 @@ it.each(['metadata', 'tasks', 'statuses', 'task-labels', 'startup', 'fullPull'].
   }
 )
 
-it.each(['task', 'status'].flatMap((kind) => ['UPDATE', 'DELETE'].map((operation) => ({ kind, operation }))))(
+it.each(['task', 'status'].flatMap((kind) => (kind === 'status' ? ['UPDATE'] : ['UPDATE', 'DELETE']).map((operation) => ({ kind, operation }))))(
   'isolates the shared offline $kind/$operation enqueue before main-process execution', async ({ kind, operation }) => {
     setOnlineStatus(false); stage = 'enqueue'
     const pending = kind === 'task' ? syncTaskChange(repos[0].tasks.findById('t')!, operation as 'UPDATE' | 'DELETE')
@@ -185,3 +186,109 @@ it.each(['task', 'status'].flatMap((kind) => ['UPDATE', 'DELETE'].map((operation
     expect(writes).toBe(0)
   }
 )
+
+const storeActions = [
+  { name: 'create', channel: 'tasks:create', run: () => useTaskStore.getState().createTask({ id: 'new', project_id: 'p', owner_id: 'a', status_id: 's', title: 'A private new task' }) },
+  { name: 'update', channel: 'tasks:update', run: () => useTaskStore.getState().updateTask('t', { title: 'A edit' }) },
+  { name: 'status await', channel: 'statuses:findById', run: () => useTaskStore.getState().updateTask('t', { status_id: 's2' }) },
+  { name: 'archive hydration', channel: 'projects:getProjectsForUser', run: () => useTaskStore.getState().updateTask('t', { is_archived: 1 }) },
+  { name: 'delete', channel: 'tasks:delete', run: () => useTaskStore.getState().deleteTask('t') },
+  { name: 'duplicate', channel: 'tasks:duplicate', run: () => useTaskStore.getState().duplicateTask('t', 'copy') },
+  { name: 'template', channel: 'tasks:saveAsTemplate', run: () => useTaskStore.getState().saveTaskAsTemplate('t', 'template') },
+  { name: 'reorder', channel: 'tasks:reorder', run: () => useTaskStore.getState().reorderTasks(['t']) },
+  { name: 'subtask', channel: 'tasks:create', run: () => useTaskStore.getState().createSubtask('t', { id: 'child', project_id: 'p', owner_id: 'a', status_id: 's', title: 'Private child' }) },
+  { name: 'label add', channel: 'tasks:addLabel', run: () => useTaskStore.getState().addLabel('t', 'l') },
+  { name: 'label remove', channel: 'tasks:removeLabel', run: () => useTaskStore.getState().removeLabel('t', 'l') },
+  { name: 'bulk update', channel: 'tasks:update', run: () => useTaskStore.getState().bulkUpdateTasks(['t'], { title: 'Private bulk' }) },
+  { name: 'bulk delete', channel: 'tasks:delete', run: () => useTaskStore.getState().bulkDeleteTasks(['t']) },
+  { name: 'bulk labels add', channel: 'tasks:addLabel', run: () => useTaskStore.getState().bulkAddLabel(['t'], 'l') },
+  { name: 'bulk labels remove', channel: 'tasks:removeLabel', run: () => useTaskStore.getState().bulkRemoveLabel(['t'], 'l') },
+  { name: 'status delete', channel: 'statuses:delete', run: () => useStatusStore.getState().deleteStatus('s') },
+  { name: 'status reassignment', channel: 'statuses:reassignAndDelete', run: () => useStatusStore.getState().reassignAndDelete('s', 's2') }
+]
+it.each(storeActions.flatMap((action) => ['account', 'database'].map((change) => ({ ...action, change }))))(
+  'binds actual store $name before its $channel await across $change changes', async ({ channel, run, change }) => {
+    stage = 'store'
+    const repo = repos[0]
+    repo.statuses.create({ id: 's2', project_id: 'p', name: 'Default', is_default: 1 })
+    repo.projects.addMember('p', 'a', 'owner')
+    repo.tasks.addLabel('t', 'l')
+    useTaskStore.setState({ tasks: { t: repo.tasks.findById('t')! }, taskLabels: { t: [repo.labels.findById('l')!] }, error: null, showDetailPanel: false })
+    useStatusStore.setState({ statuses: { s: repo.statuses.findById('s')! }, error: null })
+    const invoke = window.api.sync.invokeContext
+    let held = false
+    window.api.sync.invokeContext = async (context, name, args) => {
+      const result = await invoke(context, name, args)
+      if (!held && name === channel) { held = true; started.resolve(); await pause.promise }
+      return result
+    }
+    const pending = run()
+    await started.promise
+    active = 1; generation++
+    if (change === 'account') useAuthStore.setState({ currentUser: { id: 'b' } as never })
+    useTaskStore.setState({ tasks: {}, taskLabels: {}, error: null })
+    useStatusStore.setState({ statuses: {}, error: null })
+    pause.resolve()
+    await pending.catch(() => {})
+    await vi.advanceTimersByTimeAsync(1)
+    expect(useTaskStore.getState().tasks).toEqual({})
+    expect(useTaskStore.getState().taskLabels).toEqual({})
+    expect(useTaskStore.getState().error).toBeNull()
+    expect(useStatusStore.getState().statuses).toEqual({})
+    expect(useStatusStore.getState().error).toBeNull()
+    expect(repos[1].tasks.findById('t')).toBeUndefined()
+    expect(repos[1].syncQueue.count()).toBe(0)
+    expect(writes).toBe(0)
+  }
+)
+it('keeps a buffered detail edit bound to its originating store/database', async () => {
+  stage = 'store'
+  const row = repos[0].tasks.findById('t')!
+  useTaskStore.setState({ tasks: { t: row }, taskLabels: {}, showDetailPanel: true, lastSelectedTaskId: 't' })
+  await useTaskStore.getState().updateTask('t', { title: 'A buffered edit' })
+  expect(TaskBatch.isPending('t')).toBe(true)
+  active = 1; generation++
+  useAuthStore.setState({ currentUser: { id: 'b' } as never })
+  useTaskStore.setState({ tasks: {}, taskLabels: {} })
+  await TaskBatch.flushAll()
+  expect(writes).toBe(0)
+  expect(repos[1].syncQueue.count()).toBe(0)
+})
+
+it.each(['online', 'offline', 'failure'])('propagates shared task-label additions through the actual junction after %s writes', async (mode) => {
+  stage = 'labels'
+  const repo = repos[0]
+  repo.projects.update('p', { is_shared: 1 })
+  repo.labels.addToProject('p', 'l')
+  repo.tasks.addLabel('t', 'l')
+  const junction = new Set(['t:remote-only'])
+  const calls: string[] = []
+  let failAddition = mode === 'failure'
+  network.client = { from(table: string) {
+    const chain: Record<string, unknown> = {}
+    chain.upsert = (rows: unknown) => {
+      chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
+        await network.token!()
+        calls.push(table)
+        if (table === 'task_labels' && failAddition) return { data: null, error: { message: 'synthetic junction failure' } }
+        if (table === 'task_labels') for (const row of rows as Array<{task_id:string;label_id:string}>) junction.add(`${row.task_id}:${row.label_id}`)
+        return { data: [], error: null }
+      })().then(resolve, reject)
+      return chain
+    }
+    return chain
+  } } as unknown as SupabaseClient
+  setOnlineStatus(mode !== 'offline')
+  await syncTaskChange(repo.tasks.findById('t')!, 'UPDATE')
+  if (mode === 'online') expect(repo.syncQueue.count()).toBe(0)
+  else {
+    expect(junction.has('t:l')).toBe(false)
+    expect(repo.syncQueue.count()).toBeGreaterThan(0)
+    failAddition = false
+    setOnlineStatus(true)
+    expect(await processSyncQueue()).toBeGreaterThan(0)
+    expect(repo.syncQueue.count()).toBe(0)
+  }
+  expect(junction).toEqual(new Set(['t:remote-only', 't:l']))
+  expect(calls.indexOf('project_labels')).toBeLessThan(calls.indexOf('task_labels'))
+})

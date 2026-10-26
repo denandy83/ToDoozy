@@ -1,3 +1,4 @@
+import type { SyncProducer } from './syncContext'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Task } from '../../../shared/types'
 
@@ -39,6 +40,8 @@ function makeTask(id: string): Task {
   } as Task
 }
 
+const origin = { api: { tasks: { findById: async (id: string) => storeState.tasks[id] } }, isCurrent: async () => true } as unknown as SyncProducer
+
 type Manager = typeof import('./TaskBatchSyncManager')
 
 // Module-level pending state — re-import fresh per test so cases don't bleed.
@@ -61,30 +64,30 @@ describe('markPending', () => {
   it('marks a task pending and is idempotent', async () => {
     const mgr = await freshManager()
     expect(mgr.isPending('t1')).toBe(false)
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     expect(mgr.isPending('t1')).toBe(true)
     expect(mgr.pendingCount()).toBe(1)
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     expect(mgr.pendingCount()).toBe(1)
     expect(syncIfSharedMock).not.toHaveBeenCalled()
   })
 
   it('flushes via the 30s safety timer', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     await vi.advanceTimersByTimeAsync(29_999)
     expect(syncIfSharedMock).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(syncIfSharedMock).toHaveBeenCalledTimes(1)
-    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE')
+    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE', origin)
     expect(mgr.isPending('t1')).toBe(false)
   })
 
   it('re-marking resets the safety timer', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     await vi.advanceTimersByTimeAsync(20_000)
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     // 15s after the re-mark (35s after the first mark): not yet flushed
     await vi.advanceTimersByTimeAsync(15_000)
     expect(syncIfSharedMock).not.toHaveBeenCalled()
@@ -96,10 +99,10 @@ describe('markPending', () => {
 describe('flush', () => {
   it('pushes the current task state and clears pending + timer', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     await mgr.flush('t1')
     expect(syncIfSharedMock).toHaveBeenCalledTimes(1)
-    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE')
+    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE', origin)
     expect(mgr.isPending('t1')).toBe(false)
     // Timer was cleared — advancing past the safety window pushes nothing more
     await vi.advanceTimersByTimeAsync(60_000)
@@ -108,7 +111,7 @@ describe('flush', () => {
 
   it('double-flush is a no-op', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     await mgr.flush('t1')
     await mgr.flush('t1')
     expect(syncIfSharedMock).toHaveBeenCalledTimes(1)
@@ -122,7 +125,7 @@ describe('flush', () => {
 
   it('skips a task deleted while pending (tombstone already pushed)', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     delete storeState.tasks.t1
     await mgr.flush('t1')
     expect(syncIfSharedMock).not.toHaveBeenCalled()
@@ -133,12 +136,12 @@ describe('flush', () => {
 describe('flushAll', () => {
   it('drains every pending task', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
-    mgr.markPending('t2')
+    mgr.markPending('t1', origin)
+    mgr.markPending('t2', origin)
     await mgr.flushAll()
     expect(syncIfSharedMock).toHaveBeenCalledTimes(2)
-    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE')
-    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t2, 'UPDATE')
+    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t1, 'UPDATE', origin)
+    expect(syncIfSharedMock).toHaveBeenCalledWith(storeState.tasks.t2, 'UPDATE', origin)
     expect(mgr.pendingCount()).toBe(0)
   })
 
@@ -152,7 +155,7 @@ describe('flushAll', () => {
 describe('cancelPending', () => {
   it('drops the mark without pushing and disarms the timer', async () => {
     const mgr = await freshManager()
-    mgr.markPending('t1')
+    mgr.markPending('t1', origin)
     mgr.cancelPending('t1')
     expect(mgr.isPending('t1')).toBe(false)
     await vi.advanceTimersByTimeAsync(60_000)

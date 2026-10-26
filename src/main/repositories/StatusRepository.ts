@@ -1,3 +1,4 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
@@ -167,32 +168,11 @@ export class StatusRepository {
    * for the sync layer to pick up.
    */
   delete(id: string): boolean {
-    return withTransaction(this.db, () => {
-      const row = this.findById(id)
-      if (!row || row.deleted_at) return false
-
-      // Find the project's default status (excluding this one)
-      const def = this.db
-        .prepare(
-          `SELECT id FROM statuses
-           WHERE project_id = ? AND id != ? AND deleted_at IS NULL AND is_default = 1
-           LIMIT 1`
-        )
-        .get(row.project_id, id) as { id: string } | undefined
-      const fallbackId = def?.id
-
-      const now = new Date().toISOString()
-      if (fallbackId) {
-        this.db
-          .prepare('UPDATE tasks SET status_id = ?, updated_at = ? WHERE status_id = ? AND deleted_at IS NULL')
-          .run(fallbackId, now, id)
-      }
-
-      const result = this.db
-        .prepare('UPDATE statuses SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
-        .run(now, now, id)
-      return result.changes > 0
-    })
+    const source = this.findById(id)
+    if (!source || source.deleted_at) return false
+    const target = this.findDefault(source.project_id)
+    if (!target || target.id === id) throw new Error('Replacement status required')
+    return this.reassignAndDelete(id, target.id)
   }
 
   /**
@@ -205,14 +185,16 @@ export class StatusRepository {
 
   reassignAndDelete(statusId: string, targetStatusId: string): boolean {
     return withTransaction(this.db, () => {
-      const now = new Date().toISOString()
-      this.db
-        .prepare('UPDATE tasks SET status_id = ?, updated_at = ? WHERE status_id = ? AND deleted_at IS NULL')
-        .run(targetStatusId, now, statusId)
-      const result = this.db
-        .prepare('UPDATE statuses SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
-        .run(now, now, statusId)
-      return result.changes > 0
+      const source = this.findById(statusId), target = this.findById(targetStatusId)
+      if (!source || source.deleted_at) return false
+      if (source.is_default === 1 || source.is_done === 1) throw new Error('Default and done statuses must be retained')
+      if (!target || target.deleted_at || target.id === statusId || target.project_id !== source.project_id) throw new Error('Replacement status must be active in the same project')
+      const now = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1)).toISOString()
+      this.db.prepare('UPDATE tasks SET status_id=?,completed_date=?,updated_at=? WHERE status_id=? AND deleted_at IS NULL')
+        .run(targetStatusId, target.is_done === 1 ? now : null, now, statusId)
+      this.db.prepare('UPDATE statuses SET deleted_at=?,updated_at=? WHERE id=?').run(now, now, statusId)
+      new SyncQueueRepository(this.db).enqueue('statuses', statusId, 'UPDATE', JSON.stringify({ id: statusId, project_id: source.project_id, status_delete: true, target_id: targetStatusId, updated_at: now }))
+      return true
     })
   }
 }

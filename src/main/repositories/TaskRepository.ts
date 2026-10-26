@@ -276,11 +276,12 @@ export class TaskRepository {
   // Using create()/update() in sync code stamps NOW into updated_at, which makes
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
+    const existing = this.findById(task.id)
+    if (existing?.deleted_at && !isRemoteNewer(existing.updated_at, task.updated_at)) return existing
     const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(task.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
     if (!task.deleted_at && project?.archive_updated_at && Date.parse(task.updated_at) < Date.parse(project.archive_updated_at)) {
       task = { ...task, is_archived: project.is_archived, updated_at: project.archive_updated_at }
     }
-    const existing = this.findById(task.id)
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).

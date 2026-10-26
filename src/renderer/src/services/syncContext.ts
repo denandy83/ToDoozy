@@ -11,7 +11,16 @@ export interface SyncContext {
   scope: string
 }
 
-export function captureSyncProducer() {
+export interface SyncProducer {
+  api: TodoozyAPI
+  client(): Promise<SupabaseClient | null>
+  assertCurrent(): void
+  isCurrent(): Promise<boolean>
+  userId: string | undefined
+  scope(): Promise<string>
+}
+
+export function captureSyncProducer(): SyncProducer {
   const userId = useAuthStore.getState().currentUser?.id
   const database = window.api.sync.captureContext()
   const assertCurrent = (): void => {
@@ -54,8 +63,6 @@ export function captureSyncProducer() {
   return { api, client, assertCurrent, isCurrent, userId, scope }
 }
 
-export type SyncProducer = ReturnType<typeof captureSyncProducer>
-
 export async function withSyncProducer(operation: (origin: SyncProducer) => Promise<void>, origin = captureSyncProducer()): Promise<void> {
   try { await operation(origin) } catch (error) {
     if (await origin.isCurrent()) throw error
@@ -67,4 +74,8 @@ export async function captureSyncContext(): Promise<SyncContext> {
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+}
+
+export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {
+  if (!await origin.isCurrent()) throw new Error('Sync account or database changed')
 }
