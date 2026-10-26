@@ -420,6 +420,8 @@ export class LabelRepository {
    * (otherwise the UI keeps the label visible until the next reconcile).
    */
   softDeleteTaskLabelsForProjectLabel(projectId: string, labelId: string): void {
+    const link = this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, labelId) as { deleted_at: string | null } | undefined
+    if (link && !link.deleted_at) return
     const now = new Date().toISOString()
     this.db.prepare(
       `UPDATE task_labels SET deleted_at = ?
@@ -612,6 +614,16 @@ export class LabelRepository {
     created_at: string | null
     deleted_at: string | null
   }): void {
+    const current = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(remote.project_id, remote.label_id) as { created_at: string; deleted_at: string | null } | undefined
+    if (current && !current.deleted_at) {
+      const commands = this.db.prepare("SELECT table_name,payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ table_name: string; payload: string }>
+      if (commands.some(({ table_name, payload }) => {
+        const intent = JSON.parse(payload)
+        return intent.projectId === remote.project_id && intent.labelId === remote.label_id &&
+          (intent.deletedAt || table_name === 'task_labels') && 'expectedLink' in intent &&
+          (!intent.expectedLink || intent.expectedLink.deleted_at || intent.expectedLink.created_at !== current.created_at)
+      })) return
+    }
     if (!remote.deleted_at && this.hasPendingProjectRemoval(remote.project_id, remote.label_id)) return
     this.db
       .prepare(

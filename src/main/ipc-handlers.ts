@@ -244,6 +244,8 @@ export function registerIpcHandlers(): void {
   registerAuthHandlers()
 
   // ── Tasks ──────────────────────────────────────────────────────────
+  handle('tasks:rebaseSyncVersion', (_e, id: string, expectedAt: string, appliedAt: string) => getRepos().tasks.rebaseSyncVersion(id, expectedAt, appliedAt))
+
   handle('tasks:findById', (_e, id: string) => {
     return getRepos().tasks.findById(id) ?? null
   })
@@ -1105,6 +1107,8 @@ export function registerIpcHandlers(): void {
   handle('sync:enqueue', (_e, tableName: string, rowId: string, operation: string, payload: string) => {
     return getRepos().syncQueue.enqueue(tableName, rowId, operation as 'INSERT' | 'UPDATE' | 'DELETE', payload)
   })
+
+  handle('sync:updatePayload', (_e, id: string, payload: string) => getRepos().syncQueue.updatePayload(id, payload))
 
   handle('sync:dequeue', (_e, id: string) => {
     return getRepos().syncQueue.dequeue(id)

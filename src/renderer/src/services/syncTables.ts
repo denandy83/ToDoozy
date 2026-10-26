@@ -258,11 +258,24 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
 
   async remoteUpsert(local, context) {
     const supabase = context?.client ?? await getSupabase()
+    const api = context?.api ?? window.api
+    if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === local.id && JSON.parse(entry.payload).status_delete)) {
+      const { processSyncQueue } = await import('./SyncService')
+      await processSyncQueue(context)
+      if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === local.id && JSON.parse(entry.payload).status_delete)) throw new Error('Status deletion remains pending')
+      return
+    }
     const { error } = await supabase.from('statuses').upsert(statusDescriptor.toRemote(local))
     if (error) throw error
   },
 
   async remoteSoftDelete(id, deletedAt, context) {
+    const api = context?.api ?? window.api
+    if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === id && JSON.parse(entry.payload).status_delete)) {
+      const local = await api.statuses.findById(id)
+      if (!local) throw new Error('Status deletion intent missing')
+      return statusDescriptor.remoteUpsert(local, context)
+    }
     const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('statuses')

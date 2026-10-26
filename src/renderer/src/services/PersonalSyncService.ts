@@ -284,10 +284,11 @@ export async function deleteTaskFromSupabase(taskId: string, producer?: SyncProd
     if (!(await hasLiveSession(origin, 'deleteTask', `task=${taskId}`))) return
     try {
       const supabase = (await origin.client())!
-      const now = new Date().toISOString()
+      const local = await origin.api.tasks.findById(taskId)
+      if (!local?.deleted_at) throw new Error('Task deletion intent missing')
       const { error } = await supabase
         .from('tasks')
-        .update({ deleted_at: now, updated_at: now })
+        .update({ deleted_at: local.deleted_at, updated_at: local.updated_at })
         .eq('id', taskId)
       if (error) {
         await reportPushFailure(origin, 'deleteTask', error, 'tasks', taskId, JSON.stringify({ id: taskId }), 'DELETE')
@@ -2029,6 +2030,10 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     // 1. Owner-scoped: projects (need to land before tasks/statuses so the FK is satisfied).
     await runTable('projects', userId)
 
+    const { processSyncQueue } = await import('./SyncService')
+    await processSyncQueue(context)
+    const pendingStatusProjects = new Set((await api.sync.getQueue()).map((entry) => JSON.parse(entry.payload)).filter((payload) => payload.status_delete).map((payload) => payload.project_id))
+
     // 2. Project-scoped: per personal project, statuses then tasks.
     const allProjects = await api.projects.getProjectsForUser(userId)
     const personalProjects = allProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
@@ -2051,16 +2056,17 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     }
 
     for (const project of personalProjects) {
+      if (pendingStatusProjects.has(project.id)) continue
       await runTable('statuses', project.id)
       await runTable('tasks', project.id)
       await pullActivity(project.id)
     }
 
     for (const project of allProjects.filter((p) => p.is_shared === 1)) {
+      if (pendingStatusProjects.has(project.id)) continue
       await pullNewTasks(project.id, context)
       await pullActivity(project.id)
     }
-    const { processSyncQueue } = await import('./SyncService')
     await processSyncQueue(context)
 
     // 3. User-scoped: labels, themes, settings, saved_views, project_areas, project_templates.

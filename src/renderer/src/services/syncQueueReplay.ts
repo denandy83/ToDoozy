@@ -11,11 +11,13 @@ import { writeProjectArchive } from './projectArchiveSync'
 async function statusDeleteIntent(entry: SyncQueueEntry, api = window.api): Promise<{
   row: Awaited<ReturnType<typeof api.statuses.findById>>
   command: StatusDeletionCommand | null
+  commandId: string | null
 }> {
   const row = await api.statuses.findById(entry.row_id)
   const commands = (await api.sync.getQueue()).filter((item) => item.table_name === 'statuses' && item.row_id === entry.row_id)
-    .map((item) => JSON.parse(item.payload)).filter((payload) => payload.status_delete === true && Date.parse(payload.updated_at) === Date.parse(row?.updated_at ?? ''))
-  return { row, command: commands.at(-1) ?? null }
+    .filter((item) => { const payload = JSON.parse(item.payload); return payload.status_delete === true && Date.parse(payload.updated_at) === Date.parse(row?.updated_at ?? '') })
+  const latest = commands.at(-1)
+  return { row, command: latest ? JSON.parse(latest.payload) : null, commandId: latest?.id ?? null }
 }
 
 /** Replay non-row queue payloads explicitly; never upsert command objects as rows. */
@@ -24,23 +26,32 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
   if (entry.table_name === 'project_labels' || entry.table_name === 'task_labels') entry = (await api.sync.getQueue()).find((item) => item.id === entry.id) ?? entry
   const payload = JSON.parse(entry.payload) as Record<string, unknown>
   if (entry.table_name === 'statuses' && payload.status_delete === true) {
-    const { row: current, command } = await statusDeleteIntent(entry, api)
+    const { row: current, command, commandId } = await statusDeleteIntent(entry, api)
     if (!current) return true
     if (!current.deleted_at) {
       const { error } = await client.from('statuses').upsert(current)
       if (error) throw new Error(error.message)
       return true
     }
-    if (!command) throw new Error('Status replacement intent missing')
+    if (!command || !commandId) throw new Error('Status replacement intent missing')
     const { data: remote, error } = await client.from('statuses').select('id, deleted_at, is_default, is_done').eq('id', entry.row_id).maybeSingle()
     if (error) throw new Error(error.message)
-    if (!remote || remote.deleted_at) return true
+    if (!remote) {
+      await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command, commandId)
+      return true
+    }
+    if (remote.deleted_at) {
+      if (!command.rpc_tasks) throw new Error('Status deletion recovery snapshot missing')
+      await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command, commandId, String(remote.deleted_at))
+      return true
+    }
     if (remote.is_default === 1 || remote.is_done === 1) throw new Error('Default and done statuses must be retained')
     context?.assertCurrent()
-    await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command)
+    const rpcTasks = await preserveStatusDeletionEdits(client, api, current.project_id, entry.row_id, useAuthStore.getState().currentUser!.id, command, commandId)
+    if (!await api.sync.updatePayload(commandId, JSON.stringify({ ...command, rpc_tasks: rpcTasks }))) throw new Error('Status deletion intent changed')
     context?.assertCurrent()
     await mutateProjectStatus(client, current.project_id, useAuthStore.getState().currentUser!.id, 'delete', { id: entry.row_id, target_id: command.target_id })
-    return true
+    return replaySpecialEntry(client, entry, context)
   }
   if (entry.table_name === 'projects' && payload.archive_with_tasks === true) {
     const current = await api.projects.findById(entry.row_id)
@@ -122,7 +133,8 @@ export async function specialEntryIntent(entry: SyncQueueEntry, context: SyncCon
   const payload = JSON.parse(entry.payload)
   if (entry.table_name === 'statuses' && payload.status_delete === true) {
     const intent = await statusDeleteIntent(entry, api)
-    const tasks = await Promise.all((intent.command?.tasks ?? []).map((task) => api.tasks.findById(task.id)))
+    const ids = [...new Set([...(intent.command?.tasks ?? []).map((task) => task.id), ...(intent.command?.rpc_tasks ?? []).map((task) => String(task.id))])]
+    const tasks = await Promise.all(ids.map((id) => api.tasks.findById(id)))
     return JSON.stringify([intent, tasks])
   }
   if (entry.table_name === 'projects') {

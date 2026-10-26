@@ -279,6 +279,14 @@ export class TaskRepository {
     return this.findById(id)
   }
 
+  rebaseSyncVersion(id: string, expectedAt: string, appliedAt: string): void {
+    const current = this.findById(id)
+    if (!current) return
+    const next = current.updated_at === expectedAt ? appliedAt
+      : new Date(Math.max(Date.parse(current.updated_at), Date.parse(appliedAt) + 1)).toISOString()
+    this.db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(next, id)
+  }
+
   // Sync-only path: write a task as-is, preserving remote created_at/updated_at
   // and remote deleted_at. Skips the write entirely when the local row's
   // updated_at is newer (LWW conflict resolution).
@@ -287,7 +295,12 @@ export class TaskRepository {
   applyRemoteTask(task: Task): Task {
     const existing = this.findById(task.id)
     if (existing?.deleted_at && !isRemoteNewer(existing.updated_at, task.updated_at)) return existing
-    const metadataNewer = !existing || isRemoteNewer(existing.updated_at, task.updated_at)
+    const pendingDeletion = existing && (this.db.prepare("SELECT payload FROM sync_queue WHERE table_name='statuses'").all() as Array<{ payload: string }>).some(({ payload }) => {
+      const command = JSON.parse(payload)
+      return command.status_delete && command.project_id === existing.project_id &&
+        (command.tasks?.some((row: { id: string }) => row.id === existing.id) || command.rpc_tasks?.some((row: { id: string }) => row.id === existing.id)) && Date.parse(existing.updated_at) > Date.parse(command.updated_at)
+    })
+    const metadataNewer = !pendingDeletion && (!existing || isRemoteNewer(existing.updated_at, task.updated_at))
     const archiveNewer = !!task.archive_updated_at && (!existing?.archive_updated_at || Date.parse(task.archive_updated_at) >= Date.parse(existing.archive_updated_at))
     const archive = archiveNewer ? task : existing?.archive_updated_at ? existing : metadataNewer ? task : existing!
     task = { ...(metadataNewer ? task : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
@@ -357,7 +370,9 @@ export class TaskRepository {
    * already-tombstoned row is a no-op (and returns false).
    */
   delete(id: string): boolean {
-    const now = new Date().toISOString()
+    const existing = this.findById(id)
+    if (!existing || existing.deleted_at) return false
+    const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
     const result = this.db
       .prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
       .run(now, now, id)

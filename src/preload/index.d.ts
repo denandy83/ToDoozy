@@ -54,6 +54,7 @@ export interface TasksAPI {
   getSubtaskCount(parentId: string): Promise<{ total: number; done: number }>
   create(input: CreateTaskInput): Promise<Task>
   applyRemote(task: Task): Promise<Task>
+  rebaseSyncVersion(id: string, expectedAt: string, appliedAt: string): Promise<void>
   update(id: string, input: UpdateTaskInput): Promise<Task | null>
   delete(id: string): Promise<boolean>
   hardDelete(id: string): Promise<boolean>
@@ -349,6 +350,7 @@ export interface SyncAPI {
   invokeContext(context: { generation: number; userId: string | null }, channel: string, args: unknown[]): Promise<unknown>
   getQueue(): Promise<SyncQueueEntry[]>
   enqueue(tableName: string, rowId: string, operation: SyncOperation, payload: string): Promise<SyncQueueEntry>
+  updatePayload(id: string, payload: string): Promise<boolean>
   dequeue(id: string): Promise<boolean>
   clear(): Promise<number>
   count(): Promise<number>

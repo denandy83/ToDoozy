@@ -122,6 +122,7 @@ export class StatusRepository {
    */
   applyRemote(remote: Status): Status {
     const existing = this.findById(remote.id)
+    if (existing && (this.db.prepare("SELECT payload FROM sync_queue WHERE table_name='statuses' AND row_id=?").all(remote.id) as Array<{ payload: string }>).some(({ payload }) => JSON.parse(payload).status_delete)) return existing
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).

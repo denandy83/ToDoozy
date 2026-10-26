@@ -15,6 +15,7 @@ const api: TodoozyAPI = {
     getSubtaskCount: (parentId) => ipcRenderer.invoke('tasks:getSubtaskCount', parentId),
     create: (input) => ipcRenderer.invoke('tasks:create', input),
     applyRemote: (task) => ipcRenderer.invoke('tasks:applyRemote', task),
+    rebaseSyncVersion: (id, expectedAt, appliedAt) => ipcRenderer.invoke('tasks:rebaseSyncVersion', id, expectedAt, appliedAt),
     update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
     delete: (id) => ipcRenderer.invoke('tasks:delete', id),
     hardDelete: (id) => ipcRenderer.invoke('tasks:hardDelete', id),
@@ -296,6 +297,7 @@ const api: TodoozyAPI = {
     getQueue: () => ipcRenderer.invoke('sync:getQueue'),
     enqueue: (tableName, rowId, operation, payload) =>
       ipcRenderer.invoke('sync:enqueue', tableName, rowId, operation, payload),
+    updatePayload: (id, payload) => ipcRenderer.invoke('sync:updatePayload', id, payload),
     dequeue: (id) => ipcRenderer.invoke('sync:dequeue', id),
     clear: () => ipcRenderer.invoke('sync:clear'),
     count: () => ipcRenderer.invoke('sync:count')

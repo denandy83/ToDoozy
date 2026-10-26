@@ -592,3 +592,21 @@ it('counts active subtasks while preserving archived traversal for cascades', ()
     expect(repo.findSubtasks('parent', true)).toHaveLength(2)
   } finally { db.close() }
 })
+
+
+it.each(['unchanged','edit','delete'])('rebases a recovered sync version while retaining newer local %s intent',(action)=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId,statusId}=seedFixtures(db),repo=new TaskRepository(db)
+    const initial=makeTask(repo,projectId,userId,statusId,'recover-version')
+    if(action==='edit') repo.update(initial.id,{title:'Later edit',description:'Keep latest fields'})
+    if(action==='delete') repo.delete(initial.id)
+    const latest=repo.findById(initial.id)!
+    const appliedAt=new Date(Date.parse(latest.updated_at)+1000).toISOString()
+    repo.rebaseSyncVersion(initial.id,initial.updated_at,appliedAt)
+    const result=repo.findById(initial.id)!
+    expect({...result,updated_at:latest.updated_at}).toEqual(latest)
+    if(action==='unchanged') expect(result.updated_at).toBe(appliedAt)
+    else expect(Date.parse(result.updated_at)).toBeGreaterThan(Date.parse(appliedAt))
+  } finally {db.close()}
+})

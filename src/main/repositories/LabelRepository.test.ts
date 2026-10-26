@@ -563,3 +563,32 @@ it('keeps legacy queued project cleanup protected and remaps both cleanup identi
     expect(labels.hasPendingProjectRemoval(projectId,'canonical-legacy')).toBe(false)
   } finally {db.close()}
 })
+
+
+it.each([0,1])('preserves a genuine later re-add across active/tombstone imports and cascades (shared=%s)',(shared)=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    db.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,projectId)
+    seedTask(db,'readd-task',projectId,userId)
+    labels.create({id:'readd',user_id:userId,name:'Keep me'})
+    labels.addToProject(projectId,'readd')
+    labels.removeFromProject(projectId,'readd')
+    const expected=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')!
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('removing','task_labels',projectId+'::readd','UPDATE',JSON.stringify({projectId,labelId:'readd',deletedAt:expected.deleted_at,expectedLink:expected,remove_project_label:true}),new Date().toISOString())
+    labels.addToProject(projectId,'readd')
+    tasks.addLabel('readd-task','readd')
+    const active=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')!
+    for(const deleted_at of [null,String(expected.deleted_at)]) {
+      labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at})
+      if(deleted_at) labels.softDeleteTaskLabelsForProjectLabel(projectId,'readd')
+      expect(db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')).toEqual(active)
+      expect(labels.findByTaskId('readd-task').map((row)=>row.id)).toEqual(['readd'])
+      expect(labels.hasPendingProjectRemoval(projectId,'readd')).toBe(false)
+    }
+    db.prepare('DELETE FROM sync_queue').run()
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at:String(expected.deleted_at)})
+    labels.softDeleteTaskLabelsForProjectLabel(projectId,'readd')
+    expect(labels.findByTaskId('readd-task')).toEqual([])
+  } finally {db.close()}
+})
