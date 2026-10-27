@@ -15,6 +15,7 @@ const api: TodoozyAPI = {
     getSubtaskCount: (parentId) => ipcRenderer.invoke('tasks:getSubtaskCount', parentId),
     create: (input) => ipcRenderer.invoke('tasks:create', input),
     applyRemote: (task) => ipcRenderer.invoke('tasks:applyRemote', task),
+    rebaseSyncVersion: (id, expectedAt, appliedAt) => ipcRenderer.invoke('tasks:rebaseSyncVersion', id, expectedAt, appliedAt),
     update: (id, input) => ipcRenderer.invoke('tasks:update', id, input),
     delete: (id) => ipcRenderer.invoke('tasks:delete', id),
     hardDelete: (id) => ipcRenderer.invoke('tasks:hardDelete', id),
@@ -24,8 +25,10 @@ const api: TodoozyAPI = {
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
-    applyRemoteTaskLabels: (taskId, labelIds) =>
-      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds),
+    applyRemoteTaskLabels: (taskId, labelIds, baseline) =>
+      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline),
+    getLabelState: (taskId) => ipcRenderer.invoke('tasks:getLabelState',taskId),
+    acknowledgeLabelState: (taskId,delivered) => ipcRenderer.invoke('tasks:acknowledgeLabelState',taskId,delivered),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
     getTaskLabelsForUser: (userId) => ipcRenderer.invoke('tasks:getTaskLabelsForUser', userId),
     getTaskLabelsForSharedProjects: () =>
@@ -291,9 +294,12 @@ const api: TodoozyAPI = {
   },
 
   sync: {
+    captureContext: () => ipcRenderer.invoke('sync:captureContext'),
+    invokeContext: (context, channel, args) => ipcRenderer.invoke('sync:invokeContext', context, channel, args),
     getQueue: () => ipcRenderer.invoke('sync:getQueue'),
     enqueue: (tableName, rowId, operation, payload) =>
       ipcRenderer.invoke('sync:enqueue', tableName, rowId, operation, payload),
+    updatePayload: (id, payload) => ipcRenderer.invoke('sync:updatePayload', id, payload),
     dequeue: (id) => ipcRenderer.invoke('sync:dequeue', id),
     clear: () => ipcRenderer.invoke('sync:clear'),
     count: () => ipcRenderer.invoke('sync:count')
@@ -312,7 +318,8 @@ const api: TodoozyAPI = {
   },
 
   shell: {
-    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+    openReference: (url) => ipcRenderer.invoke('shell:openReference', url)
   },
 
   app: {
@@ -331,6 +338,7 @@ const api: TodoozyAPI = {
   },
 
   projectAreas: {
+    findById: (id) => ipcRenderer.invoke('projectAreas:findById', id),
     findByUserId: (userId) => ipcRenderer.invoke('projectAreas:findByUserId', userId),
     create: (input) => ipcRenderer.invoke('projectAreas:create', input),
     update: (id, input) => ipcRenderer.invoke('projectAreas:update', id, input),

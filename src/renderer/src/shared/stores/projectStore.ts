@@ -1,3 +1,6 @@
+import { captureSyncProducer } from '../../services/syncContext'
+import { hydrationContext } from './hydrationContext'
+import { useAuthStore } from './authStore'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type {
@@ -39,14 +42,16 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   error: null,
 
   async hydrateProjects(userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const projects = await window.api.projects.getProjectsForUser(userId)
+      const projects = await api.projects.getProjectsForUser(userId)
       const projectMap: Record<string, Project> = {}
       for (const project of projects) {
         projectMap[project.id] = project
       }
       // Auto-select default project if none selected
+      if (!await isCurrent()) return
       const currentId = get().currentProjectId
       if (!currentId || !projectMap[currentId]) {
         const defaultProject = projects.find((p) => p.is_default === 1) ?? projects[0] ?? null
@@ -62,23 +67,28 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       const membersMap: Record<string, ProjectMember[]> = { ...get().members }
       for (const project of projects) {
         try {
-          membersMap[project.id] = await window.api.projects.getMembers(project.id)
+          membersMap[project.id] = await api.projects.getMembers(project.id)
         } catch { /* ignore */ }
       }
+      if (!await isCurrent()) return
       set({ members: membersMap })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       set({ error: message, loading: false })
     }
   },
 
   async hydrateMembers(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const members = await window.api.projects.getMembers(projectId)
+      const members = await api.projects.getMembers(projectId)
+      if (!await isCurrent()) return
       set((state) => ({
         members: { ...state.members, [projectId]: members }
       }))
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load project members'
       set({ error: message })
     }
@@ -159,32 +169,50 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async archiveProject(id: string): Promise<Project | null> {
+    const origin = captureSyncProducer()
     try {
-      const project = await window.api.projects.archiveWithTasks(id)
-      if (project) {
+      const current = get().projects[id] ?? await origin.api.projects.findById(id)
+      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+        throw new Error('Only the project owner can archive or restore this project')
+      }
+      const project = await origin.api.projects.archiveWithTasks(id)
+      if (project && await origin.isCurrent()) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
-        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
-          pushProjectArchive(id, 1).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
-        })
+        const { useTaskStore } = await import('./taskStore')
+        if (!await origin.isCurrent()) return null
+        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        const { pushProjectArchive } = await import('../../services/PersonalSyncService')
+        if (!await origin.isCurrent()) return null
+        await pushProjectArchive()
       }
       return project ?? null
     } catch (err) {
+      if (!await origin.isCurrent()) return null
       set({ error: err instanceof Error ? err.message : 'Failed to archive project' })
       throw err
     }
   },
 
   async unarchiveProject(id: string): Promise<Project | null> {
+    const origin = captureSyncProducer()
     try {
-      const project = await window.api.projects.unarchiveWithTasks(id)
-      if (project) {
+      const current = get().projects[id] ?? await origin.api.projects.findById(id)
+      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+        throw new Error('Only the project owner can archive or restore this project')
+      }
+      const project = await origin.api.projects.unarchiveWithTasks(id)
+      if (project && await origin.isCurrent()) {
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
-        import('../../services/PersonalSyncService').then(({ pushProjectArchive }) => {
-          pushProjectArchive(id, 0).catch((err) => console.error('[ProjectStore] pushProjectArchive failed:', err))
-        })
+        const { useTaskStore } = await import('./taskStore')
+        if (!await origin.isCurrent()) return null
+        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        const { pushProjectArchive } = await import('../../services/PersonalSyncService')
+        if (!await origin.isCurrent()) return null
+        await pushProjectArchive()
       }
       return project ?? null
     } catch (err) {
+      if (!await origin.isCurrent()) return null
       set({ error: err instanceof Error ? err.message : 'Failed to unarchive project' })
       throw err
     }

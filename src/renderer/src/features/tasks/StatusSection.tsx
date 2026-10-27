@@ -13,6 +13,7 @@ interface StatusSectionProps {
   allLabels: Label[]
   selectedTaskIds: Set<string>
   taskFilterOpacity?: Record<string, number>
+  visibleTaskIds?: Set<string>
   dropIndicator?: DropIndicator | null
   onSelectTask: (taskId: string, e: React.MouseEvent) => void
   onStatusChange: (taskId: string, newStatusId: string) => void
@@ -38,6 +39,7 @@ export function StatusSection({
   allLabels,
   selectedTaskIds,
   taskFilterOpacity,
+  visibleTaskIds,
   dropIndicator,
   onSelectTask,
   onStatusChange,
@@ -120,6 +122,8 @@ export function StatusSection({
                 depth={0}
                 isExpanded={expandedTaskIds.has(task.id)}
                 filterOpacity={taskFilterOpacity?.[task.id]}
+                taskFilterOpacity={taskFilterOpacity}
+                visibleTaskIds={visibleTaskIds}
                 dropIndicator={dropIndicator}
                 onSelect={onSelectTask}
                 onStatusChange={onStatusChange}

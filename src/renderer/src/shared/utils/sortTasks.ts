@@ -100,3 +100,12 @@ export const SORT_FIELD_LABELS: Record<SortField, string> = {
 
 export const DEFAULT_SAVED_VIEW_SORT: SortRule[] = [{ field: 'priority', direction: 'desc' }]
 export const DEFAULT_PROJECT_SORT: SortRule[] = [{ field: 'custom', direction: 'asc' }]
+
+/** Active children retain their manual order; completed children follow newest first. */
+export function sortSubtasksForDisplay(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    if (!!a.completed_date !== !!b.completed_date) return a.completed_date ? 1 : -1
+    if (a.completed_date && b.completed_date) return compareDoneByCompletion(a, b)
+    return a.order_index - b.order_index
+  })
+}

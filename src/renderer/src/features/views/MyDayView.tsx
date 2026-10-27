@@ -1,3 +1,4 @@
+import { sortSubtasksForDisplay } from '../../shared/utils/sortTasks'
 import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import { useToast } from '../../shared/components/Toast'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
@@ -347,16 +348,18 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   // Flat task list for keyboard navigation — includes subtasks of expanded parents
   const flatTasks = useMemo(() => {
     const result: Task[] = []
-    for (const group of bucketGroups) {
-      for (const task of [...group.tasks].sort(prioritySortFn)) {
-        result.push(task)
-        if (expandedTaskIds.has(task.id)) {
-          const subtasks = Object.values(allTasks)
-            .filter((t) => t.parent_id === task.id && t.is_archived === 0)
-            .sort((a, b) => a.order_index - b.order_index)
-          result.push(...subtasks)
-        }
+    const visited = new Set<string>()
+    const append = (task: Task): void => {
+      if (visited.has(task.id)) return
+      visited.add(task.id)
+      result.push(task)
+      if (expandedTaskIds.has(task.id)) {
+        for (const child of sortSubtasksForDisplay(Object.values(allTasks)
+          .filter((t) => t.parent_id === task.id && !t.is_archived && !t.deleted_at))) append(child)
       }
+    }
+    for (const group of bucketGroups) {
+      for (const task of [...group.tasks].sort(prioritySortFn)) append(task)
     }
     return result
   }, [bucketGroups, prioritySortFn, expandedTaskIds, allTasks])

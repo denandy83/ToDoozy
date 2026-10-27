@@ -1,3 +1,4 @@
+import { useAuthStore } from '../../shared/stores/authStore'
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Search, Archive, X, Calendar } from 'lucide-react'
@@ -35,6 +36,13 @@ interface FilterChip {
 export function CommandPalette(): React.JSX.Element | null {
   const { isOpen, query, selectedIndex, includeArchived, close, setQuery, setSelectedIndex, setIncludeArchived } =
     useCommandPaletteStore()
+  const userId = useAuthStore((s) => s.currentUser?.id)
+  useEffect(() => {
+    if (isOpen && userId) {
+      void useTaskStore.getState().hydrateAllForUser(userId)
+      void import('../../services/searchSync').then(({ refreshSearchIndex }) => refreshSearchIndex(userId))
+    }
+  }, [isOpen, userId])
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)

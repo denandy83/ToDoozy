@@ -1,3 +1,5 @@
+import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -26,9 +28,11 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   error: null,
 
   async hydrateStatuses(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const statuses = await window.api.statuses.findByProjectId(projectId)
+      const statuses = await api.statuses.findByProjectId(projectId)
+      if (!await isCurrent()) return
       set((state) => {
         // Remove old statuses for this project, then add new ones
         const updated: Record<string, Status> = {}
@@ -41,82 +45,103 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         return { statuses: updated, loading: false }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load statuses'
       set({ error: message, loading: false })
     }
   },
 
   async createStatus(input: CreateStatusInput): Promise<Status> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const status = await window.api.statuses.create(input)
+      const status = await api.statuses.create(input)
+      await requireProducerCurrent(origin)
       set((state) => ({
         statuses: { ...state.statuses, [status.id]: status }
       }))
-      import('../../services/PersonalSyncService').then(({ pushStatus }) => {
-        pushStatus(status).catch((err) => console.error('[StatusStore] push failed:', err))
-      })
+      const { pushStatus } = await import('../../services/PersonalSyncService')
+      await pushStatus(status, origin)
       return status
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create status'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async updateStatus(id: string, input: UpdateStatusInput): Promise<Status | null> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const status = await window.api.statuses.update(id, input)
+      const status = await api.statuses.update(id, input)
       if (status) {
+        await requireProducerCurrent(origin)
         set((state) => ({
           statuses: { ...state.statuses, [status.id]: status }
         }))
-        import('../../services/PersonalSyncService').then(({ pushStatus }) => {
-          pushStatus(status).catch((err) => console.error('[StatusStore] push failed:', err))
-        })
+        const { pushStatus } = await import('../../services/PersonalSyncService')
+        await pushStatus(status, origin)
       }
       return status
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update status'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async deleteStatus(id: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const result = await window.api.statuses.delete(id)
+      const source = await api.statuses.findById(id)
+      if (!source) return false
+      const project = await api.projects.findById(source.project_id)
+      if (project?.owner_id !== origin.userId) throw new Error('Only the project owner can manage statuses')
+      const result = await api.statuses.delete(id)
       if (result) {
+        await requireProducerCurrent(origin)
         set((state) => {
           const { [id]: _, ...remaining } = state.statuses
           return { statuses: remaining }
         })
-        import('../../services/PersonalSyncService').then(({ deleteStatusFromSupabase }) => {
-          deleteStatusFromSupabase(id).catch((err) => console.error('[StatusStore] delete sync failed:', err))
-        })
+        const { deleteStatusFromSupabase } = await import('../../services/PersonalSyncService')
+        await deleteStatusFromSupabase(id, origin)
       }
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete status'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }
   },
 
   async reassignAndDelete(statusId: string, targetStatusId: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const result = await window.api.statuses.reassignAndDelete(statusId, targetStatusId)
+      const source = await api.statuses.findById(statusId)
+      if (!source) return false
+      const project = await api.projects.findById(source.project_id)
+      if (project?.owner_id !== origin.userId) throw new Error('Only the project owner can manage statuses')
+      const result = await api.statuses.reassignAndDelete(statusId, targetStatusId)
       if (result) {
+        await requireProducerCurrent(origin)
         set((state) => {
           const { [statusId]: _, ...remaining } = state.statuses
           return { statuses: remaining }
         })
-        import('../../services/PersonalSyncService').then(({ deleteStatusFromSupabase }) => {
-          deleteStatusFromSupabase(statusId).catch((err) => console.error('[StatusStore] delete sync failed:', err))
-        })
+        const { deleteStatusFromSupabase } = await import('../../services/PersonalSyncService')
+        await deleteStatusFromSupabase(statusId, origin)
       }
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reassign and delete status'
+      await requireProducerCurrent(origin)
       set({ error: message })
       throw err
     }

@@ -11,6 +11,8 @@ import type {
   ProjectArea,
   ProjectTemplate
 } from '../../../shared/types'
+import { captureSyncContext, type SyncContext } from './syncContext'
+import { readAll } from './readAll'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -50,18 +52,18 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
   remoteScopeColumn: string
 
   // Local-side ops (renderer calls window.api.* under the hood)
-  localList(scopeId: string, includeTombstones: boolean): Promise<TLocal[]>
-  localGetById(id: string): Promise<TLocal | null>
+  localList(scopeId: string, includeTombstones: boolean, api?: typeof window.api): Promise<TLocal[]>
+  localGetById(id: string, api?: typeof window.api): Promise<TLocal | null>
   /** Upsert with the remote's `updated_at` and `deleted_at` preserved (no NOW() bump). */
-  localApplyRemote(remote: TRemote): Promise<void>
+  localApplyRemote(remote: TRemote, api?: typeof window.api): Promise<void>
   /** Returns max(updated_at) on local active rows, or null if empty. */
-  localMaxUpdatedAt(scopeId: string): Promise<string | null>
+  localMaxUpdatedAt(scopeId: string, api?: typeof window.api): Promise<string | null>
 
   // Remote-side ops (Supabase client calls)
-  remoteList(scopeId: string, sinceUpdatedAt: string | null, includeTombstones: boolean): Promise<TRemote[]>
-  remoteUpsert(local: TLocal): Promise<void>
-  remoteSoftDelete(id: string, deletedAt: string): Promise<void>
-  remoteMaxUpdatedAt(scopeId: string): Promise<string | null>
+  remoteList(scopeId: string, sinceUpdatedAt: string | null, includeTombstones: boolean, context?: SyncContext): Promise<TRemote[]>
+  remoteUpsert(local: TLocal, context?: SyncContext): Promise<void>
+  remoteSoftDelete(id: string, deletedAt: string, context?: SyncContext): Promise<void>
+  remoteMaxUpdatedAt(scopeId: string, context?: SyncContext): Promise<string | null>
 
   // Conversion (local <-> remote shapes)
   toRemote(local: TLocal): TRemote
@@ -72,7 +74,7 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
    * seed missing user FK targets (owner_id, assigned_to) before applyRemote.
    * Errors are caught by the engine and logged.
    */
-  preparePullRow?(remote: TRemote): Promise<void>
+  preparePullRow?(remote: TRemote, api?: typeof window.api): Promise<void>
   /**
    * Optional: re-order remote rows before applying. Used by `tasks` to apply
    * parents before children so the parent_id FK holds.
@@ -112,40 +114,41 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
   localScopeColumn: 'project_id',
   remoteScopeColumn: 'project_id',
 
-  async localList(projectId, includeTombstones) {
-    return window.api.tasks.findAllByProject(projectId, { includeTombstones })
+  async localList(projectId, includeTombstones, api = window.api) {
+    return api.tasks.findAllByProject(projectId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.tasks.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.tasks.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.tasks.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.tasks.applyRemote(remote)
   },
 
-  async localMaxUpdatedAt(projectId) {
-    return window.api.tasks.findMaxUpdatedAt(projectId)
+  async localMaxUpdatedAt(projectId, api = window.api) {
+    return api.tasks.findMaxUpdatedAt(projectId)
   },
 
-  async remoteList(projectId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
-    let query = supabase.from('tasks').select('*').eq('project_id', projectId)
-    if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
-    if (!includeTombstones) query = query.is('deleted_at', null)
-    const { data, error } = await query
-    if (error) throw error
-    return (data ?? []) as Task[]
+  async remoteList(projectId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
+    const { data } = await readAll(() => {
+      let query = supabase.from('tasks').select('*').eq('project_id', projectId)
+      if (sinceUpdatedAt) query = query.or(`updated_at.gt.${sinceUpdatedAt},archive_updated_at.gt.${sinceUpdatedAt}`)
+      if (!includeTombstones) query = query.is('deleted_at', null)
+      return query
+    })
+    return data as unknown as Task[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('tasks').upsert(tasksDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('tasks')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -153,8 +156,8 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(projectId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(projectId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('tasks')
       .select('updated_at')
@@ -174,13 +177,13 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
     return remote
   },
 
-  async preparePullRow(remote) {
+  async preparePullRow(remote, api = window.api) {
     // Seed missing user FK targets so tasks.applyRemote doesn't trip the FK.
     const ownerId = remote.owner_id
     if (ownerId) {
-      const localOwner = await window.api.users.findById(ownerId)
+      const localOwner = await api.users.findById(ownerId)
       if (!localOwner) {
-        await window.api.users
+        await api.users
           .create({
             id: ownerId,
             email: placeholderEmail(ownerId),
@@ -192,9 +195,9 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
     }
     const assignedTo = remote.assigned_to
     if (assignedTo) {
-      const localAssignee = await window.api.users.findById(assignedTo)
+      const localAssignee = await api.users.findById(assignedTo)
       if (!localAssignee) {
-        await window.api.users
+        await api.users
           .create({
             id: assignedTo,
             email: placeholderEmail(assignedTo),
@@ -227,24 +230,24 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
   localScopeColumn: 'project_id',
   remoteScopeColumn: 'project_id',
 
-  async localList(projectId, includeTombstones) {
-    return window.api.statuses.findAllByProject(projectId, { includeTombstones })
+  async localList(projectId, includeTombstones, api = window.api) {
+    return api.statuses.findAllByProject(projectId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.statuses.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.statuses.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.statuses.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.statuses.applyRemote(remote)
   },
 
-  async localMaxUpdatedAt(projectId) {
-    return window.api.statuses.findMaxUpdatedAt(projectId)
+  async localMaxUpdatedAt(projectId, api = window.api) {
+    return api.statuses.findMaxUpdatedAt(projectId)
   },
 
-  async remoteList(projectId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(projectId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('statuses').select('*').eq('project_id', projectId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -253,14 +256,27 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
     return (data ?? []) as Status[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
+    const api = context?.api ?? window.api
+    if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === local.id && JSON.parse(entry.payload).status_delete)) {
+      const { processSyncQueue } = await import('./SyncService')
+      await processSyncQueue(context)
+      if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === local.id && JSON.parse(entry.payload).status_delete)) throw new Error('Status deletion remains pending')
+      return
+    }
     const { error } = await supabase.from('statuses').upsert(statusDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const api = context?.api ?? window.api
+    if ((await api.sync.getQueue()).some((entry) => entry.table_name === 'statuses' && entry.row_id === id && JSON.parse(entry.payload).status_delete)) {
+      const local = await api.statuses.findById(id)
+      if (!local) throw new Error('Status deletion intent missing')
+      return statusDescriptor.remoteUpsert(local, context)
+    }
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('statuses')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -268,8 +284,8 @@ const statusDescriptor: SyncTableDescriptor<Status, Status> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(projectId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(projectId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('statuses')
       .select('updated_at')
@@ -304,34 +320,35 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
   localScopeColumn: 'owner_id',
   remoteScopeColumn: 'owner_id',
 
-  async localList(ownerId, includeTombstones) {
-    return window.api.projects.findAllByOwner(ownerId, { includeTombstones })
+  async localList(ownerId, includeTombstones, api = window.api) {
+    return api.projects.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.projects.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.projects.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projects.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.projects.applyRemote(remote)
   },
 
-  async localMaxUpdatedAt(ownerId) {
-    return window.api.projects.findMaxUpdatedAt(ownerId)
+  async localMaxUpdatedAt(ownerId, api = window.api) {
+    return api.projects.findMaxUpdatedAt(ownerId)
   },
 
-  async remoteList(ownerId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
-    let query = supabase.from('projects').select('*').eq('owner_id', ownerId)
-    if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
-    if (!includeTombstones) query = query.is('deleted_at', null)
-    const { data, error } = await query
-    if (error) throw error
-    return (data ?? []) as Project[]
+  async remoteList(ownerId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
+    const { data } = await readAll(() => {
+      let query = supabase.from('projects').select('*').eq('owner_id', ownerId)
+      if (sinceUpdatedAt) query = query.or(`updated_at.gt.${sinceUpdatedAt},archive_updated_at.gt.${sinceUpdatedAt}`)
+      if (!includeTombstones) query = query.is('deleted_at', null)
+      return query
+    })
+    return data as unknown as Project[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('projects').upsert(projectsDescriptor.toRemote(local))
     if (error) {
       // 42501 = RLS denial. Happens when local has a project whose remote
@@ -345,8 +362,8 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
     }
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('projects')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -358,8 +375,8 @@ const projectsDescriptor: SyncTableDescriptor<Project, Project> = {
     }
   },
 
-  async remoteMaxUpdatedAt(ownerId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(ownerId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('projects')
       .select('updated_at')
@@ -404,10 +421,11 @@ SYNC_TABLES.projects = projectsDescriptor as SyncTableDescriptor<unknown, unknow
 async function consolidateLocalLabel(
   localId: string,
   userId: string,
-  name: string
+  name: string,
+  context?: SyncContext
 ): Promise<boolean> {
   try {
-    const supabase = await getSupabase()
+    const supabase = context?.client ?? await getSupabase()
     // Fetch the canonical remote row in full — we need its data to insert
     // into local labels before the FK-bound junction remap can run.
     const { data: remote, error: lookupErr } = await supabase
@@ -444,7 +462,7 @@ async function consolidateLocalLabel(
       updated_at: String(r.updated_at ?? new Date().toISOString()),
       deleted_at: r.deleted_at == null ? null : String(r.deleted_at)
     }
-    const result = await window.api.labels.consolidate(localId, canonicalLabel)
+    const result = await (context?.api ?? window.api).labels.consolidate(localId, canonicalLabel)
     console.info(`[sync] Consolidated label "${name}" ${localId} → ${canonicalLabel.id} (taskRemaps=${result.taskRemaps} projectRemaps=${result.projectRemaps})`)
     return true
   } catch (err) {
@@ -460,24 +478,24 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
   localScopeColumn: 'user_id',
   remoteScopeColumn: 'user_id',
 
-  async localList(userId, includeTombstones) {
-    return window.api.labels.findAllByUser(userId, { includeTombstones })
+  async localList(userId, includeTombstones, api = window.api) {
+    return api.labels.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.labels.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.labels.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.labels.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.labels.applyRemote(remote)
   },
 
-  async localMaxUpdatedAt(userId) {
-    return window.api.labels.findMaxUpdatedAt(userId)
+  async localMaxUpdatedAt(userId, api = window.api) {
+    return api.labels.findMaxUpdatedAt(userId)
   },
 
-  async remoteList(userId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(userId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('user_labels').select('*').eq('user_id', userId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -486,8 +504,8 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     return (data ?? []) as Label[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('user_labels').upsert(labelsDescriptor.toRemote(local))
     if (error) {
       // Any upsert error is a consolidation candidate when we have a same-name
@@ -503,15 +521,15 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
       //      exists, collapses the local row onto it. When no such canonical
       //      exists it returns false and we surface the original error.
       if (local.user_id) {
-        const consolidated = await consolidateLocalLabel(local.id, local.user_id, local.name)
+        const consolidated = await consolidateLocalLabel(local.id, local.user_id, local.name, context)
         if (consolidated) return
       }
       throw error
     }
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_labels')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -519,8 +537,8 @@ const labelsDescriptor: SyncTableDescriptor<Label, Label> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(userId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(userId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('user_labels')
       .select('updated_at')
@@ -611,24 +629,24 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   localScopeColumn: 'owner_id',
   remoteScopeColumn: 'user_id',
 
-  async localList(ownerId, includeTombstones) {
-    return window.api.themes.findAllByOwner(ownerId, { includeTombstones })
+  async localList(ownerId, includeTombstones, api = window.api) {
+    return api.themes.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return window.api.themes.findById(id)
+  async localGetById(id, api = window.api) {
+    return api.themes.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.themes.applyRemote(themesDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.themes.applyRemote(themesDescriptor.fromRemote(remote))
   },
 
-  async localMaxUpdatedAt(ownerId) {
-    return window.api.themes.findMaxUpdatedAt(ownerId)
+  async localMaxUpdatedAt(ownerId, api = window.api) {
+    return api.themes.findMaxUpdatedAt(ownerId)
   },
 
-  async remoteList(userId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(userId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('user_themes').select('*').eq('user_id', userId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -637,14 +655,14 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     return (data ?? []) as RemoteTheme[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('user_themes').upsert(themesDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_themes')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -652,8 +670,8 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(userId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(userId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('user_themes')
       .select('updated_at')
@@ -740,31 +758,34 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
   localScopeColumn: 'user_id',
   remoteScopeColumn: 'user_id',
 
-  async localList(userId, includeTombstones) {
-    const rows = await window.api.settings.findAllByUser(userId, { includeTombstones })
+  async localList(userId, includeTombstones, api = window.api) {
+    const rows = await api.settings.findAllByUser(userId, { includeTombstones })
     // api_key is a device-local bearer secret — never reconcile it up to the
     // cloud user_settings table, even if a legacy per-user row exists locally
     // (e.g. an upgrade from a build that leaked it). See settingsSyncPolicy (#114).
     return rows.filter((row) => !isSettingSyncExcluded(row.key))
   },
 
-  async localGetById() {
-    // Settings have a composite PK; the generic reconcile loop falls back to
-    // localList rather than per-id lookups.
-    return null
+  async localGetById(id, api = window.api) {
+    const separator = id.indexOf(':')
+    if (separator < 1) return null
+    const userId = id.slice(0, separator)
+    const key = id.slice(separator + 1)
+    const rows = await api.settings.findAllByUser(userId, { includeTombstones: true })
+    return isSettingSyncExcluded(key) ? null : rows.find((row) => row.key === key) ?? null
   },
 
-  async localApplyRemote(remote) {
+  async localApplyRemote(remote, api = window.api) {
     if (isSettingSyncExcluded(settingsDescriptor.fromRemote(remote).key)) return
-    await window.api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
+    await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 
-  async localMaxUpdatedAt(userId) {
-    return window.api.settings.findMaxUpdatedAt(userId)
+  async localMaxUpdatedAt(userId, api = window.api) {
+    return api.settings.findMaxUpdatedAt(userId)
   },
 
-  async remoteList(userId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(userId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('user_settings').select('*').eq('user_id', userId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -773,14 +794,14 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     return (data ?? []) as RemoteSetting[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('user_settings').upsert(settingsDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_settings')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -788,8 +809,8 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(userId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(userId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('user_settings')
       .select('updated_at')
@@ -848,25 +869,25 @@ const savedViewsDescriptor: SyncTableDescriptor<SavedView, RemoteSavedView> = {
   localScopeColumn: 'user_id',
   remoteScopeColumn: 'user_id',
 
-  async localList(userId, includeTombstones) {
-    return window.api.savedViews.findAllByUser(userId, { includeTombstones })
+  async localList(userId, includeTombstones, api = window.api) {
+    return api.savedViews.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    const view = await window.api.savedViews.findById(id)
+  async localGetById(id, api = window.api) {
+    const view = await api.savedViews.findById(id)
     return view ?? null
   },
 
-  async localApplyRemote(remote) {
-    await window.api.savedViews.applyRemote(savedViewsDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.savedViews.applyRemote(savedViewsDescriptor.fromRemote(remote))
   },
 
-  async localMaxUpdatedAt(userId) {
-    return window.api.savedViews.findMaxUpdatedAt(userId)
+  async localMaxUpdatedAt(userId, api = window.api) {
+    return api.savedViews.findMaxUpdatedAt(userId)
   },
 
-  async remoteList(userId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(userId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('user_saved_views').select('*').eq('user_id', userId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -875,16 +896,16 @@ const savedViewsDescriptor: SyncTableDescriptor<SavedView, RemoteSavedView> = {
     return (data ?? []) as RemoteSavedView[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_saved_views')
       .upsert(savedViewsDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_saved_views')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -892,8 +913,8 @@ const savedViewsDescriptor: SyncTableDescriptor<SavedView, RemoteSavedView> = {
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(userId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(userId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('user_saved_views')
       .select('updated_at')
@@ -962,29 +983,24 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
   localScopeColumn: 'user_id',
   remoteScopeColumn: 'user_id',
 
-  async localList(userId, includeTombstones) {
-    return window.api.projectAreas.findAllByUser(userId, { includeTombstones })
+  async localList(userId, includeTombstones, api = window.api) {
+    return api.projectAreas.findAllByUser(userId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    // Find via list — there's no findById exposed for areas. The reconcile loop
-    // primarily uses localList, so this is a thin best-effort shim.
-    const row = (await window.api.projectAreas.findAllByUser('', { includeTombstones: true })).find(
-      (a) => a.id === id
-    )
-    return row ?? null
+  async localGetById(id, api = window.api) {
+    return api.projectAreas.findById(id)
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projectAreas.applyRemote(projectAreasDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api) {
+    await api.projectAreas.applyRemote(projectAreasDescriptor.fromRemote(remote))
   },
 
-  async localMaxUpdatedAt(userId) {
-    return window.api.projectAreas.findMaxUpdatedAt(userId)
+  async localMaxUpdatedAt(userId, api = window.api) {
+    return api.projectAreas.findMaxUpdatedAt(userId)
   },
 
-  async remoteList(userId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(userId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('user_project_areas').select('*').eq('user_id', userId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -993,16 +1009,16 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
     return (data ?? []) as RemoteProjectArea[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_project_areas')
       .upsert(projectAreasDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('user_project_areas')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -1010,8 +1026,8 @@ const projectAreasDescriptor: SyncTableDescriptor<ProjectArea, RemoteProjectArea
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(userId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(userId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('user_project_areas')
       .select('updated_at')
@@ -1067,24 +1083,24 @@ const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTe
   localScopeColumn: 'owner_id',
   remoteScopeColumn: 'owner_id',
 
-  async localList(ownerId, includeTombstones) {
-    return window.api.projectTemplates.findAllByOwner(ownerId, { includeTombstones })
+  async localList(ownerId, includeTombstones, api = window.api) {
+    return api.projectTemplates.findAllByOwner(ownerId, { includeTombstones })
   },
 
-  async localGetById(id) {
-    return (await window.api.projectTemplates.findById(id)) ?? null
+  async localGetById(id, api = window.api) {
+    return (await api.projectTemplates.findById(id)) ?? null
   },
 
-  async localApplyRemote(remote) {
-    await window.api.projectTemplates.applyRemote(remote)
+  async localApplyRemote(remote, api = window.api) {
+    await api.projectTemplates.applyRemote(remote)
   },
 
-  async localMaxUpdatedAt(ownerId) {
-    return window.api.projectTemplates.findMaxUpdatedAt(ownerId)
+  async localMaxUpdatedAt(ownerId, api = window.api) {
+    return api.projectTemplates.findMaxUpdatedAt(ownerId)
   },
 
-  async remoteList(ownerId, sinceUpdatedAt, includeTombstones) {
-    const supabase = await getSupabase()
+  async remoteList(ownerId, sinceUpdatedAt, includeTombstones, context) {
+    const supabase = context?.client ?? await getSupabase()
     let query = supabase.from('project_templates').select('*').eq('owner_id', ownerId)
     if (sinceUpdatedAt) query = query.gt('updated_at', sinceUpdatedAt)
     if (!includeTombstones) query = query.is('deleted_at', null)
@@ -1093,16 +1109,16 @@ const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTe
     return (data ?? []) as ProjectTemplate[]
   },
 
-  async remoteUpsert(local) {
-    const supabase = await getSupabase()
+  async remoteUpsert(local, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('project_templates')
       .upsert(projectTemplatesDescriptor.toRemote(local))
     if (error) throw error
   },
 
-  async remoteSoftDelete(id, deletedAt) {
-    const supabase = await getSupabase()
+  async remoteSoftDelete(id, deletedAt, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase
       .from('project_templates')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -1110,8 +1126,8 @@ const projectTemplatesDescriptor: SyncTableDescriptor<ProjectTemplate, ProjectTe
     if (error) throw error
   },
 
-  async remoteMaxUpdatedAt(ownerId) {
-    const supabase = await getSupabase()
+  async remoteMaxUpdatedAt(ownerId, context) {
+    const supabase = context?.client ?? await getSupabase()
     const { data, error } = await supabase
       .from('project_templates')
       .select('updated_at')
@@ -1167,8 +1183,11 @@ SYNC_TABLES['project_templates'] = projectTemplatesDescriptor as SyncTableDescri
 export async function reconcileTable<TLocal, TRemote extends { id: string; updated_at: string }>(
   desc: SyncTableDescriptor<TLocal, TRemote>,
   scopeId: string,
-  userId: string
+  userId: string,
+  context?: SyncContext
 ): Promise<ReconcileStats> {
+  context ??= await captureSyncContext()
+  const api = context.api
   const stats: ReconcileStats = {
     pushed: 0,
     pulled: 0,
@@ -1181,9 +1200,9 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // neither max exceeds the stored high-water, we know nothing has changed
   // since the last successful reconcile and we can skip the heavy listing.
   const [localMax, remoteMax, storedHigh] = await Promise.all([
-    desc.localMaxUpdatedAt(scopeId),
-    desc.remoteMaxUpdatedAt(scopeId),
-    window.api.syncMeta.getHighWater(userId, scopeId, desc.name)
+    desc.localMaxUpdatedAt(scopeId, api),
+    desc.remoteMaxUpdatedAt(scopeId, context),
+    api.syncMeta.getHighWater(userId, scopeId, desc.name)
   ])
 
   // ISO timestamps are NOT lexically equivalent across formats — local writes
@@ -1194,14 +1213,14 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // compare equal.
   const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
 
-  if (storedHigh) {
+  if (storedHigh && desc.name !== 'projects' && desc.name !== 'tasks') {
     const highMs = tsMs(storedHigh)
     const localStale = !localMax || tsMs(localMax) <= highMs
     const remoteStale = !remoteMax || tsMs(remoteMax) <= highMs
     if (localStale && remoteStale) {
       stats.skipped = true
       // Touch last_reconciled_at so the UI/debug surface knows we ran.
-      await window.api.syncMeta.setLastReconciledAt(
+      await api.syncMeta.setLastReconciledAt(
         userId,
         scopeId,
         desc.name,
@@ -1213,8 +1232,8 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
 
   // Step 2 — full diff.
   const [localRows, remoteRows] = await Promise.all([
-    desc.localList(scopeId, true),
-    desc.remoteList(scopeId, null, true)
+    desc.localList(scopeId, true, api),
+    desc.remoteList(scopeId, null, true, context)
   ])
 
   const localById = new Map<string, TLocal>()
@@ -1239,7 +1258,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     if (remoteById.has(id)) continue
     const local = localById.get(id)!
     try {
-      await desc.remoteUpsert(local)
+      await desc.remoteUpsert(local, context)
       stats.pushed++
     } catch {
       stats.failed++
@@ -1249,8 +1268,8 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // Remote-only: pull
   for (const remote of remoteOnlyRows) {
     try {
-      if (desc.preparePullRow) await desc.preparePullRow(remote).catch(() => {})
-      await desc.localApplyRemote(remote)
+      if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
+      await desc.localApplyRemote(remote, api)
       stats.pulled++
     } catch {
       stats.failed++
@@ -1261,8 +1280,21 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // for the same instant are treated as equal (see tsMs comment above).
   for (const id of localById.keys()) {
     if (!remoteById.has(id)) continue
-    const local = localById.get(id)!
+    let local = localById.get(id)!
     const remote = remoteById.get(id)!
+    if (desc.name === 'projects' || desc.name === 'tasks') {
+      try {
+        await desc.localApplyRemote(remote, api)
+        local = (await desc.localGetById(id, api))!
+        const merged = desc.toRemote(local) as unknown as Project
+        const original = remote as unknown as Project
+        if (Date.parse(merged.archive_updated_at ?? '') > Date.parse(original.archive_updated_at ?? '1970-01-01')) {
+          await desc.remoteUpsert(local, context)
+          stats.pushed++
+          continue
+        }
+      } catch { stats.failed++; continue }
+    }
     const localUpdatedAt = desc.toRemote(local).updated_at
     const localMs = tsMs(localUpdatedAt)
     const remoteMs = tsMs(remote.updated_at)
@@ -1272,15 +1304,15 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     }
     if (localMs > remoteMs) {
       try {
-        await desc.remoteUpsert(local)
+        await desc.remoteUpsert(local, context)
         stats.pushed++
       } catch {
         stats.failed++
       }
     } else {
       try {
-        if (desc.preparePullRow) await desc.preparePullRow(remote).catch(() => {})
-        await desc.localApplyRemote(remote)
+        if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
+        await desc.localApplyRemote(remote, api)
         stats.pulled++
       } catch {
         stats.failed++
@@ -1300,11 +1332,11 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     if (candidates.length > 0) {
       const newHigh = candidates.reduce((a, b) => (tsMs(a) > tsMs(b) ? a : b))
       if (!storedHigh || tsMs(newHigh) > tsMs(storedHigh)) {
-        await window.api.syncMeta.setHighWater(userId, scopeId, desc.name, newHigh)
+        await api.syncMeta.setHighWater(userId, scopeId, desc.name, newHigh)
       }
     }
   }
-  await window.api.syncMeta.setLastReconciledAt(userId, scopeId, desc.name, nowIso)
+  await api.syncMeta.setLastReconciledAt(userId, scopeId, desc.name, nowIso)
 
   return stats
 }
@@ -1338,12 +1370,15 @@ export interface RemoteActivityRow {
  */
 export async function pullActivityLogForProject(
   projectId: string,
-  userId: string
+  userId: string,
+  context?: SyncContext
 ): Promise<number> {
-  const supabase = await getSupabase()
+  context ??= await captureSyncContext()
+  const api = context.api
+  const supabase = context.client
   const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
 
-  const storedHigh = await window.api.syncMeta.getHighWater(userId, projectId, 'activity_log')
+  const storedHigh = await api.syncMeta.getHighWater(userId, projectId, 'activity_log')
 
   // Tiny max() probe — skip the listing when nothing new arrived remotely.
   const { data: maxRow, error: maxErr } = await supabase
@@ -1358,7 +1393,7 @@ export async function pullActivityLogForProject(
 
   const nowIso = new Date().toISOString()
   if (!remoteMax || (storedHigh && tsMs(remoteMax) <= tsMs(storedHigh))) {
-    await window.api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
+    await api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
     return 0
   }
 
@@ -1374,7 +1409,7 @@ export async function pullActivityLogForProject(
   let applied = 0
   let missingTask = 0
   for (const row of (data ?? []) as RemoteActivityRow[]) {
-    const result = await window.api.activityLog
+    const result = await api.activityLog
       .applyRemote({
         id: row.id,
         task_id: row.task_id,
@@ -1390,9 +1425,9 @@ export async function pullActivityLogForProject(
   }
 
   if (missingTask === 0) {
-    await window.api.syncMeta.setHighWater(userId, projectId, 'activity_log', remoteMax)
+    await api.syncMeta.setHighWater(userId, projectId, 'activity_log', remoteMax)
   }
-  await window.api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
+  await api.syncMeta.setLastReconciledAt(userId, projectId, 'activity_log', nowIso)
   return applied
 }
 

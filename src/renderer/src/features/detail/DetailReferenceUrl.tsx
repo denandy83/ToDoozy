@@ -1,36 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
+import { looksLikeUrl, ensureProtocol, displayUrl } from '../../../../shared/referenceUrl'
 
 interface DetailReferenceUrlProps {
   referenceUrl: string | null
   onReferenceUrlChange: (url: string | null) => void
-}
-
-/** Returns true if the string looks like a valid URL (has a dot and no spaces). */
-function looksLikeUrl(text: string): boolean {
-  const trimmed = text.trim()
-  if (!trimmed || trimmed.includes(' ')) return false
-  // Must contain a dot (domain separator) and no spaces
-  return /^[^\s]+\.[^\s]+/.test(trimmed)
-}
-
-/** Ensures a URL has an http(s):// prefix. */
-function ensureProtocol(url: string): string {
-  const trimmed = url.trim()
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  return `https://${trimmed}`
-}
-
-/** Truncates a URL for display: shows domain + start of path, ellipsis if too long. */
-function displayUrl(url: string): string {
-  try {
-    const full = ensureProtocol(url)
-    const parsed = new URL(full)
-    const display = parsed.hostname + (parsed.pathname !== '/' ? parsed.pathname : '')
-    return display.length > 50 ? display.slice(0, 47) + '...' : display
-  } catch {
-    return url.length > 50 ? url.slice(0, 47) + '...' : url
-  }
 }
 
 export function DetailReferenceUrl({
@@ -112,7 +86,7 @@ export function DetailReferenceUrl({
 
   const handleOpenUrl = useCallback(() => {
     if (referenceUrl && looksLikeUrl(referenceUrl)) {
-      window.api.shell.openExternal(ensureProtocol(referenceUrl))
+      window.api.shell.openReference(ensureProtocol(referenceUrl))
     }
   }, [referenceUrl])
 

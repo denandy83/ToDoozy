@@ -1,3 +1,5 @@
+const pinnedProducer = vi.hoisted(() => ({ client: null as unknown }))
+vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn(() => pinnedProducer.client) }))
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SupabaseClient, Session } from '@supabase/supabase-js'
 
@@ -10,6 +12,7 @@ vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
 import { chunkArray, fullPull, fullUpload, initSync, pushSetting } from './PersonalSyncService'
+import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
 
@@ -74,7 +77,7 @@ function makeSupabase(): SupabaseClient {
   const chain: Record<string, unknown> = {}
   const chainMethods = [
     'select', 'insert', 'upsert', 'update', 'delete',
-    'eq', 'neq', 'in', 'is', 'order', 'limit', 'filter', 'match'
+    'eq', 'neq', 'in', 'is', 'order', 'limit', 'or', 'filter', 'match'
   ]
   for (const method of chainMethods) chain[method] = (): Record<string, unknown> => chain
   chain.single = (): Promise<QueryResult> => Promise.resolve(result)
@@ -88,6 +91,7 @@ function makeSupabase(): SupabaseClient {
     from: (): Record<string, unknown> => chain,
     rpc: (): Promise<QueryResult> => Promise.resolve(result)
   }
+  pinnedProducer.client = supabase
   return supabase as unknown as SupabaseClient
 }
 
@@ -124,7 +128,16 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
   const statusesFindByProjectId = vi.fn((): Promise<unknown[]> => Promise.resolve([]))
   const empty = (): Promise<unknown[]> => Promise.resolve([])
 
+  useAuthStore.setState({ currentUser: { id: USER_ID } as never })
   const api = {
+    auth: { getSupabaseConfig: async () => ({ url: 'https://example.invalid', anonKey: 'synthetic' }) },
+    sync: {
+      captureContext: async () => ({ userId: USER_ID, generation: 1 }),
+      invokeContext: async (_context: unknown, channel: string, args: unknown[]) => {
+        const [namespace, method] = channel.split(':')
+        return (window.api as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>)[namespace][method](...args)
+      }
+    },
     settings: { set: settingsSet, get: settingsGet, getAll: settingsGetAll },
     projects: { getProjectsForUser: projectsGetProjectsForUser },
     labels: { findAll: labelsFindAll, findByProjectId: empty },
@@ -132,6 +145,8 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
     statuses: { findByProjectId: statusesFindByProjectId },
     tasks: {
       findByProjectId: empty, findArchived: empty, findTemplates: empty,
+      getLabelState: empty,
+      acknowledgeLabelState: async()=>undefined,
       getLabels: empty
     },
     projectAreas: { findByUserId: empty },
@@ -171,11 +186,14 @@ function makeRecordingSupabase(records: UpsertRecord[]): SupabaseClient {
     chain.then = (resolve: (v: typeof ok) => unknown): unknown => resolve(ok)
     return chain
   }
-  return { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+  const client = { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+  pinnedProducer.client = client
+  return client
 }
 
 describe('pushSetting api_key exclusion (#114)', () => {
   beforeEach(() => {
+    installApi({ hasProject: false })
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.mocked(requireSession).mockResolvedValue({ user: { id: USER_ID } } as unknown as Session)
@@ -236,7 +254,7 @@ function makePullSupabase(
     }
     const chain: Record<string, unknown> = {}
     for (const m of [
-      'select', 'eq', 'neq', 'in', 'is', 'order', 'limit', 'filter', 'match',
+      'select', 'eq', 'neq', 'in', 'is', 'order', 'limit', 'or', 'filter', 'match',
       'update', 'delete', 'insert', 'upsert'
     ]) {
       chain[m] = (): Record<string, unknown> => chain
@@ -246,7 +264,9 @@ function makePullSupabase(
     chain.then = (resolve: (v: typeof result) => unknown): unknown => resolve(result)
     return chain
   }
-  return { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+  const client = { from: (table: string): Record<string, unknown> => make(table) } as unknown as SupabaseClient
+  pinnedProducer.client = client
+  return client
 }
 
 describe('fullPull api_key exclusion (#114)', () => {

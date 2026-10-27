@@ -22,6 +22,10 @@ export class SyncQueueRepository {
     return { id, table_name: tableName, row_id: rowId, operation, payload, created_at: now }
   }
 
+  updatePayload(id: string, payload: string): boolean {
+    return this.db.prepare('UPDATE sync_queue SET payload = ? WHERE id = ?').run(payload, id).changes > 0
+  }
+
   dequeue(id: string): boolean {
     const result = this.db.prepare('DELETE FROM sync_queue WHERE id = ?').run(id)
     return result.changes > 0

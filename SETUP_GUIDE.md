@@ -8,8 +8,8 @@
 ## 1. Install Prerequisites
 
 ```bash
-# Node.js 20+ (required for Electron + electron-vite)
-node --version  # should be v20+
+# Node.js: use the version pinned in .github/workflows/ci.yml
+node --version
 
 # Claude Code CLI
 claude --version  # install from https://claude.ai/claude-code if missing
@@ -114,12 +114,7 @@ This lets you type multi-line prompts with Shift+Enter.
 
 ## 6. Create Environment File
 
-In your project directory, create `.env` (add to `.gitignore`):
-
-```bash
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
-```
+Follow [Install & Run](README.md#install--run) for the environment setup and public-key requirements; `.env.example` is the configuration template.
 
 ---
 
@@ -187,7 +182,7 @@ Give Claude this prompt to begin:
 
 Before you start building, confirm:
 
-- [ ] Node.js 20+ installed
+- [ ] Node.js version from `.github/workflows/ci.yml` installed
 - [ ] Claude Code CLI installed and working
 - [ ] Supabase CLI installed
 - [ ] Supabase project created with URL + anon key noted

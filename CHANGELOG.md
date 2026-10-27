@@ -4,6 +4,25 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.10.0 (unreleased)
+
+Release and backend activation remain gated by the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade).
+
+- **Project-label delivery** — Overlapping eager, queued, upload and reconciliation writes recheck current local intent after delivery; failed repair remains queued. Family clocks use the same accented-name comparison as the UI.
+- **Bot release validation** — The candidate container uses Node 22.23.2, matching CI, and generated bot output is excluded from lint without excluding handwritten sources.
+- **Label removal clocks** — Project-label removals and later additions advance beyond known same-name association clocks, including clock-ahead imports and clock rollback.
+- **Telegram polling watchdog** — Bounded graceful recovery, polling/backlog monitoring and sanitized failure logs address silent polling loss. Package checks are included in CI. Source implementation awaits independent verification and deployment; it is not user-verified or deployed.
+
+- **Search across projects and descriptions** — Command-K refreshes tasks from known projects, including projects you have not opened, and searches task descriptions as well as titles.
+- **Descriptions stay intact** — Opening or leaving the description editor no longer saves untouched content. Remote updates cancel stale pending saves, and title-only MCP edits preserve the description.
+- **Shared project archive and restore** — Only the owner can archive a shared project for everyone. Settings → Projects → Archive provides a permanent way to restore it and its tasks.
+- **Consistent subtasks** — Archived children stay hidden, label filters retain matching nested children and their ancestors, and completed children follow active children with the newest completion first. Keyboard navigation uses the same order.
+- **Task-label removals converge** — Complete remote assignment snapshots now remove obsolete labels without dropping pending local choices. Shared and personal delivery preserve offline and buffered additions/removals, ordinary metadata edits avoid recreating removed assignments, and project-label chip updates stay within their project. Source repair awaits independent verification and signed release.
+- **Shared labels and sync reliability** — Project-label changes refresh across members, including renamed definitions. Failed writes remain queued for retry, obsolete buffered writes use current local intent, and account changes cannot replay another account's work.
+- **MCP improvements** — Task references support reference URLs. Status tools support creating, editing, deleting, ensuring and reordering statuses with owner checks, atomic task reassignment and default/done safeguards. Task updates reject a status from another project.
+- **File references and Quick Add** — File URLs retain their scheme and reveal the local target. Suggestion popups explain that typing filters the initial list.
+- **Maintenance** — Development database snapshots work with per-user databases, lint runs again, and dependency updates include Electron 42.11.16.
+
 ## v1.7.1
 
 - **Sign-in no longer traps you on the splash screen** — If a Supabase auth call hung (e.g. during an upstream outage), the TD-logo splash had no Cancel button and would block the app forever, forcing a Force Quit. Sign-in now times out (30s for email/password, 15s for Google OAuth, 20s for cold-start session restore) and the splash shows a Cancel link after 5 seconds. Cold-start hangs now fall through to offline mode instead of freezing.

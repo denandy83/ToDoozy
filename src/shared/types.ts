@@ -25,6 +25,7 @@ export interface Project {
   auto_archive_value: number
   auto_archive_unit: string
   is_archived: number
+  archive_updated_at?: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -69,6 +70,7 @@ export interface Task {
   is_in_my_day: number
   is_template: number
   is_archived: number
+  archive_updated_at?: string | null
   completed_date: string | null
   recurrence_rule: string | null
   reference_url: string | null
@@ -100,6 +102,11 @@ export interface TaskLabel {
   task_id: string
   label_id: string
   deleted_at: string | null
+}
+
+export interface TaskLabelSyncState extends TaskLabel {
+  local_version: number
+  sync_pending: number
 }
 
 export interface TaskLabelMapping extends Label {

@@ -1,3 +1,4 @@
+import { ArchivedProjectsList } from './ArchivedProjectsList'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Pencil, X, Check, FolderOpen, Plus, Trash2 } from 'lucide-react'
 import { DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors, useDraggable, useDroppable, type DragEndEvent, type DragStartEvent, type DragOverEvent } from '@dnd-kit/core'
@@ -276,7 +277,7 @@ export function ProjectsSettingsContent({
       )}
 
       {subtab === 'archive' && (
-        <ArchiveSection projects={sortedProjects} />
+        <><ArchivedProjectsList /><ArchiveSection projects={sortedProjects} /></>
       )}
 
     </div>
@@ -734,6 +735,8 @@ function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchi
   const archiveProject = useProjectStore((s) => s.archiveProject)
   const unarchiveProject = useProjectStore((s) => s.unarchiveProject)
   const { addToast } = useToast()
+  const userId = useAuthStore((s) => s.currentUser?.id)
+  if (project.owner_id !== userId) return null
 
   const handleArchive = async (): Promise<void> => {
     if (isLastProject) return
@@ -763,7 +766,7 @@ function ProjectArchiveSection({ project, isLastProject, onClose }: ProjectArchi
         Archive Project
       </button>
       <p className="mt-2 text-[10px] font-light text-muted/60">
-        Archives this project and all its tasks. Restore it from the Archive view.
+        Archives this project and all its tasks. Restore it from Settings → Projects → Archive.
       </p>
     </div>
   )

@@ -1,3 +1,4 @@
+import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -112,9 +113,11 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   error: null,
 
   async hydrateLabels(projectId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true, error: null })
     try {
-      const labels = await window.api.labels.findByProjectId(projectId)
+      const labels = await api.labels.findByProjectId(projectId)
+      if (!await isCurrent()) return
       set((state) => {
         const updated = { ...state.labels }
         const labelIdSet = new Set<string>()
@@ -129,19 +132,22 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load labels'
       set({ error: message, loading: false })
     }
   },
 
   async hydrateAllLabels(): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     try {
-      const labels = await window.api.labels.findAll(getUserId())
+      const labels = await api.labels.findAll(getUserId())
       // Merge into existing labels rather than replace. Other users' labels
       // pulled by hydrateLabels(projectId) for shared projects must survive
       // this call — replacing the map wipes them and breaks the chip remap
       // (current user's same-name label disappears, chip falls back to the
       // other user's color).
+      if (!await isCurrent()) return
       set((state) => {
         const merged = { ...state.labels }
         for (const l of labels) {
@@ -150,6 +156,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         return { ...state, labels: merged }
       })
     } catch (err) {
+      if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load all labels'
       set({ error: message })
     }
@@ -304,6 +311,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         useTaskStore.setState((s) => {
           const updated: Record<string, Label[]> = {}
           for (const [taskId, labels] of Object.entries(s.taskLabels)) {
+            if (s.tasks[taskId]?.project_id !== projectId) {updated[taskId]=labels;continue}
             updated[taskId] = targetName
               ? labels.filter((l) => l.name.toLowerCase() !== targetName)
               : labels.filter((l) => !idsToUnlink.includes(l.id))

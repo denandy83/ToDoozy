@@ -53,6 +53,7 @@ describe('StatusRepository — soft-delete', () => {
 
   it('delete() sets deleted_at instead of removing the row', () => {
     repo = new StatusRepository(db)
+    makeStatus(repo, projectId, 'default', 'Default', 1)
     const s = makeStatus(repo, projectId, 's1')
     expect(repo.delete(s.id)).toBe(true)
 
@@ -63,6 +64,7 @@ describe('StatusRepository — soft-delete', () => {
 
   it('delete() is idempotent — second delete on tombstoned row returns false', () => {
     repo = new StatusRepository(db)
+    makeStatus(repo, projectId, 'default', 'Default', 1)
     const s = makeStatus(repo, projectId, 's1')
     expect(repo.delete(s.id)).toBe(true)
     expect(repo.delete(s.id)).toBe(false)
@@ -77,7 +79,7 @@ describe('StatusRepository — soft-delete', () => {
 
   it('findByProjectId() filters out tombstoned rows', () => {
     repo = new StatusRepository(db)
-    makeStatus(repo, projectId, 's1', 'Todo')
+    makeStatus(repo, projectId, 's1', 'Todo', 1)
     const s2 = makeStatus(repo, projectId, 's2', 'Done')
     repo.delete(s2.id)
     const list = repo.findByProjectId(projectId)
@@ -86,6 +88,7 @@ describe('StatusRepository — soft-delete', () => {
 
   it('findById() returns the tombstone (raw access for sync layer)', () => {
     repo = new StatusRepository(db)
+    makeStatus(repo, projectId, 'default', 'Default', 1)
     const s = makeStatus(repo, projectId, 's1')
     repo.delete(s.id)
     const raw = repo.findById(s.id)
@@ -97,13 +100,13 @@ describe('StatusRepository — soft-delete', () => {
     repo = new StatusRepository(db)
     const def = makeStatus(repo, projectId, 's1', 'Todo', 1)
     expect(repo.findDefault(projectId)?.id).toBe(def.id)
-    repo.delete(def.id)
+    db.prepare('UPDATE statuses SET deleted_at=? WHERE id=?').run(new Date().toISOString(),def.id)
     expect(repo.findDefault(projectId)).toBeUndefined()
   })
 
   it('findAllByProject() returns active rows only by default', () => {
     repo = new StatusRepository(db)
-    makeStatus(repo, projectId, 's1')
+    makeStatus(repo, projectId, 's1', 'Default', 1)
     const s2 = makeStatus(repo, projectId, 's2')
     repo.delete(s2.id)
     const active = repo.findAllByProject(projectId)
@@ -112,7 +115,7 @@ describe('StatusRepository — soft-delete', () => {
 
   it('findAllByProject({ includeTombstones: true }) returns all rows including tombstones', () => {
     repo = new StatusRepository(db)
-    makeStatus(repo, projectId, 's1')
+    makeStatus(repo, projectId, 's1', 'Default', 1)
     const s2 = makeStatus(repo, projectId, 's2')
     repo.delete(s2.id)
     const all = repo.findAllByProject(projectId, { includeTombstones: true })

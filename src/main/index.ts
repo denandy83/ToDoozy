@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { app, shell, BrowserWindow, globalShortcut, ipcMain, powerMonitor } from 'electron'
@@ -300,7 +301,6 @@ app.whenReady().then(() => {
   let lastWalPath = getDatabasePath() + '-wal'
   let lastMtime = 0
   try {
-    const { statSync } = require('fs') as typeof import('fs')
     lastMtime = statSync(lastWalPath).mtimeMs
   } catch { /* WAL file may not exist yet */ }
 
@@ -312,8 +312,7 @@ app.whenReady().then(() => {
         lastWalPath = walPath
         lastMtime = 0
       }
-      const { statSync } = require('fs') as typeof import('fs')
-      const mtime = statSync(walPath).mtimeMs
+        const mtime = statSync(walPath).mtimeMs
       if (mtime > lastMtime) {
         lastMtime = mtime
         // Story #103: skip the (heavy) full-store rehydrate broadcast when the

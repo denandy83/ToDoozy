@@ -20,11 +20,13 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
+  "exclude": ["src/main/ipc-handlers.activity.test.ts"],
   "include": [
     "src/main/**/*.ts",
     "src/shared/**/*.ts",
     "src/preload/**/*.ts",
     "src/preload/**/*.d.ts",
-    "electron.vite.config.ts"
+    "electron.vite.config.ts",
+    "scripts/supabase-build-config.ts"
   ]
 }

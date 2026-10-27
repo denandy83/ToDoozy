@@ -1,30 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-// Re-implement the pure functions here for testing since they're not exported
-// (they're internal to the component). If they were exported, we'd import directly.
-
-function looksLikeUrl(text: string): boolean {
-  const trimmed = text.trim()
-  if (!trimmed || trimmed.includes(' ')) return false
-  return /^[^\s]+\.[^\s]+/.test(trimmed)
-}
-
-function ensureProtocol(url: string): string {
-  const trimmed = url.trim()
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  return `https://${trimmed}`
-}
-
-function displayUrl(url: string): string {
-  try {
-    const full = ensureProtocol(url)
-    const parsed = new URL(full)
-    const display = parsed.hostname + (parsed.pathname !== '/' ? parsed.pathname : '')
-    return display.length > 50 ? display.slice(0, 47) + '...' : display
-  } catch {
-    return url.length > 50 ? url.slice(0, 47) + '...' : url
-  }
-}
+import { looksLikeUrl, ensureProtocol, displayUrl } from '../../../../shared/referenceUrl'
 
 describe('looksLikeUrl', () => {
   it('returns true for standard URLs', () => {

@@ -152,7 +152,7 @@ function App(): React.JSX.Element {
       // Reconcile pass: detect and repair drift between local SQLite and Supabase.
       // Fire-and-forget so startup isn't blocked on it.
       void import('./services/PersonalSyncService').then(({ reconcile }) =>
-        reconcile(uid).catch((err) => console.error('[Startup] Reconcile failed:', err))
+        reconcile(uid).then(() => useTaskStore.getState().hydrateAllForUser(uid)).catch((err) => console.error('[Startup] Reconcile failed:', err))
       )
 
       // Warm the What's New cache so first visit doesn't depend on a live fetch.

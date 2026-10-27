@@ -752,4 +752,33 @@ const migration_26: Migration = (db) => {
   }
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26]
+const migration_27: Migration = (db) => {
+  db.exec('ALTER TABLE projects ADD COLUMN archive_updated_at TEXT NULL')
+  const actions = new Map<string, { stamp: string; archived: number }>()
+  const queued = db.prepare("SELECT row_id, payload FROM sync_queue WHERE table_name='projects'").all() as { row_id: string; payload: string }[]
+  for (const entry of queued) {
+    let payload: { archive_with_tasks?: boolean; updated_at?: string; is_archived?: number }
+    try { payload = JSON.parse(entry.payload) } catch { continue }
+    if (payload.archive_with_tasks !== true || !Number.isFinite(Date.parse(payload.updated_at ?? '')) || ![0, 1].includes(payload.is_archived!)) continue
+    const stamp = new Date(payload.updated_at!).toISOString()
+    if (!actions.has(entry.row_id) || stamp > actions.get(entry.row_id)!.stamp) actions.set(entry.row_id, { stamp, archived: payload.is_archived! })
+  }
+  for (const [id, action] of actions) db.prepare('UPDATE projects SET archive_updated_at=? WHERE id=? AND is_archived=?').run(action.stamp, id, action.archived)
+}
+
+const migration_28: Migration = (db) => {
+  db.exec('ALTER TABLE tasks ADD COLUMN archive_updated_at TEXT NULL')
+}
+
+const migration_29: Migration = (db) => {
+  db.exec('ALTER TABLE task_labels ADD COLUMN local_version INTEGER NOT NULL DEFAULT 0')
+  db.exec('ALTER TABLE task_labels ADD COLUMN sync_pending INTEGER NOT NULL DEFAULT 0')
+  const entries = db.prepare("SELECT payload FROM sync_queue WHERE table_name='task_labels'").all() as Array<{payload:string}>
+  for (const entry of entries) {
+    let payload: {task_id?:unknown}
+    try {payload=JSON.parse(entry.payload)} catch {continue}
+    if (typeof payload.task_id === 'string') db.prepare('UPDATE task_labels SET sync_pending=1,local_version=1 WHERE task_id=?').run(payload.task_id)
+  }
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28, migration_29]

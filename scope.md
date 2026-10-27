@@ -119,3 +119,91 @@ All 46 open tasks labeled `Todoozy` (excl. `Later`) were fact-checked against HE
 - `.claude/plans/synchronous-enchanting-tiger.md` referenced by old context-menu task does not exist.
 - Local MCP server (`src/main/mcp-server.ts`) logs no activity at all; remote edge fn does.
 - `release_notes` Supabase table has no RLS policy in any migration file.
+
+## 2026-10-25/26 — Codex backlog audit
+- Synced GitHub main 9fddf7d → a920619 (v1.9.0) before edits; branch codex/backlog-audit-2026-10-25. GitHub had no open issues/PRs. The pre-existing Electron update was preserved during sync, then superseded by the verified security upgrade to 42.11.16.
+- Live backlog snapshot remains local in .git/backlog-audit-2026-10-25.json: 22 in scope, 6 Later excluded. Three old runtime reports retired at the user's direction. Seventeen implementation items addressed; label data consolidation and historical password remediation remain operational work.
+- Owner-only archive applies to every member. Settings → Projects → Archive provides persistent restoration, with a compound retryable project/task sync operation.
+- Fixed recursive subtask filtering, archived visibility/counts, completion ordering and keyboard traversal; description search; editor autosave without hydration/blur writes; reference URL scheme handling; quick-add filter hint; WAL-safe per-user dev DB backups; ESLint configuration.
+- Search explicitly refreshes all known projects on palette open, including unopened personal projects. Batched reads use keyset pagination, preserve newest duplicate versions, apply parents first, and guard account changes. Shared realtime refreshes the affected project and global stores, including deletions and label changes.
+- Sync retry retains API errors, coalesces superseded operations and reads current SQLite state, handles composite settings IDs, preserves tombstone timestamps, batches writes, and prevents concurrent drains. Shared label definition changes fan out through project_labels events after migration deployment.
+- MCP supports reference_url, rejects a foreign-project status, and adds atomic owner-only status create/update/delete/reorder/ensure. The RPC preserves default/done invariants and changes task completion state transactionally.
+- Backend deployed after user verification on 2026-10-26: 20261026075319_shared_label_realtime.sql, then 20261026075322_atomic_status_management.sql, then MCP v16 (ACTIVE). Local migration filenames match production history. Status completion values explicitly match the deployed TEXT column using ISO UTC strings. All seven bundled runtime source files match local code; OPTIONS returned 204 and unauthenticated GET returned 401. No new security/performance advisory findings.
+- Security dependencies updated within compatible ranges plus Electron 42.11.16 after checking official breaking changes. The root desktop manifest npm audit reported zero advisories after those updates; that check did not cover the separate Telegram bot lockfile. An isolated Electron 42.11.16 startup with synthetic configuration, a fresh database and blocked external requests reached the sign-in screen with the preload API available.
+- Validation: TypeScript, 78 Vitest files / 1160 tests, Deno MCP typecheck, production build, and lint (zero errors, 27 existing hook warnings). Independent reviewers exercised task hierarchy, WAL snapshots, status SQL, queue/refresh paths, search pagination, and account-switch isolation with synthetic fixtures.
+- No production auth or label-ownership mutations. prd.sh/verifier charter are absent on this Mac; empty prd stories untouched. Independent verification used the available Codex agents. No origin push per AGENTS.md.
+
+## 2026-10-26 — Verification and release preparation
+- User confirmed verification. All 17 implemented backlog items are Done with an explicit note that acceptance does not mean the signed Mac app has been published. The two operational tasks and the new task-only label removal follow-up remain open.
+- Prepared v1.10.0 package/lockfile metadata and changelog; production build, typecheck and all 1160 tests passed again. Independent review confirmed completion-date behavior with a non-UTC database timezone.
+- Application release remains pending: no no-mistakes executable/configured pipeline found on this Mac, no Developer ID distribution identity for the configured team HXNS28BT9C, and no notarization settings present. Only an Apple Development identity is available. Requested the release host/pipeline location; no origin push, tag or public release performed.
+
+## 2026-10-26 — Release environment repair
+- Installed official no-mistakes v1.84.0 (verified release SHA-256), initialized the local gate and launchd daemon, and configured the existing authenticated Codex runner. No direct origin push.
+- Restored ignored public Supabase client configuration; the project auth settings endpoint accepted the key. Added production-build validation that rejects missing endpoints and server-side keys, plus isolated regressions. CI now runs typecheck, tests, lint and build using repository Actions variables containing only public client settings.
+- Typecheck, production build, lint (zero errors, existing warnings) and 79 test files / 1164 tests passed. An actual build with empty settings failed with the intended configuration error.
+- Xcode has no signed-in Apple account. It is waiting at the account sign-in sheet; user authentication requested before distribution-certificate and notarization setup.
+
+
+## 2026-10-26 — Gate review follow-up
+
+- The outer executor reports deploying the exact task-status guard SQL as `20261026094537_task_status_assignment_guard`; the local filename and test references now match that history. SQL bytes remain unchanged (Git blob `53f17146fae986da0e9ec9a0f779b2baecdbe953`). No production query or deployment was performed in this review phase.
+- The supplied independent PostgreSQL 17 verification passed 16/16 cases on a9aad656, including independent sessions, RLS, ISO TEXT dates, and deadlock rollback followed by explicit retry. Automatic application retry was outside that verifier's scope; the pending MCP source adds bounded retry only for SQLSTATE 40P01 and 40001 on the complete atomic status RPC.
+- The outer executor reports MCP v17 active from exact 8096fde: all eight bundled files match, own API-key authentication and verify_jwt=false are preserved, Deno check and independent status-RPC retry checks passed, and OPTIONS/unauthenticated GET returned 204/401. No MCP deployment was performed in this review phase. The signed application remains unpublished and the gate remains in progress.
+- R4 and review-1 share the retained `readAll`/`readAllIn` repair: tasks/statuses paginate before watermarks, label definitions and project/task junctions paginate before application, and queue reconciliation/cleanup reads all remote rows. `syncPull.integration.test.ts` covers more than 1,000 tasks, statuses, labels and junctions, failed-page watermark retention, and both queued cleanup paths.
+
+
+## 2026-10-26 — Archive versions and shared sync lifetime
+
+- Prepared the additive `20261026102717_project_archive_version.sql` migration; it remains unapplied in this phase. Archive actions have an independent version that generic project metadata cannot overwrite. Local actions persist their queue entry atomically; delayed producers only drain current durable intent. Older imported task rows inherit the applicable archive action, while later individual choices remain guarded. Remote task IDs are paged and equal patches are sent in batches of at most 200.
+- Shared task/status writes and implicit-context pull paths use captured account/database APIs and clients, including queue feedback and UI routing. Original R9 rename/task-choice and R11 tombstone/timestamp behavior remains covered by isolated regressions. Fresh full-branch review and the outer Test phase remain required; the application and gate are still pending.
+
+
+## 2026-10-26 — Legacy compatibility containment and review repairs
+
+- The outer executor reports applying `20261026105740_disable_legacy_status_consistency_guard.sql` after 17/17 independent containment checks. The identical rollback artifact is included locally. `enforce_task_status_assignment` remains enabled; `enforce_status_task_consistency` is disabled for deployed v1.9 compatibility and is not re-enabled here. MCP v17 remains active. Direct legacy status edits retain their prior unsent-reassignment/completion limitations; no global direct-status consistency is claimed.
+- Desktop status deletion now records its selected replacement atomically with local reassignment and sends the complete owner-only `manage_project_status` RPC during delivery/retry. Store mutations retain their originating database before awaiting. Shared label additions write the actual junction and bounded retries preserve current intent. The task-only label-removal follow-up remains open.
+- The unapplied archive-version migration now distinguishes versioned, timestamped legacy-action, and metadata statements by targeted columns, preserves accepted state on equal-version conflicts, and fences stale task cascades. The new `20261026111055_task_label_addition_realtime.sql` migration emits task notifications after junction additions without changing task versions. Both new migrations remain unapplied in this phase; production was not queried or deployed. The original applied guard SQL is unchanged. The application/gate remain pending.
+
+
+## 2026-10-26 — Archive activation requires a coordinated writer upgrade
+
+The pending archive and task-label notification migrations remain undeployed. The candidate MCP task writer carries an explicit task archive version; live MCP v17 remains active until the outer executor independently verifies and coordinates deployment. Unambiguous older MCP partial archive updates and the v1.9 project archive/restore protocol are supported by the pending guard. Legacy full-row task updates cannot distinguish a genuine archive choice from stale metadata carrying the same flag, so their archive behavior is not compatible with activating the new guard.
+
+Activation requires a paused-writer maintenance window: prepare, review, sign and notarize the v1.10 artifact offline; verify the exact SQL and candidate runtime; confirm all old desktop and MCP writers are paused; apply the verified pending migrations to expand the schema and activate the guards; deploy and verify the candidate MCP; then install/start signed v1.10 clients and resume only upgraded writers. New desktop/MCP writers require the archive columns and must not run before schema expansion. If old writers cannot be controlled, defer activation or independently design a separate compatibility expansion phase. The Apple distribution key is still absent and the signed client rollout is not ready. Do not deploy the new guard while shipped v1.9 full-row writers remain in use; an unsigned build or authentication changes do not satisfy this deployment requirement. The existing task status assignment guard stays enabled, the applied legacy status consistency rollback stays disabled, and applied migration files remain unchanged.
+
+
+## 2026-10-26 — Task-label assignment convergence repair
+
+The task-only label-removal follow-up (bc87b45b-d256-4490-980d-40452847197e) is implemented in source with local assignment versions and durable pending choices. Complete, successful paged snapshots can remove obsolete assignments, including empty results; pending or concurrent local additions/removals remain protected. Ordinary task metadata writes no longer recreate cached assignments. Personal/shared eager, buffered and queued delivery use explicit choices, with canonical remapping and version-specific acknowledgement. Project palette addition/removal reconciliation uses the association's addition/removal clock; removing a project label only clears chips cached for that project.
+
+This source repair awaits independent verification and release validation; it is not user-verified or shipped. The local SQLite migration does not require new Supabase DDL. Applied SQL stays immutable; the pending archive and notification SQL remains undeployed. Historical operational data cleanup and auth follow-ups remain open. Coordinated activation above still requires the missing Developer ID signing key and paused legacy writers; production cleanup is not part of this repair.
+
+
+## 2026-10-26 — Ordered task-label delivery and removal notifications
+
+Task-label writes are ordered per originating account/database and task across eager, buffered, queued, legacy and reconciliation delivery. Ready tasks and completed batches can progress independently; pending additions share project palette reads and bounded batches of at most 200 rows. Removing a displayed canonical label resolves same-name foreign assignment IDs for that task, retaining unrelated assignments, palettes and definitions.
+
+The pending task-label notification migration now includes effective soft and hard removals, alongside additions/restorations, while preserving task metadata timestamps, no-op suppression, transaction rollback and invoker access checks. Source and pending SQL still await independent exact-head verification and the coordinated paused-writer client/backend rollout above. No applied migration or deployed backend has changed; this is not a user-verified or shipped release.
+
+
+## 2026-10-26 — Label clocks and Telegram polling watchdog
+
+Project-label removal/addition versions are generated transactionally after valid known same-name family addition/removal clocks. Tombstones and removal commands share the captured removal version. Same-tick and rolled-back local clocks cannot cause a previously acknowledged remote addition to be mistaken for a later re-add.
+
+The original unlabeled non-Later bot watchdog item (e3d3132d-6b4e-49b8-9420-2ecb994083ac) is implemented in source: polling errors are sanitized, recovery is single-flight with bounded backoff and graceful stop, heartbeat/backlog checks detect stalled consumers, and failed recovery exits for the existing Docker restart policy. Synthetic tests execute the pinned library; CI includes package typecheck/test/build. See packages/telegram-bot/README.md for the unexecuted deployment and rollback recipe. This implementation awaits independent exact-head verification and production rollout; it is not user-verified or deployed. No production credentials, service settings or data were accessed or changed. Applied SQL and all earlier label/status/archive protocols are preserved; signed client, pending migrations and candidate MCP still require the coordinated paused-writer rollout above.
+
+## 2026-10-26 — Project-link delivery convergence and bot runtime
+
+Project-link writers share a current-intent boundary across eager/queued delivery, full upload, reconciliation and removal/restoration. Each bounded write rereads the originating database before and after delivery, reasserts changed local choice even if an overlapping delivery already acknowledged it, and retains failed repair as queued work. This is in-process convergence, not protection against concurrent cross-device writes. Association clocks use the existing JavaScript `toLowerCase()` family equivalence, including accented names; no identity merge or new normalization is introduced.
+
+Bot generated output is excluded narrowly from lint while handwritten source/tests/config remain covered. The candidate container uses Node 22.23.2, matching CI; polling behavior, Compose restart policy and grace period are preserved. These source repairs await outer exact-SHA verification and rollout. No applied or pending SQL, production data/configuration or running service changed. The signed client and candidate MCP remain subject to the coordinated paused-writer rollout above.
+
+Focused store/reconciliation regressions use isolated SQLite plus PGlite and synthetic transport. The status/store fixture deliberately omits unrelated user-scoped tables/bootstrap services; errors from those unavailable paths are not evidence for full-backend readiness. Project-link, assignment, queue and observer end-state assertions remain enforced. Full repository gates and independent exact-SHA execution remain outer-executor work. Bot package checks and Compose parsing ran on local Node 22.23.2 with synthetic environment; Docker CLI was present but its daemon was unavailable, so no image was built or started.
+
+
+## 2026-10-26 — Consolidation receipts and nested bot dependencies
+
+Task-label consolidation selects the complete highest-version assignment independently of acknowledgement state. Remapped or still-pending canonical work receives a fresh local version and a transactional queue command, so receipts for pre-remap physical identities cannot acknowledge the new delivery. No global identity merge or data cleanup is performed.
+
+The bot dependency tree is separately audited from the desktop. Its candidate lock retains SDK 0.66.0, uses the maintained Cypress request fork for injected and peer transports, and patches compatible form-data, qs, ws and uuid versions. Separate full root and bot audits include dev dependencies; no advisory is suppressed. Installed advisory presence was not evidence of exploitation in this bot. Clean development and production-pruned installs plus localhost synthetic transport checks are source-readiness evidence only; no container build, live Telegram access or deployment occurred. All SQL and the coordinated signed-client/MCP rollout boundary remain unchanged.

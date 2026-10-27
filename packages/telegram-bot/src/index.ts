@@ -1,6 +1,10 @@
 import { existsSync, writeFileSync, unlinkSync, readFileSync } from 'fs'
 import { join } from 'path'
 import TelegramBot from 'node-telegram-bot-api'
+import { startPollingWatchdog, logBotFailure } from './pollingWatchdog'
+
+process.on('unhandledRejection', (error) => { logBotFailure('Unhandled bot rejection', error); process.exit(1) })
+process.on('uncaughtException', (error) => { logBotFailure('Uncaught bot exception', error); process.exit(1) })
 
 // Prevent multiple instances — PID file lock
 const PID_FILE = join(__dirname, '..', '.bot.pid')
@@ -17,8 +21,6 @@ if (existsSync(PID_FILE)) {
 }
 writeFileSync(PID_FILE, String(process.pid))
 process.on('exit', () => { try { unlinkSync(PID_FILE) } catch { /* ignore */ } })
-process.on('SIGTERM', () => process.exit(0))
-process.on('SIGINT', () => process.exit(0))
 import {
   parseMessage,
   isStandaloneCommand,
@@ -58,7 +60,11 @@ if (ENV_ALLOWED_IDS.length === 0) {
   throw new Error('Missing ALLOWED_TELEGRAM_IDS env var')
 }
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true })
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false, request: { timeout: 40_000 } as TelegramBot.ConstructorOptions['request'] })
+const polling = startPollingWatchdog(bot)
+process.on('SIGTERM', () => { void polling.shutdown() })
+process.on('SIGINT', () => { void polling.shutdown() })
+
 
 console.log('ToDoozy Telegram Bot started. Polling for messages...')
 
@@ -175,9 +181,8 @@ bot.on('message', async (msg) => {
     // Regular text — create task
     await handleCreateTask(chatId, text)
   } catch (err) {
-    console.error('Error handling message:', err)
-    const errMsg = err instanceof Error ? err.message : 'Unknown error'
-    await bot.sendMessage(chatId, `Error: ${errMsg}`)
+    logBotFailure('Error handling message', err)
+    await bot.sendMessage(chatId, 'Unable to complete the request. Please try again.').catch((error) => logBotFailure('Error reply failed', error))
   }
 })
 
@@ -313,8 +318,8 @@ bot.on('callback_query', async (query) => {
       await bot.answerCallbackQuery(query.id, { text: 'Already completed' })
     }
   } catch (err) {
-    console.error('Error handling callback:', err)
-    await bot.answerCallbackQuery(query.id, { text: 'Error occurred' })
+    logBotFailure('Error handling callback', err)
+    await bot.answerCallbackQuery(query.id, { text: 'Error occurred' }).catch((error) => logBotFailure('Callback reply failed', error))
   }
 })
 

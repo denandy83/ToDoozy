@@ -1,4 +1,6 @@
+import { sortSubtasksForDisplay } from '../../shared/utils/sortTasks'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { visibleTaskIdsWithAncestors } from './filterHierarchy'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore, useTasksByProject } from '../../shared/stores'
 import { useStatusesByProject } from '../../shared/stores'
@@ -247,11 +249,20 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
     return filterMode === 'blur' ? map : undefined
   }, [tasks, hasAnyFilter, filterMode, blurOpacity, taskMatchesFilters])
 
-  // Filter tasks for hide mode
+  const hierarchy = useMemo(() => hasAnyFilter
+    ? visibleTaskIdsWithAncestors(tasks, taskMatchesFilters)
+    : null, [tasks, hasAnyFilter, taskMatchesFilters])
+  useEffect(() => {
+    if (!hierarchy) return
+    const state = useTaskStore.getState()
+    const expanded = new Set(state.expandedTaskIds)
+    for (const id of hierarchy.forcedExpandIds) expanded.add(id)
+    if (expanded.size !== state.expandedTaskIds.size) useTaskStore.setState({ expandedTaskIds: expanded })
+  }, [hierarchy])
   const filteredTasks = useMemo(() => {
-    if (!hasAnyFilter || filterMode !== 'hide') return tasks
-    return tasks.filter(taskMatchesFilters)
-  }, [tasks, hasAnyFilter, filterMode, taskMatchesFilters])
+    if (!hierarchy || filterMode !== 'hide') return tasks
+    return tasks.filter((task) => hierarchy.visibleIds.has(task.id))
+  }, [tasks, hierarchy, filterMode])
 
   // Build status order map for sort comparator
   const statusOrderMap = useMemo((): Map<string, number> => {
@@ -300,9 +311,8 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
       const addWithChildren = (task: Task): void => {
         result.push(task)
         if (expandedTaskIds.has(task.id)) {
-          const children = filteredTasks
-            .filter((t) => t.parent_id === task.id)
-            .sort(comparator)
+          const children = sortSubtasksForDisplay(filteredTasks
+            .filter((t) => t.parent_id === task.id && !t.is_archived && !t.is_template && !t.deleted_at))
           for (const child of children) {
             addWithChildren(child)
           }
@@ -874,6 +884,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
                 allLabels={allLabels}
                 selectedTaskIds={selectedTaskIds}
                 taskFilterOpacity={taskFilterOpacity}
+                visibleTaskIds={filterMode === 'hide' ? hierarchy?.visibleIds : undefined}
                 dropIndicator={dropIndicator}
                 onSelectTask={handleSelectTask}
                 onStatusChange={handleStatusChange}

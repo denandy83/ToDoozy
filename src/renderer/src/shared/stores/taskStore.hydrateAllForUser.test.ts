@@ -42,9 +42,11 @@ function mapping(taskId: string, labelId: string, name: string): TaskLabelMappin
 }
 
 describe('taskStore.hydrateAllForUser', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { useAuthStore } = await import('./authStore')
+    useAuthStore.setState({ currentUser: { id: 'u1' } as never })
     const getProjectsForUser = vi.fn().mockResolvedValue([{ id: 'pA' }, { id: 'pB' }])
-    const findByProjectId = vi.fn(async (pid: string) =>
+    const findAllByProject = vi.fn(async (pid: string) =>
       pid === 'pA' ? [makeTask('a1', 'pA'), makeTask('a2', 'pA')] : [makeTask('b1', 'pB')]
     )
     const findTaskLabelsByProject = vi.fn(async (pid: string) =>
@@ -53,8 +55,15 @@ describe('taskStore.hydrateAllForUser', () => {
     vi.stubGlobal('window', {
       ...globalThis.window,
       api: {
+        sync: {
+          captureContext: async () => ({ userId: 'u1', generation: 1 }),
+          invokeContext: async (_context: unknown, channel: string, args: unknown[]) => {
+            const [ns, method] = channel.split(':')
+            return (window.api as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args)
+          }
+        },
         projects: { getProjectsForUser },
-        tasks: { findByProjectId },
+        tasks: { findAllByProject },
         labels: { findTaskLabelsByProject }
       }
     })
@@ -86,4 +95,29 @@ describe('taskStore.hydrateAllForUser', () => {
     await useTaskStore.getState().hydrateAllForUser('u1')
     expect(useTaskStore.getState().loading).toBe(false)
   })
+  it('removes deleted task rows and stale label mappings from refreshed projects', async () => {
+    const { useTaskStore } = await import('./taskStore')
+    useTaskStore.setState({ tasks: { deleted: makeTask('deleted', 'pA'), a2: makeTask('a2', 'pA') }, taskLabels: { a2: [mapping('a2', 'stale', 'Old')] } })
+    await useTaskStore.getState().hydrateAllForUser('u1')
+    expect(useTaskStore.getState().tasks.deleted).toBeUndefined()
+    expect(useTaskStore.getState().taskLabels.a2).toBeUndefined()
+  })
+
+  it('preserves local edits made while the cross-project read is in flight', async () => {
+    const { useTaskStore } = await import('./taskStore')
+    const original = makeTask('a1', 'pA')
+    useTaskStore.setState({ tasks: { a1: original }, taskLabels: {} })
+    let finish!: (tasks: Task[]) => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    vi.mocked(window.api.tasks.findAllByProject).mockImplementation((pid) => pid === 'pA' ? new Promise((resolve) => { finish = resolve; entered() }) : Promise.resolve([]))
+    const hydration = useTaskStore.getState().hydrateAllForUser('u1')
+    await started
+    const edited = { ...original, title: 'Typing while remote refresh runs' }
+    useTaskStore.setState({ tasks: { a1: edited } })
+    finish([original])
+    await hydration
+    expect(useTaskStore.getState().tasks.a1.title).toBe(edited.title)
+  })
+
 })

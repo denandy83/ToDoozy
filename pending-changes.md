@@ -44,3 +44,6 @@ Working file — entries written here during a session are processed into perman
 <!-- entries below this line are added automatically -->
 <!-- last processed: 2026-06-10 (session 2) — #69 scroll-wheel fix + #68 AI-native copy removal folded into CHANGELOG/RELEASE_NOTES v1.7.1 (untagged bucket; latest tag still v1.7.0). DEVLOG entry added. Internal commits (3a21e42 ralph completion-check, aa01e3b/4a99221 ralph model + doc processing, 7fa2d8b prd.json story planning #68–#94) intentionally NOT in user-facing docs. -->
 
+
+## 2026-10-26 — Backlog audit
+See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes and [scope.md](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade) for the release and backend activation requirements.

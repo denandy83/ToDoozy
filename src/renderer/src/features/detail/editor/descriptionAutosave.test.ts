@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createDescriptionAutosave } from './descriptionAutosave'
+
+afterEach(() => vi.useRealTimers())
+describe('description autosave', () => {
+  it('opening, blurring, and closing an untouched description never saves normalized content', () => {
+    vi.useFakeTimers()
+    const save = vi.fn()
+    const autosave = createDescriptionAutosave(save)
+    autosave.flush()
+    vi.runAllTimers()
+    expect(save).not.toHaveBeenCalled()
+  })
+  it('saves only the latest user edit once after the debounce', () => {
+    vi.useFakeTimers()
+    const save = vi.fn()
+    const autosave = createDescriptionAutosave(save)
+    autosave.edit('first')
+    vi.advanceTimersByTime(500)
+    autosave.edit('latest')
+    vi.advanceTimersByTime(999)
+    expect(save).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    autosave.flush()
+    expect(save.mock.calls).toEqual([['latest']])
+  })
+  it('cancels stale writes when remote content replaces the editor', () => {
+    vi.useFakeTimers()
+    const save = vi.fn()
+    const autosave = createDescriptionAutosave(save)
+    autosave.edit('old local value')
+    autosave.cancel()
+    autosave.flush()
+    vi.runAllTimers()
+    expect(save).not.toHaveBeenCalled()
+  })
+  it('flushes an intentional clear on task switch', () => {
+    vi.useFakeTimers()
+    const save = vi.fn()
+    const autosave = createDescriptionAutosave(save)
+    autosave.edit(null)
+    autosave.flush()
+    vi.runAllTimers()
+    expect(save.mock.calls).toEqual([[null]])
+  })
+})

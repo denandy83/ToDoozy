@@ -172,9 +172,10 @@ export function matchesTextTerms(task: Task, textTerms: string[]): boolean {
   if (textTerms.length === 0) return true
   const titleLower = task.title.toLowerCase()
   const idLower = task.id.toLowerCase()
+  const descriptionLower = (task.description ?? '').toLowerCase()
   return textTerms.every((term) => {
     const t = term.toLowerCase()
-    return titleLower.includes(t) || idLower.includes(t)
+    return titleLower.includes(t) || idLower.includes(t) || descriptionLower.includes(t)
   })
 }
 

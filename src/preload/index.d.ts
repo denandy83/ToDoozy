@@ -4,6 +4,7 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskLabel,
+  TaskLabelSyncState,
   Label,
   TaskLabelMapping,
   CreateLabelInput,
@@ -54,6 +55,7 @@ export interface TasksAPI {
   getSubtaskCount(parentId: string): Promise<{ total: number; done: number }>
   create(input: CreateTaskInput): Promise<Task>
   applyRemote(task: Task): Promise<Task>
+  rebaseSyncVersion(id: string, expectedAt: string, appliedAt: string): Promise<void>
   update(id: string, input: UpdateTaskInput): Promise<Task | null>
   delete(id: string): Promise<boolean>
   hardDelete(id: string): Promise<boolean>
@@ -65,7 +67,9 @@ export interface TasksAPI {
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
-  applyRemoteTaskLabels(taskId: string, labelIds: string[]): Promise<number>
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): Promise<number>
+  getLabelState(taskId: string): Promise<TaskLabelSyncState[]>
+  acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): Promise<void>
   getLabels(taskId: string): Promise<TaskLabel[]>
   getTaskLabelsForUser(userId: string): Promise<TaskLabel[]>
   getTaskLabelsForSharedProjects(): Promise<TaskLabel[]>
@@ -345,8 +349,11 @@ export interface NotificationsAPI {
 }
 
 export interface SyncAPI {
+  captureContext(): Promise<{ generation: number; userId: string | null }>
+  invokeContext(context: { generation: number; userId: string | null }, channel: string, args: unknown[]): Promise<unknown>
   getQueue(): Promise<SyncQueueEntry[]>
   enqueue(tableName: string, rowId: string, operation: SyncOperation, payload: string): Promise<SyncQueueEntry>
+  updatePayload(id: string, payload: string): Promise<boolean>
   dequeue(id: string): Promise<boolean>
   clear(): Promise<number>
   count(): Promise<number>
@@ -398,6 +405,7 @@ export type OpenExternalResult = { ok: true } | { ok: false; error: string }
 
 export interface ShellAPI {
   openExternal(url: string): Promise<OpenExternalResult>
+  openReference(url: string): Promise<OpenExternalResult>
 }
 
 export interface PowerAPI {
@@ -446,6 +454,7 @@ export interface UpdaterAPI {
 }
 
 export interface ProjectAreasAPI {
+  findById(id: string): Promise<ProjectArea | null>
   findByUserId(userId: string): Promise<ProjectArea[]>
   create(input: CreateProjectAreaInput): Promise<ProjectArea>
   update(id: string, input: UpdateProjectAreaInput): Promise<ProjectArea | null>

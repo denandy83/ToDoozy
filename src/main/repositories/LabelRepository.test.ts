@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { SyncQueueRepository } from './SyncQueueRepository'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
 import { LabelRepository } from './LabelRepository'
@@ -510,4 +511,215 @@ describe('LabelRepository — consolidate', () => {
     const todoozyRows = db.prepare('SELECT id FROM labels WHERE user_id = ? AND LOWER(name) = ?').all(userId, 'todoozy')
     expect(todoozyRows.map((r) => (r as { id: string }).id)).toEqual(['canon-todoozy'])
   })
+})
+
+import { TaskRepository } from './TaskRepository'
+it('keeps pending name-wide removals through project and task-link imports and canonical consolidation', () => {
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db)
+    const labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    seedTask(db,'pending-task',projectId,userId)
+    labels.create({id:'old',user_id:userId,name:'Remove me'})
+    labels.create({id:'foreign',user_id:'other',name:'Remove me'})
+    labels.addToProject(projectId,'old')
+    tasks.addLabel('pending-task','old')
+    labels.removeFromProject(projectId,'old')
+    const expected=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'old')!
+    const intent={projectId,labelId:'old',labelName:'Remove me',deletedAt:new Date().toISOString(),expectedLink:expected,remove_project_label:true}
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('remove','task_labels',`${projectId}::old`,'UPDATE',JSON.stringify(intent),new Date().toISOString())
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'old',created_at:'2020-01-01',deleted_at:null})
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'foreign',created_at:'2020-01-01',deleted_at:null})
+    tasks.applyRemoteTaskLabels('pending-task',['old','foreign'])
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    expect(labels.findByTaskId('pending-task')).toEqual([])
+    const canonical={...labels.findById('old')!,id:'canonical'}
+    labels.consolidate('old',canonical)
+    const queued=JSON.parse(String(db.prepare('SELECT payload FROM sync_queue WHERE id=?').get('remove')!.payload))
+    expect(queued.labelId).toBe('canonical')
+    expect(queued.expectedLink.deleted_at).toBeTruthy()
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'canonical',created_at:'2020-01-01',deleted_at:null})
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    labels.addToProject(projectId,'canonical')
+    expect(labels.hasPendingProjectRemoval(projectId,'canonical')).toBe(false)
+    expect(labels.findByProjectId(projectId).map((row)=>row.id)).toEqual(['canonical'])
+  } finally {db.close()}
+})
+
+it('keeps legacy queued project cleanup protected and remaps both cleanup identities',()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db)
+    labels.create({id:'legacy-removal',user_id:userId,name:'Legacy'})
+    labels.addToProject(projectId,'legacy-removal')
+    labels.removeFromProject(projectId,'legacy-removal')
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('legacy','task_labels',`${projectId}::legacy-removal`,'UPDATE',JSON.stringify({projectId,labelId:'legacy-removal',siblingIds:['legacy-removal']}),new Date().toISOString())
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'legacy-removal',created_at:'2020-01-01',deleted_at:null})
+    expect(labels.findByProjectId(projectId)).toEqual([])
+    labels.consolidate('legacy-removal',{...labels.findById('legacy-removal')!,id:'canonical-legacy'})
+    const payload=JSON.parse(String(db.prepare('SELECT payload FROM sync_queue WHERE id=?').get('legacy')!.payload))
+    expect(payload.labelId).toBe('canonical-legacy')
+    expect(payload.siblingIds).toEqual(expect.arrayContaining(['legacy-removal','canonical-legacy']))
+    labels.addToProject(projectId,'canonical-legacy')
+    expect(labels.hasPendingProjectRemoval(projectId,'canonical-legacy')).toBe(false)
+  } finally {db.close()}
+})
+
+
+it.each([0,1])('preserves a genuine later re-add across active/tombstone imports and cascades (shared=%s)',(shared)=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    db.prepare('UPDATE projects SET is_shared=? WHERE id=?').run(shared,projectId)
+    seedTask(db,'readd-task',projectId,userId)
+    labels.create({id:'readd',user_id:userId,name:'Keep me'})
+    labels.addToProject(projectId,'readd')
+    labels.removeFromProject(projectId,'readd')
+    const expected=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')!
+    db.prepare('INSERT INTO sync_queue(id,table_name,row_id,operation,payload,created_at) VALUES(?,?,?,?,?,?)').run('removing','task_labels',projectId+'::readd','UPDATE',JSON.stringify({projectId,labelId:'readd',deletedAt:expected.deleted_at,expectedLink:expected,remove_project_label:true}),new Date().toISOString())
+    labels.addToProject(projectId,'readd')
+    tasks.addLabel('readd-task','readd')
+    const active=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')!
+    for(const deleted_at of [null,String(expected.deleted_at)]) {
+      labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at})
+      if(deleted_at) labels.softDeleteTaskLabelsForProjectLabel(projectId,'readd')
+      expect(db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,'readd')).toEqual(active)
+      expect(labels.findByTaskId('readd-task').map((row)=>row.id)).toEqual(['readd'])
+      expect(labels.hasPendingProjectRemoval(projectId,'readd')).toBe(false)
+    }
+    db.prepare('DELETE FROM sync_queue').run()
+    labels.applyRemoteProjectLabel({project_id:projectId,label_id:'readd',created_at:String(expected.created_at),deleted_at:new Date(Date.parse(String(active.created_at))+1).toISOString()})
+    labels.softDeleteTaskLabelsForProjectLabel(projectId,'readd')
+    expect(labels.findByTaskId('readd-task')).toEqual([])
+  } finally {db.close()}
+})
+
+it('persists task-driven addition identity before imports even after removal acknowledgement',()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db),tasks=new TaskRepository(db)
+    seedTask(db,'addition-task',projectId,userId)
+    labels.create({id:'addition',user_id:userId,name:'Again'})
+    labels.addToProject(projectId,'addition')
+    labels.removeFromProject(projectId,'addition')
+    const removed=labels.getProjectLabelsForOwner(userId).find((row)=>row.label_id==='addition')!
+    db.prepare('DELETE FROM sync_queue').run()
+    tasks.addLabel('addition-task','addition')
+    const active=labels.getProjectLabelsForOwner(userId).find((row)=>row.label_id==='addition')!
+    expect(Date.parse(active.created_at)).toBeGreaterThan(Date.parse(removed.deleted_at!))
+    const queued=db.prepare("SELECT payload FROM sync_queue WHERE table_name='project_labels'").get()!
+    expect(JSON.parse(String(queued.payload))).toMatchObject({projectId,labelId:'addition',addition:true,createdAt:active.created_at})
+    for(const deleted_at of [removed.deleted_at,null]) {
+      labels.applyRemoteProjectLabel({...removed,deleted_at})
+      if(deleted_at) labels.softDeleteTaskLabelsForProjectLabel(projectId,'addition')
+      expect(labels.findByTaskId('addition-task').map((row)=>row.id)).toEqual(['addition'])
+      expect(labels.hasPendingProjectAddition(projectId,'addition')).toBe(true)
+    }
+  } finally {db.close()}
+})
+
+it('orders family removals and later additions after valid imported clocks',()=>{
+  const db=createTestDb(),{userId,projectId}=seedFixtures(db),repo=new LabelRepository(db)
+  const original=repo.create({id:'clock-c',user_id:userId,name:'Clock',project_id:projectId})
+  for(const id of ['clock-user-f','clock-user-invalid']) db.prepare('INSERT INTO users(id,email,created_at,updated_at) VALUES(?,?,?,?)').run(id,id+'@example.invalid','2020-01-01','2020-01-01')
+  repo.create({id:'clock-f',user_id:'clock-user-f',name:'CLOCK',project_id:projectId})
+  repo.create({id:'clock-invalid',user_id:'clock-user-invalid',name:'clock',project_id:projectId})
+  seedTask(db,'clock-task',projectId,userId)
+  db.prepare('INSERT INTO task_labels(task_id,label_id) VALUES(?,?)').run('clock-task',original.id)
+  db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE label_id=?').run('2031-01-01T00:00:00Z','2032-01-01T00:00:00Z','clock-f')
+  db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE label_id=?').run('invalid','invalid','clock-invalid')
+  const now=vi.spyOn(Date,'now').mockReturnValue(Date.parse('2020-01-01T00:00:00Z'))
+  try {
+    expect(repo.removeFromProject(projectId,original.id)).toBe(true)
+    const link=db.prepare('SELECT deleted_at FROM project_labels WHERE label_id=?').get(original.id)!
+    expect(link.deleted_at).toBe('2032-01-01T00:00:00.001Z')
+    expect(db.prepare('SELECT deleted_at FROM task_labels WHERE task_id=?').get('clock-task')?.deleted_at).toBe(link.deleted_at)
+    const command=JSON.parse(String(db.prepare("SELECT payload FROM sync_queue WHERE table_name='task_labels'").get()!.payload))
+    expect(command.deletedAt).toBe(link.deleted_at);expect(command.expectedLink.deleted_at).toBe(link.deleted_at)
+    repo.addToProject(projectId,original.id)
+    expect(db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE label_id=?').get(original.id)).toMatchObject({created_at:'2032-01-01T00:00:00.002Z',deleted_at:null})
+  } finally {now.mockRestore();db.close()}
+})
+
+it.each(['source','target'].flatMap((newest)=>['add','remove'].flatMap((choice)=>[0,1].flatMap((sourcePending)=>[0,1].map((targetPending)=>({newest,choice,sourcePending,targetPending}))))))('preserves complete assignment state during consolidation ($newest/$choice, pending $sourcePending/$targetPending)',async({newest,choice,sourcePending,targetPending})=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db)
+    const labels=new LabelRepository(db)
+    const {TaskRepository}=await import('./TaskRepository')
+    const tasks=new TaskRepository(db)
+    seedTask(db,'merge-task',projectId,userId)
+    labels.create({id:'merge-source',user_id:userId,name:'Étiquette',project_id:projectId})
+    labels.create({id:'merge-target',user_id:userId,name:'étiquette',project_id:projectId})
+    tasks.applyRemoteTaskLabels('merge-task',['merge-source','merge-target'])
+    const newer=newest==='source'?'merge-source':'merge-target',older=newest==='source'?'merge-target':'merge-source'
+    if(choice==='add') tasks.removeLabel('merge-task',older)
+    else tasks.addLabel('merge-task',older)
+    if(choice==='add') tasks.addLabel('merge-task',newer)
+    else tasks.removeLabel('merge-task',newer)
+    for(const [label_id,pending] of [['merge-source',sourcePending],['merge-target',targetPending]] as const) {
+      if(!pending) tasks.acknowledgeLabelState('merge-task',[tasks.getLabelState('merge-task').find((row)=>row.label_id===label_id)!])
+    }
+    const receipts=tasks.getLabelState('merge-task'),winner=receipts.find((row)=>row.label_id===newer)!
+    labels.consolidate('merge-source',labels.findById('merge-target')!)
+    const after=tasks.getLabelState('merge-task')
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({label_id:'merge-target',deleted_at:winner.deleted_at})
+    expect(after[0].local_version).toBeGreaterThanOrEqual(winner.local_version)
+    const needsDelivery=newest==='source'||!!sourcePending||!!targetPending
+    expect(after[0].sync_pending).toBe(needsDelivery?1:0)
+    tasks.acknowledgeLabelState('merge-task',receipts)
+    expect(tasks.getLabelState('merge-task')[0].sync_pending).toBe(needsDelivery?1:0)
+    if(needsDelivery) expect(db.prepare("SELECT COUNT(*) AS count FROM sync_queue WHERE table_name='task_labels' AND row_id='merge-task'").get()!.count).toBeGreaterThan(0)
+  } finally {db.close()}
+})
+
+it('requeues an acknowledged source-only assignment under a fresh physical receipt identity',async()=>{
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db)
+    const {TaskRepository}=await import('./TaskRepository'),tasks=new TaskRepository(db)
+    seedTask(db,'physical-task',projectId,userId)
+    const source=labels.create({id:'physical-source',user_id:userId,name:'Physical',project_id:projectId})
+    tasks.addLabel('physical-task',source.id)
+    const [receipt]=tasks.getLabelState('physical-task')
+    tasks.acknowledgeLabelState('physical-task',[receipt])
+    labels.consolidate(source.id,{...source,id:'physical-canonical'})
+    const [next]=tasks.getLabelState('physical-task')
+    expect(next).toMatchObject({label_id:'physical-canonical',deleted_at:null,sync_pending:1})
+    expect(next.local_version).toBeGreaterThan(receipt.local_version)
+    tasks.acknowledgeLabelState('physical-task',[receipt,{...receipt,label_id:'physical-canonical'}])
+    expect(tasks.getLabelState('physical-task')[0].sync_pending).toBe(1)
+    tasks.acknowledgeLabelState('physical-task',[next])
+    expect(tasks.getLabelState('physical-task')[0].sync_pending).toBe(0)
+    labels.consolidate(source.id,{...source,id:'physical-canonical'})
+    expect(tasks.getLabelState('physical-task')[0]).toEqual({...next,sync_pending:0})
+  } finally {db.close()}
+})
+
+
+it.each(['source','target'].flatMap((newest)=>['add','remove'].map((choice)=>({newest,choice}))))('merges complete project association clocks ($newest/$choice)',({newest,choice})=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId}=seedFixtures(db),labels=new LabelRepository(db)
+    const source=labels.create({id:'project-source',user_id:userId,name:'Étiquette'})
+    const target={...source,id:'project-target',name:'étiquette'}
+    labels.applyRemote(target)
+    const state=(id:string)=>({project_id:projectId,label_id:id,created_at:'2020-01-01T00:00:00.000Z',deleted_at:null as string|null})
+    const older=state(newest==='source'?target.id:source.id),latest=state(newest==='source'?source.id:target.id)
+    if(choice==='add') {older.deleted_at='2021-01-01T00:00:00.000Z';latest.created_at='2022-01-01T00:00:00.000Z'}
+    else latest.deleted_at='2022-01-01T00:00:00.000Z'
+    labels.applyRemoteProjectLabel(older);labels.applyRemoteProjectLabel(latest)
+    const removal=latest.deleted_at?latest:older
+    new SyncQueueRepository(db).enqueue('task_labels',`${projectId}::${removal.label_id}`,'UPDATE',JSON.stringify({projectId,labelId:removal.label_id,remove_project_label:true,deletedAt:removal.deleted_at,expectedLink:{created_at:removal.created_at,deleted_at:removal.deleted_at}}))
+    labels.consolidate(source.id,target)
+    const merged=db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,target.id)
+    expect(merged).toEqual({created_at:latest.created_at,deleted_at:latest.deleted_at})
+    const commands=new SyncQueueRepository(db).findAll().map((entry)=>JSON.parse(entry.payload))
+    expect(commands.every((command)=>command.labelId===target.id)).toBe(true)
+    for(const command of commands.filter((command)=>command.remove_project_label)) {
+      if(choice==='remove') expect(command).toMatchObject({deletedAt:latest.deleted_at,expectedLink:merged})
+      else expect(command.expectedLink.deleted_at).toBe(older.deleted_at)
+    }
+  } finally {db.close()}
 })

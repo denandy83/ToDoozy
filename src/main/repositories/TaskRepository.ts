@@ -1,6 +1,8 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
+import { LabelRepository } from './LabelRepository'
 import { randomUUID } from 'crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel } from '../../shared/types'
+import type { Task, CreateTaskInput, UpdateTaskInput, TaskLabel, TaskLabelSyncState } from '../../shared/types'
 import { TASK_UPDATABLE_COLUMNS } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
@@ -154,9 +156,9 @@ export class TaskRepository {
       .all(projectId) as unknown as Task[]
   }
 
-  findSubtasks(parentId: string): Task[] {
+  findSubtasks(parentId: string, includeArchived = false): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ORDER BY order_index ASC')
+      .prepare(`SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'} ORDER BY order_index ASC`)
       .all(parentId) as unknown as Task[]
   }
 
@@ -166,7 +168,7 @@ export class TaskRepository {
         `SELECT
            COUNT(*) as total,
            SUM(CASE WHEN status_id IN (SELECT id FROM statuses WHERE is_done = 1) THEN 1 ELSE 0 END) as done
-         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL`
+         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL AND is_archived = 0`
       )
       .get(parentId) as { total: number; done: number }
     return { total: row.total, done: row.done ?? 0 }
@@ -208,12 +210,14 @@ export class TaskRepository {
 
   create(input: CreateTaskInput): Task {
     const now = new Date().toISOString()
+    const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(input.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
+    const archiveAt = input.is_archived !== undefined ? new Date(Math.max(Date.now(), Date.parse(project?.archive_updated_at ?? '') + 1 || 0)).toISOString() : project?.archive_updated_at ?? null
     this.db
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, title, status_id, assigned_to, description,
          priority, due_date, parent_id, order_index, is_in_my_day, is_template, is_archived,
-         completed_date, recurrence_rule, reference_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         completed_date, recurrence_rule, reference_url, created_at, updated_at, archive_updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -229,20 +233,31 @@ export class TaskRepository {
         input.order_index ?? 0,
         input.is_in_my_day ?? 0,
         input.is_template ?? 0,
-        input.is_archived ?? 0,
+        input.is_archived ?? project?.is_archived ?? 0,
         input.completed_date ?? null,
         input.recurrence_rule ?? null,
         input.reference_url ?? null,
         now,
-        now
+        now,
+        archiveAt
       )
     return this.findById(input.id)!
   }
 
   update(id: string, input: UpdateTaskInput): Task | undefined {
-    const now = new Date().toISOString()
+    const existing = this.findById(id)
+    if (!existing) return undefined
+    if (input.is_archived === undefined && !TASK_UPDATABLE_COLUMNS.some((col) => input[col] !== undefined && input[col] !== existing[col])) return existing
+    const archiveVersion = input.is_archived !== undefined
+      ? (this.db.prepare('SELECT archive_updated_at FROM projects WHERE id=?').get(existing.project_id) as { archive_updated_at: string | null } | undefined)?.archive_updated_at
+      : null
+    const now = input.is_archived !== undefined
+      ? new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1, Date.parse(existing.archive_updated_at ?? '') + 1 || 0, Date.parse(archiveVersion ?? '') + 1 || 0)).toISOString()
+      : new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
+    const metadataChanged = TASK_UPDATABLE_COLUMNS.some((col) => col !== 'is_archived' && input[col] !== undefined && input[col] !== existing[col])
     const sets: string[] = ['updated_at = ?']
-    const values: (string | number | null)[] = [now]
+    const values: (string | number | null)[] = [metadataChanged ? now : existing.updated_at]
+    if (input.is_archived !== undefined) { sets.push('archive_updated_at = ?'); values.push(now) }
 
     for (const col of TASK_UPDATABLE_COLUMNS) {
       if (input[col] !== undefined) {
@@ -256,13 +271,21 @@ export class TaskRepository {
 
     // Cascade archive/unarchive to subtasks
     if (input.is_archived !== undefined) {
-      const subtasks = this.findSubtasks(id)
+      const subtasks = this.findSubtasks(id, true)
       for (const subtask of subtasks) {
         this.update(subtask.id, { is_archived: input.is_archived })
       }
     }
 
     return this.findById(id)
+  }
+
+  rebaseSyncVersion(id: string, expectedAt: string, appliedAt: string): void {
+    const current = this.findById(id)
+    if (!current) return
+    const next = current.updated_at === expectedAt ? appliedAt
+      : new Date(Math.max(Date.parse(current.updated_at), Date.parse(appliedAt) + 1)).toISOString()
+    this.db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run(next, id)
   }
 
   // Sync-only path: write a task as-is, preserving remote created_at/updated_at
@@ -272,18 +295,27 @@ export class TaskRepository {
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
     const existing = this.findById(task.id)
-    // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
-    // the same instant but do not string-compare reliably. Skip when the local
-    // row is newer or equal (remote not strictly newer).
-    if (existing && !isRemoteNewer(existing.updated_at, task.updated_at)) {
-      return existing
+    if (existing?.deleted_at && !isRemoteNewer(existing.updated_at, task.updated_at)) return existing
+    const pendingDeletion = existing && (this.db.prepare("SELECT payload FROM sync_queue WHERE table_name='statuses'").all() as Array<{ payload: string }>).some(({ payload }) => {
+      const command = JSON.parse(payload)
+      return command.status_delete && command.project_id === existing.project_id &&
+        (command.tasks?.some((row: { id: string }) => row.id === existing.id) || command.rpc_tasks?.some((row: { id: string }) => row.id === existing.id)) && Date.parse(existing.updated_at) > Date.parse(command.updated_at)
+    })
+    const metadataNewer = !pendingDeletion && (!existing || isRemoteNewer(existing.updated_at, task.updated_at))
+    const archiveNewer = !!task.archive_updated_at && (!existing?.archive_updated_at || Date.parse(task.archive_updated_at) >= Date.parse(existing.archive_updated_at))
+    const archive = archiveNewer ? task : existing?.archive_updated_at ? existing : metadataNewer ? task : existing!
+    task = { ...(metadataNewer ? task : existing!), is_archived: archive.is_archived, archive_updated_at: archive.archive_updated_at ?? null }
+    const project = this.db.prepare('SELECT is_archived, archive_updated_at FROM projects WHERE id=?').get(task.project_id) as { is_archived: number; archive_updated_at: string | null } | undefined
+    if (!task.deleted_at && project?.archive_updated_at && Date.parse(task.archive_updated_at ?? '1970-01-01') <= Date.parse(project.archive_updated_at)) {
+      task = { ...task, is_archived: project.is_archived, archive_updated_at: project.archive_updated_at }
     }
+    if (!metadataNewer && task.is_archived === existing!.is_archived && task.archive_updated_at === existing!.archive_updated_at) return existing!
     this.db
       .prepare(
         `INSERT INTO tasks (id, project_id, owner_id, assigned_to, title, description, status_id,
          priority, due_date, parent_id, order_index, is_template, is_archived, is_in_my_day,
-         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         completed_date, recurrence_rule, reference_url, my_day_dismissed_date, created_at, updated_at, deleted_at, archive_updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            owner_id = excluded.owner_id,
@@ -304,7 +336,8 @@ export class TaskRepository {
            my_day_dismissed_date = excluded.my_day_dismissed_date,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
-           deleted_at = excluded.deleted_at`
+           deleted_at = excluded.deleted_at,
+           archive_updated_at = excluded.archive_updated_at`
       )
       .run(
         task.id,
@@ -327,7 +360,8 @@ export class TaskRepository {
         task.my_day_dismissed_date ?? null,
         toCanonicalIso(task.created_at),
         toCanonicalIso(task.updated_at),
-        toCanonicalIso(task.deleted_at ?? null)
+        toCanonicalIso(task.deleted_at ?? null),
+        toCanonicalIso(task.archive_updated_at ?? null)
       )
     return this.findById(task.id)!
   }
@@ -337,7 +371,9 @@ export class TaskRepository {
    * already-tombstoned row is a no-op (and returns false).
    */
   delete(id: string): boolean {
-    const now = new Date().toISOString()
+    const existing = this.findById(id)
+    if (!existing || existing.deleted_at) return false
+    const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
     const result = this.db
       .prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
       .run(now, now, id)
@@ -355,15 +391,16 @@ export class TaskRepository {
 
   reorder(taskIds: string[]): void {
     withTransaction(this.db, () => {
-      const stmt = this.db.prepare('UPDATE tasks SET order_index = ? WHERE id = ?')
-      for (let i = 0; i < taskIds.length; i++) {
-        stmt.run(i, taskIds[i])
-      }
+      const tasks = taskIds.map((id) => this.findById(id)).filter((task) => !!task)
+      const now = new Date(Math.max(Date.now(), ...tasks.map((task) => Date.parse(task.updated_at) + 1))).toISOString()
+      const stmt = this.db.prepare('UPDATE tasks SET order_index = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      for (let i = 0; i < taskIds.length; i++) stmt.run(i, now, taskIds[i])
     })
   }
 
   // Label assignments
   addLabel(taskId: string, labelId: string): void {
+    if (!this.db.isTransaction) return withTransaction(this.db, () => this.addLabel(taskId, labelId))
     // Upsert (not INSERT OR IGNORE) so that a previously tombstoned row
     // gets revived. Without `deleted_at = NULL`, a label that was
     // soft-deleted (e.g. via LabelRepository.removeFromProject's cascade
@@ -377,7 +414,8 @@ export class TaskRepository {
          ON CONFLICT(task_id, label_id) DO UPDATE SET deleted_at = NULL`
       )
       .run(taskId, labelId)
-    this.ensureProjectLabel(taskId, labelId)
+    this.ensureProjectLabel(taskId, labelId, true)
+    this.recordLabelIntent(taskId,labelId)
   }
 
   /**
@@ -389,74 +427,72 @@ export class TaskRepository {
    * lockstep with task_labels — called by both the user-facing addLabel and the
    * sync-pull applyRemoteTaskLabels, so no add path (renderer, duplicate,
    * template, MCP echo, reconcile) can leave a label orphaned from its project.
-   * Revives a tombstoned link (DO UPDATE SET deleted_at = NULL): if a label is
-   * actively on a task, it belongs in that project's palette.
    */
-  private ensureProjectLabel(taskId: string, labelId: string): void {
+  private ensureProjectLabel(taskId: string, labelId: string, local = false): void {
+    if (local) {
+      const task = this.findById(taskId)
+      if (task) new LabelRepository(this.db).addToProject(task.project_id, labelId)
+      return
+    }
     this.db
       .prepare(
         `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
-         SELECT t.project_id, ?, datetime('now'), NULL FROM tasks t WHERE t.id = ?
-         ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL`
+         SELECT t.project_id, ?, '1970-01-01T00:00:00.000Z', NULL FROM tasks t WHERE t.id = ?
+         ON CONFLICT(project_id, label_id) DO NOTHING`
       )
       .run(labelId, taskId)
   }
 
-  /**
-   * Apply remote task_labels rows for one task (Realtime targeted pull).
-   * Additive + tombstone-aware, deliberately NOT a strict replace-set:
-   * - missing pair → insert active
-   * - locally tombstoned pair → left alone; a local remove whose push is
-   *   still in flight must not be resurrected by the echo of our own
-   *   task-row push
-   * - local-active pairs absent from remote are KEPT — they may be local
-   *   adds whose pushTask hasn't completed; deleting them here would lose
-   *   data. Remote removals converge via the project_labels cascade and
-   *   the reconcile key-set diff.
-   * Skips label ids without a local labels row (FK) — callers run
-   * ensureLabelsExistLocally first. Returns the number of inserted pairs.
-   */
-  applyRemoteTaskLabels(taskId: string, labelIds: string[]): number {
-    const task = this.db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
+  getLabelState(taskId: string): TaskLabelSyncState[] {
+    return this.db.prepare('SELECT * FROM task_labels WHERE task_id=? ORDER BY label_id').all(taskId) as unknown as TaskLabelSyncState[]
+  }
+
+  acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): void {
+    for (const row of delivered) this.db.prepare('UPDATE task_labels SET sync_pending=0 WHERE task_id=? AND label_id=? AND local_version=?').run(taskId,row.label_id,row.local_version)
+  }
+
+  private recordLabelIntent(taskId: string, labelId: string): void {
+    this.db.prepare('UPDATE task_labels SET local_version=(SELECT COALESCE(MAX(local_version),0)+1 FROM task_labels),sync_pending=1 WHERE task_id=? AND label_id=?').run(taskId,labelId)
+    new SyncQueueRepository(this.db).enqueue('task_labels',taskId,'UPDATE',JSON.stringify({task_id:taskId,assignment_intent:true}))
+  }
+
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): number {
+    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.applyRemoteTaskLabels(taskId,labelIds,baseline))
+    const task = this.findById(taskId)
     if (!task) return 0
-    let added = 0
-    for (const labelId of labelIds) {
-      const label = this.db.prepare('SELECT id FROM labels WHERE id = ?').get(labelId)
-      if (!label) continue
-      const existing = this.db
-        .prepare('SELECT deleted_at FROM task_labels WHERE task_id = ? AND label_id = ?')
-        .get(taskId, labelId) as { deleted_at: string | null } | undefined
-      if (existing) continue
-      this.db
-        .prepare('INSERT INTO task_labels (task_id, label_id, deleted_at) VALUES (?, ?, NULL)')
-        .run(taskId, labelId)
-      // Keep the junction in lockstep: a remote task_labels row may arrive
-      // without a remote project_labels row (the original drift source), which
-      // would render the label invisible locally. ensureProjectLabel guarantees
-      // the link exists so the pulled label actually shows.
-      this.ensureProjectLabel(taskId, labelId)
-      added++
+    const current = this.getLabelState(taskId)
+    const before = new Map(baseline?.map((row)=>[row.label_id,row]))
+    const existing = new Map(current.map((row)=>[row.label_id,row]))
+    const incoming = new Set(labelIds)
+    let changed = 0
+    for (const id of new Set([...labelIds,...(baseline ? current.map((row)=>row.label_id) : [])])) {
+      const row=existing.get(id), captured=before.get(id)
+      if (row?.sync_pending || captured?.sync_pending || (baseline && row?.local_version !== captured?.local_version)) continue
+      if (!incoming.has(id)) {
+        if (row && !row.deleted_at) {this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=local_version+1 WHERE task_id=? AND label_id=?').run(new Date().toISOString(),taskId,id);changed++}
+        continue
+      }
+      if (new LabelRepository(this.db).hasPendingProjectRemoval(task.project_id,id)) continue
+      const palette=this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(task.project_id,id) as {deleted_at:string|null}|undefined
+      if (palette?.deleted_at || !this.db.prepare('SELECT id FROM labels WHERE id=?').get(id)) continue
+      if (row && (!baseline || !row.deleted_at)) continue
+      this.db.prepare('INSERT INTO task_labels(task_id,label_id,deleted_at) VALUES(?,?,NULL) ON CONFLICT(task_id,label_id) DO UPDATE SET deleted_at=NULL,local_version=task_labels.local_version+1').run(taskId,id)
+      this.ensureProjectLabel(taskId,id)
+      changed++
     }
-    return added
+    return changed
   }
 
   removeLabel(taskId: string, labelId: string): boolean {
-    // Soft-delete to match the read paths' `tl.deleted_at IS NULL` filter
-    // and to keep parity with LabelRepository.removeFromProject (which
-    // also soft-deletes via UPDATE). A hard DELETE would still hide the
-    // row from reads but couldn't be revived by a later addLabel.
-    const now = new Date().toISOString()
-    const result = this.db
-      .prepare(
-        'UPDATE task_labels SET deleted_at = ? WHERE task_id = ? AND label_id = ? AND deleted_at IS NULL'
-      )
-      .run(now, taskId, labelId)
-    return result.changes > 0
+    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.removeLabel(taskId,labelId))
+    const result=this.db.prepare('UPDATE task_labels SET deleted_at=? WHERE task_id=? AND label_id=? AND deleted_at IS NULL').run(new Date().toISOString(),taskId,labelId)
+    if (result.changes>0) this.recordLabelIntent(taskId,labelId)
+    return result.changes>0
   }
 
   getLabels(taskId: string): TaskLabel[] {
     return this.db
-      .prepare('SELECT * FROM task_labels WHERE task_id = ? AND deleted_at IS NULL')
+      .prepare('SELECT task_id,label_id,deleted_at FROM task_labels WHERE task_id = ? AND deleted_at IS NULL')
       .all(taskId) as unknown as TaskLabel[]
   }
 
@@ -556,7 +592,7 @@ export class TaskRepository {
     projectId: string,
     defaultStatusId: string
   ): void {
-    const subtasks = this.findSubtasks(originalParentId)
+    const subtasks = this.findSubtasks(originalParentId, true)
     for (const subtask of subtasks) {
       const subtaskId = randomUUID()
       this.create({
@@ -772,7 +808,7 @@ export class TaskRepository {
     }
 
     // Recursively duplicate subtasks
-    const subtasks = this.findSubtasks(id)
+    const subtasks = this.findSubtasks(id, true)
     for (const subtask of subtasks) {
       const subtaskNewId = randomUUID()
       const dupSubtask = this.findById(subtask.id)
@@ -871,7 +907,7 @@ export class TaskRepository {
     projectId: string,
     defaultStatusId: string
   ): void {
-    const subtasks = this.findSubtasks(originalParentId)
+    const subtasks = this.findSubtasks(originalParentId, true)
     for (const subtask of subtasks) {
       const subtaskId = randomUUID()
       this.create({

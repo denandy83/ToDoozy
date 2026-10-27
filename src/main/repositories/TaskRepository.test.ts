@@ -541,3 +541,97 @@ describe('TaskRepository — orphaned-status repair is write-free in steady stat
     expect(executed.slice(mark).filter(isTasksUpdate)).toEqual([])
   })
 })
+
+describe('independent task archive and reorder versions', () => {
+  it.each([0, 1])('keeps metadata edits separate from explicit archive=%s', (archived) => {
+    const db = createTestDb()
+    try {
+      const { projectId, userId, statusId } = seedFixtures(db)
+      const repo = new TaskRepository(db)
+      const task = makeTask(repo, projectId, userId, statusId, 'intent')
+      const initial = task.updated_at
+      const choice = repo.update(task.id, { is_archived: archived })!
+      expect(choice.updated_at).toBe(initial)
+      expect(choice.archive_updated_at).toBeTruthy()
+      const edited = repo.update(task.id, { title: 'New metadata' })!
+      expect(edited.archive_updated_at).toBe(choice.archive_updated_at)
+      db.prepare('UPDATE projects SET is_archived=?, archive_updated_at=? WHERE id=?').run(1-archived, '2099-01-01T00:00:00Z', projectId)
+      const applied = repo.applyRemoteTask({ ...edited, title: 'Cloud newer metadata', updated_at: '2099-01-02T00:00:00Z' })
+      expect(applied).toMatchObject({ title: 'Cloud newer metadata', is_archived: 1-archived, archive_updated_at: '2099-01-01T00:00:00.000Z' })
+      const later = repo.update(task.id, { is_archived: archived })!
+      expect(Date.parse(later.archive_updated_at!)).toBeGreaterThan(Date.parse(applied.archive_updated_at!))
+      expect(later.updated_at).toBe(applied.updated_at)
+    } finally { db.close() }
+  })
+  it('persists reorder versions newer than every reordered row', () => {
+    const db = createTestDb()
+    try {
+      const { projectId, userId, statusId } = seedFixtures(db)
+      const repo = new TaskRepository(db)
+      makeTask(repo, projectId, userId, statusId, 'a')
+      makeTask(repo, projectId, userId, statusId, 'b')
+      db.exec("UPDATE tasks SET updated_at='2099-01-01T00:00:00Z'")
+      repo.reorder(['b', 'a'])
+      expect(repo.findById('b')?.order_index).toBe(0)
+      expect(repo.findById('a')?.order_index).toBe(1)
+      expect(Date.parse(repo.findById('a')!.updated_at)).toBeGreaterThan(Date.parse('2099-01-01T00:00:00Z'))
+    } finally { db.close() }
+  })
+})
+
+it('counts active subtasks while preserving archived traversal for cascades', () => {
+  const db = createTestDb()
+  try {
+    const { projectId, userId, statusId } = seedFixtures(db)
+    const repo = new TaskRepository(db)
+    makeTask(repo, projectId, userId, statusId, 'parent')
+    repo.create({ id: 'active-child', project_id: projectId, owner_id: userId, status_id: statusId, title: 'Active', parent_id: 'parent' })
+    repo.create({ id: 'archived-child', project_id: projectId, owner_id: userId, status_id: statusId, title: 'Archived', parent_id: 'parent', is_archived: 1 })
+    expect(repo.getSubtaskCount('parent')).toEqual({ total: 1, done: 0 })
+    expect(repo.findSubtasks('parent')).toHaveLength(1)
+    expect(repo.findSubtasks('parent', true)).toHaveLength(2)
+  } finally { db.close() }
+})
+
+
+it.each(['unchanged','edit','delete'])('rebases a recovered sync version while retaining newer local %s intent',(action)=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId,statusId}=seedFixtures(db),repo=new TaskRepository(db)
+    const initial=makeTask(repo,projectId,userId,statusId,'recover-version')
+    if(action==='edit') repo.update(initial.id,{title:'Later edit',description:'Keep latest fields'})
+    if(action==='delete') repo.delete(initial.id)
+    const latest=repo.findById(initial.id)!
+    const appliedAt=new Date(Date.parse(latest.updated_at)+1000).toISOString()
+    repo.rebaseSyncVersion(initial.id,initial.updated_at,appliedAt)
+    const result=repo.findById(initial.id)!
+    expect({...result,updated_at:latest.updated_at}).toEqual(latest)
+    if(action==='unchanged') expect(result.updated_at).toBe(appliedAt)
+    else expect(Date.parse(result.updated_at)).toBeGreaterThan(Date.parse(appliedAt))
+  } finally {db.close()}
+})
+
+it('remaps pending assignment identity and acknowledges only the canonical delivered version',()=>{
+  const db=createTestDb()
+  try {
+    const {projectId,userId,statusId}=seedFixtures(db),tasks=new TaskRepository(db),labels=new LabelRepository(db)
+    const task=makeTask(tasks,projectId,userId,statusId,'canonical-intent')
+    const label=labels.create({id:'assignment-old',user_id:userId,name:'Assignment'})
+    tasks.applyRemoteTaskLabels(task.id,[label.id])
+    tasks.removeLabel(task.id,label.id)
+    const before=tasks.getLabelState(task.id)
+    labels.consolidate(label.id,{...label,id:'assignment-canonical'})
+    tasks.acknowledgeLabelState(task.id,before)
+    expect(tasks.getLabelState(task.id)[0]).toMatchObject({label_id:'assignment-canonical',sync_pending:1})
+    expect(tasks.getLabelState(task.id)[0].local_version).toBeGreaterThan(before[0].local_version)
+    tasks.acknowledgeLabelState(task.id,before.map((row)=>({...row,label_id:'assignment-canonical'})))
+    expect(tasks.getLabelState(task.id)[0].sync_pending).toBe(1)
+    const canonical=tasks.getLabelState(task.id)
+    tasks.acknowledgeLabelState(task.id,canonical)
+    expect(tasks.getLabelState(task.id)[0].sync_pending).toBe(0)
+    tasks.addLabel(task.id,'assignment-canonical')
+    tasks.acknowledgeLabelState(task.id,canonical)
+    expect(tasks.getLabelState(task.id)[0].sync_pending).toBe(1)
+    expect(tasks.getLabels(task.id).map((row)=>row.label_id)).toEqual(['assignment-canonical'])
+  } finally {db.close()}
+})

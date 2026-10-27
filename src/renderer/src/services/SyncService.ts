@@ -1,3 +1,11 @@
+import { syncTaskLabelChoices } from './taskLabelAdditions'
+import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
+import { remoteTaskOrder } from './remoteTaskOrder'
+import { readAll, readAllIn } from './readAll'
+import { useAuthStore } from '../shared/stores/authStore'
+import { captureSyncContext, captureSyncProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
+import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
  * SyncService — manages write-through to Supabase and Realtime subscriptions
  * for shared projects. Runs in the renderer process where the authenticated
@@ -5,11 +13,12 @@
  */
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
-import type { Task, Status, SyncOperation } from '../../../shared/types'
+import type { Task, Status, Label, SyncOperation } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
-import { getCachedProjectName } from './PersonalSyncService'
+import { pushLabel, getCachedProjectName } from './PersonalSyncService'
+import { SYNC_TABLES } from './syncTables'
 import { isSuspended } from './powerState'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
@@ -32,9 +41,7 @@ function getReconnectDelay(attempt: number): number {
 }
 
 /** Mark a successful push in the sync store */
-function markSynced(): void {
-  useSyncStore.getState().setLastSynced()
-}
+
 
 export function setOnlineStatus(online: boolean): void {
   isOnline = online
@@ -49,16 +56,28 @@ export function setRealtimeCallback(cb: RealtimeCallback): void {
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
+  const context = await captureSyncContext()
   const supabase = await getSupabase()
+  context.assertCurrent()
   const channel = supabase
     .channel(`project:${projectId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
+      try { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) } catch { return }
+    })
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
+        if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
+          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
+            .catch((error) => logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)))
+        } else {
+          scheduleRemoteProjectRefresh(projectId, typeof data.id === 'string' ? data.id : undefined)
+        }
         onChangeCallback?.('task', payload.eventType, data)
       }
     )
@@ -66,9 +85,14 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'statuses', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
+        if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
+          void context.api.statuses.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
+            .catch((error) => logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)))
+        } else scheduleRemoteProjectRefresh(projectId)
         onChangeCallback?.('status', payload.eventType, data)
       }
     )
@@ -76,6 +100,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_members', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
@@ -93,9 +118,11 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_labels', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
+        scheduleRemoteProjectRefresh(projectId)
         onChangeCallback?.('project_label', payload.eventType, data)
       }
     )
@@ -378,34 +405,6 @@ export function buildTaskLabelData(
   return labelData
 }
 
-/**
- * Route a sync push failure through every channel a user/operator might watch.
- * Mirrors PersonalSyncService.reportPushFailure; lives here so SyncService
- * stays self-contained (no cross-service imports).
- */
-async function reportPushFailure(
-  context: string,
-  error: { message?: string; code?: string; details?: string } | unknown,
-  table: string,
-  rowId: string,
-  payload: string,
-  operation: SyncOperation = 'UPDATE'
-): Promise<void> {
-  const err = error as { message?: string; code?: string; details?: string }
-  const msg = err?.message ?? (typeof error === 'string' ? error : 'unknown error')
-  const code = err?.code ?? ''
-  const details = err?.details ?? ''
-  console.error(`[SyncService] ${context} error:`, msg, code, details, `id=${rowId}`)
-  logEvent('error', 'sync', `${context} failed: ${msg}`, `table=${table} id=${rowId} code=${code} details=${details}`)
-  try {
-    await window.api.sync.enqueue(table, rowId, operation, payload)
-  } catch (e) {
-    console.error('[SyncService] Failed to enqueue after push error:', e)
-  }
-  useSyncStore.getState().setError(msg || `${context} failed`)
-  void useSyncStore.getState().refreshPendingCount()
-}
-
 async function syncTaskToSupabase(
   supabase: SupabaseClient,
   task: Task,
@@ -425,6 +424,7 @@ async function syncTaskToSupabase(
     order_index: task.order_index,
     is_template: task.is_template,
     is_archived: task.is_archived,
+    archive_updated_at: task.archive_updated_at ?? null,
     completed_date: task.completed_date,
     recurrence_rule: task.recurrence_rule,
     reference_url: task.reference_url,
@@ -441,35 +441,41 @@ async function syncTaskToSupabase(
 export async function syncTaskChange(
   task: Task,
   operation: SyncOperation,
-  labelData?: Array<{ name: string; color: string }>
+  labelData?: Array<{ name: string; color: string }>,
+  producer?: SyncProducer
 ): Promise<void> {
-  if (!isOnline) {
-    await window.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
-    void useSyncStore.getState().refreshPendingCount()
-    return
-  }
-
-  const supabase = await getSupabase()
-
-  try {
-    if (operation === 'DELETE') {
-      const now = new Date().toISOString()
-      const { error } = await supabase
-        .from('tasks')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', task.id)
-      if (error) {
-        await reportPushFailure('syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
-        return
-      }
-    } else {
-      // syncTaskToSupabase throws on error; the catch routes it.
-      await syncTaskToSupabase(supabase, task, labelData ?? [])
+  return withSyncProducer(async (origin) => {
+    try {
+    if (!isOnline) {
+      await origin.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task))
+      await refreshProducerPending(origin)
+      return
     }
-    markSynced()
-  } catch (err) {
-    await reportPushFailure('syncTaskChange', err, 'tasks', task.id, JSON.stringify(task), operation)
-  }
+
+    const supabase = await origin.client()
+      if (!supabase) { await origin.api.sync.enqueue('tasks', task.id, operation, JSON.stringify(task)); await refreshProducerPending(origin); return }
+
+      if (operation === 'DELETE') {
+        const local = await origin.api.tasks.findById(task.id)
+        if (!local?.deleted_at) throw new Error('Task deletion intent missing')
+        const { error } = await supabase
+          .from('tasks')
+          .update({ deleted_at: local.deleted_at, updated_at: local.updated_at })
+          .eq('id', task.id)
+        if (error) {
+          await reportPushFailure(origin, 'syncTaskChange:DELETE', error, 'tasks', task.id, JSON.stringify({ id: task.id }), 'DELETE')
+          return
+        }
+      } else {
+        // syncTaskToSupabase throws on error; the catch routes it.
+        await syncTaskToSupabase(supabase, task, labelData ?? [])
+      await syncTaskLabelChoices(supabase, [task.id], origin.api, await origin.scope())
+      }
+      await markSynced(origin)
+    } catch (err) {
+      await reportPushFailure(origin, 'syncTaskChange', err, 'tasks', task.id, JSON.stringify(task), operation)
+    }
+  }, producer)
 }
 
 /**
@@ -477,125 +483,179 @@ export async function syncTaskChange(
  */
 export async function syncStatusChange(
   status: Status,
-  operation: SyncOperation
+  operation: SyncOperation,
+  producer?: SyncProducer
 ): Promise<void> {
-  if (!isOnline) {
-    await window.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
-    void useSyncStore.getState().refreshPendingCount()
-    return
-  }
-
-  const supabase = await getSupabase()
-
-  try {
-    if (operation === 'DELETE') {
-      // Soft-delete: set deleted_at, keep the row. Hard-DELETE is reserved for the 30-day purge.
-      const now = new Date().toISOString()
-      const { error } = await supabase
-        .from('statuses')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', status.id)
-      if (error) {
-        await reportPushFailure('syncStatusChange:SOFT_DELETE', error, 'statuses', status.id, JSON.stringify({ id: status.id, deleted_at: now }), 'UPDATE')
+  return withSyncProducer(async (origin) => {
+      if (operation === 'DELETE') {
+        const { deleteStatusFromSupabase } = await import('./PersonalSyncService')
+        await deleteStatusFromSupabase(status.id, origin)
         return
       }
-    } else {
-      const { error } = await supabase.from('statuses').upsert({
-        id: status.id,
-        project_id: status.project_id,
-        name: status.name,
-        color: status.color,
-        icon: status.icon,
-        order_index: status.order_index,
-        is_done: status.is_done,
-        is_default: status.is_default,
-        created_at: status.created_at,
-        updated_at: status.updated_at,
-        deleted_at: status.deleted_at ?? null
-      })
-      if (error) {
-        await reportPushFailure('syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
-        return
-      }
+    try {
+    if (!isOnline) {
+      await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status))
+      await refreshProducerPending(origin)
+      return
     }
-    markSynced()
-  } catch (err) {
-    await reportPushFailure('syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
-  }
+
+    const supabase = await origin.client()
+      if (!supabase) { await origin.api.sync.enqueue('statuses', status.id, operation, JSON.stringify(status)); await refreshProducerPending(origin); return }
+
+       const { error } = await supabase.from('statuses').upsert({
+          id: status.id,
+          project_id: status.project_id,
+          name: status.name,
+          color: status.color,
+          icon: status.icon,
+          order_index: status.order_index,
+          is_done: status.is_done,
+          is_default: status.is_default,
+          created_at: status.created_at,
+          updated_at: status.updated_at,
+          deleted_at: status.deleted_at ?? null
+        })
+        if (error) {
+          await reportPushFailure(origin, 'syncStatusChange:UPSERT', error, 'statuses', status.id, JSON.stringify(status), operation)
+          return
+        }
+      await markSynced(origin)
+    } catch (err) {
+      await reportPushFailure(origin, 'syncStatusChange', err, 'statuses', status.id, JSON.stringify(status), operation)
+    }
+  }, producer)
 }
 
 /**
  * Process queued offline changes.
  */
-export async function processSyncQueue(): Promise<number> {
-  const queue = await window.api.sync.getQueue()
-  if (queue.length === 0) return 0
+let queueDrain: Promise<number> | null = null
+export function processSyncQueue(context?: SyncContext): Promise<number> {
+  if (!queueDrain) queueDrain = drainSyncQueue(context).finally(() => { queueDrain = null })
+  return queueDrain
+}
 
-  const supabase = await getSupabase()
+async function drainSyncQueue(context?: SyncContext): Promise<number> {
   let processed = 0
-
-  // Group by table + operation for batch processing
-  const upsertsByTable = new Map<string, Array<{ entryId: string; payload: Record<string, unknown> }>>()
-  const deletes: typeof queue = []
-
-  for (const entry of queue) {
-    if (entry.operation === 'DELETE') {
-      deletes.push(entry)
-    } else {
-      const existing = upsertsByTable.get(entry.table_name) ?? []
-      existing.push({ entryId: entry.id, payload: JSON.parse(entry.payload) })
-      upsertsByTable.set(entry.table_name, existing)
-    }
+  const origin = context ?? captureSyncProducer()
+  try { context ??= await captureSyncContext() } catch {
+    if (await origin.isCurrent()) useSyncStore.getState().setStatus('offline')
+    return 0
   }
-
-  // Batch upserts by table
-  for (const [table, entries] of upsertsByTable) {
-    try {
-      const payloads = entries.map((e) => e.payload)
-      await supabase.from(table).upsert(payloads)
-      for (const e of entries) {
-        await window.api.sync.dequeue(e.entryId)
-        processed++
+  const { api, client: supabase, assertCurrent } = context
+  try {
+    const queue = await api.sync.getQueue()
+    if (!queue.length || !isOnline) return 0
+    const groups = new Map<string, typeof queue>()
+    for (const entry of queue) {
+      const key = `${entry.table_name}:${entry.row_id}`
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+    let failure: string | null = null
+    const priority = ['projects', 'user_labels', 'statuses', 'project_labels', 'tasks']
+    const ordered = [...groups.values()].sort((a, b) =>
+      (priority.indexOf(a[0].table_name) + 1 || 99) - (priority.indexOf(b[0].table_name) + 1 || 99))
+    const work = ordered.map((entries) => {
+      let entry = entries[entries.length - 1]
+      const commands = entries.filter((item) => JSON.parse(item.payload).status_delete === true)
+      if (commands.length) entry = commands.sort((a, b) => Date.parse(JSON.parse(a.payload).updated_at) - Date.parse(JSON.parse(b.payload).updated_at)).at(-1)!
+      const payload = JSON.parse(entry.payload) as Record<string, unknown>
+      const archive = entries.some((item) => JSON.parse(item.payload).archive_with_tasks === true)
+      if (archive) entry = { ...entry, payload: JSON.stringify({ ...payload, archive_with_tasks: true }) }
+      const special = entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive || commands.length > 0
+      const descriptor = Object.values(SYNC_TABLES).find((item) => item?.remoteName === entry.table_name)
+      const snapshot = async (): Promise<string> => {
+        assertCurrent()
+        if (special) return specialEntryIntent(entry, context)
+        const row = descriptor ? await descriptor.localGetById(entry.row_id, api) : payload
+        return JSON.stringify({ row: row ?? null, labels: entry.table_name === 'tasks' && row ? (await api.tasks.getLabels(entry.row_id)).map((link) => link.label_id).sort() : [] })
       }
-    } catch (err) {
-      console.error(`Failed to batch sync ${table}:`, err)
-      // Fallback: try one-by-one
-      for (const e of entries) {
-        try {
-          await supabase.from(table).upsert(e.payload)
-          await window.api.sync.dequeue(e.entryId)
-          processed++
-        } catch (innerErr) {
-          console.error(`Failed to sync queue entry ${e.entryId}:`, innerErr)
+      return { entry, entries, payload, special, descriptor, snapshot }
+    })
+    type Work = typeof work[number]
+    const complete = async (item: Work): Promise<void> => {
+      for (const entry of item.entries) { if (await api.sync.dequeue(entry.id)) processed++ }
+    }
+    const blockedTasks = new Set<string>()
+    const handled = new Set<Work>()
+    for (const item of work) {
+      if (handled.has(item)) continue
+      if (item.entry.table_name === 'tasks' && blockedTasks.has(item.entry.row_id)) continue
+      if (!item.special && item.descriptor) {
+        const tableItems = work.filter((candidate) => !candidate.special && candidate.descriptor && candidate.entry.table_name === item.entry.table_name && !(candidate.entry.table_name === 'tasks' && blockedTasks.has(candidate.entry.row_id)))
+        for (const candidate of tableItems) handled.add(candidate)
+        for (let index = 0; index < tableItems.length; index += 200) {
+          let pending = tableItems.slice(index, index + 200)
+          try {
+            while (pending.length && isOnline) {
+              const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
+              const rows = snapshots.map((value) => JSON.parse(value).row)
+              const values = rows.filter(Boolean).map((row) => item.descriptor!.toRemote(row))
+              if (values.length) {
+                const { error } = await supabase.from(item.entry.table_name).upsert(values)
+                if (error) {
+                  if (item.entry.table_name !== 'user_labels') throw new Error(error.message)
+                  const producer: SyncProducer = {
+                    api, userId: useAuthStore.getState().currentUser?.id,
+                    client: async () => supabase, assertCurrent, isCurrent: context.isCurrent,
+                    scope: async () => context.scope
+                  }
+                  for (const row of values) {
+                    if (!await pushLabel(row as Label, producer.userId!, producer)) throw new Error(error.message)
+                  }
+                }
+                if (item.entry.table_name === 'tasks') await syncTaskLabelChoices(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api, context.scope)
+              }
+              const changed: Work[] = []
+              for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
+                const candidate = pending[rowIndex]
+                if (!rows[rowIndex]) {
+                  const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
+                  await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)
+                }
+                if (item.entry.table_name === 'user_labels' && rows[rowIndex] && !await item.descriptor!.localGetById(candidate.entry.row_id, api)) {
+                  await complete(candidate)
+                  continue
+                }
+                if (snapshots[rowIndex] !== await candidate.snapshot()) changed.push(candidate)
+                else await complete(candidate)
+              }
+              pending = changed
+            }
+          } catch (error) { assertCurrent(); failure = error instanceof Error ? error.message : String(error) }
+        }
+        continue
+      }
+      try {
+        while (isOnline) {
+          const before = await item.snapshot()
+          assertCurrent()
+          if (!await replaySpecialEntry(supabase, item.entry, context)) throw new Error('Unsupported queued operation')
+          if (before !== await item.snapshot()) continue
+          await complete(item)
           break
+        }
+      } catch (error) {
+        assertCurrent()
+        failure = error instanceof Error ? error.message : String(error)
+        if (item.payload.status_delete === true) {
+          const affected = Array.isArray(item.payload.tasks) ? item.payload.tasks as Array<{ id: string }>
+            : await api.tasks.findAllByProject(String(item.payload.project_id), { includeTombstones: true })
+          for (const task of affected) blockedTasks.add(task.id)
         }
       }
     }
-  }
-
-  // Process deletes individually (can't batch different row IDs)
-  for (const entry of deletes) {
-    try {
-      await supabase.from(entry.table_name).delete().eq('id', entry.row_id)
-      await window.api.sync.dequeue(entry.id)
-      processed++
-    } catch (err) {
-      console.error(`Failed to sync delete ${entry.id}:`, err)
-      break
+    assertCurrent()
+    const pendingCount = await api.sync.count()
+    if (!await context.isCurrent()) return processed
+    useSyncStore.setState({ pendingCount })
+    assertCurrent()
+    if (useSyncStore.getState().pendingCount > 0) useSyncStore.getState().setError(failure ?? 'Changes are still waiting to sync')
+    else {
+      useSyncStore.getState().setError(null)
+      useSyncStore.getState().setLastSynced()
     }
-  }
-
-  // After a drain attempt, refresh the queue count and clear stale error if drained clean.
-  await useSyncStore.getState().refreshPendingCount()
-  const finalCount = useSyncStore.getState().pendingCount
-  if (finalCount === 0) {
-    useSyncStore.getState().setError(null)
-    useSyncStore.getState().setLastSynced()
-    if (processed > 0) {
-      logEvent('info', 'sync', `Sync queue drained: ${processed} items pushed`)
-    }
-  }
-
+  } catch { return processed }
   return processed
 }
 
@@ -802,16 +862,16 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
  * Discover shared projects the user is a member of in Supabase
  * but doesn't have locally. Returns project IDs to sync down.
  */
-export async function discoverRemoteMemberships(_userId: string): Promise<string[]> {
+export async function discoverRemoteMemberships(userId: string): Promise<string[]> {
   if (!navigator.onLine) return []
-  const supabase = await getSupabase()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return []
+  const context = await captureSyncContext()
+  if (useAuthStore.getState().currentUser?.id !== userId) return []
+  const { api, client: supabase } = context
 
   const { data: memberships, error } = await supabase
     .from('project_members')
     .select('project_id')
-    .eq('user_id', session.user.id)
+    .eq('user_id', userId)
 
   if (error || !memberships) return []
 
@@ -832,16 +892,16 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
   }
 
   for (const m of memberships) {
-    const local = await window.api.projects.findById(m.project_id)
+    const local = await api.projects.findById(m.project_id)
     if (!local) {
       // Project doesn't exist locally — sync it down
       idsToSync.push(m.project_id)
     } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
       // Project exists locally but isn't marked shared — just mark it and sync members
       // Do NOT call syncProjectDown which would delete/overwrite local tasks
-      await window.api.projects.update(m.project_id, { is_shared: 1 })
+      await api.projects.update(m.project_id, { is_shared: 1 })
       logEvent('warn', 'sync', `Repaired mis-flagged shared project "${local.name}"`, `project=${m.project_id} members=${memberCounts.get(m.project_id)}`)
-      await syncMembersDown(m.project_id)
+      await syncMembersDown(m.project_id, context)
     }
   }
   // Deduplicate
@@ -852,8 +912,8 @@ export async function discoverRemoteMemberships(_userId: string): Promise<string
  * Sync only project members from Supabase (without overwriting tasks/statuses).
  * Used when a local project is discovered to be shared.
  */
-async function syncMembersDown(projectId: string): Promise<void> {
-  const supabase = await getSupabase()
+async function syncMembersDown(projectId: string, context: SyncContext): Promise<void> {
+  const { api, client: supabase } = context
   const { data: members } = await supabase
     .from('project_members')
     .select('*')
@@ -861,14 +921,14 @@ async function syncMembersDown(projectId: string): Promise<void> {
 
   if (!members) return
 
-  const localMembers = await window.api.projects.getMembers(projectId)
+  const localMembers = await api.projects.getMembers(projectId)
   const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
   // Batch-fetch profiles for any members whose local row is missing or stale.
   const memberIdsNeedingProfile: string[] = []
   const localUsersById = new Map<string, { id: string; email: string } | undefined>()
   for (const member of members) {
-    const localUser = await window.api.users.findById(member.user_id)
+    const localUser = await api.users.findById(member.user_id)
     localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
     if (!localUser || isPlaceholderEmail(localUser.email)) {
       memberIdsNeedingProfile.push(member.user_id)
@@ -892,14 +952,14 @@ async function syncMembersDown(projectId: string): Promise<void> {
     const profile = profilesById.get(member.user_id)
 
     if (!localUser) {
-      await window.api.users.create({
+      await api.users.create({
         id: member.user_id,
         email: profile?.email ?? placeholderEmail(member.user_id),
         display_name: profile?.display_name ?? null,
         avatar_url: profile?.avatar_url ?? null
       }).catch(() => { /* already exists */ })
     } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
-      await window.api.users.update(member.user_id, {
+      await api.users.update(member.user_id, {
         email: profile.email,
         display_name: profile.display_name,
         avatar_url: profile.avatar_url
@@ -907,7 +967,7 @@ async function syncMembersDown(projectId: string): Promise<void> {
     }
 
     if (!localMemberIds.has(member.user_id)) {
-      await window.api.projects.addMember(
+      await api.projects.addMember(
         projectId,
         member.user_id,
         member.role,
@@ -916,7 +976,7 @@ async function syncMembersDown(projectId: string): Promise<void> {
     }
 
     if (member.display_color || member.display_initials) {
-      await window.api.projects.updateMember(projectId, member.user_id, {
+      await api.projects.updateMember(projectId, member.user_id, {
         display_color: member.display_color ?? null,
         display_initials: member.display_initials ?? null
       })
@@ -927,13 +987,16 @@ async function syncMembersDown(projectId: string): Promise<void> {
 /**
  * Sync all shared project data from Supabase to local SQLite.
  */
-export async function syncProjectDown(projectId: string, userId: string): Promise<void> {
+export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext): Promise<void> {
   // Never sync down when offline — would delete all local tasks
   if (!navigator.onLine) {
     console.log('[SyncService] Skipping syncProjectDown (offline)')
     return
   }
-  const supabase = await getSupabase()
+  context ??= await captureSyncContext()
+  context.assertCurrent()
+  if (useAuthStore.getState().currentUser?.id !== userId) return
+  const { api, client: supabase } = context
 
   // Get shared project
   const { data: project } = await supabase
@@ -945,20 +1008,20 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   if (!project) throw new Error('Shared project not found')
 
   // Ensure the project owner's user record exists locally with real profile data
-  const localOwner = await window.api.users.findById(project.owner_id)
+  const localOwner = await api.users.findById(project.owner_id)
   const { data: ownerProfileRows } = await supabase
     .rpc('get_user_profiles', { p_user_ids: [project.owner_id] })
   const ownerProfile = (ownerProfileRows as Array<{ email: string; display_name: string | null; avatar_url: string | null }> | null)?.[0] ?? null
 
   if (!localOwner) {
-    await window.api.users.create({
+    await api.users.create({
       id: project.owner_id,
       email: ownerProfile?.email ?? placeholderEmail(project.owner_id),
       display_name: ownerProfile?.display_name ?? null,
       avatar_url: ownerProfile?.avatar_url ?? null
     }).catch(() => { /* already exists */ })
   } else if (isPlaceholderEmail(localOwner.email) && ownerProfile) {
-    await window.api.users.update(project.owner_id, {
+    await api.users.update(project.owner_id, {
       email: ownerProfile.email,
       display_name: ownerProfile.display_name,
       avatar_url: ownerProfile.avatar_url
@@ -966,38 +1029,24 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
 
   // Create local project if not exists
-  const localProject = await window.api.projects.findById(projectId)
+  const localProject = await api.projects.findById(projectId)
   if (!localProject) {
     // Append the newly-discovered shared project after the member's own
     // projects rather than inheriting the owner's sidebar_order (which can be
     // a large integer that pushes it past the sidebar's MAX_VISIBLE_PROJECTS
     // cutoff). sidebar_order is a per-device preference; applyRemote preserves
     // this local value on subsequent syncs (COALESCE in the ON CONFLICT clause).
-    const localProjects = await window.api.projects.getProjectsForUser(userId)
+    const localProjects = await api.projects.getProjectsForUser(userId)
     const maxLocalOrder = localProjects.reduce(
       (m, p) => Math.max(m, p.sidebar_order ?? 0),
       -1
     )
-    await window.api.projects.create({
-      id: project.id,
-      name: project.name,
-      description: project.description,
-      color: project.color,
-      icon: project.icon,
-      owner_id: project.owner_id,
-      is_default: 0,
-      sidebar_order: maxLocalOrder + 1
-    })
+    await api.projects.applyRemote({ ...project, sidebar_order: maxLocalOrder + 1 })
     // Add current user as member locally
-    await window.api.projects.addMember(projectId, userId, 'member')
+    await api.projects.addMember(projectId, userId, 'member')
   }
-  // Mark as shared — but only if it isn't already, otherwise we bump
-  // updated_at every startup and trigger a phantom 2-row push on the next
-  // reconcile (`projects (pushed=2)` feedback loop).
-  if (localProject?.is_shared !== 1) {
-    await window.api.projects.update(projectId, { is_shared: 1 })
-    logEvent('info', 'sync', `Marked project "${project.name}" as shared (syncProjectDown)`, `project=${projectId}`)
-  }
+  if (localProject) await api.projects.applyRemote(project)
+  await api.projects.update(projectId, { is_shared: 1 })
 
   // Sync project↔label links from the project_labels junction (the source
   // of truth — preserves tombstones). Reading the legacy projects.label_data
@@ -1010,31 +1059,31 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   // tombstoned remotely stays tombstoned locally instead of being revived.
   // Step C: cascade tombstones to local task_labels so the chip disappears
   // immediately on this device.
-  const { data: remoteProjectLabels } = await supabase
+  const { data: remoteProjectLabels } = await readAll(() => supabase
     .from('project_labels')
     .select('project_id, label_id, created_at, deleted_at')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['project_id', 'label_id'])
   if (remoteProjectLabels && remoteProjectLabels.length > 0) {
     // Resolve label rows for any label_ids we don't have yet, by name.
     const missingLabelIds = (
       await Promise.all(
         remoteProjectLabels.map(async (pl) => {
-          const local = await window.api.labels.findById(pl.label_id as string)
+          const local = await api.labels.findById(pl.label_id as string)
           return local ? null : (pl.label_id as string)
         })
       )
     ).filter((id): id is string => id !== null)
     if (missingLabelIds.length > 0) {
-      const { data: remoteLabels } = await supabase
+      const { data: remoteLabels } = await readAllIn(missingLabelIds, (ids) => supabase
         .from('user_labels')
         .select('id, name, color')
-        .in('id', missingLabelIds)
+        .in('id', ids), ['id'])
       if (remoteLabels) {
         for (const rl of remoteLabels) {
           const name = rl.name as string
-          const existingByName = await window.api.labels.findByName(userId, name).catch(() => null)
+          const existingByName = await api.labels.findByName(userId, name).catch(() => null)
           if (!existingByName) {
-            await window.api.labels.create({
+            await api.labels.create({
               id: rl.id as string,
               user_id: userId,
               name,
@@ -1048,16 +1097,16 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     for (const pl of remoteProjectLabels) {
       const labelId = pl.label_id as string
       const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
-      const exists = await window.api.labels.findById(labelId).catch(() => null)
+      const exists = await api.labels.findById(labelId).catch(() => null)
       if (!exists) continue
-      await window.api.labels.applyRemoteProjectLabel({
+      await api.labels.applyRemoteProjectLabel({
         project_id: projectId,
         label_id: labelId,
         created_at: (pl.created_at as string | null) ?? null,
         deleted_at: deletedAt
       }).catch(() => {})
       if (deletedAt) {
-        await window.api.labels
+        await api.labels
           .softDeleteTaskLabelsForProjectLabel(projectId, labelId)
           .catch(() => {})
       }
@@ -1065,34 +1114,22 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
   }
 
   // Sync statuses
-  const { data: statuses } = await supabase
+  const { data: statuses } = await readAll(() => supabase
     .from('statuses')
     .select('*')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['updated_at', 'id'])
 
   if (statuses) {
     for (const status of statuses) {
-      const existing = await window.api.statuses.findById(status.id)
-      if (!existing) {
-        await window.api.statuses.create({
-          id: status.id,
-          project_id: status.project_id,
-          name: status.name,
-          color: status.color,
-          icon: status.icon,
-          order_index: status.order_index,
-          is_done: status.is_done,
-          is_default: status.is_default
-        })
-      }
+      await api.statuses.applyRemote(status)
     }
   }
 
   // Sync tasks — create new, update existing, delete removed
-  const { data: remoteTasks } = await supabase
+  const { data: remoteTasks } = await readAll(() => supabase
     .from('tasks')
     .select('*')
-    .eq('project_id', projectId)
+    .eq('project_id', projectId), ['updated_at', 'id'])
 
   const remoteTaskIds = new Set<string>()
 
@@ -1108,7 +1145,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
     const missingUserIds: string[] = []
     for (const uid of referencedUserIds) {
-      const local = await window.api.users.findById(uid)
+      const local = await api.users.findById(uid)
       if (!local) missingUserIds.push(uid)
     }
     if (missingUserIds.length > 0) {
@@ -1124,7 +1161,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       }
       for (const uid of missingUserIds) {
         const profile = profilesById.get(uid)
-        await window.api.users.create({
+        await api.users.create({
           id: uid,
           email: profile?.email ?? placeholderEmail(uid),
           display_name: profile?.display_name ?? null,
@@ -1136,20 +1173,17 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     // Sort parents before subtasks to satisfy the parent_id FK constraint.
     // Remote rows arrive in arbitrary order; inserting a subtask before its
     // parent throws FOREIGN KEY constraint failed on tasks:create.
-    const tasksToInsert = [
-      ...remoteTasks.filter((t) => !t.parent_id),
-      ...remoteTasks.filter((t) => t.parent_id)
-    ]
+    const tasksToInsert = remoteTaskOrder(remoteTasks)
 
     for (const task of tasksToInsert) {
       remoteTaskIds.add(task.id)
-      const existing = await window.api.tasks.findById(task.id)
+      const existing = await api.tasks.findById(task.id)
 
       try {
         // applyRemote preserves remote created_at/updated_at; using create/update
         // would stamp NOW into updated_at and make the row look "local newer" on
         // the next sync, triggering redundant pushes back to remote.
-        await window.api.tasks.applyRemote({
+        await api.tasks.applyRemote({
           id: task.id,
           project_id: task.project_id,
           owner_id: task.owner_id,
@@ -1163,6 +1197,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
           order_index: task.order_index ?? 0,
           is_template: task.is_template ?? existing?.is_template ?? 0,
           is_archived: task.is_archived ?? 0,
+          archive_updated_at: task.archive_updated_at ?? null,
           is_in_my_day: existing?.is_in_my_day ?? 0,
           completed_date: task.completed_date,
           recurrence_rule: task.recurrence_rule,
@@ -1187,35 +1222,16 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     }
   }
 
-  // Pull task_labels rows for all the tasks we just synced. The remote
-  // task_labels table has no `deleted_at` column — a removal is a hard
-  // DELETE on Supabase — so a row missing here means it was deleted and
-  // we should not re-insert it. addLabel revives tombstoned local rows
-  // when a row IS present remotely, so the two halves balance out.
-  if (remoteTasks && remoteTasks.length > 0) {
-    const taskIdList = remoteTasks.map((t) => t.id as string)
-    const remoteTl: Array<{ task_id: string; label_id: string }> = []
-    const chunkSize = 500
-    for (let i = 0; i < taskIdList.length; i += chunkSize) {
-      const chunk = taskIdList.slice(i, i + chunkSize)
-      const { data } = await supabase
-        .from('task_labels')
-        .select('task_id, label_id')
-        .in('task_id', chunk)
-      if (data) remoteTl.push(...(data as Array<{ task_id: string; label_id: string }>))
-    }
-    for (const tl of remoteTl) {
-      const exists = await window.api.labels.findById(tl.label_id).catch(() => null)
-      if (!exists) continue
-      await window.api.tasks.addLabel(tl.task_id, tl.label_id).catch(() => {})
-    }
+  if (remoteTasks?.length) {
+    const { pullTaskLabelsForTasks } = await import('./PersonalSyncService')
+    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context)
   }
 
   // Delete local tasks that no longer exist in Supabase
-  const localTasks = await window.api.tasks.findByProjectId(projectId)
+  const localTasks = await api.tasks.findByProjectId(projectId)
   for (const lt of localTasks) {
     if (!remoteTaskIds.has(lt.id)) {
-      await window.api.tasks.delete(lt.id).catch(() => {})
+      await api.tasks.delete(lt.id).catch(() => {})
     }
   }
 
@@ -1226,7 +1242,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     .eq('project_id', projectId)
 
   if (members) {
-    const localMembers = await window.api.projects.getMembers(projectId)
+    const localMembers = await api.projects.getMembers(projectId)
     const localMemberIds = new Set(localMembers.map((m) => m.user_id))
 
     // Batch-fetch all member profiles (N+1 → 1 query) for any local users that
@@ -1234,7 +1250,7 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
     const memberIdsNeedingProfile: string[] = []
     const localUsersById = new Map<string, { id: string; email: string } | undefined>()
     for (const member of members) {
-      const localUser = await window.api.users.findById(member.user_id)
+      const localUser = await api.users.findById(member.user_id)
       localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
       if (!localUser || isPlaceholderEmail(localUser.email)) {
         memberIdsNeedingProfile.push(member.user_id)
@@ -1258,14 +1274,14 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       const profile = memberProfilesById.get(member.user_id)
 
       if (!localUser) {
-        await window.api.users.create({
+        await api.users.create({
           id: member.user_id,
           email: profile?.email ?? placeholderEmail(member.user_id),
           display_name: profile?.display_name ?? null,
           avatar_url: profile?.avatar_url ?? null
         }).catch(() => { /* already exists */ })
       } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
-        await window.api.users.update(member.user_id, {
+        await api.users.update(member.user_id, {
           email: profile.email,
           display_name: profile.display_name,
           avatar_url: profile.avatar_url
@@ -1273,12 +1289,12 @@ export async function syncProjectDown(projectId: string, userId: string): Promis
       }
 
       if (!localMemberIds.has(member.user_id)) {
-        await window.api.projects.addMember(projectId, member.user_id, member.role)
+        await api.projects.addMember(projectId, member.user_id, member.role)
       }
 
       // Sync display customizations from Supabase
       if (member.display_color || member.display_initials) {
-        await window.api.projects.updateMember(projectId, member.user_id, {
+        await api.projects.updateMember(projectId, member.user_id, {
           display_color: member.display_color ?? null,
           display_initials: member.display_initials ?? null
         })

@@ -1,3 +1,4 @@
+import { ensureProtocol } from '../../../../shared/referenceUrl'
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Trash2, ChevronRight, Plus, Calendar, CheckCircle2, ExternalLink, Repeat } from 'lucide-react'
@@ -38,6 +39,8 @@ interface TaskRowProps {
   depth: number
   isExpanded: boolean
   filterOpacity?: number
+  visibleTaskIds?: Set<string>
+  taskFilterOpacity?: Record<string, number>
   dropIndicator?: DropIndicator | null
   isDragOverlay?: boolean
   onSelect: (taskId: string, e: React.MouseEvent) => void
@@ -65,6 +68,8 @@ export function TaskRow({
   depth,
   isExpanded,
   filterOpacity,
+  visibleTaskIds,
+  taskFilterOpacity,
   dropIndicator,
   isDragOverlay,
   onSelect,
@@ -414,8 +419,7 @@ export function TaskRow({
             onClick={(e) => {
               e.stopPropagation()
               const url = task.reference_url!
-              const href = url.match(/^https?:\/\//) ? url : `https://${url}`
-              window.open(href, '_blank')
+              void window.api.shell.openReference(ensureProtocol(url))
             }}
             className="flex-shrink-0 rounded p-0.5 text-accent/40 transition-colors hover:bg-accent/10 hover:text-accent"
             title={task.reference_url}
@@ -527,6 +531,8 @@ export function TaskRow({
       {/* Render subtasks if expanded or pending inline add */}
       {((hasChildren && isExpanded) || hasPendingSubtask) && !isDragging && (
         <SubtaskList
+          visibleTaskIds={visibleTaskIds}
+          taskFilterOpacity={taskFilterOpacity}
           parentId={task.id}
           projectId={task.project_id}
           statuses={statuses}
@@ -551,6 +557,8 @@ export function TaskRow({
 }
 
 interface SubtaskListProps {
+  visibleTaskIds?: Set<string>
+  taskFilterOpacity?: Record<string, number>
   parentId: string
   projectId: string
   statuses: Status[]
@@ -571,6 +579,8 @@ interface SubtaskListProps {
 }
 
 function SubtaskList({
+  visibleTaskIds,
+  taskFilterOpacity,
   parentId,
   projectId,
   statuses,
@@ -677,10 +687,13 @@ function SubtaskList({
           />
         </div>
       )}
-      {subtasks.map((child) => (
+      {subtasks.filter((child) => !visibleTaskIds || visibleTaskIds.has(child.id)).map((child) => (
         <TaskRow
           key={child.id}
           task={child}
+          visibleTaskIds={visibleTaskIds}
+          taskFilterOpacity={taskFilterOpacity}
+          filterOpacity={taskFilterOpacity?.[child.id]}
           statuses={statuses}
           allLabels={allLabels}
           isSelected={selectedTaskIds.has(child.id)}

@@ -1,3 +1,4 @@
+import { SyncQueueRepository } from './SyncQueueRepository'
 import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
@@ -312,32 +313,72 @@ export class LabelRepository {
         .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
         .all(fromId) as Array<{ task_id: string }>
       for (const row of taskRows) {
-        const exists = this.db
-          .prepare('SELECT 1 FROM task_labels WHERE task_id = ? AND label_id = ?')
-          .get(row.task_id, toId)
-        if (exists) {
+        const source = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,fromId) as {deleted_at:string|null;local_version:number;sync_pending:number}
+        const target = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,toId) as typeof source | undefined
+        const winner = !target || source.local_version>target.local_version || (source.local_version===target.local_version && source.sync_pending && !target.sync_pending) ? source : target
+        const needsDelivery = winner===source || !!source.sync_pending || !!target?.sync_pending
+        const version = needsDelivery
+          ? Number((this.db.prepare('SELECT COALESCE(MAX(local_version),0)+1 AS version FROM task_labels').get() as {version:number}).version)
+          : winner.local_version
+        if (target) {
+          this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=?,sync_pending=? WHERE task_id=? AND label_id=?').run(winner.deleted_at,version,needsDelivery?1:0,row.task_id,toId)
           this.db.prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?').run(row.task_id, fromId)
         } else {
-          this.db.prepare('UPDATE task_labels SET label_id = ? WHERE task_id = ? AND label_id = ?').run(toId, row.task_id, fromId)
+          this.db.prepare('UPDATE task_labels SET label_id=?,local_version=?,sync_pending=1 WHERE task_id=? AND label_id=?').run(toId,version,row.task_id,fromId)
           taskRemaps++
         }
+        if (needsDelivery) new SyncQueueRepository(this.db).enqueue('task_labels',row.task_id,'UPDATE',JSON.stringify({task_id:row.task_id,assignment_intent:true}))
       }
 
       const projectRows = this.db
         .prepare('SELECT project_id FROM project_labels WHERE label_id = ?')
         .all(fromId) as Array<{ project_id: string }>
       for (const row of projectRows) {
-        const exists = this.db
-          .prepare('SELECT 1 FROM project_labels WHERE project_id = ? AND label_id = ?')
-          .get(row.project_id, toId)
-        if (exists) {
-          this.db.prepare('DELETE FROM project_labels WHERE project_id = ? AND label_id = ?').run(row.project_id, fromId)
+        const sourceLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,fromId) as {created_at:string;deleted_at:string|null}
+        const targetLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as typeof sourceLink | undefined
+        const version = (link: typeof sourceLink): number => {
+          const value = Date.parse(link.deleted_at ?? link.created_at)
+          return Number.isFinite(value) ? value : -Infinity
+        }
+        const winner = !targetLink || version(sourceLink)>version(targetLink) || (version(sourceLink)===version(targetLink) && sourceLink.deleted_at && !targetLink.deleted_at) ? sourceLink : targetLink
+        if (targetLink) {
+          this.db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE project_id=? AND label_id=?').run(winner.created_at,winner.deleted_at,row.project_id,toId)
+          this.db.prepare('DELETE FROM project_labels WHERE project_id=? AND label_id=?').run(row.project_id,fromId)
         } else {
-          this.db.prepare('UPDATE project_labels SET label_id = ? WHERE project_id = ? AND label_id = ?').run(toId, row.project_id, fromId)
+          this.db.prepare('UPDATE project_labels SET label_id=? WHERE project_id=? AND label_id=?').run(toId,row.project_id,fromId)
           projectRemaps++
+        }
+        if (winner.deleted_at) this.softDeleteTaskLabelsForProjectLabel(row.project_id,toId)
+        if (winner===sourceLink) {
+          new SyncQueueRepository(this.db).enqueue(winner.deleted_at?'task_labels':'project_labels',`${row.project_id}::${toId}`,'UPDATE',JSON.stringify({
+            projectId:row.project_id,labelId:toId,labelName:nameParam,
+            ...(winner.deleted_at?{remove_project_label:true,deletedAt:winner.deleted_at,expectedLink:winner}:{addition:true,createdAt:winner.created_at,deletedAt:null})
+          }))
         }
       }
 
+      const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ id: string; payload: string }>
+      for (const command of commands) {
+        const payload = JSON.parse(command.payload)
+        if (typeof payload.task_id==='string') {
+          for (const key of ['insert','delete']) if (Array.isArray(payload[key])) payload[key]=[...new Set(payload[key].map((id:string)=>id===fromId?toId:id))]
+          this.db.prepare('UPDATE sync_queue SET payload=? WHERE id=?').run(JSON.stringify(payload),command.id)
+        }
+        if (payload.labelId !== fromId && payload.labelId !== toId) continue
+        payload.labelId = toId
+        if (payload.addition) payload.createdAt = (this.db.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId,toId) as {created_at:string} | undefined)?.created_at ?? payload.createdAt
+        if (Array.isArray(payload.siblingIds) && payload.siblingIds.includes(fromId)) payload.siblingIds = [...new Set([...payload.siblingIds, toId])]
+        if (payload.expectedLink) {
+          const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId, toId) as { created_at: string; deleted_at: string | null } | undefined
+          if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) {
+            payload.expectedLink = link
+            if (link.deleted_at && payload.deletedAt) payload.deletedAt = link.deleted_at
+          }
+        }
+        this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
+          .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
+      }
+      this.db.prepare("DELETE FROM sync_queue WHERE table_name='user_labels' AND row_id=?").run(fromId)
       if (fromExists) {
         this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
       }
@@ -381,11 +422,11 @@ export class LabelRepository {
 
   /** Remove a label from a specific project. Tasks in that project lose the label. */
   removeFromProject(projectId: string, labelId: string): boolean {
-    const now = new Date().toISOString()
     return withTransaction(this.db, () => {
+      const now = this.nextProjectLabelVersion(projectId, labelId)
       // Soft-delete task_labels for tasks in this project (active rows only)
       this.db.prepare(
-        `UPDATE task_labels SET deleted_at = ?
+        `UPDATE task_labels SET deleted_at = ?,sync_pending=0,local_version=(SELECT COALESCE(MAX(local_version),0)+1 FROM task_labels)
          WHERE label_id = ? AND deleted_at IS NULL AND task_id IN (
            SELECT id FROM tasks WHERE project_id = ?
          )`
@@ -395,6 +436,15 @@ export class LabelRepository {
       const result = this.db.prepare(
         'UPDATE project_labels SET deleted_at = ? WHERE project_id = ? AND label_id = ? AND deleted_at IS NULL'
       ).run(now, projectId, labelId)
+      if (result.changes > 0) {
+        const additions = this.db.prepare("SELECT id,payload FROM sync_queue WHERE table_name='project_labels'").all() as Array<{id:string;payload:string}>
+        for (const addition of additions) {
+          const intent = JSON.parse(addition.payload)
+          if (intent.addition && intent.projectId === projectId && intent.labelId === labelId) this.db.prepare('DELETE FROM sync_queue WHERE id=?').run(addition.id)
+        }
+        const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,labelId)
+        new SyncQueueRepository(this.db).enqueue('task_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({projectId,labelId,labelName:this.findById(labelId)?.name,remove_project_label:true,deletedAt:now,expectedLink:link}))
+      }
       return result.changes > 0
     })
   }
@@ -406,9 +456,11 @@ export class LabelRepository {
    * (otherwise the UI keeps the label visible until the next reconcile).
    */
   softDeleteTaskLabelsForProjectLabel(projectId: string, labelId: string): void {
+    const link = this.db.prepare('SELECT deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, labelId) as { deleted_at: string | null } | undefined
+    if (link && !link.deleted_at) return
     const now = new Date().toISOString()
     this.db.prepare(
-      `UPDATE task_labels SET deleted_at = ?
+      `UPDATE task_labels SET deleted_at = ?,sync_pending=0,local_version=(SELECT COALESCE(MAX(local_version),0)+1 FROM task_labels)
        WHERE label_id = ? AND deleted_at IS NULL AND task_id IN (
          SELECT id FROM tasks WHERE project_id = ?
        )`
@@ -417,11 +469,30 @@ export class LabelRepository {
 
   /** Link an existing label to a project — revives a tombstoned link if present. */
   addToProject(projectId: string, labelId: string): void {
+    if (!this.db.isTransaction) return withTransaction(this.db, () => this.addToProject(projectId, labelId))
+    const now = this.nextProjectLabelVersion(projectId, labelId)
     this.db.prepare(
       `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
-       VALUES (?, ?, datetime('now'), NULL)
-       ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL`
-    ).run(projectId, labelId)
+       VALUES (?, ?, ?, NULL)
+       ON CONFLICT(project_id, label_id) DO UPDATE SET deleted_at = NULL, created_at = excluded.created_at`
+    ).run(projectId, labelId, now)
+    new SyncQueueRepository(this.db).enqueue('project_labels', `${projectId}::${labelId}`, 'UPDATE', JSON.stringify({ projectId, labelId, deletedAt: null, addition: true, createdAt: now }))
+  }
+
+  private nextProjectLabelVersion(projectId: string, labelId: string): string {
+    const name = this.findById(labelId)?.name.toLowerCase()
+    const links = (this.db.prepare(`SELECT pl.label_id,l.name,pl.created_at,pl.deleted_at FROM project_labels pl
+      JOIN labels l ON l.id=pl.label_id WHERE pl.project_id=?`)
+      .all(projectId) as Array<{label_id:string;name:string;created_at:string;deleted_at:string|null}>)
+      .filter((link) => link.label_id === labelId || (name !== undefined && link.name.toLowerCase() === name))
+    let version = Date.now()
+    for (const link of links) {
+      for (const value of [link.created_at,link.deleted_at]) {
+        const clock = Date.parse(value ?? '')
+        if (Number.isFinite(clock)) version = Math.max(version,clock+1)
+      }
+    }
+    return new Date(version).toISOString()
   }
 
   findByTaskId(taskId: string): Label[] {
@@ -575,12 +646,42 @@ export class LabelRepository {
    * Idempotent insert/upsert; preserves remote `deleted_at` for tombstone
    * propagation across devices.
    */
+  hasPendingProjectAddition(projectId: string, labelId: string): boolean {
+    const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId,labelId) as { created_at: string; deleted_at: string | null } | undefined
+    if (!link || link.deleted_at) return false
+    return (this.db.prepare("SELECT payload FROM sync_queue WHERE table_name='project_labels'").all() as Array<{ payload: string }>).some(({payload}) => {
+      const intent = JSON.parse(payload)
+      return intent.addition && intent.projectId === projectId && intent.labelId === labelId && intent.createdAt === link.created_at
+    })
+  }
+
+  hasPendingProjectRemoval(projectId: string, labelId: string, addedAt?: string | null): boolean {
+    const name = this.findById(labelId)?.name.toLowerCase()
+    const commands = this.db.prepare("SELECT table_name,payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ table_name: string; payload: string }>
+    return commands.some((entry) => {
+      const intent = JSON.parse(entry.payload)
+      const removal = intent.deletedAt || (entry.table_name === 'task_labels' && intent.projectId && intent.labelId)
+      if (intent.projectId !== projectId || !removal) return false
+      if (addedAt && Date.parse(addedAt)>Date.parse(intent.deletedAt ?? intent.expectedLink?.deleted_at ?? '')) return false
+      const targetName = intent.labelName ?? this.findById(intent.labelId)?.name
+      if (intent.labelId !== labelId && !(entry.table_name === 'task_labels' && name && targetName?.toLowerCase() === name)) return false
+      const current = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(projectId, intent.labelId) as { created_at: string; deleted_at: string | null } | undefined
+      const expected = intent.expectedLink
+      return !current || !!current.deleted_at || (expected && current.created_at === expected.created_at && !expected.deleted_at)
+    })
+  }
+
   applyRemoteProjectLabel(remote: {
     project_id: string
     label_id: string
     created_at: string | null
     deleted_at: string | null
   }): void {
+    const current = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(remote.project_id, remote.label_id) as { created_at: string; deleted_at: string | null } | undefined
+    if (current && !remote.created_at && !remote.deleted_at) return
+    if (current && Date.parse(remote.deleted_at ?? remote.created_at ?? '')<Date.parse(current.deleted_at ?? current.created_at)) return
+    if (current?.deleted_at && !remote.deleted_at && Date.parse(remote.created_at ?? '')===Date.parse(current.deleted_at)) return
+    if (!remote.deleted_at && this.hasPendingProjectRemoval(remote.project_id, remote.label_id, remote.created_at)) return
     this.db
       .prepare(
         `INSERT INTO project_labels (project_id, label_id, created_at, deleted_at)
@@ -592,7 +693,7 @@ export class LabelRepository {
       .run(
         remote.project_id,
         remote.label_id,
-        toCanonicalIso(remote.created_at) ?? new Date().toISOString(),
+        toCanonicalIso(remote.created_at) ?? new Date(0).toISOString(),
         toCanonicalIso(remote.deleted_at)
       )
   }
