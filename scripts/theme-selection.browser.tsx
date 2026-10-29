@@ -52,7 +52,7 @@ async function choose(value: string): Promise<void> {
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await pause()
 }
-function gate() {
+function gate(): { wait: Promise<void>; release: () => void; entered: boolean } {
   let release!: () => void
   const wait = new Promise<void>((resolve) => { release = resolve })
   return { wait, release, entered: false }
@@ -121,7 +121,7 @@ const client = new PostgrestClient('https://example.invalid', { fetch: async (in
 } }) as unknown as SupabaseClient
 function context(): SyncContext {
   const captured = generation
-  const isCurrent = async () => captured === generation
+  const isCurrent = async (): Promise<boolean> => captured === generation
   return { api: window.api, client, isCurrent, assertCurrent: () => assert(captured === generation, 'Stale sync'), scope: String(captured) }
 }
 function Projection(): null { useThemeApplicator(); return null }

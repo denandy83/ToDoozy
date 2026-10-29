@@ -106,7 +106,7 @@ async function verify(): Promise<string> {
     await waitFor(() => Boolean(container.querySelector('[role="dialog"][aria-label="Settings"]')), 'Settings did not open')
     return container.querySelector<HTMLElement>('[role="dialog"][aria-label="Settings"]')!
   }
-  let settings = await openSettings()
+  const settings = await openSettings()
   await click(button('Appearance', settings))
   const trigger = settings.querySelector<HTMLButtonElement>('[aria-label="Edit accent color"]')!
   assert(trigger, 'Actual theme color control did not render')

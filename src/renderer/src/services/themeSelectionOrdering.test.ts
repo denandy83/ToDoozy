@@ -26,13 +26,15 @@ vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 import { fullPull, fullUpload, pushSetting, pushTheme, deleteThemeFromSupabase, deleteSettingFromSupabase } from './PersonalSyncService'
 import { processSyncQueue, setOnlineStatus } from './SyncService'
 import { requireSession } from './sessionRecovery'
-import { reconcileTable, SYNC_TABLES } from './syncTables'
+import { reconcileTable, SYNC_TABLES, type SyncTableDescriptor, type RemoteSetting, type RemoteTheme } from './syncTables'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { useSettingsStore, selectCurrentTheme } from '../shared/stores/settingsStore'
 import { registerIpcHandlers } from '../../../main/ipc-handlers'
 
 const databases: DatabaseSync[] = []
+const settingsTable = SYNC_TABLES.settings! as SyncTableDescriptor<Setting, RemoteSetting>
+const themesTable = SYNC_TABLES.themes! as SyncTableDescriptor<Theme, RemoteTheme>
 let databaseGeneration = 0
 const userId = 'user-1'
 const older = '2026-10-29T09:00:00.000Z'
@@ -230,7 +232,7 @@ async function publish(path: PublishPath, installed: ReturnType<typeof install>)
   else if (path === 'queued') {
     if (!installed.queue.length) installed.queue.push({ id: 'selection', table_name: 'user_settings', row_id: `${userId}:theme_id`, operation: 'UPDATE', payload: JSON.stringify(selection(aliasId, older)), created_at: upgrade })
     await processSyncQueue(installed.context)
-  } else await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
+  } else await reconcileTable(settingsTable, userId, userId, installed.context)
 }
 
 async function publishTheme(path: PublishPath, device: ReturnType<typeof database>, installed: ReturnType<typeof install>): Promise<void> {
@@ -240,7 +242,7 @@ async function publishTheme(path: PublishPath, device: ReturnType<typeof databas
   else if (path === 'queued') {
     installed.queue.push({ id: `theme-${installed.queue.length}`, table_name: 'user_themes', row_id: aliasId, operation: 'UPDATE', payload: JSON.stringify(SYNC_TABLES.themes!.toRemote(theme)), created_at: upgrade })
     await processSyncQueue(installed.context)
-  } else await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+  } else await reconcileTable(themesTable, userId, userId, installed.context)
 }
 
 function genuine(original: Theme, updatedAt = newer): Theme {
@@ -290,7 +292,7 @@ async function restoredCloudSelection(archive: boolean, stamp: string) {
   installed = install(a, server, true)
   await fullPull(userId, installed.context)
   expect(a.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
-  await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
+  await reconcileTable(settingsTable, userId, userId, installed.context)
   expect(server.get()).toMatchObject(selection(aliasId, stamp))
   return { a, b, server, builtin, installed: install(b, server, true) }
 }
@@ -300,14 +302,14 @@ describe('equal-version theme selection convergence', () => {
     for (const archive of [false, true]) for (const stamp of [older, '2090-10-29T09:00:00.000Z']) {
       const { b, server, builtin, installed } = await restoredCloudSelection(archive, stamp)
       if (path === 'full pull') await fullPull(userId, installed.context)
-      else if (path === 'reconcile') expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+      else if (path === 'reconcile') expect((await reconcileTable(settingsTable, userId, userId, installed.context)).failed).toBe(0)
       else await installed.context.api.settings.applyRemote(selection(aliasId, stamp.replace('Z', '+00:00')))
       expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
       for (let delivery = 0; delivery < 2; delivery++) {
         await SYNC_TABLES.settings!.localApplyRemote(SYNC_TABLES.settings!.toRemote(selection(builtin, stamp)), installed.context.api, installed.context)
         expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
         await fullPull(userId, installed.context)
-        expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+        expect((await reconcileTable(settingsTable, userId, userId, installed.context)).failed).toBe(0)
         expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
         expect(server.get()).toMatchObject(selection(aliasId, stamp))
       }
@@ -332,7 +334,7 @@ describe('equal-version theme selection convergence', () => {
     expect(await processSyncQueue(installed.context)).toBe(1)
     expect(installed.queue).toHaveLength(0)
     await fullPull(userId, installed.context)
-    expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+    expect((await reconcileTable(settingsTable, userId, userId, installed.context)).failed).toBe(0)
     expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
     expect(server.get()).toMatchObject(selection(aliasId, stamp))
   })
@@ -351,7 +353,7 @@ describe('equal-version theme selection convergence', () => {
       expect(b.settings.findRaw(userId, 'theme_id')).toEqual(explicit)
       await publish('queued', installed)
       await fullPull(userId, installed.context)
-      expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+      expect((await reconcileTable(settingsTable, userId, userId, installed.context)).failed).toBe(0)
       expect(b.settings.findRaw(userId, 'theme_id')).toEqual(explicit)
       expect(server.get()).toMatchObject(explicit)
     }
@@ -451,13 +453,13 @@ describe('accepted theme state in the renderer', () => {
       expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(ocean, newer))
       throw new Error('Synthetic accepted-state read failure')
     })
-    const first = await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)
+    const first = await reconcileTable(settingsTable, userId, userId, context)
     expect(first).toMatchObject({ failed: 1, inSync: 0, pulled: 0 })
     expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(ocean, newer))
     expect(useSettingsStore.getState().currentThemeId).toBe(forest)
     expect(useSettingsStore.getState().settings.theme_id).toBe(forest)
     expect(selectCurrentTheme(useSettingsStore.getState())?.id).toBe(forest)
-    const second = await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)
+    const second = await reconcileTable(settingsTable, userId, userId, context)
     expect(second).toMatchObject({ failed: 0, inSync: 1, pulled: 0, pushed: 0 })
     expectRenderedTheme(device, ocean, newer)
     expect(server.get()).toMatchObject(selection(ocean, newer))
@@ -484,9 +486,9 @@ describe('accepted theme state in the renderer', () => {
   it.each(['eager theme', 'theme reconcile'] as const)('%s publishes indirect selection recovery even when settings is already in sync', async (path) => {
     const { device, server, installed } = await renderedThemeFixture(true)
     if (path === 'eager theme') await publishTheme('eager', device, installed)
-    else expect((await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)).failed).toBe(0)
+    else expect((await reconcileTable(themesTable, userId, userId, installed.context)).failed).toBe(0)
     expectRenderedTheme(device, aliasId, older)
-    const stats = await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
+    const stats = await reconcileTable(settingsTable, userId, userId, installed.context)
     expect(stats).toMatchObject({ inSync: 1, failed: 0 })
     expectRenderedTheme(device, aliasId, older)
     expect(server.get()).toMatchObject(selection(aliasId, older))
@@ -654,10 +656,10 @@ describe('theme selection intent ordering', () => {
     await fullPull(userId, installed.context)
     expect(device.themes.findById(aliasId)).toEqual(renamed)
     await installed.context.api.syncMeta.setHighWater(userId, userId, 'themes', cleanup.updated_at)
-    expect((await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)).failed).toBe(0)
+    expect((await reconcileTable(themesTable, userId, userId, installed.context)).failed).toBe(0)
     expect(server.getTheme(aliasId)).toMatchObject({ name: renamed.name, updated_at: newer, deleted_at: null, accent: '#b6d9c7', sidebar: '#123456' })
     const writes = server.writes.length
-    await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    await reconcileTable(themesTable, userId, userId, installed.context)
     expect(server.writes).toHaveLength(writes)
   })
 
@@ -710,7 +712,7 @@ describe('theme selection intent ordering', () => {
     expect(server.getTheme(aliasId)).toMatchObject({ name: cleanup.name, deleted_at: cleanup.deleted_at })
     expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
     if (path !== 'reconcile') expect(installed.queue).toHaveLength(1)
-    if (path === 'reconcile') await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    if (path === 'reconcile') await reconcileTable(themesTable, userId, userId, installed.context)
     else await processSyncQueue(installed.context)
     expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
     expect(installed.queue).toHaveLength(0)
@@ -750,7 +752,7 @@ describe('theme selection intent ordering', () => {
     await publishTheme(path, device, installed)
     expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
     expect(server.writes.filter((write) => write.table === 'user_themes' && write.payload.id === aliasId)).toHaveLength(0)
-    await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    await reconcileTable(themesTable, userId, userId, installed.context)
     expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
   })
 
@@ -1086,7 +1088,7 @@ describe('theme selection intent ordering', () => {
         queue.push({ id: 'old-selection', table_name: 'user_settings', row_id: `${userId}:theme_id`, operation: 'UPDATE', payload: JSON.stringify(selection(aliasId, oldStamp)), created_at: clock })
         expect(await processSyncQueue(context)).toBe(1)
         expect(queue).toHaveLength(0)
-      } else expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)).failed).toBe(0)
+      } else expect((await reconcileTable(settingsTable, userId, userId, context)).failed).toBe(0)
       expect(server.get()).toMatchObject(selection(winner, newStamp))
       expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(winner, newStamp))
       expect(useSyncStore.getState().errorMessage).toBeNull()
@@ -1141,7 +1143,7 @@ describe('theme selection intent ordering', () => {
     else if (path === 'queued') {
       queue.push({ id: 'stale-payload', table_name: 'user_settings', row_id: `${userId}:theme_id`, operation: 'UPDATE', payload: JSON.stringify(selection(aliasId, upgrade)), created_at: upgrade })
       expect(await processSyncQueue(context)).toBe(1)
-    } else await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)
+    } else await reconcileTable(settingsTable, userId, userId, context)
     expect(server.get()).toMatchObject(selection(canonical, future))
     expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(canonical, future))
     expect(server.writes.filter((write) => write.table === 'user_settings' && write.payload.key === 'theme_id')).toHaveLength(1)

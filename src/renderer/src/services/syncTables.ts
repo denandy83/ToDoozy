@@ -574,7 +574,7 @@ SYNC_TABLES.labels = labelsDescriptor as SyncTableDescriptor<unknown, unknown>
 // `is_builtin` themes never round-trip — they're seeded locally per release
 // and excluded from `findAllByOwner`. The remote table has no `is_builtin`.
 
-interface RemoteTheme {
+export interface RemoteTheme {
   id: string
   user_id: string
   name: string
@@ -693,8 +693,9 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     }
     const latest = await read()
     if (latest.error) throw latest.error
-    if (!latest.data) throw new Error('Theme identity changed during sync')
-    await acceptThemeState(latest.data.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(latest.data)), context)
+    const latestTheme = latest.data
+    if (!latestTheme) throw new Error('Theme identity changed during sync')
+    await acceptThemeState(latestTheme.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(latestTheme)), context)
   },
 
   async remoteSoftDelete(id, _deletedAt, context) {
@@ -774,7 +775,7 @@ SYNC_TABLES.themes = themesDescriptor as SyncTableDescriptor<unknown, unknown>
 // is reconstructed in `toRemote` and split in `fromRemote`. Global defaults
 // (user_id = '') are seeded locally per release and excluded from sync.
 
-interface RemoteSetting {
+export interface RemoteSetting {
   id: string
   user_id: string
   key: string
@@ -1412,13 +1413,14 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
         }
       } catch { stats.failed++; continue }
     }
-    const localUpdatedAt = desc.toRemote(local).updated_at
+    const localRemote = desc.toRemote(local)
+    const localUpdatedAt = localRemote.updated_at
     const localMs = tsMs(localUpdatedAt)
     const remoteMs = tsMs(remote.updated_at)
     if (localMs === remoteMs) {
-      if (desc.name === 'settings' && (local as Setting).key === 'theme_id') {
+      if (desc.name === 'settings' && 'key' in localRemote && localRemote.key === 'theme_id' && 'value' in localRemote && 'value' in remote) {
         try {
-          if ((local as Setting).value !== (remote as unknown as RemoteSetting).value) await desc.remoteUpsert(local, context)
+          if (localRemote.value !== remote.value) await desc.remoteUpsert(local, context)
           else await refreshSyncedTheme(scopeId, context)
         } catch { stats.failed++; continue }
       }
