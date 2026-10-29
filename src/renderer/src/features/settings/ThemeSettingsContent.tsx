@@ -136,7 +136,7 @@ interface ThemeSettingsContentProps {
 
 export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSettingsContentProps>(function ThemeSettingsContent({ onDirtyChange, onBlockingChange }, ref) {
   const currentTheme = useSettingsStore(selectCurrentTheme)
-  const { setSetting, setCurrentTheme, createTheme, updateTheme, deleteTheme } = useSettingsStore()
+  const { setSetting, createTheme, updateTheme, deleteTheme } = useSettingsStore()
   const { addToast } = useToast()
 
   const [mode, setMode] = useState<'dark' | 'light'>('dark')
@@ -178,13 +178,12 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
         applyThemeConfig(parseConfig(target))
         await setSetting('theme_id', target.id)
         await setSetting('theme_mode', newMode)
-        setCurrentTheme(target.id)
         setConfigEdited(false)
         setColorsEdited(false)
         setChangedKeys(new Set())
       }
     },
-    [currentTheme, setSetting, setCurrentTheme]
+    [currentTheme, setSetting]
   )
 
   const handlePresetChange = useCallback((themeId: string) => {
@@ -221,7 +220,6 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       }
       await setSetting('theme_id', selectedThemeId)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(selectedThemeId)
       setConfigEdited(false)
       setColorsEdited(false)
       setChangedKeys(new Set())
@@ -263,7 +261,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const msg = err instanceof Error ? err.message : 'Failed to apply theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [selectedThemeId, selectedTheme, editConfig, mode, colorsEdited, changedKeys, updateTheme, setSetting, setCurrentTheme, addToast])
+  }, [selectedThemeId, selectedTheme, editConfig, mode, colorsEdited, changedKeys, updateTheme, setSetting, addToast])
 
   const handleRevert = useCallback(() => {
     if (currentTheme) {
@@ -359,18 +357,21 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       await deleteTheme(selectedThemeId)
       if (counterpart) await deleteTheme(counterpart.id)
 
-      const standard = Object.values(useSettingsStore.getState().themes).find(
-        (t) => t.name === 'Standard Dark' && t.is_builtin === 1
-      )
-      if (standard) {
-        const config = parseConfig(standard)
+      const { currentThemeId, themes } = useSettingsStore.getState()
+      const needsFallback = currentThemeId === selectedThemeId || currentThemeId === counterpart?.id
+      const target = needsFallback
+        ? Object.values(themes).find((theme) => theme.name === 'Standard Dark' && theme.is_builtin === 1)
+        : currentThemeId ? themes[currentThemeId] : undefined
+      if (target) {
+        const config = parseConfig(target)
         applyThemeConfig(config)
         setEditConfig(config)
-        setSelectedThemeId(standard.id)
-        setMode('dark')
-        await setSetting('theme_id', standard.id)
-        await setSetting('theme_mode', 'dark')
-        setCurrentTheme(standard.id)
+        setSelectedThemeId(target.id)
+        setMode(target.mode === 'light' ? 'light' : 'dark')
+        if (needsFallback) {
+          await setSetting('theme_id', target.id)
+          await setSetting('theme_mode', target.mode)
+        }
       }
       setConfigEdited(false)
       addToast({ message: `Deleted "${themeName}"${counterpart ? ' and its counterpart' : ''}` })
@@ -378,7 +379,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const msg = err instanceof Error ? err.message : 'Failed to delete theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [selectedThemeId, canDeleteSelected, selectedTheme, deleteTheme, setSetting, setCurrentTheme, addToast])
+  }, [selectedThemeId, canDeleteSelected, selectedTheme, deleteTheme, setSetting, addToast])
 
   const handleDeleteTheme = useCallback(() => {
     if (!selectedTheme) return
@@ -489,7 +490,6 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       setSelectedThemeId(theme.id)
       await setSetting('theme_id', theme.id)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(theme.id)
       setCustomName('')
       setConfigEdited(false)
       addToast({ message: `Theme "${name}" created with ${counterpartMode} counterpart` })
@@ -497,7 +497,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const msg = err instanceof Error ? err.message : 'Failed to create theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [customName, mode, editConfig, createTheme, setSetting, setCurrentTheme, addToast])
+  }, [customName, mode, editConfig, createTheme, setSetting, addToast])
 
   const handleExport = useCallback(async () => {
     const selected = selectedThemeId ? themesMap[selectedThemeId] : null
@@ -577,9 +577,8 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
     setSelectedThemeId(newId)
     await setSetting('theme_id', newId)
     await setSetting('theme_mode', mode)
-    setCurrentTheme(newId)
     addToast({ message: 'Theme loaded successfully' })
-  }, [themesMap, mode, createTheme, setSetting, setCurrentTheme, addToast])
+  }, [themesMap, mode, createTheme, setSetting, addToast])
 
   return (
     <div className="flex flex-col gap-5">

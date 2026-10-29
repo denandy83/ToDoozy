@@ -51,7 +51,7 @@ function parseConfig(theme: Theme): ThemeConfig {
 export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): React.JSX.Element | null {
   const dialogPresence = usePresence(open, 'dialog')
   const currentTheme = useSettingsStore(selectCurrentTheme)
-  const { setSetting, setCurrentTheme, createTheme, updateTheme } = useSettingsStore()
+  const { setSetting, createTheme, updateTheme } = useSettingsStore()
   const { addToast } = useToast()
 
   const [mode, setMode] = useState<'dark' | 'light'>('dark')
@@ -130,14 +130,13 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       // Save as current theme
       await setSetting('theme_id', selectedThemeId)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(selectedThemeId)
       setHasChanges(false)
       addToast({ message: 'Theme applied' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to apply theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [selectedThemeId, editConfig, mode, updateTheme, setSetting, setCurrentTheme, addToast])
+  }, [selectedThemeId, editConfig, mode, updateTheme, setSetting, addToast])
 
   // Save as new custom theme
   const handleSaveAs = useCallback(async () => {
@@ -161,7 +160,6 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       setSelectedThemeId(theme.id)
       await setSetting('theme_id', theme.id)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(theme.id)
       setCustomName('')
       setHasChanges(false)
       addToast({ message: `Theme "${theme.name}" created` })
@@ -169,7 +167,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       const msg = err instanceof Error ? err.message : 'Failed to create theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [customName, mode, editConfig, createTheme, setSetting, setCurrentTheme, addToast])
+  }, [customName, mode, editConfig, createTheme, setSetting, addToast])
 
   // Revert to saved theme on cancel
   const handleClose = useCallback(() => {

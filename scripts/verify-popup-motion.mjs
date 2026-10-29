@@ -37,6 +37,7 @@ if (process.versions.electron) {
   const fixture = process.argv[2] ?? 'scripts/popup-motion.browser.tsx'
   const server = await createServer({
     configFile: false,
+    optimizeDeps: { entries: [fixture] },
     plugins: [react(), tailwindcss(), {
       name: 'popup-motion-fixture',
       configureServer(server) {

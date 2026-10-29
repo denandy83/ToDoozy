@@ -107,7 +107,7 @@ export function Sidebar({
   const setSelectedProject = useViewStore((s) => s.setSelectedProject)
   const currentTheme = useSettingsStore(selectCurrentTheme)
   const themes = useSettingsStore((s) => s.themes)
-  const { setSetting, setCurrentTheme } = useSettingsStore()
+  const { setSetting } = useSettingsStore()
   const sidebarRef = useRef<HTMLElement>(null)
   const isDarkMode = currentTheme?.mode === 'dark'
   const [projectsExpanded, setProjectsExpanded] = useState(false)
@@ -258,12 +258,11 @@ export function Sidebar({
         applyThemeConfig(config)
         await setSetting('theme_id', target.id)
         await setSetting('theme_mode', newMode)
-        setCurrentTheme(target.id)
       } catch {
         // Ignore parse errors
       }
     }
-  }, [currentTheme, isDarkMode, themes, setSetting, setCurrentTheme])
+  }, [currentTheme, isDarkMode, themes, setSetting])
 
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
 

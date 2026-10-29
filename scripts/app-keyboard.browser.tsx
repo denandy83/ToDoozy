@@ -54,7 +54,8 @@ const api = {
   auth: { getSavedEmail: async () => null },
   labels: { findTaskLabelsByProject: async () => [], findAllWithUsage: async () => [label], findAll: async () => [label] },
   statuses: { findByProjectId: async () => [] },
-  themes: { update: async (id: string, input: UpdateThemeInput) => { themeWrites.push({ id, input }); theme = { ...theme, ...input }; return theme } },
+  themes: { list: async () => [theme], update: async (id: string, input: UpdateThemeInput) => { themeWrites.push({ id, input }); theme = { ...theme, ...input }; return theme } },
+  settings: { get: async (_user: string, name: string) => useSettingsStore.getState().settings[name] ?? (name === 'theme_id' ? theme.id : null) },
   fs: { showOpenDialog: async () => ({ canceled: false, filePaths: ['synthetic-invalid-theme.json'] }), readFile: async () => ({ ok: true, contents: '{ invalid json' }) },
   sync: {
     captureContext: async () => ({ userId: null, generation: 1 }),

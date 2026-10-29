@@ -30,7 +30,6 @@ interface SettingsActions {
   createTheme(input: CreateThemeInput): Promise<Theme>
   updateTheme(id: string, input: UpdateThemeInput): Promise<Theme | null>
   deleteTheme(id: string): Promise<boolean>
-  setCurrentTheme(id: string): void
   getThemeConfig(id: string): Promise<ThemeConfig | null>
   clearError(): void
 }
@@ -41,7 +40,7 @@ let themeRevision = 0
 let pendingThemeWrites = 0
 
 export async function refreshSyncedTheme(userId: string, origin = hydrationContext()): Promise<void> {
-  if (!userId || useSettingsStore.getState().userId !== userId || pendingThemeWrites) return
+  if (useSettingsStore.getState().userId !== userId || pendingThemeWrites) return
   const revision = ++themeRevision
   if (!await origin.isCurrent()) return
   const [themeId, themes] = await Promise.all([
@@ -265,11 +264,6 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
         throw err
       }
     })
-  },
-
-  setCurrentTheme(id: string): void {
-    ++themeRevision
-    set({ currentThemeId: id })
   },
 
   async getThemeConfig(id: string): Promise<ThemeConfig | null> {

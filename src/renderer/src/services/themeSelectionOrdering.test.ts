@@ -429,6 +429,41 @@ function holdIpc(channel: string, before = false) {
 }
 
 describe('accepted theme state in the renderer', () => {
+  it.each(['themes:list', 'settings:get'])('ordinary reconciliation retries a failed %s refresh on equal builtin-only state', async (channel) => {
+    const device = database(true)
+    repairBuiltinThemes(device.db)
+    const forest = builtinThemeId('Forest Dark')
+    const ocean = builtinThemeId('Ocean Blue Dark')
+    device.settings.applyRemote(selection(forest, older))
+    const server = cloud()
+    server.put(selection(ocean, newer))
+    const { context } = install(device, server, true)
+    useSettingsStore.getState().setUserId(userId)
+    await useSettingsStore.getState().hydrateSettings()
+    await useSettingsStore.getState().hydrateThemes()
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, unrelated: 'optimistic' } }))
+    expect(device.themes.findAllByOwner(userId, { includeTombstones: true })).toHaveLength(0)
+    expectRenderedTheme(device, forest, older)
+    const invoke = ipc.handlers.get('sync:invokeContext')!
+    ipc.handlers.set('sync:invokeContext', (...args: unknown[]) => {
+      if (args[2] !== channel) return invoke(...args)
+      ipc.handlers.set('sync:invokeContext', invoke)
+      expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(ocean, newer))
+      throw new Error('Synthetic accepted-state read failure')
+    })
+    const first = await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)
+    expect(first).toMatchObject({ failed: 1, inSync: 0, pulled: 0 })
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(ocean, newer))
+    expect(useSettingsStore.getState().currentThemeId).toBe(forest)
+    expect(useSettingsStore.getState().settings.theme_id).toBe(forest)
+    expect(selectCurrentTheme(useSettingsStore.getState())?.id).toBe(forest)
+    const second = await reconcileTable(SYNC_TABLES.settings!, userId, userId, context)
+    expect(second).toMatchObject({ failed: 0, inSync: 1, pulled: 0, pushed: 0 })
+    expectRenderedTheme(device, ocean, newer)
+    expect(server.get()).toMatchObject(selection(ocean, newer))
+    expect(server.writes).toHaveLength(0)
+  })
+
   it.each(['full pull', ...paths] as const)('%s refreshes the hydrated store and selector without another hydrate', async (path) => {
     const { device, server, installed } = await renderedThemeFixture()
     if (path === 'full pull') await fullPull(userId, installed.context)
@@ -439,7 +474,6 @@ describe('accepted theme state in the renderer', () => {
     expectRenderedTheme(device, aliasId, older)
     const rendered = useSettingsStore.getState().currentThemeId!
     await useSettingsStore.getState().setSetting('theme_id', rendered)
-    useSettingsStore.getState().setCurrentTheme(rendered)
     await vi.advanceTimersByTimeAsync(6000)
     const explicit = device.settings.findRaw(userId, 'theme_id')!
     expect(Date.parse(explicit.updated_at)).toBeGreaterThan(Date.parse(older))
@@ -465,7 +499,6 @@ describe('accepted theme state in the renderer', () => {
     await held.ready
     const value = choice === 'same rendered ID' ? builtin : builtinThemeId('Ocean Blue Dark')
     await useSettingsStore.getState().setSetting('theme_id', value)
-    useSettingsStore.getState().setCurrentTheme(value)
     const explicit = device.settings.findRaw(userId, 'theme_id')!
     const visible: Array<string | null> = []
     const unsubscribe = useSettingsStore.subscribe((state) => visible.push(state.currentThemeId))

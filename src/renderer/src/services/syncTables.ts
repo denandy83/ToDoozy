@@ -1415,8 +1415,11 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     const localMs = tsMs(localUpdatedAt)
     const remoteMs = tsMs(remote.updated_at)
     if (localMs === remoteMs) {
-      if (desc.name === 'settings' && (local as Setting).key === 'theme_id' && (local as Setting).value !== (remote as unknown as RemoteSetting).value) {
-        try { await desc.remoteUpsert(local, context) } catch { stats.failed++; continue }
+      if (desc.name === 'settings' && (local as Setting).key === 'theme_id') {
+        try {
+          if ((local as Setting).value !== (remote as unknown as RemoteSetting).value) await desc.remoteUpsert(local, context)
+          else await refreshSyncedTheme(scopeId, context)
+        } catch { stats.failed++; continue }
       }
       stats.inSync++
       continue
