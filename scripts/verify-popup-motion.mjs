@@ -3,10 +3,11 @@ import path from 'node:path'
 if (process.versions.electron) {
   const { app, BrowserWindow, ipcMain } = await import('electron')
   app.setPath('userData', path.resolve('node_modules/.cache/popup-motion'))
-  ipcMain.handle('verify:keyboard', (event, keyCode) => {
-    event.sender.sendInputEvent({ type: 'keyDown', keyCode })
-    if (keyCode === 'Enter') event.sender.sendInputEvent({ type: 'char', keyCode: '\r' })
-    event.sender.sendInputEvent({ type: 'keyUp', keyCode })
+  ipcMain.handle('verify:keyboard', (event, input) => {
+    const { keyCode, modifiers = [] } = typeof input === 'string' ? { keyCode: input } : input
+    event.sender.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+    if (keyCode === 'Enter') event.sender.sendInputEvent({ type: 'char', keyCode: '\r', modifiers })
+    event.sender.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
   })
   ipcMain.handle('verify:text', (event, text) => event.sender.insertText(text))
   ipcMain.handle('verify:viewport', (event, { width, height }) => BrowserWindow.fromWebContents(event.sender).setContentSize(width, height))

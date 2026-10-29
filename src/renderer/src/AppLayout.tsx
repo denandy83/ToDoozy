@@ -344,6 +344,7 @@ export function AppLayout(): React.JSX.Element {
         if (e.defaultPrevented) return
         const target = e.target as HTMLElement
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+        if (target.closest('.ui-surface, .ui-color-swatches, dialog, [role="dialog"], [role="alertdialog"], [role="menu"]')) return
         // Don't cycle projects if any task is selected — Tab should cycle tasks instead
         const { selectedTaskIds } = useTaskStore.getState()
         if (selectedTaskIds.size > 0) return
