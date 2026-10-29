@@ -816,7 +816,18 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
 
   async localApplyRemote(remote, api = window.api, context) {
     if (isSettingSyncExcluded(settingsDescriptor.fromRemote(remote).key)) return
-    if (remote.key === 'theme_id') await resolveSelectionTheme(settingsDescriptor.fromRemote(remote), api, context)
+    if (remote.key === 'theme_id') {
+      const local = await api.settings.findRaw(remote.user_id, remote.key)
+      if (local && Date.parse(local.updated_at) === Date.parse(remote.updated_at) && local.value !== remote.value) {
+        const client = context?.client ?? await getSupabase()
+        const { data, error } = await client.from('user_settings').select('*').eq('id', remote.id).eq('user_id', remote.user_id).eq('key', remote.key).maybeSingle()
+        if (error) throw error
+        context?.assertCurrent()
+        if (!data) return
+        remote = data
+      }
+      await resolveSelectionTheme(settingsDescriptor.fromRemote(remote), api, context)
+    }
     await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 

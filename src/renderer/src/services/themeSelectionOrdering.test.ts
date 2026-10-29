@@ -11,6 +11,14 @@ import type { Setting, SyncQueueEntry, Theme } from '../../../shared/types'
 import type { SyncContext } from './syncContext'
 
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
+const ipc = vi.hoisted(() => ({ handlers: new Map<string, (...args: unknown[]) => unknown>(), database: null as unknown as DatabaseSync }))
+vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => ipc.handlers.set(channel, handler) }, safeStorage: {}, BrowserWindow: {}, dialog: {}, shell: {}, app: {} }))
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
+vi.mock('../../../main/database', () => ({ getDatabase: () => ipc.database, switchDatabase: vi.fn(), getDatabasePath: vi.fn() }))
+vi.mock('../../../main/quick-add', () => ({ hideQuickAddWindow: vi.fn() }))
+vi.mock('../../../main/index', () => ({ registerQuickAddShortcut: vi.fn(), registerAppToggleShortcut: vi.fn(), getMainWindow: vi.fn() }))
+vi.mock('../../../main/tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { network.token = options.accessToken; return network.client }) }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(async () => network.client), safeRefresh: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn(async () => ({ user: { id: 'user-1' } }) as Session) }))
@@ -21,6 +29,7 @@ import { requireSession } from './sessionRecovery'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useSyncStore } from '../shared/stores/syncStore'
+import { registerIpcHandlers } from '../../../main/ipc-handlers'
 
 const databases: DatabaseSync[] = []
 let databaseGeneration = 0
@@ -131,7 +140,7 @@ function cloud() {
     failNextMutation(table = 'user_settings') { failMutation = true; failTable = table }
   }
 }
-function install(device: ReturnType<typeof database>, server: ReturnType<typeof cloud>): { context: SyncContext; queue: SyncQueueEntry[] } {
+function install(device: ReturnType<typeof database>, server: ReturnType<typeof cloud>, throughIpc = false): { context: SyncContext; queue: SyncQueueEntry[] } {
   const generation = ++databaseGeneration
   network.token = null
   const queue: SyncQueueEntry[] = []
@@ -169,6 +178,15 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
       getQueue: async () => [...queue], count: async () => queue.length,
       enqueue: async (table_name: string, row_id: string, operation: SyncQueueEntry['operation'], payload: string) => { queue.push({ id: `queue-${queue.length}`, table_name, row_id, operation, payload, created_at: new Date().toISOString() }) },
       dequeue: async (id: string) => { const index = queue.findIndex((item) => item.id === id); if (index < 0) return false; queue.splice(index, 1); return true }
+    }
+  }
+  if (throughIpc) {
+    ipc.database = device.db
+    ipc.handlers.clear()
+    registerIpcHandlers()
+    ipc.handlers.get('auth:switchDatabase')!({}, userId)
+    for (const namespace of ['settings', 'themes'] as const) {
+      api[namespace] = new Proxy(api[namespace], { get: (_, method: string) => async (...args: unknown[]) => ipc.handlers.get(`${namespace}:${method}`)!({}, ...args) }) as typeof api.settings & typeof api.themes
     }
   }
   vi.stubGlobal('window', { api })
@@ -218,6 +236,126 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   databases.splice(0).forEach((db) => db.close())
+})
+
+async function restoredCloudSelection(archive: boolean, stamp: string) {
+  const a = database()
+  const offline = database()
+  const b = database(!archive)
+  const forest = BUILTIN_THEMES.find((theme) => theme.name === 'Forest Dark')!
+  const builtin = builtinThemeId(forest.name)
+  for (const device of [a, offline, ...(archive ? [b] : [])]) {
+    device.db.prepare('UPDATE themes SET name=?,config=?,updated_at=? WHERE id=?')
+      .run(forest.name, JSON.stringify(forest.config), stamp, aliasId)
+  }
+  const original = offline.themes.findById(aliasId)!
+  offline.settings.applyRemote(selection(aliasId, stamp))
+  offline.themes.applyRemote(genuine(original, new Date(Date.parse(stamp) + 3600000).toISOString()))
+  a.settings.applyRemote(selection(aliasId, stamp))
+  repairBuiltinThemes(a.db)
+  repairBuiltinThemes(b.db)
+  const server = cloud()
+  server.put(selection(aliasId, stamp))
+  let installed = install(a, server, true)
+  await SYNC_TABLES.settings!.remoteUpsert(a.settings.findRaw(userId, 'theme_id')!, installed.context)
+  expect(server.get()).toMatchObject(selection(builtin, stamp))
+  installed = install(b, server, true)
+  await fullPull(userId, installed.context)
+  expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(builtin, stamp))
+  const archives = b.db.prepare('SELECT snapshot FROM theme_duplicate_archive').all() as Array<{ snapshot: string }>
+  expect(archives).toHaveLength(archive ? 1 : 0)
+  for (const row of archives) expect(JSON.parse(row.snapshot).selections).toEqual([])
+  installed = install(offline, server, true)
+  await publishTheme('eager', offline, installed)
+  expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', deleted_at: null })
+  installed = install(b, server, true)
+  await SYNC_TABLES.themes!.localApplyRemote(server.getTheme(aliasId)!, installed.context.api, installed.context)
+  expect(b.settings.canRewriteThemeReference(userId, builtin, aliasId, stamp)).toBe(false)
+  expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(builtin, stamp))
+  installed = install(a, server, true)
+  await fullPull(userId, installed.context)
+  expect(a.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+  await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
+  expect(server.get()).toMatchObject(selection(aliasId, stamp))
+  return { a, b, server, builtin, installed: install(b, server, true) }
+}
+
+describe('equal-version theme selection convergence', () => {
+  it.each(['full pull', 'reconcile', 'IPC'] as const)('%s adopts a three-peer restoration without receiver-owned selection proof', async (path) => {
+    for (const archive of [false, true]) for (const stamp of [older, '2090-10-29T09:00:00.000Z']) {
+      const { b, server, builtin, installed } = await restoredCloudSelection(archive, stamp)
+      if (path === 'full pull') await fullPull(userId, installed.context)
+      else if (path === 'reconcile') expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+      else await installed.context.api.settings.applyRemote(selection(aliasId, stamp.replace('Z', '+00:00')))
+      expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+      for (let delivery = 0; delivery < 2; delivery++) {
+        await SYNC_TABLES.settings!.localApplyRemote(SYNC_TABLES.settings!.toRemote(selection(builtin, stamp)), installed.context.api, installed.context)
+        expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+        await fullPull(userId, installed.context)
+        expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+        expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+        expect(server.get()).toMatchObject(selection(aliasId, stamp))
+      }
+      await installed.context.api.settings.applyRemote(selection(builtin, stamp))
+      await publish('queued', installed)
+      expect(installed.queue).toHaveLength(0)
+      expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+      expect(server.get()).toMatchObject(selection(aliasId, stamp))
+      expect(server.writes.filter((write) => write.table === 'user_settings' && write.payload.key === 'theme_id').map((write) => write.payload.value)).toEqual([builtin, aliasId])
+    }
+  })
+
+  it.each([false, true])('refreshes a pending offline retry from corrected cloud state, archive=%s', async (archive) => {
+    const stamp = '2090-10-29T09:00:00.000Z'
+    const { b, server, builtin, installed } = await restoredCloudSelection(archive, stamp)
+    vi.mocked(requireSession).mockResolvedValue(null)
+    pushSetting('theme_id', builtin, userId)
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(installed.queue).toHaveLength(1)
+    expect(JSON.parse(installed.queue[0].payload)).toMatchObject(selection(builtin, stamp))
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: userId } } as Session)
+    expect(await processSyncQueue(installed.context)).toBe(1)
+    expect(installed.queue).toHaveLength(0)
+    await fullPull(userId, installed.context)
+    expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+    expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+    expect(server.get()).toMatchObject(selection(aliasId, stamp))
+  })
+
+  it.each(['builtin', 'custom'] as const)('preserves and publishes a genuinely later explicit %s choice', async (choice) => {
+    for (const stamp of [older, '2090-10-29T09:00:00.000Z']) {
+      const { b, server, builtin, installed } = await restoredCloudSelection(false, stamp)
+      await installed.context.api.themes.applyRemote({ ...b.themes.findById(aliasId)!, id: 'later-custom', name: 'Evening Dark' })
+      const value = choice === 'builtin' ? builtinThemeId('Ocean Blue Dark') : 'later-custom'
+      await installed.context.api.settings.set(userId, 'theme_id', value)
+      const explicit = b.settings.findRaw(userId, 'theme_id')!
+      expect(Date.parse(explicit.updated_at)).toBeGreaterThan(Date.parse(stamp))
+      await installed.context.api.settings.applyRemote(selection(aliasId, stamp))
+      await SYNC_TABLES.settings!.localApplyRemote(SYNC_TABLES.settings!.toRemote(selection(builtin, stamp)), installed.context.api, installed.context)
+      await fullPull(userId, installed.context)
+      expect(b.settings.findRaw(userId, 'theme_id')).toEqual(explicit)
+      await publish('queued', installed)
+      await fullPull(userId, installed.context)
+      expect((await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)).failed).toBe(0)
+      expect(b.settings.findRaw(userId, 'theme_id')).toEqual(explicit)
+      expect(server.get()).toMatchObject(explicit)
+    }
+  })
+
+  it('keeps deletion and unrelated equal-version setting merges unchanged', async () => {
+    const { b, installed } = await restoredCloudSelection(false, older)
+    await installed.context.api.settings.applyRemote(selection(aliasId, older))
+    await installed.context.api.settings.applyRemote(selection(null, older, older))
+    expect(b.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, older))
+    const unrelated = { user_id: userId, key: 'unrelated', value: 'first', updated_at: older, deleted_at: null }
+    await installed.context.api.settings.applyRemote(unrelated)
+    await installed.context.api.settings.applyRemote({ ...unrelated, value: 'equal' })
+    expect(b.settings.findRaw(userId, unrelated.key)).toEqual(unrelated)
+    b.settings.delete(userId, 'theme_id')
+    const deleted = b.settings.findRaw(userId, 'theme_id')!
+    await installed.context.api.settings.applyRemote(selection(aliasId, deleted.updated_at))
+    expect(b.settings.findRaw(userId, 'theme_id')).toEqual(deleted)
+  })
 })
 
 describe('theme selection intent ordering', () => {
@@ -672,7 +810,7 @@ describe('theme selection intent ordering', () => {
     expect(device.settings.applyRemote(selection(softAlias.id, stamp.replace('Z', '+00:00')))).toEqual(expected)
     const later = new Date(Date.parse(stamp) + 1).toISOString()
     device.settings.applyRemote(selection('named-custom', later))
-    for (const replay of [stamp, later]) {
+    for (const replay of [stamp, stamp.replace('Z', '+00:00')]) {
       device.settings.applyRemote(selection(softAlias.id, replay))
       expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection('named-custom', later))
     }

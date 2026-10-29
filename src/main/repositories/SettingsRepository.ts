@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Setting } from '../../shared/types'
-import { canonicalThemeReference, canRewriteThemeReference, normalizeThemeSelection, themeReferenceSource, retirementStamp } from '../database/themeRepair'
+import { canRewriteThemeReference, normalizeThemeSelection, themeReferenceSource, retirementStamp } from '../database/themeRepair'
 
 export class SettingsRepository {
   constructor(private db: DatabaseSync) {}
@@ -162,11 +162,11 @@ export class SettingsRepository {
     // row is newer or equal (remote not strictly newer).
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       if (remote.key === 'theme_id' && !remote.deleted_at && !existing.deleted_at && Date.parse(existing.updated_at) === Date.parse(remote.updated_at)) {
-        const value = canonicalThemeReference(this.db, remote.value, remote.user_id)
-        if (canRewriteThemeReference(this.db, remote.user_id, existing.value, value, remote.updated_at)) {
+        const value = normalizeThemeSelection(this.db, remote)
+        if (!canRewriteThemeReference(this.db, remote.user_id, value, existing.value, remote.updated_at)) {
           this.db.prepare("UPDATE settings SET value=? WHERE user_id=? AND key='theme_id'").run(value, remote.user_id)
-          return this.findRaw(remote.user_id, remote.key)!
         }
+        return this.findRaw(remote.user_id, remote.key)!
       }
       return existing
     }
