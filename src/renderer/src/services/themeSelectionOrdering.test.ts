@@ -29,6 +29,7 @@ import { requireSession } from './sessionRecovery'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { useAuthStore } from '../shared/stores/authStore'
 import { useSyncStore } from '../shared/stores/syncStore'
+import { useSettingsStore, selectCurrentTheme } from '../shared/stores/settingsStore'
 import { registerIpcHandlers } from '../../../main/ipc-handlers'
 
 const databases: DatabaseSync[] = []
@@ -185,14 +186,26 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
     ipc.handlers.clear()
     registerIpcHandlers()
     ipc.handlers.get('auth:switchDatabase')!({}, userId)
+    const database = ipc.handlers.get('sync:captureContext')!({}) as { userId: string; generation: number }
+    api.sync.captureContext = async () => ipc.handlers.get('sync:captureContext')!({}) as typeof database
+    api.sync.invokeContext = async (context, channel, args) => {
+      const current = await api.sync.captureContext()
+      if (current.generation !== context.generation) throw new Error('Synthetic database changed')
+      const [namespace, method] = channel.split(':')
+      return (api as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>)[namespace][method](...args)
+    }
     for (const namespace of ['settings', 'themes'] as const) {
-      api[namespace] = new Proxy(api[namespace], { get: (_, method: string) => async (...args: unknown[]) => ipc.handlers.get(`${namespace}:${method}`)!({}, ...args) }) as typeof api.settings & typeof api.themes
+      api[namespace] = new Proxy(api[namespace], { get: (_, method: string) => async (...args: unknown[]) => ipc.handlers.get('sync:invokeContext')!({}, database, `${namespace}:${method}`, args) }) as typeof api.settings & typeof api.themes
     }
   }
   vi.stubGlobal('window', { api })
   network.client = server.client
   const pinnedApi = window.api
-  const isCurrent = (): boolean => useAuthStore.getState().currentUser?.id === userId && window.api === pinnedApi
+  const capturedDatabase = throughIpc ? ipc.handlers.get('sync:captureContext')!({}) as { userId: string; generation: number } : null
+  const isCurrent = (): boolean => {
+    const current = throughIpc ? ipc.handlers.get('sync:captureContext')!({}) as typeof capturedDatabase : null
+    return useAuthStore.getState().currentUser?.id === userId && window.api === pinnedApi && (!capturedDatabase || (current?.userId === capturedDatabase.userId && current?.generation === capturedDatabase.generation))
+  }
   return { queue, context: { api: pinnedApi, client: server.client, assertCurrent: () => { if (!isCurrent()) throw new Error('Synthetic account changed') }, isCurrent: async () => isCurrent(), scope: 'synthetic' } }
 }
 beforeEach(() => {
@@ -201,6 +214,8 @@ beforeEach(() => {
   vi.setSystemTime(upgrade)
   vi.mocked(requireSession).mockResolvedValue({ user: { id: userId } } as Session)
   useAuthStore.setState({ currentUser: { id: userId } as never })
+  useSettingsStore.getState().setUserId('')
+  useSettingsStore.setState({ currentThemeId: null, themes: {}, settings: {}, error: null, loading: false })
   useSyncStore.setState({ status: 'synced', errorMessage: null })
   setOnlineStatus(true)
 })
@@ -355,6 +370,186 @@ describe('equal-version theme selection convergence', () => {
     const deleted = b.settings.findRaw(userId, 'theme_id')!
     await installed.context.api.settings.applyRemote(selection(aliasId, deleted.updated_at))
     expect(b.settings.findRaw(userId, 'theme_id')).toEqual(deleted)
+  })
+})
+
+async function renderedThemeFixture(indirect = false) {
+  const device = database(!indirect)
+  const forest = BUILTIN_THEMES.find((theme) => theme.name === 'Forest Dark')!
+  const builtin = builtinThemeId(forest.name)
+  const original: Theme = { id: aliasId, name: forest.name, mode: forest.mode, config: JSON.stringify(forest.config), is_builtin: 0, owner_id: userId, created_at: older, updated_at: older, deleted_at: null }
+  if (indirect) device.db.prepare('UPDATE themes SET name=?,config=? WHERE id=?').run(original.name, original.config, aliasId)
+  device.settings.applyRemote(selection(indirect ? aliasId : builtin, older))
+  repairBuiltinThemes(device.db)
+  const server = cloud()
+  server.put(selection(builtin, older))
+  const installed = install(device, server, true)
+  useSettingsStore.getState().setUserId(userId)
+  await useSettingsStore.getState().hydrateSettings()
+  await useSettingsStore.getState().hydrateThemes()
+  useSettingsStore.setState((state) => ({ settings: { ...state.settings, unrelated: 'optimistic' } }))
+  expect(useSettingsStore.getState().currentThemeId).toBe(builtin)
+  expect(selectCurrentTheme(useSettingsStore.getState())?.id).toBe(builtin)
+  expect(useSettingsStore.getState().themes[aliasId]).toBeUndefined()
+  server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original)) as Record<string, unknown>)
+  server.put(selection(aliasId, older))
+  return { device, server, installed, builtin, original }
+}
+
+function expectRenderedTheme(device: ReturnType<typeof database>, value: string, stamp: string) {
+  const state = useSettingsStore.getState()
+  expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(value, stamp))
+  expect(state.currentThemeId).toBe(value)
+  expect(state.settings.theme_id).toBe(value)
+  expect(state.settings.unrelated).toBe('optimistic')
+  expect(state.themes[value]).toEqual(device.themes.findById(value))
+  expect(selectCurrentTheme(state)).toEqual(device.themes.findById(value))
+}
+
+function holdIpc(channel: string, before = false) {
+  let release!: () => void
+  let reached!: () => void
+  const blocked = new Promise<void>((resolve) => { release = resolve })
+  const ready = new Promise<void>((resolve) => { reached = resolve })
+  const handler = ipc.handlers.get('sync:invokeContext')!
+  ipc.handlers.set('sync:invokeContext', async (...args: unknown[]) => {
+    if (args[2] !== channel) return handler(...args)
+    ipc.handlers.set('sync:invokeContext', handler)
+    if (before) {
+      reached()
+      await blocked
+      return handler(...args)
+    }
+    const result = await handler(...args)
+    reached()
+    await blocked
+    return result
+  })
+  return { ready, release }
+}
+
+describe('accepted theme state in the renderer', () => {
+  it.each(['full pull', ...paths] as const)('%s refreshes the hydrated store and selector without another hydrate', async (path) => {
+    const { device, server, installed } = await renderedThemeFixture()
+    if (path === 'full pull') await fullPull(userId, installed.context)
+    else await publish(path, installed)
+    expectRenderedTheme(device, aliasId, older)
+    expect(server.get()).toMatchObject(selection(aliasId, older))
+    await SYNC_TABLES.settings!.localApplyRemote(SYNC_TABLES.settings!.toRemote(selection(builtinThemeId('Forest Dark'), older)), installed.context.api, installed.context)
+    expectRenderedTheme(device, aliasId, older)
+    const rendered = useSettingsStore.getState().currentThemeId!
+    await useSettingsStore.getState().setSetting('theme_id', rendered)
+    useSettingsStore.getState().setCurrentTheme(rendered)
+    await vi.advanceTimersByTimeAsync(6000)
+    const explicit = device.settings.findRaw(userId, 'theme_id')!
+    expect(Date.parse(explicit.updated_at)).toBeGreaterThan(Date.parse(older))
+    expectRenderedTheme(device, aliasId, explicit.updated_at)
+    expect(server.get()).toMatchObject(explicit)
+  })
+
+  it.each(['eager theme', 'theme reconcile'] as const)('%s publishes indirect selection recovery even when settings is already in sync', async (path) => {
+    const { device, server, installed } = await renderedThemeFixture(true)
+    if (path === 'eager theme') await publishTheme('eager', device, installed)
+    else expect((await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)).failed).toBe(0)
+    expectRenderedTheme(device, aliasId, older)
+    const stats = await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
+    expect(stats).toMatchObject({ inSync: 1, failed: 0 })
+    expectRenderedTheme(device, aliasId, older)
+    expect(server.get()).toMatchObject(selection(aliasId, older))
+  })
+
+  it.each(['same rendered ID', 'different ID'] as const)('preserves an explicit %s choice made during an accepted-state read', async (choice) => {
+    const { device, server, installed, builtin } = await renderedThemeFixture()
+    const held = holdIpc('themes:list')
+    const merging = SYNC_TABLES.settings!.localApplyRemote(server.get(), installed.context.api, installed.context)
+    await held.ready
+    const value = choice === 'same rendered ID' ? builtin : builtinThemeId('Ocean Blue Dark')
+    await useSettingsStore.getState().setSetting('theme_id', value)
+    useSettingsStore.getState().setCurrentTheme(value)
+    const explicit = device.settings.findRaw(userId, 'theme_id')!
+    const visible: Array<string | null> = []
+    const unsubscribe = useSettingsStore.subscribe((state) => visible.push(state.currentThemeId))
+    held.release()
+    await merging
+    unsubscribe()
+    expect(visible).not.toContain(aliasId)
+    expectRenderedTheme(device, value, explicit.updated_at)
+    await publish('queued', installed)
+    expect(server.get()).toMatchObject(explicit)
+    expectRenderedTheme(device, value, explicit.updated_at)
+  })
+
+  it('keeps a pending same-ID write protected until persistence completes', async () => {
+    const { device, server, installed, builtin } = await renderedThemeFixture()
+    const held = holdIpc('settings:set', true)
+    const saving = useSettingsStore.getState().setSetting('theme_id', builtin)
+    await held.ready
+    await SYNC_TABLES.settings!.localApplyRemote(server.get(), installed.context.api, installed.context)
+    expect(device.settings.findRaw(userId, 'theme_id')?.value).toBe(aliasId)
+    expect(useSettingsStore.getState().currentThemeId).toBe(builtin)
+    held.release()
+    await saving
+    const explicit = device.settings.findRaw(userId, 'theme_id')!
+    expectRenderedTheme(device, builtin, explicit.updated_at)
+    await publish('queued', installed)
+    expect(server.get()).toMatchObject(explicit)
+  })
+
+  it('keeps a local color edit while accepting the recovered selection', async () => {
+    const { device, server, installed, builtin } = await renderedThemeFixture()
+    const held = holdIpc('themes:list')
+    const merging = SYNC_TABLES.settings!.localApplyRemote(server.get(), installed.context.api, installed.context)
+    await held.ready
+    const config = JSON.stringify({ ...JSON.parse(device.themes.findById(builtin)!.config), accent: '#aBcDEF' })
+    await useSettingsStore.getState().updateTheme(builtin, { config })
+    held.release()
+    await merging
+    expectRenderedTheme(device, aliasId, older)
+    expect(useSettingsStore.getState().themes[builtin].config).toBe(config)
+    expect(device.themes.findById(builtin)?.config).toBe(config)
+    expect(server.get()).toMatchObject(selection(aliasId, older))
+  })
+
+  it.each(['account', 'same-user database'] as const)('rejects a held snapshot after a %s switch', async (change) => {
+    const { device, server, installed } = await renderedThemeFixture()
+    const held = holdIpc('themes:list')
+    const merging = SYNC_TABLES.themes!.localApplyRemote(server.getTheme(aliasId)!, installed.context.api, installed.context)
+    await held.ready
+    const other = database(true)
+    repairBuiltinThemes(other.db)
+    const nextUser = change === 'account' ? 'other-user' : userId
+    const nextTheme = other.themes.findById(builtinThemeId('Ocean Blue Dark'))!
+    other.settings.applyRemote({ ...selection(nextTheme.id, newer), user_id: nextUser })
+    ipc.database = other.db
+    ipc.handlers.get('auth:switchDatabase')!({}, nextUser)
+    useAuthStore.setState({ currentUser: { id: nextUser } as never })
+    const nextState = { userId: nextUser, currentThemeId: nextTheme.id, themes: { [nextTheme.id]: nextTheme }, settings: { theme_id: nextTheme.id, unrelated: 'new account' } }
+    useSettingsStore.setState(nextState)
+    held.release()
+    await merging
+    expect(useSettingsStore.getState()).toMatchObject(nextState)
+    expect(selectCurrentTheme(useSettingsStore.getState())).toEqual(nextTheme)
+    expect(device.themes.findById(aliasId)?.name).toBe('Aviobook Dark')
+  })
+
+  it('retries an accepted merge whose renderer-state read failed', async () => {
+    const { device, server, installed, builtin } = await renderedThemeFixture()
+    const read = ipc.handlers.get('sync:invokeContext')!
+    ipc.handlers.set('sync:invokeContext', (...args: unknown[]) => {
+      if (args[2] !== 'themes:list') return read(...args)
+      ipc.handlers.set('sync:invokeContext', read)
+      throw new Error('Synthetic theme-state read failure')
+    })
+    await publish('queued', installed)
+    expect(installed.queue).toHaveLength(1)
+    expect(useSettingsStore.getState().currentThemeId).toBe(builtin)
+    expect(useSettingsStore.getState().settings.theme_id).toBe(builtin)
+    expect(selectCurrentTheme(useSettingsStore.getState())?.id).toBe(builtin)
+    expect(server.get()).toMatchObject(selection(aliasId, older))
+    await publish('queued', installed)
+    expect(installed.queue).toHaveLength(0)
+    expectRenderedTheme(device, aliasId, older)
+    expect(server.get()).toMatchObject(selection(aliasId, older))
   })
 })
 

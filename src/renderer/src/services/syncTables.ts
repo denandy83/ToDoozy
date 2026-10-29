@@ -17,6 +17,8 @@ import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
 import { BUILTIN_THEMES, builtinThemeId, canSyncTheme } from '../../../shared/themeCatalog'
+import { refreshSyncedTheme, useSettingsStore } from '../shared/stores/settingsStore'
+import { hydrationContext } from '../shared/stores/hydrationContext'
 
 export type { SyncTableName }
 
@@ -623,6 +625,13 @@ function parseThemeConfig(json: string): ThemeConfig {
   }
 }
 
+async function acceptThemeState<T>(userId: string, merge: () => Promise<T>, context?: SyncContext): Promise<T> {
+  const origin = context ?? (useSettingsStore.getState().userId === userId ? hydrationContext() : null)
+  const accepted = await merge()
+  if (origin) await refreshSyncedTheme(userId, origin)
+  return accepted
+}
+
 const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   name: 'themes',
   remoteName: 'user_themes',
@@ -638,8 +647,8 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     return api.themes.findById(id)
   },
 
-  async localApplyRemote(remote, api = window.api) {
-    await api.themes.applyRemote(themesDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api, context) {
+    await acceptThemeState(remote.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(remote)), context)
   },
 
   async localMaxUpdatedAt(ownerId, api = window.api) {
@@ -664,7 +673,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     const { data: remote, error } = await read()
     if (error) throw error
     context?.assertCurrent()
-    const current = remote ? await api.themes.applyRemote(themesDescriptor.fromRemote(remote)) : await api.themes.findById(local.id)
+    const current = remote ? await acceptThemeState(remote.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(remote)), context) : await api.themes.findById(local.id)
     if (!current || !canSyncTheme(current) || await api.themes.isPresetAlias(current)) return
     const payload = themesDescriptor.toRemote(current)
     if (remote) {
@@ -684,7 +693,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     const latest = await read()
     if (latest.error) throw latest.error
     if (!latest.data) throw new Error('Theme identity changed during sync')
-    await api.themes.applyRemote(themesDescriptor.fromRemote(latest.data))
+    await acceptThemeState(latest.data.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(latest.data)), context)
   },
 
   async remoteSoftDelete(id, _deletedAt, context) {
@@ -784,7 +793,7 @@ async function resolveSelectionTheme(setting: Setting, api: typeof window.api, c
     context?.assertCurrent()
     if (data) {
       const incoming = themesDescriptor.fromRemote(data)
-      const current = await api.themes.applyRemote(incoming)
+      const current = await acceptThemeState(setting.user_id, () => api.themes.applyRemote(incoming), context)
       if (!await api.themes.isPresetAlias(current) && await api.themes.isPresetAlias(incoming)) await themesDescriptor.remoteUpsert(current, context)
     }
   }
@@ -828,7 +837,9 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
       }
       await resolveSelectionTheme(settingsDescriptor.fromRemote(remote), api, context)
     }
-    await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
+    if (remote.key === 'theme_id') {
+      await acceptThemeState(remote.user_id, () => api.settings.applyRemote(settingsDescriptor.fromRemote(remote)), context)
+    } else await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(userId, api = window.api) {
