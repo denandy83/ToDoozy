@@ -1,3 +1,4 @@
+import { readableColor, mixColor } from '../../../../shared/colorContrast'
 import type { ThemeConfig } from '../../../../shared/types'
 
 interface ThemePreviewProps {
@@ -19,6 +20,14 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
     parseInt(config.bg.replace('#', '').slice(4, 6), 16)
   const isDark = bgBrightness < 384
   const surface = adjustColor(config.bg, isDark ? 12 : -8)
+  const sidebarBackgrounds = [config.sidebar, mixColor(config.accent, config.sidebar, .12), mixColor(config.accent, config.sidebar, .2)]
+  const sidebarText = {
+    fg: readableColor(config.fg, sidebarBackgrounds),
+    fgSecondary: readableColor(config.fgSecondary, sidebarBackgrounds),
+    fgMuted: readableColor(config.fgMuted, sidebarBackgrounds),
+    accent: readableColor(config.accent, sidebarBackgrounds)
+  }
+
 
   return (
     <div
@@ -37,10 +46,10 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
             style={{ backgroundColor: config.accent + '26' }}
           >
             <div className="flex h-full items-center justify-center">
-              <span style={{ color: config.accent, fontSize: '9px', fontWeight: 700 }}>TD</span>
+              <span style={{ color: sidebarText.accent, fontSize: '9px', fontWeight: 700 }}>TD</span>
             </div>
           </div>
-          <span style={{ color: config.fg, fontSize: '9px', fontWeight: 700 }}>ToDoozy</span>
+          <span style={{ color: sidebarText.fg, fontSize: '9px', fontWeight: 700 }}>ToDoozy</span>
         </div>
 
         {/* My Day - active */}
@@ -49,13 +58,13 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
           style={{ backgroundColor: config.accent + '1f', borderLeft: `2px solid ${config.accent}` }}
         >
           <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.accent }} />
-          <span style={{ color: config.fg, fontSize: '9px' }}>My Day</span>
+          <span style={{ color: sidebarText.fg, fontSize: '9px' }}>My Day</span>
         </div>
 
         {/* Projects header */}
         <div className="flex items-center gap-1.5 px-1.5 py-1 mt-0.5">
           <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.muted + '40' }} />
-          <span style={{ color: config.fgMuted, fontSize: '9px' }}>Projects</span>
+          <span style={{ color: sidebarText.fgMuted, fontSize: '9px' }}>Projects</span>
         </div>
 
         {/* Project items - indented */}
@@ -65,14 +74,14 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
             className="flex items-center gap-1.5 rounded px-1.5 py-0.5 ml-3"
           >
             <div className="h-2 w-2 rounded-full" style={{ backgroundColor: item === 'Personal' ? config.accent : '#f59e0b' }} />
-            <span style={{ color: config.fgSecondary, fontSize: '8px' }}>{item}</span>
+            <span style={{ color: sidebarText.fgSecondary, fontSize: '8px' }}>{item}</span>
           </div>
         ))}
 
         {/* Archive */}
         <div className="flex items-center gap-1.5 rounded px-1.5 py-1 mt-0.5">
           <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: config.muted + '40' }} />
-          <span style={{ color: config.fgSecondary, fontSize: '9px' }}>Archive</span>
+          <span style={{ color: sidebarText.fgSecondary, fontSize: '9px' }}>Archive</span>
         </div>
       </div>
 
@@ -98,7 +107,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
 
         {/* Not Started section */}
         <div className="px-3 pt-2 pb-1">
-          <span style={{ color: '#888888', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+          <span style={{ color: readableColor('#888888', [config.bg, surface]), fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
             Not Started
           </span>
         </div>
@@ -115,7 +124,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
             >
               {/* Project indicator → Status circle → Title → Labels */}
               <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: task.projectColor }}>
-                <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>{task.initials}</span>
+                <span style={{ color: readableColor('#ffffff', [task.projectColor]), fontSize: '5px', fontWeight: 700 }}>{task.initials}</span>
               </div>
               <div
                 className="h-2.5 w-2.5 rounded-full border"
@@ -125,7 +134,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
               {task.label && (
                 <span
                   className="rounded-full px-1 py-0"
-                  style={{ backgroundColor: task.label.color + '20', color: task.label.color, fontSize: '5px', fontWeight: 700, border: `1px solid ${task.label.color}30` }}
+                  style={{ backgroundColor: task.label.color + '20', color: readableColor(task.label.color, [mixColor(task.label.color, surface, .125)]), fontSize: '5px', fontWeight: 700, border: `1px solid ${task.label.color}30` }}
                 >
                   {task.label.name}
                 </span>
@@ -136,7 +145,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
 
         {/* In Progress section */}
         <div className="px-3 pt-2 pb-1">
-          <span style={{ color: '#f59e0b', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+          <span style={{ color: readableColor('#f59e0b', [config.bg, surface]), fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
             In Progress
           </span>
         </div>
@@ -144,7 +153,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
         <div className="flex flex-col gap-1 px-3">
           <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
             <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: config.accent }}>
-              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>PE</span>
+              <span style={{ color: readableColor('#ffffff', [config.accent]), fontSize: '5px', fontWeight: 700 }}>PE</span>
             </div>
             <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#f59e0b', border: `1px solid #f59e0b` }}>
               <div className="flex h-full items-center justify-center">
@@ -154,7 +163,7 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
             <span style={{ color: config.fg, fontSize: '8px', fontWeight: 300, flex: 1 }}>Prepare presentation</span>
             <span
               className="rounded-full px-1 py-0"
-              style={{ backgroundColor: '#ef4444' + '20', color: '#ef4444', fontSize: '5px', fontWeight: 700, border: '1px solid #ef444430' }}
+              style={{ backgroundColor: '#ef4444' + '20', color: readableColor('#ef4444', [mixColor('#ef4444', surface, .125)]), fontSize: '5px', fontWeight: 700, border: '1px solid #ef444430' }}
             >
               Urgent
             </span>
@@ -163,14 +172,14 @@ export function ThemePreview({ config }: ThemePreviewProps): React.JSX.Element {
 
         {/* Done section */}
         <div className="px-3 pt-2 pb-1">
-          <span style={{ color: '#22c55e', fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
+          <span style={{ color: readableColor('#22c55e', [config.bg, surface]), fontSize: '7px', fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase' as const }}>
             Done
           </span>
         </div>
         <div className="flex flex-col gap-1 px-3">
           <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ backgroundColor: surface }}>
             <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full" style={{ backgroundColor: '#f59e0b' }}>
-              <span style={{ color: '#fff', fontSize: '5px', fontWeight: 700 }}>WO</span>
+              <span style={{ color: readableColor('#ffffff', ['#f59e0b']), fontSize: '5px', fontWeight: 700 }}>WO</span>
             </div>
             <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#22c55e' }} />
             <span style={{ color: config.fgMuted, fontSize: '8px', fontWeight: 300, textDecoration: 'line-through', flex: 1 }}>Fix login bug</span>

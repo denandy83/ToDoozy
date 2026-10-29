@@ -1,3 +1,5 @@
+import { resolveBuiltinConfig } from '../../../../shared/themeCatalog'
+import { readableColor, surfaceColor, mixColor } from '../../../../shared/colorContrast'
 import { useEffect } from 'react'
 import { useSettingsStore, selectCurrentTheme } from '../stores'
 import type { ThemeConfig } from '../../../../shared/types'
@@ -37,31 +39,36 @@ function resolveConfig(config: ThemeConfig): ThemeConfig {
 }
 
 export function applyThemeConfig(config: ThemeConfig): void {
-  const resolved = resolveConfig(config)
-  const root = document.documentElement
-  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
-    root.style.setProperty(cssVar, resolved[key as keyof ThemeConfig])
-  }
-  // Derive surface color (slightly lighter for dark themes, slightly darker for light)
-  const bgBrightness =
-    parseInt(resolved.bg.replace('#', '').slice(0, 2), 16) +
-    parseInt(resolved.bg.replace('#', '').slice(2, 4), 16) +
-    parseInt(resolved.bg.replace('#', '').slice(4, 6), 16)
-  const isDark = bgBrightness < 384
-  root.style.setProperty('--color-surface', adjustColor(resolved.bg, isDark ? 12 : -8))
+  applyThemeConfigToElement(document.documentElement, config)
 }
 
 export function applyThemeConfigToElement(el: HTMLElement, config: ThemeConfig): void {
   const resolved = resolveConfig(config)
-  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
-    el.style.setProperty(cssVar, resolved[key as keyof ThemeConfig])
+  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) el.style.setProperty(cssVar, resolved[key as keyof ThemeConfig])
+  const surfaces = [resolved.bg, surfaceColor(resolved.bg)]
+  const backgrounds = [...surfaces, ...surfaces.flatMap((bg) => [mixColor(resolved.accent, bg, .12), mixColor(resolved.accent, bg, .2)])]
+  const sidebarBackgrounds = [resolved.sidebar, mixColor(resolved.accent, resolved.sidebar, .12), mixColor(resolved.accent, resolved.sidebar, .2)]
+  el.style.setProperty('--color-surface', surfaceColor(resolved.bg))
+  el.style.setProperty('--color-selected-muted', readableColor(resolved.muted, backgrounds))
+  el.style.setProperty('--color-selected-secondary', readableColor(resolved.fgSecondary, backgrounds))
+  el.style.setProperty('--color-accent-text', readableColor(resolved.accent, backgrounds))
+  el.style.setProperty('--color-focus', readableColor(resolved.accent, backgrounds, 3))
+  el.style.setProperty('--color-canvas-focus', readableColor(resolved.accent, backgrounds, 3))
+  el.style.setProperty('--color-sidebar-focus', readableColor(resolved.accent, sidebarBackgrounds, 3))
+  for (const [role, color] of [['danger', '#ef4444'], ['success', '#22c55e']] as const) {
+    const text = readableColor(color, backgrounds)
+    el.style.setProperty('--color-' + role, text)
+    el.style.setProperty('--color-canvas-' + role, text)
+    el.style.setProperty('--color-' + role + '-fg', readableColor('#ffffff', [text]))
+    el.style.setProperty('--color-sidebar-' + role, readableColor(color, sidebarBackgrounds))
   }
-  const bgBrightness =
-    parseInt(resolved.bg.replace('#', '').slice(0, 2), 16) +
-    parseInt(resolved.bg.replace('#', '').slice(2, 4), 16) +
-    parseInt(resolved.bg.replace('#', '').slice(4, 6), 16)
-  const isDark = bgBrightness < 384
-  el.style.setProperty('--color-surface', adjustColor(resolved.bg, isDark ? 12 : -8))
+  for (const [role, color] of [['foreground', resolved.fg], ['fg-secondary', resolved.fgSecondary], ['fg-muted', resolved.fgMuted], ['muted', resolved.muted], ['accent-text', readableColor(resolved.accent, backgrounds)]] as const) {
+    el.style.setProperty('--color-canvas-' + role, color)
+  }
+  // A dark sidebar can accompany a pastel canvas without forcing one text color onto both.
+  for (const [role, color] of [['foreground', resolved.fg], ['fg-secondary', resolved.fgSecondary], ['fg-muted', resolved.fgMuted], ['muted', resolved.muted], ['accent-text', resolved.accent]] as const) {
+    el.style.setProperty('--color-sidebar-' + role, readableColor(color, sidebarBackgrounds))
+  }
 }
 
 export function useThemeApplicator(): void {
@@ -72,7 +79,7 @@ export function useThemeApplicator(): void {
 
     try {
       const config: ThemeConfig = JSON.parse(currentTheme.config)
-      applyThemeConfig(config)
+      applyThemeConfig(resolveBuiltinConfig(currentTheme.name, currentTheme.is_builtin, config))
     } catch (err) {
       console.error('Failed to parse theme config:', err)
     }

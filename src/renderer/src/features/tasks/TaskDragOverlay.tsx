@@ -21,7 +21,7 @@ export function TaskDragOverlay({ task, width }: TaskDragOverlayProps): React.JS
 
   return (
     <div
-      className="rounded-lg border border-accent/30 bg-surface shadow-lg opacity-30"
+      className="rounded-lg border border-accent/30 bg-surface shadow-xl opacity-85"
       style={{ width: width ? `${width}px` : undefined }}
     >
       <TaskRow

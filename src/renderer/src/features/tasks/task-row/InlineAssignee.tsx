@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../../shared/motion/MotionPresence'
 import { useState, useRef, useEffect } from 'react'
 import { UserCircle } from 'lucide-react'
 import { useMemberDisplay, useProjectMemberDisplays } from '../../../shared/hooks/useMemberDisplay'
@@ -48,12 +49,11 @@ export function InlineAssignee({ taskId, assignedTo, projectId }: { taskId: stri
           </div>
         ) : (
           <div className="flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-muted/20 group-hover:border-muted/40">
-            <UserCircle size={8} className="text-muted/0 group-hover:text-muted/40" />
+            <UserCircle size={8} className="text-muted/0 group-hover:text-muted" />
           </div>
         )}
       </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-surface py-1 shadow-xl">
+      {<MotionPresence open={Boolean(open)}>{() => (open) ? (<div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-surface py-1 shadow-xl">
           {assignedTo && (
             <button
               onClick={(e) => { e.stopPropagation(); handleAssign(null) }}
@@ -77,8 +77,7 @@ export function InlineAssignee({ taskId, assignedTo, projectId }: { taskId: stri
               <span className="truncate text-[12px] font-light text-foreground">{d.display_name ?? d.email}</span>
             </button>
           ))}
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

@@ -95,7 +95,7 @@ export function CommandPalette(): React.JSX.Element | null {
 
   const results = useCommandPaletteSearch(query, includeArchived, externalFilters)
 
-  useFocusRestore()
+  useFocusRestore(isOpen, containerRef)
   useFocusTrap(containerRef, isOpen)
   const allTasks = useTaskStore((s) => s.tasks)
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask)
@@ -327,12 +327,12 @@ export function CommandPalette(): React.JSX.Element | null {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[15vh] backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
+      className="ui-command-palette fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[15vh] backdrop-blur-sm "
       onClick={handleBackdropClick}
     >
       <div
         ref={containerRef}
-        className="w-full max-w-xl rounded-xl border border-border bg-surface shadow-2xl motion-safe:animate-in motion-safe:slide-in-from-top-2 motion-safe:duration-150"
+        className="w-full max-w-xl rounded-xl border border-border bg-surface shadow-2xl "
         onKeyDown={handleKeyDown}
       >
         {/* Search input + chips */}
@@ -354,7 +354,7 @@ export function CommandPalette(): React.JSX.Element | null {
               {chip.label}
               <button
                 onClick={() => removeChip(chip.id)}
-                className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10"
+                className="ml-0.5 rounded-full p-0.5  hover:bg-foreground/10"
               >
                 <X size={8} />
               </button>

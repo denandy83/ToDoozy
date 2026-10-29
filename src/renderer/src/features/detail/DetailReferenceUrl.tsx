@@ -107,7 +107,7 @@ export function DetailReferenceUrl({
         onKeyDown={handleKeyDown}
         onFocus={() => setIsEditing(true)}
         placeholder="Add reference..."
-        className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded px-0 py-0.5"
+        className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded px-0 py-0.5"
         aria-label="Reference URL"
       />
     )
@@ -139,7 +139,7 @@ export function DetailReferenceUrl({
       )}
       <button
         onClick={startEditing}
-        className="flex-shrink-0 rounded p-0.5 text-muted/40 transition-colors hover:text-foreground hover:bg-foreground/6"
+        className="flex-shrink-0 rounded p-0.5 text-muted transition-colors hover:text-foreground hover:bg-foreground/6"
         title="Edit reference URL"
         aria-label="Edit reference URL"
         tabIndex={-1}
@@ -148,7 +148,7 @@ export function DetailReferenceUrl({
       </button>
       <button
         onClick={handleClear}
-        className="flex-shrink-0 rounded p-0.5 text-muted/40 transition-colors hover:text-danger hover:bg-foreground/6"
+        className="flex-shrink-0 rounded p-0.5 text-muted transition-colors hover:text-danger hover:bg-foreground/6"
         title="Clear reference URL"
         aria-label="Clear reference URL"
       >

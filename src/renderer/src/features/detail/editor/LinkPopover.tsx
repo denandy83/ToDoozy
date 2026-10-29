@@ -81,7 +81,7 @@ export function LinkPopover({
   return (
     <div
       ref={popoverRef}
-      className="fixed z-[10000] w-64 rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+      className="fixed z-[10000] w-64 rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:duration-100"
       style={{ top: position.top, left: position.left }}
     >
       {isEditing ? (

@@ -1,12 +1,9 @@
+import { ColorSwatches } from '../../shared/components/ColorSwatches'
 import { useState, useEffect, useRef } from 'react'
 import type { Project } from '../../../../shared/types'
 import { useProjectStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 
-const PROJECT_COLORS = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
-  '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'
-]
 
 interface ProjectGeneralSettingsProps {
   project: Project
@@ -94,19 +91,7 @@ export function ProjectGeneralSettings({
           Color
         </label>
         <div className="flex gap-2">
-          {PROJECT_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => handleColorChange(c)}
-              className={`h-8 w-8 rounded-full transition-transform ${
-                color === c
-                  ? 'scale-110 ring-2 ring-foreground/30 ring-offset-2 ring-offset-surface'
-                  : ''
-              }`}
-              style={{ backgroundColor: c }}
-            />
-          ))}
+          <ColorSwatches value={color} onChange={handleColorChange} />
         </div>
       </div>
 

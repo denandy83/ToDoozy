@@ -1,3 +1,4 @@
+import { MotionPresence } from '../motion/MotionPresence'
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import { X, Plus, Save } from 'lucide-react'
 import {
@@ -225,7 +226,7 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
       {/* Row 1: Label chips (inline) */}
       {showLabelsInline && (
         <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted mr-1">Labels</span>
+          <span className="ui-section-label text-muted mr-1">Labels</span>
           {labels.map((label) => {
             const isActive = activeLabelFilters.has(label.name.toLowerCase())
             return (
@@ -281,19 +282,17 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
             Filter
           </button>
 
-          {dropdownOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-border bg-surface shadow-lg">
+          {<MotionPresence open={Boolean(dropdownOpen)}>{() => (dropdownOpen) ? (<div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-border bg-surface shadow-lg">
               {availableFilterTypes.map((type) => (
                 <button
                   key={type}
                   onClick={() => handleAddFilter(type)}
-                  className="block w-full px-3 py-1.5 text-left text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6 first:rounded-t-lg last:rounded-b-lg"
+                  className="block w-full px-3 py-1.5 text-left ui-metadata text-foreground transition-colors hover:bg-foreground/6 first:rounded-t-lg last:rounded-b-lg"
                 >
                   {{ due_date: 'Due Date', keyword: 'Keyword', labels: 'Labels', projects: 'Projects', priority: 'Priority', status: 'Status' }[type]}
                 </button>
               ))}
-            </div>
-          )}
+            </div>) : null}</MotionPresence>}
 
           {/* Filter picker popups */}
           {activeFilterType && pickerPos && (

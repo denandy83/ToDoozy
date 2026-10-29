@@ -55,7 +55,7 @@ export function NavItem({
           {count > 0 && (
             <span
               className={`text-[10px] font-bold tabular-nums ${
-                active ? 'text-accent' : 'text-muted/60'
+                active ? 'text-accent' : 'text-muted'
               }`}
             >
               {count}
@@ -66,7 +66,7 @@ export function NavItem({
       {collapsed && count > 0 && (
         <span
           className={`absolute bottom-0.5 right-0.5 text-[8px] font-bold tabular-nums leading-none ${
-            active ? 'text-accent' : 'text-muted/60'
+            active ? 'text-accent' : 'text-muted'
           }`}
         >
           {count > 99 ? '99+' : count}

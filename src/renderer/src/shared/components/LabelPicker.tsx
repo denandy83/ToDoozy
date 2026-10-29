@@ -1,3 +1,4 @@
+import { ColorSwatches } from './ColorSwatches'
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import type { Label } from '../../../../shared/types'
@@ -201,7 +202,7 @@ export function LabelPicker({
     <div
       ref={ref}
       onKeyDown={handleKeyDown}
-      className="w-56 rounded-lg border border-border bg-background p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+      className="w-56 rounded-lg border border-border bg-background p-1 shadow-lg motion-safe:duration-100"
     >
       {newLabelMode ? (
         <div className="flex flex-col gap-2 p-2">
@@ -211,15 +212,10 @@ export function LabelPicker({
             value={newLabelName}
             onChange={(e) => setNewLabelName(e.target.value)}
             placeholder="Label name"
-            className="rounded border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground focus:outline-none focus:border-accent"
+            className="rounded border border-border bg-transparent px-2 py-1 text-sm font-normal text-foreground focus:outline-none focus:border-accent"
           />
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={newLabelColor}
-              onChange={(e) => setNewLabelColor(e.target.value)}
-              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
-            />
+          <div className="flex flex-col gap-2">
+            <ColorSwatches value={newLabelColor} onChange={setNewLabelColor} />
             <button
               onClick={handleCreateLabel}
               className="flex-1 rounded bg-accent px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-accent-fg transition-colors hover:bg-accent/80"
@@ -237,7 +233,7 @@ export function LabelPicker({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search labels..."
-              className="w-full rounded border border-border bg-transparent px-2 py-1 text-sm font-light text-foreground placeholder:text-muted/40 focus:border-accent focus:outline-none"
+              className="w-full rounded border border-border bg-transparent px-2 py-1 text-sm font-normal text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
             />
           </div>
           <div ref={listRef} className="max-h-48 overflow-y-auto">
@@ -248,7 +244,7 @@ export function LabelPicker({
                   key={label.id}
                   data-label-index={index}
                   onClick={() => { onToggleLabel(label.id); setSearchQuery(''); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
-                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${index === highlightedIndex ? 'bg-foreground/6' : ''}`}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-normal transition-colors hover:bg-foreground/6 ${index === highlightedIndex ? 'bg-foreground/6' : ''}`}
                 >
                   <span
                     className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
@@ -274,7 +270,7 @@ export function LabelPicker({
                       key={label.id}
                       data-label-index={globalIndex}
                       onClick={() => handleAddGlobalLabel(label.id)}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-light transition-colors hover:bg-foreground/6 ${globalIndex === highlightedIndex ? 'bg-foreground/6' : ''}`}
+                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm font-normal transition-colors hover:bg-foreground/6 ${globalIndex === highlightedIndex ? 'bg-foreground/6' : ''}`}
                     >
                       <span
                         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
@@ -291,7 +287,7 @@ export function LabelPicker({
           <div className="mt-1 border-t border-border pt-1">
             <button
               onClick={() => setNewLabelMode(true)}
-              className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-light text-muted transition-colors hover:bg-foreground/6 hover:text-foreground ${highlightedIndex === totalItems ? 'bg-foreground/6 text-foreground' : ''}`}
+              className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-normal text-muted transition-colors hover:bg-foreground/6 hover:text-foreground ${highlightedIndex === totalItems ? 'bg-foreground/6 text-foreground' : ''}`}
             >
               <Plus size={14} />
               New label...

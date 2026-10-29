@@ -1,3 +1,5 @@
+import { MotionPresence } from '../../shared/motion/MotionPresence'
+import { ColorSwatches } from '../../shared/components/ColorSwatches'
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
@@ -5,30 +7,29 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 
 function ColorDot({ color, onChange }: { color: string; onChange: (c: string) => void }): React.JSX.Element {
-  const inputRef = useRef<HTMLInputElement>(null)
-  return (
-    <button
-      className="relative h-3.5 w-3.5 flex-shrink-0 rounded-full cursor-pointer ring-1 ring-foreground/10 hover:ring-foreground/30 transition-all"
-      style={{ backgroundColor: color }}
-      onClick={() => inputRef.current?.click()}
-      title="Change color"
-    >
-      <input
-        ref={inputRef}
-        type="color"
-        value={color}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      />
-    </button>
-  )
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent): void => { if (!ref.current?.contains(event.target as Node)) setOpen(false) }
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false) } }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key) }
+  }, [open])
+  return <div ref={ref} className="relative flex-shrink-0">
+    <button type="button" aria-label="Change label color" aria-expanded={open} className="h-4 w-4 rounded-full ring-1 ring-foreground/20" style={{ backgroundColor: color }} onClick={() => setOpen(!open)} />
+    <MotionPresence open={open}><div className="absolute left-0 top-full z-50 mt-2 w-60 rounded-lg border border-border bg-surface p-3 shadow-xl">
+      <ColorSwatches value={color} onChange={onChange} />
+    </div></MotionPresence>
+  </div>
 }
 import { useLabelStore } from '../../shared/stores/labelStore'
 import { useProjectStore, selectCurrentProject } from '../../shared/stores/projectStore'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useToast } from '../../shared/components/Toast'
 import { useSettingsStore, useSetting } from '../../shared/stores/settingsStore'
-import { LABEL_COLORS, leastUsedLabelColor } from '../../shared/utils/labelColors'
+import { leastUsedLabelColor } from '../../shared/utils/labelColors'
 import type { Label, LabelUsageInfo } from '../../../../shared/types'
 
 export function LabelSettingsContent(): React.JSX.Element {
@@ -445,20 +446,10 @@ function SortableLabelRow({
               className="flex-1 rounded border border-border bg-surface px-3 py-1.5 text-sm font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
             />
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex flex-col items-start gap-2">
               <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
-              {LABEL_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => onEditColorChange(c)}
-                  className={`h-5 w-5 rounded-full ${
-                    editColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
+              <ColorSwatches value={editColor} onChange={onEditColorChange} />
             </div>
             <div className="flex items-center gap-1">
               <button

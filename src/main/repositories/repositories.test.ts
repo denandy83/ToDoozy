@@ -1233,14 +1233,14 @@ describe('ThemeRepository', () => {
 
   it('lists seeded themes', () => {
     const themes = repo.list()
-    expect(themes.length).toBe(12)
+    expect(themes.length).toBe(18)
   })
 
   it('lists themes by mode', () => {
     const dark = repo.listByMode('dark')
     const light = repo.listByMode('light')
-    expect(dark.length).toBe(6)
-    expect(light.length).toBe(6)
+    expect(dark.length).toBe(9)
+    expect(light.length).toBe(9)
   })
 
   it('creates a custom theme', () => {
@@ -1248,7 +1248,7 @@ describe('ThemeRepository', () => {
     const config = JSON.stringify({ bg: '#000', fg: '#fff', fgSecondary: '#aaa', fgMuted: '#666', muted: '#888', accent: '#f00', accentFg: '#fff', border: '#333' })
     const theme = repo.create({ id, name: 'Custom', mode: 'dark', config })
     expect(theme.name).toBe('Custom')
-    expect(repo.list().length).toBe(13)
+    expect(repo.list().length).toBe(19)
   })
 
   it('updates a theme', () => {

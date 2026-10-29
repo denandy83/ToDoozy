@@ -1,3 +1,4 @@
+import { usePresence } from '../../shared/motion/usePresence'
 /**
  * Flyout panel listing recent notifications. Click a notification to navigate
  * to the relevant task/project and mark as read.
@@ -11,6 +12,7 @@ import { useToast } from '../../shared/components/Toast'
 
 export function NotificationPanel(): React.JSX.Element | null {
   const panelOpen = useNotificationStore((s) => s.panelOpen)
+  const presence = usePresence(panelOpen, 'menu')
   const closePanel = useNotificationStore((s) => s.closePanel)
   const notifications = useNotificationStore((s) => s.notifications)
   const markAsRead = useNotificationStore((s) => s.markAsRead)
@@ -47,7 +49,7 @@ export function NotificationPanel(): React.JSX.Element | null {
     return () => document.removeEventListener('mousedown', handler)
   }, [panelOpen, closePanel])
 
-  if (!panelOpen) return null
+  if (!presence.present) return null
 
   const handleNotificationClick = async (n: typeof notifications[0]): Promise<void> => {
     if (n.read === 0) {
@@ -99,7 +101,8 @@ export function NotificationPanel(): React.JSX.Element | null {
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full z-50 mt-1.5 w-80 rounded-xl border border-border bg-background shadow-2xl"
+      {...presence.props}
+      className="ui-surface ui-menu absolute right-0 top-full z-50 mt-1.5 w-80 rounded-xl border border-border bg-background shadow-2xl"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">

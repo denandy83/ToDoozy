@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 /**
  * Overlapping avatar circles for shared project members.
  * Shows all members including current user. Clicking a member
@@ -74,11 +75,9 @@ function MemberCircle({
       >
         {initials}
       </button>
-      {hovered && (
-        <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted shadow-md ring-1 ring-border">
+      {<MotionPresence open={Boolean(hovered)}>{() => (hovered) ? (<div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted shadow-md ring-1 ring-border">
           {label}
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

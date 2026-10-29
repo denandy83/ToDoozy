@@ -1,3 +1,4 @@
+import { usePresence } from '../../shared/motion/usePresence'
 import { useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
@@ -72,11 +73,12 @@ interface KeyboardShortcutsModalProps {
 }
 
 export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModalProps): React.JSX.Element | null {
+  const presence = usePresence(open, 'dialog')
   const containerRef = useRef<HTMLDivElement>(null)
   const appToggleShortcut = useSetting('app_toggle_shortcut') ?? 'Cmd+Shift+B'
 
-  useFocusRestore()
-  useFocusTrap(containerRef, open)
+  useFocusRestore(presence.present, containerRef)
+  useFocusTrap(containerRef, presence.present)
 
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent) => {
@@ -96,17 +98,18 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
     [onClose]
   )
 
-  if (!open) return null
+  if (!presence.present) return null
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[10vh] backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150"
+      {...presence.props}
+      className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[10vh] backdrop-blur-sm motion-safe:duration-150"
       onClick={handleBackdropClick}
     >
       <div
         ref={containerRef}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl focus:outline-none motion-safe:animate-in motion-safe:slide-in-from-top-2 motion-safe:duration-150"
+        className="ui-modal-content w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl focus:outline-none motion-safe:duration-150"
         onKeyDown={handleKeyDown}
       >
         {/* Header */}

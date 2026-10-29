@@ -104,3 +104,22 @@ describe('migration_25 — project_labels backfill', () => {
     expect((db.prepare('SELECT COUNT(*) c FROM project_labels WHERE label_id = ?').get('l1') as { c: number }).c).toBe(1)
   })
 })
+
+describe('soft theme installation', () => {
+  it('adds three pairs once without changing custom colors or the selected theme', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      for (const migration of migrations.slice(0, 29)) migration(db)
+      const selected = db.prepare("SELECT id, config FROM themes WHERE name='Standard Dark'").get() as { id: string; config: string }
+      const custom = JSON.stringify({ bg: '#e7b7c8', accent: '#b6d9c7' })
+      db.prepare("INSERT INTO themes (id,name,mode,config,is_builtin) VALUES ('custom-pastel','Soft Sage Dark','dark',?,0)").run(custom)
+      db.prepare("UPDATE settings SET value=? WHERE key='theme_id'").run(selected.id)
+      migrations[29](db)
+      migrations[29](db)
+      expect((db.prepare("SELECT COUNT(*) AS count FROM themes WHERE is_builtin=1 AND name LIKE 'Soft %'").get() as { count: number }).count).toBe(6)
+      expect((db.prepare("SELECT config FROM themes WHERE id='custom-pastel'").get() as { config: string }).config).toBe(custom)
+      expect((db.prepare("SELECT value FROM settings WHERE key='theme_id'").get() as { value: string }).value).toBe(selected.id)
+      expect((db.prepare('SELECT config FROM themes WHERE id=?').get(selected.id) as { config: string }).config).toBe(selected.config)
+    } finally { db.close() }
+  })
+})

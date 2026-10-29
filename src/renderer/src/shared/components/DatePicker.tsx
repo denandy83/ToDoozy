@@ -7,6 +7,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import { Clock, X } from 'lucide-react'
 import { useDateFormat, type DateFormatType } from '../utils/dateFormat'
 import { pushPopup } from '../utils/popupStack'
+import { CalendarMotion } from './CalendarMotion'
 
 registerLocale('en-GB', enGB)
 registerLocale('en-US', enUS)
@@ -227,6 +228,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       <div className="datepicker-wrapper">
         <ReactDatePicker
           ref={datePickerRef}
+          popperContainer={CalendarMotion}
           selected={dateObj}
           onChange={handleDateChange}
           onChangeRaw={handleChangeRaw}
@@ -236,7 +238,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
           locale={fmtConfig.locale}
           placeholderText={dateFormat.toUpperCase()}
           isClearable={false}
-          className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted/50 focus:outline-none"
+          className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted focus:outline-none"
           calendarClassName="todoozy-calendar"
           popperPlacement="bottom-start"
         />
@@ -247,6 +249,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
         <div className="datepicker-wrapper-time" data-detail-subfield="1">
           <ReactDatePicker
             ref={timePickerRef}
+            popperContainer={CalendarMotion}
             selected={timeObj}
             onChange={handleTimeChange}
             onChangeRaw={handleTimeChangeRaw}
@@ -260,7 +263,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
             dateFormat="HH:mm"
             placeholderText="HH:MM"
             isClearable={false}
-            className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted/50 focus:outline-none"
+            className="w-full bg-transparent text-sm font-light text-foreground placeholder:text-muted focus:outline-none"
             calendarClassName="todoozy-calendar"
             popperPlacement="bottom-start"
           />

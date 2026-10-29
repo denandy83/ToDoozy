@@ -1,3 +1,4 @@
+import { useDismissibleSurface } from '../../shared/motion/useDismissibleSurface'
 import { useState, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTaskStore } from '../../shared/stores'
@@ -18,8 +19,11 @@ export function UseTemplateModal({
   template,
   projects,
   currentUser,
-  onClose
+  onClose: finishClose
 }: UseTemplateModalProps): React.JSX.Element {
+  const surface = useDismissibleSurface(finishClose)
+  const onClose = surface.close
+
   const [selectedProjectId, setSelectedProjectId] = useState(
     projects[0]?.id ?? ''
   )
@@ -169,11 +173,12 @@ export function UseTemplateModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      {...surface.props}
+      className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
+        className="ui-modal-content w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-2xl motion-safe:duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">

@@ -1,10 +1,7 @@
+import { ColorSwatches } from '../../shared/components/ColorSwatches'
 import { useState } from 'react'
 import { Check, X } from 'lucide-react'
 
-const STATUS_COLORS = [
-  '#888888', '#ef4444', '#f59e0b', '#22c55e',
-  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'
-]
 
 interface StatusEditRowProps {
   initialName: string
@@ -54,20 +51,10 @@ export function StatusEditRow({
         />
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <span className="text-[9px] font-bold uppercase tracking-wider text-muted">Color</span>
-          {STATUS_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setColor(c)}
-              className={`h-5 w-5 rounded-full ${
-                color === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''
-              }`}
-              style={{ backgroundColor: c }}
-            />
-          ))}
+          <ColorSwatches value={color} onChange={setColor} />
         </div>
 
         <div className="flex items-center gap-1">

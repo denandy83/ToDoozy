@@ -1,3 +1,8 @@
+import { ColorSwatches } from './shared/components/ColorSwatches'
+import { usePresence } from './shared/motion/usePresence'
+import { useLayoutMotion } from './shared/motion/useLayoutMotion'
+import { EASE_OUT, REORDER_DURATION, immediateMotion, markPointerReorder, subscribeMotionInput } from './shared/motion/motion'
+import { MotionPresence } from './shared/motion/MotionPresence'
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   DndContext,
@@ -5,7 +10,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  type Modifier
 } from '@dnd-kit/core'
 import { LayoutList, LayoutGrid, Columns3, LayoutTemplate, Trash2, Archive, Copy, Filter } from 'lucide-react'
 import { NewProjectModal } from './features/projects'
@@ -51,6 +55,8 @@ import { NotificationBell, NotificationPanel, MemberAvatars, ShareProjectMenu, R
 import { useNotificationStore } from './shared/stores/notificationStore'
 
 export function AppLayout(): React.JSX.Element {
+  const mainRef = useRef<HTMLElement>(null)
+  useEffect(subscribeMotionInput, [])
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
@@ -58,11 +64,6 @@ export function AppLayout(): React.JSX.Element {
   const helpOpenRef = useRef(false)
   const dragWidthRef = useRef(0)
   helpOpenRef.current = helpOpen
-
-  // Lock ghost horizontally (stays at original X), only moves vertically
-  const lockHorizontal: Modifier = useCallback(({ transform }) => {
-    return { ...transform, x: 0 }
-  }, [])
 
   // Apply current theme CSS variables
   useThemeApplicator()
@@ -654,6 +655,8 @@ export function AppLayout(): React.JSX.Element {
   const detailPanelPosition = useViewStore((s) => s.detailPanelPosition)
   const hasDetailPanel = showDetailPanel && selectedTaskIds.size === 1
   const isSidePanel = detailPanelPosition === 'side'
+  const detailPresence = usePresence(hasDetailPanel, 'panel')
+  useLayoutMotion(mainRef, allTasks)
 
   return (
     <DndContext
@@ -661,7 +664,7 @@ export function AppLayout(): React.JSX.Element {
       collisionDetection={collisionDetection}
       onDragStart={(event) => { dragWidthRef.current = (event.active.rect.current.initial?.width ?? 0); handleDragStart(event) }}
       onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
+      onDragEnd={(event) => { markPointerReorder(); handleDragEnd(event) }}
       onDragCancel={handleDragCancel}
     >
       <div className="flex h-screen w-screen bg-background text-foreground">
@@ -677,9 +680,9 @@ export function AppLayout(): React.JSX.Element {
         />
 
         {/* Main content area */}
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main ref={mainRef} className="flex flex-1 flex-col overflow-hidden">
           <UpdateReadyBanner />
-          <header className="relative flex h-[57px] items-center gap-3 border-b border-foreground/10 px-6">
+          <header className="relative flex h-16 flex-shrink-0 items-center gap-3 border-b border-foreground/10 px-6">
             {currentView === 'project' && selectedProject && (
               <>
                 <LayoutGrid size={16} className="flex-shrink-0 text-muted" />
@@ -709,7 +712,7 @@ export function AppLayout(): React.JSX.Element {
                   if (e.key === 'Enter') handleSaveProjectName()
                   if (e.key === 'Escape') { e.stopPropagation(); setEditingProjectName(false) }
                 }}
-                className="text-3xl font-light tracking-[0.15em] uppercase text-foreground bg-transparent focus:outline-none"
+                className="ui-workspace-heading text-foreground bg-transparent focus:outline-none"
               />
             ) : editingViewName && currentView === 'saved-view' ? (
               <input
@@ -722,11 +725,11 @@ export function AppLayout(): React.JSX.Element {
                   if (e.key === 'Enter') handleSaveViewName()
                   if (e.key === 'Escape') { e.stopPropagation(); setEditingViewName(false) }
                 }}
-                className="text-3xl font-light tracking-[0.15em] uppercase text-foreground bg-transparent focus:outline-none"
+                className="ui-workspace-heading text-foreground bg-transparent focus:outline-none"
               />
             ) : (
               <h1
-                className={`text-3xl font-light tracking-[0.15em] uppercase text-foreground ${currentView === 'project' || currentView === 'saved-view' ? 'cursor-pointer' : ''}`}
+                className={`ui-workspace-heading text-foreground ${currentView === 'project' || currentView === 'saved-view' ? 'cursor-pointer' : ''}`}
                 onDoubleClick={currentView === 'saved-view' ? handleStartEditViewName : handleStartEditProjectName}
               >
                 {viewTitle}
@@ -868,7 +871,7 @@ export function AppLayout(): React.JSX.Element {
             </div>
 
             {/* Detail Panel */}
-            {hasDetailPanel && <DetailPanel />}
+            {detailPresence.present && <DetailPanel motionProps={detailPresence.props} />}
           </div>
         </main>
 
@@ -922,7 +925,7 @@ export function AppLayout(): React.JSX.Element {
       </div>
 
       {/* Drag overlay - ghost card */}
-      <DragOverlay dropAnimation={null} modifiers={[lockHorizontal]}>
+      <DragOverlay dropAnimation={immediateMotion() ? null : { duration: REORDER_DURATION, easing: EASE_OUT }}>
         {dragState.activeTask ? (
           layoutMode === 'kanban' ? (
             <KanbanCard
@@ -943,7 +946,6 @@ export function AppLayout(): React.JSX.Element {
   )
 }
 
-const VIEW_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#14b8a6', '#f97316', '#84cc16', '#e11d48']
 
 function ViewColorDot({ color, onChange }: { color: string; onChange: (c: string) => void }): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -966,22 +968,11 @@ function ViewColorDot({ color, onChange }: { color: string; onChange: (c: string
         style={{ backgroundColor: color }}
         title="Change view color"
       />
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-2 rounded-lg border border-border bg-surface p-3 shadow-lg">
-          <div className="flex gap-1.5">
-            {VIEW_COLORS.map((c) => (
-              <button
-                key={c}
-                onClick={() => { onChange(c); setOpen(false) }}
-                className={`h-4 w-4 rounded-full transition-transform ${
-                  color === c ? 'scale-110 ring-2 ring-foreground/30 ring-offset-1 ring-offset-surface' : ''
-                }`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
+      {<MotionPresence open={Boolean(open)}>{() => (open) ? (<div className="absolute left-0 top-full z-50 mt-2 rounded-lg border border-border bg-surface p-3 shadow-lg">
+          <div className="w-56">
+            <ColorSwatches value={color} onChange={(next) => { onChange(next); setOpen(false) }} />
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 import { useCallback, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { LabelChip } from '../../shared/components/LabelChip'
@@ -96,8 +97,7 @@ export function DetailLabels({
         </button>
       </div>
 
-      {dropdownOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1">
+      <MotionPresence open={dropdownOpen}><div className="absolute left-0 top-full z-50 mt-1">
           <LabelPicker
             allLabels={allLabels}
             assignedLabelIds={assignedIds}
@@ -110,7 +110,7 @@ export function DetailLabels({
             projectId={projectId}
           />
         </div>
-      )}
+      </MotionPresence>
     </div>
   )
 }

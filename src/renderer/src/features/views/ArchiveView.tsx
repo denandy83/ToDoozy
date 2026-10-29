@@ -331,7 +331,7 @@ export function ArchiveView(): React.JSX.Element {
       {/* Right-click context menu */}
       {contextMenu && createPortal(
         <div
-          className="fixed z-[9999] w-52 rounded-lg border border-border bg-surface p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+          className="fixed z-[9999] w-52 rounded-lg border border-border bg-surface p-1 shadow-lg motion-safe:duration-100"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseDown={(e) => e.stopPropagation()}
         >

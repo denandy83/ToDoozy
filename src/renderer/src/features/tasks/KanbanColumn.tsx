@@ -1,3 +1,4 @@
+import { useSemanticColor } from '../../shared/hooks/useSemanticColor'
 import { useDroppable, useDndContext } from '@dnd-kit/core'
 import { useMemo } from 'react'
 import { Ban } from 'lucide-react'
@@ -30,6 +31,7 @@ export function KanbanColumn({
   onStatusChange,
   onDeleteTask
 }: KanbanColumnProps): React.JSX.Element {
+  const headingColor = useSemanticColor(status.color || '#888888')
   const { active } = useDndContext()
   const allTasks = useTaskStore((s) => s.tasks)
   const allStatusMap = useStatusStore((s) => s.statuses)
@@ -58,12 +60,12 @@ export function KanbanColumn({
           style={{ backgroundColor: status.color || 'var(--color-muted)' }}
         />
         <span
-          className="text-[10px] font-bold uppercase tracking-[0.3em]"
-          style={{ color: status.color || undefined }}
+          className="ui-section-label"
+          style={{ color: headingColor.text }}
         >
           {status.name}
         </span>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+        <span className="ui-metadata text-muted">
           {tasks.length}
         </span>
       </div>
@@ -96,7 +98,7 @@ export function KanbanColumn({
           ))}
 
         {tasks.length === 0 && !(isOver && isDropBlocked) && (
-          <p className="py-3 text-center text-[10px] font-bold uppercase tracking-widest text-muted/40">
+          <p className="py-3 text-center ui-metadata text-muted">
             No tasks
           </p>
         )}

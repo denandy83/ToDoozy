@@ -1,3 +1,4 @@
+import { usePresence } from '../../shared/motion/usePresence'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Modal } from '../../shared/components/Modal'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
@@ -12,17 +13,7 @@ interface ThemeSettingsModalProps {
   onClose: () => void
 }
 
-const DEFAULT_CONFIG: ThemeConfig = {
-  bg: '#1a1a2e',
-  fg: '#e0e0e0',
-  fgSecondary: '#b0b0b0',
-  fgMuted: '#666666',
-  muted: '#888888',
-  accent: '#6366f1',
-  accentFg: '#ffffff',
-  border: '#2a2a4a',
-  sidebar: '#26263a'
-}
+import { DEFAULT_THEME_CONFIG as DEFAULT_CONFIG, resolveBuiltinConfig } from '../../../../shared/themeCatalog'
 
 const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   bg: 'Background',
@@ -38,7 +29,7 @@ const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
 
 function parseConfig(theme: Theme): ThemeConfig {
   try {
-    const c = JSON.parse(theme.config) as Partial<ThemeConfig>
+    const c = resolveBuiltinConfig(theme.name, theme.is_builtin, JSON.parse(theme.config) as ThemeConfig)
     const bg = c.bg ?? DEFAULT_CONFIG.bg
     if (!c.sidebar) {
       const num = parseInt(bg.replace('#', ''), 16)
@@ -56,6 +47,7 @@ function parseConfig(theme: Theme): ThemeConfig {
 }
 
 export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): React.JSX.Element | null {
+  const dialogPresence = usePresence(open, 'dialog')
   const currentTheme = useSettingsStore(selectCurrentTheme)
   const { setSetting, setCurrentTheme, createTheme, updateTheme } = useSettingsStore()
   const { addToast } = useToast()
@@ -192,7 +184,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
     onClose()
   }, [currentTheme, onClose])
 
-  if (!open) return null
+  if (!dialogPresence.present) return null
 
   return (
     <Modal open={open} onClose={handleClose} title="Theme Settings">

@@ -1,3 +1,4 @@
+import { usePresence } from '../../shared/motion/usePresence'
 import { ensureProtocol } from '../../../../shared/referenceUrl'
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
@@ -91,6 +92,7 @@ export function TaskRow({
   const { isEditing, setIsEditing, editValue, inputRef, saveTitle, handleEditKeyDown, handleEditChange } =
     useInlineTitleEdit(task, onTitleChange)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerPresence = usePresence(pickerOpen)
   const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null)
   const addLabelBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -122,8 +124,8 @@ export function TaskRow({
       ? 'font-medium'
       : task.priority >= 3
         ? 'font-normal'
-        : 'font-light'
-    : 'font-light'
+        : 'font-normal'
+    : 'font-normal'
 
   const {
     attributes,
@@ -292,7 +294,7 @@ export function TaskRow({
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        className={`group relative flex items-center gap-2 py-2 pr-6 transition-all select-none ${
+        className={`ui-task-row group relative flex items-center gap-2 pr-6 select-none ${
           readOnly
             ? 'cursor-default'
             : 'cursor-grab active:cursor-grabbing'
@@ -308,6 +310,7 @@ export function TaskRow({
         {...listeners}
         role="row"
         data-task-id={task.id}
+        data-layout-task={isDragOverlay ? undefined : task.id}
         aria-selected={isSelected}
         aria-expanded={hasChildren ? isExpanded : undefined}
         tabIndex={0}
@@ -431,7 +434,7 @@ export function TaskRow({
 
         {/* Due date */}
         {task.due_date && !isDone && (
-          <span className={`inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${
+          <span className={`inline-flex flex-shrink-0 items-center gap-1 ui-metadata ${
             task.due_date.split('T')[0] < new Date().toISOString().split('T')[0] ? 'text-danger' : 'text-muted'
           }`}>
             <Calendar size={10} />
@@ -441,7 +444,7 @@ export function TaskRow({
 
         {/* Completed time — shown on done tasks instead of due date */}
         {isDone && task.completed_date && (
-          <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-success/40">
+          <span className="inline-flex flex-shrink-0 items-center gap-1 ui-metadata text-success">
             <CheckCircle2 size={10} />
             {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
             {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
@@ -452,7 +455,7 @@ export function TaskRow({
         {task.recurrence_rule && (
           <div className="group/recur relative flex-shrink-0">
             <Repeat size={12} strokeWidth={1.5} className="text-muted" />
-            <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover/recur:opacity-100">
+            <div className="ui-tooltip pointer-events-none absolute left-1/2 top-full mt-1.5 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-surface px-2 py-1 ui-metadata text-muted opacity-0 shadow-md ring-1 ring-border transition-opacity group-hover/recur:opacity-100">
               {describeRecurrence(task.recurrence_rule)}
             </div>
           </div>
@@ -487,7 +490,7 @@ export function TaskRow({
           <button
             ref={addLabelBtnRef}
             onClick={handleOpenPicker}
-            className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
+            className="ui-icon-button ui-row-action flex-shrink-0 rounded text-muted/0 transition-colors group-hover:text-muted hover:text-foreground hover:bg-foreground/6 focus-visible:ring-1 focus-visible:ring-accent"
             title="Add label"
             aria-label="Add label"
             tabIndex={0}
@@ -499,7 +502,7 @@ export function TaskRow({
         {!readOnly && (
           <button
             onClick={handleDelete}
-            className="flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
+            className="ui-icon-button ui-row-action flex-shrink-0 rounded p-1 text-danger opacity-0 transition-opacity hover:bg-danger/10 focus-visible:opacity-100 group-hover:opacity-100"
             title="Delete task"
             aria-label="Delete task"
           >
@@ -509,10 +512,11 @@ export function TaskRow({
       </div>
 
       {/* Label picker portal */}
-      {pickerOpen && pickerPos &&
+      {pickerPresence.present && pickerPos &&
         createPortal(
           <div
-            className="fixed z-[9999]"
+            {...pickerPresence.props}
+            className="ui-surface ui-menu fixed z-[9999]"
             style={{ top: pickerPos.top, left: pickerPos.left }}
           >
             <LabelPicker
@@ -683,7 +687,7 @@ function SubtaskList({
               }
             }}
             placeholder="Subtask title..."
-            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
         </div>
       )}

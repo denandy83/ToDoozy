@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../motion/MotionPresence'
 import { useCallback, useMemo } from 'react'
 import { X, Plus, ArrowUpDown, Trash2 } from 'lucide-react'
 import type { SortRule, SortField } from '../../utils/sortTasks'
@@ -72,8 +73,7 @@ export function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dr
         </button>
       )}
 
-      {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface p-2 shadow-lg">
+      {<MotionPresence open={Boolean(isOpen)}>{() => (isOpen) ? (<div className="absolute left-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface p-2 shadow-lg">
           {/* Existing rules */}
           {rules.map((rule, idx) => (
             <div key={idx} className="flex items-center gap-1.5 py-1">
@@ -125,21 +125,20 @@ export function SortDropdown({ rules, onChange, showCustom, isOpen, onToggle, dr
           <div className="flex items-center gap-1 border-t border-border pt-1.5 mt-1">
             <button
               onClick={onToggle}
-              className="rounded px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-accent transition-colors hover:bg-accent/12"
+              className="rounded px-2 py-1 ui-metadata text-accent transition-colors hover:bg-accent/12"
             >
               Done
             </button>
             {rules.length > 0 && (
               <button
                 onClick={() => onChange([])}
-                className="ml-auto rounded px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-red-500 transition-colors hover:bg-red-500/10"
+                className="ml-auto rounded px-2 py-1 ui-metadata text-red-500 transition-colors hover:bg-red-500/10"
               >
                 Clear
               </button>
             )}
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

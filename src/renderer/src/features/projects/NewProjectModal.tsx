@@ -1,9 +1,10 @@
+import { ColorSwatches } from '../../shared/components/ColorSwatches'
 import { useState } from 'react'
 import { Modal } from '../../shared/components/Modal'
 import { useProjectStore } from '../../shared/stores'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useStatusStore } from '../../shared/stores/statusStore'
-import { PROJECT_COLORS, pickNextProjectColor } from './projectColors'
+import { pickNextProjectColor } from './projectColors'
 
 interface NewProjectModalProps {
   open: boolean
@@ -98,17 +99,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps): React.
             Color
           </label>
           <div className="flex gap-2">
-            {PROJECT_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setColor(c)}
-                className={`h-8 w-8 rounded-full transition-transform ${
-                  color === c ? 'scale-110 ring-2 ring-foreground/30 ring-offset-2 ring-offset-surface' : ''
-                }`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
+            <ColorSwatches value={color} onChange={setColor} />
           </div>
         </div>
 

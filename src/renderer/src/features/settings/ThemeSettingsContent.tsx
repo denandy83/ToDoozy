@@ -1,3 +1,4 @@
+import { contrastRatio, isHexColor, surfaceColor, repairThemeText } from '../../../../shared/colorContrast'
 import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef, useRef } from 'react'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
@@ -18,17 +19,7 @@ import {
 } from '../../shared/utils/themeIO'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
-const DEFAULT_CONFIG: ThemeConfig = {
-  bg: '#1a1a2e',
-  fg: '#e0e0e0',
-  fgSecondary: '#b0b0b0',
-  fgMuted: '#666666',
-  muted: '#888888',
-  accent: '#6366f1',
-  accentFg: '#ffffff',
-  border: '#2a2a4a',
-  sidebar: '#26263a'
-}
+import { DEFAULT_THEME_CONFIG as DEFAULT_CONFIG, BUILTIN_CONFIGS, resolveBuiltinConfig } from '../../../../shared/themeCatalog'
 
 const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   bg: 'Background',
@@ -40,21 +31,6 @@ const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   accentFg: 'Accent FG',
   border: 'Border',
   sidebar: 'Sidebar'
-}
-
-const BUILTIN_CONFIGS: Record<string, ThemeConfig> = {
-  'Standard Dark': { bg: '#1a1a2e', fg: '#e0e0e0', fgSecondary: '#b0b0b0', fgMuted: '#666666', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#2a2a4a', sidebar: '#26263a' },
-  'Standard Light': { bg: '#f8f9fa', fg: '#1a1a2e', fgSecondary: '#4a4a6a', fgMuted: '#999999', muted: '#888888', accent: '#6366f1', accentFg: '#ffffff', border: '#e0e0e8', sidebar: '#f0f1f2' },
-  'Warm Earth Dark': { bg: '#1c1410', fg: '#e8ddd0', fgSecondary: '#b8a898', fgMuted: '#7a6a5a', muted: '#8a7a6a', accent: '#d4915e', accentFg: '#1c1410', border: '#3a2a1e', sidebar: '#28201c' },
-  'Warm Earth Light': { bg: '#faf5ef', fg: '#3a2a1e', fgSecondary: '#6a5a4a', fgMuted: '#a09080', muted: '#8a7a6a', accent: '#c07830', accentFg: '#ffffff', border: '#e0d5c8', sidebar: '#f2ede7' },
-  'Ocean Blue Dark': { bg: '#0d1b2a', fg: '#d0e0f0', fgSecondary: '#8ab0d0', fgMuted: '#4a6a8a', muted: '#5a7a9a', accent: '#2196f3', accentFg: '#ffffff', border: '#1b3a5a', sidebar: '#192736' },
-  'Ocean Blue Light': { bg: '#f0f6fc', fg: '#0d1b2a', fgSecondary: '#2a4a6a', fgMuted: '#7a9abc', muted: '#5a7a9a', accent: '#1976d2', accentFg: '#ffffff', border: '#c8daf0', sidebar: '#e8eef4' },
-  'Amethyst Dark': { bg: '#1a1024', fg: '#e0d0f0', fgSecondary: '#b090d0', fgMuted: '#6a4a8a', muted: '#7a5a9a', accent: '#9c27b0', accentFg: '#ffffff', border: '#2a1a3e', sidebar: '#261c30' },
-  'Amethyst Light': { bg: '#f8f0fc', fg: '#2a1a3e', fgSecondary: '#5a3a7a', fgMuted: '#9a7aba', muted: '#7a5a9a', accent: '#8e24aa', accentFg: '#ffffff', border: '#e0c8f0', sidebar: '#f0e8f4' },
-  'Forest Dark': { bg: '#0e1a10', fg: '#d0e8d0', fgSecondary: '#90b890', fgMuted: '#4a7a4a', muted: '#5a8a5a', accent: '#4caf50', accentFg: '#ffffff', border: '#1a3a1a', sidebar: '#1a261c' },
-  'Forest Light': { bg: '#f0faf0', fg: '#1a3a1a', fgSecondary: '#3a6a3a', fgMuted: '#7aaa7a', muted: '#5a8a5a', accent: '#388e3c', accentFg: '#ffffff', border: '#c0e0c0', sidebar: '#e8f2e8' },
-  'Rosewood Dark': { bg: '#1a0e10', fg: '#f0d0d8', fgSecondary: '#d090a0', fgMuted: '#8a4a5a', muted: '#9a5a6a', accent: '#e91e63', accentFg: '#ffffff', border: '#3a1a22', sidebar: '#261a1c' },
-  'Rosewood Light': { bg: '#fcf0f2', fg: '#3a1a22', fgSecondary: '#7a3a4a', fgMuted: '#ba7a8a', muted: '#9a5a6a', accent: '#c2185b', accentFg: '#ffffff', border: '#f0c8d0', sidebar: '#f4e8ea' }
 }
 
 function deriveSidebar(bg: string): string {
@@ -69,7 +45,8 @@ function deriveSidebar(bg: string): string {
 
 function parseConfig(theme: Theme): ThemeConfig {
   try {
-    const c = JSON.parse(theme.config) as Partial<ThemeConfig>
+    const raw = JSON.parse(theme.config) as ThemeConfig
+    const c = resolveBuiltinConfig(theme.name, theme.is_builtin, raw)
     return {
       bg: c.bg ?? DEFAULT_CONFIG.bg,
       fg: c.fg ?? DEFAULT_CONFIG.fg,
@@ -777,13 +754,13 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
             const right = keys[i + 1]
             rows.push(
               <div key={`row-${i}`} className="flex items-center gap-1.5 h-7">
-                <span className="w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[8px] font-bold uppercase tracking-widest text-muted text-right">{COLOR_LABELS[left]}</span>
-                <ColorSquare value={editConfig[left]} onChange={(v) => handleColorChange(left, v)} />
+                <span className="w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[11px] font-medium text-fg-secondary text-right">{COLOR_LABELS[left]}</span>
+                <ColorSquare label={COLOR_LABELS[left]} value={editConfig[left]} onChange={(v) => handleColorChange(left, v)} />
                 <span className="w-[52px] flex-shrink-0 text-xs font-mono text-fg-secondary"><ColorHex value={editConfig[left]} onChange={(v) => handleColorChange(left, v)} /></span>
                 {right && (
                   <>
-                    <span className="ml-2 w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[8px] font-bold uppercase tracking-widest text-muted text-right">{COLOR_LABELS[right]}</span>
-                    <ColorSquare value={editConfig[right]} onChange={(v) => handleColorChange(right, v)} />
+                    <span className="ml-2 w-[70px] flex-shrink-0 whitespace-nowrap overflow-hidden text-[11px] font-medium text-fg-secondary text-right">{COLOR_LABELS[right]}</span>
+                    <ColorSquare label={COLOR_LABELS[right]} value={editConfig[right]} onChange={(v) => handleColorChange(right, v)} />
                     <span className="w-[52px] flex-shrink-0 text-xs font-mono text-fg-secondary"><ColorHex value={editConfig[right]} onChange={(v) => handleColorChange(right, v)} /></span>
                   </>
                 )}
@@ -793,6 +770,24 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
           return rows
         })()}
       </div>
+
+      {Object.values(editConfig).every(isHexColor) && <div className="flex flex-wrap gap-2" aria-label="Theme contrast checks">
+        {([['Text', editConfig.fg, editConfig.bg], ['Secondary', editConfig.fgSecondary, editConfig.bg], ['Muted', editConfig.muted, surfaceColor(editConfig.bg)], ['Accent text', editConfig.accentFg, editConfig.accent]] as const).map(([name, foreground, background]) => {
+          const ratio = contrastRatio(foreground, background)
+          return <span key={name} className={`rounded border px-2 py-1 text-[11px] ${ratio >= 4.5 ? 'border-border text-fg-secondary' : 'border-danger/40 text-danger'}`} title="Normal text should have at least 4.5:1 contrast">{name} {ratio.toFixed(2)}:1 {ratio >= 4.5 ? '✓' : '— low'}</span>
+        })}
+      </div>}
+
+      <button type="button" className="self-start rounded border border-border px-3 py-1.5 text-xs text-fg-secondary hover:text-foreground" onClick={() => {
+        const next = repairThemeText(editConfig)
+        const keys = (Object.keys(next) as Array<keyof ThemeConfig>).filter((key) => next[key] !== editConfig[key])
+        if (!keys.length) return
+        setEditConfig(next)
+        applyThemeConfig(next)
+        setConfigEdited(true)
+        setColorsEdited(true)
+        setChangedKeys((previous) => new Set([...previous, ...keys]))
+      }}>Improve text contrast</button>
 
       {/* Live preview */}
       <div>

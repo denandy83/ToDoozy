@@ -20,7 +20,7 @@ export function DetailDescription({
     <div className="flex flex-col gap-1.5">
       <TiptapEditor key={taskId} content={description} taskId={taskId} onChange={onDescriptionChange} readOnly={readOnly} />
       {updatedAt && (
-        <span className="text-[9px] font-bold uppercase tracking-wider text-muted/40">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
           Last updated {formatDate(updatedAt, undefined, { omitCurrentYear: true })}{updatedAt.includes('T') ? ` ${updatedAt.split('T')[1].slice(0, 5)}` : ''}
         </span>
       )}

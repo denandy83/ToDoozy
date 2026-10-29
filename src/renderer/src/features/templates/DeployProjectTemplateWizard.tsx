@@ -1,3 +1,4 @@
+import { useDismissibleSurface } from '../../shared/motion/useDismissibleSurface'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, Trash2, ChevronRight, ChevronLeft, Calendar } from 'lucide-react'
@@ -58,9 +59,12 @@ interface WizardLabel {
 export function DeployProjectTemplateWizard({
   template,
   currentUser,
-  onClose,
+  onClose: finishClose,
   mode = 'deploy'
 }: DeployWizardProps): React.JSX.Element {
+  const surface = useDismissibleSurface(finishClose)
+  const onClose = surface.close
+
   const data: ProjectTemplateData = JSON.parse(template.data)
   const wizardRef = useRef<HTMLDivElement>(null)
 
@@ -276,12 +280,13 @@ export function DeployProjectTemplateWizard({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      {...surface.props}
+      className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         ref={wizardRef}
-        className="flex w-full max-w-lg flex-col rounded-xl border border-border bg-surface shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
+        className="ui-modal-content flex w-full max-w-lg flex-col rounded-xl border border-border bg-surface shadow-2xl motion-safe:duration-200"
         onClick={(e) => e.stopPropagation()}
         style={{ maxHeight: '80vh' }}
       >

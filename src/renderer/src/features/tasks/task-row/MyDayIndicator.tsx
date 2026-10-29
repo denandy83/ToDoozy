@@ -4,8 +4,8 @@ export function MyDayIndicator({ visible, onToggle }: { visible: boolean; onTogg
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onToggle?.() }}
-      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
-        visible ? 'bg-accent/15 hover:bg-accent/25' : 'opacity-0 group-hover:opacity-100 hover:bg-accent/10'
+      className={`ui-icon-button flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+        visible ? 'bg-accent/15 hover:bg-accent/25' : 'ui-row-action opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-accent/10'
       }`}
       title={visible ? 'Remove from My Day' : 'Add to My Day'}
       aria-label={visible ? 'Remove from My Day' : 'Add to My Day'}

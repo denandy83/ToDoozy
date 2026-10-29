@@ -1,3 +1,5 @@
+import { useSemanticColor } from '../../hooks/useSemanticColor'
+import { MotionPresence } from '../../motion/MotionPresence'
 import { useState, useRef, useEffect } from 'react'
 import { X, ChevronDown } from 'lucide-react'
 import type { Label, Project } from '../../../../../shared/types'
@@ -167,12 +169,13 @@ interface FilterChipProps {
 }
 
 function FilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.JSX.Element {
+  const appearance = useSemanticColor(color)
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
-      style={{ backgroundColor: `${color}20`, color, border: `1px solid ${color}30` }}
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 ui-metadata whitespace-nowrap"
+      style={{ backgroundColor: `${color}20`, color: appearance.text, border: `1px solid ${color}30` }}
     >
-      <span className="opacity-60">{prefix}:</span>
+      <span className="font-medium">{prefix}:</span>
       {label}
       <button onClick={onRemove} className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10">
         <X size={8} />
@@ -182,12 +185,13 @@ function FilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.
 }
 
 function ExcludeFilterChip({ label, color, prefix, onRemove }: FilterChipProps): React.JSX.Element {
+  const appearance = useSemanticColor(color)
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
-      style={{ backgroundColor: `${color}20`, color, border: `1px solid ${color}30` }}
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 ui-metadata whitespace-nowrap"
+      style={{ backgroundColor: `${color}20`, color: appearance.text, border: `1px solid ${color}30` }}
     >
-      <span className="text-red-400/80">{prefix} is not:</span>
+      <span className="font-medium">{prefix} is not:</span>
       {label}
       <button onClick={onRemove} className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-foreground/10">
         <X size={8} />
@@ -230,11 +234,11 @@ function GroupFilterChip({ count, operator, names, ids, onRemove, onSetOperator,
   return (
     <span
       ref={ref}
-      className={`relative inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${
+      className={`relative inline-flex items-center gap-1 rounded-full px-2 py-0.5 ui-metadata whitespace-nowrap ${
         exclude ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-accent/10 text-accent border border-accent/20'
       }`}
     >
-      <span className="opacity-60">Label</span>
+      <span className="font-medium">Label</span>
       <button
         onClick={() => setMenuOpen((o) => !o)}
         className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 transition-colors hover:bg-foreground/10"
@@ -245,7 +249,7 @@ function GroupFilterChip({ count, operator, names, ids, onRemove, onSetOperator,
         {operatorLabel(current)}
         <ChevronDown size={8} />
       </button>
-      <span className="opacity-60">:</span>
+      <span className="font-medium">:</span>
       {names}
       <button
         onClick={() => ids.forEach((id) => onRemove(id))}
@@ -256,8 +260,7 @@ function GroupFilterChip({ count, operator, names, ids, onRemove, onSetOperator,
         <X size={8} />
       </button>
 
-      {menuOpen && (
-        <div
+      {<MotionPresence open={Boolean(menuOpen)}>{() => (menuOpen) ? (<div
           className="absolute left-0 top-full z-50 mt-1 min-w-[110px] rounded-lg border border-border bg-surface p-1 shadow-lg"
           role="menu"
         >
@@ -276,8 +279,7 @@ function GroupFilterChip({ count, operator, names, ids, onRemove, onSetOperator,
               {operatorLabel(op)}
             </button>
           ))}
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </span>
   )
 }

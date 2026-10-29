@@ -902,7 +902,7 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
 
           {sortedStatuses.length === 0 && (
             <div className="flex flex-1 items-center justify-center py-20">
-              <p className="text-sm font-light text-muted/60">
+              <p className="text-sm font-light text-muted">
                 No statuses configured. Add statuses in project settings.
               </p>
             </div>

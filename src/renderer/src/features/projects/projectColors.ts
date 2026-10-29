@@ -1,6 +1,8 @@
+import { PASTEL_COLORS } from '../../shared/utils/colorPalette'
 export const PROJECT_COLORS = [
   '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
-  '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6'
+  '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6',
+  ...PASTEL_COLORS
 ]
 
 /** First color not used by any existing project; falls back to cycling by count. */

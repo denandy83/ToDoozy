@@ -1,3 +1,4 @@
+import { readableColor } from '../../../../shared/colorContrast'
 import { useCallback } from 'react'
 import { Archive } from 'lucide-react'
 import type { Status } from '../../../../shared/types'
@@ -98,7 +99,7 @@ function StatusChip({ status, isActive, onSelect }: StatusChipProps): React.JSX.
       className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         isActive ? 'text-accent-fg' : 'text-muted hover:bg-foreground/6'
       }`}
-      style={isActive ? { backgroundColor: status.color } : undefined}
+      style={isActive ? { backgroundColor: status.color, color: readableColor('#ffffff', [status.color]) } : undefined}
       role="radio"
       aria-checked={isActive}
       aria-label={status.name}

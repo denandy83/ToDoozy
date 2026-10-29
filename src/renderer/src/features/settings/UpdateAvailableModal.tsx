@@ -1,9 +1,15 @@
+import { useRef } from 'react'
+import { usePresence } from '../../shared/motion/usePresence'
 import { useMemo, useCallback } from 'react'
 import { Download, X } from 'lucide-react'
 import { useUpdateStore } from '../../shared/stores/updateStore'
 
 export function UpdateAvailableModal(): React.JSX.Element | null {
-  const status = useUpdateStore((s) => s.status)
+  const liveStatus = useUpdateStore((s) => s.status)
+  const presence = usePresence(liveStatus.state === 'available', 'dialog')
+  const retainedStatus = useRef(liveStatus)
+  if (liveStatus.state === 'available') retainedStatus.current = liveStatus
+  const status = retainedStatus.current
   const downloadUpdate = useUpdateStore((s) => s.downloadUpdate)
   const dismissUpdate = useUpdateStore((s) => s.dismissUpdate)
 
@@ -17,12 +23,12 @@ export function UpdateAvailableModal(): React.JSX.Element | null {
     }
   }, [status, dismissUpdate])
 
-  if (status.state !== 'available') return null
+  if (!presence.present || status.state !== 'available') return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div {...presence.props} className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
-        className="relative mx-4 flex w-full max-w-md flex-col gap-4 rounded-xl border border-border bg-surface p-6 shadow-2xl"
+        className="ui-modal-content relative mx-4 flex w-full max-w-md flex-col gap-4 rounded-xl border border-border bg-surface p-6 shadow-2xl"
         role="dialog"
         aria-modal="true"
       >

@@ -1,3 +1,4 @@
+import type { usePresence } from '../../shared/motion/usePresence'
 import { useCallback, useRef, useEffect, useState } from 'react'
 import { X, PanelBottom, PanelRight, AlertTriangle } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
@@ -24,8 +25,11 @@ import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
 import { formatDate } from '../../shared/utils/dateFormat'
 import { flushAll as flushBatchedTaskEdits } from '../../services/TaskBatchSyncManager'
 
-export function DetailPanel(): React.JSX.Element | null {
-  const task = useTaskStore(selectCurrentTask)
+export function DetailPanel({ motionProps }: { motionProps?: ReturnType<typeof usePresence>['props'] } = {}): React.JSX.Element | null {
+  const liveTask = useTaskStore(selectCurrentTask)
+  const retainedTask = useRef(liveTask)
+  if (liveTask) retainedTask.current = liveTask
+  const task = liveTask ?? retainedTask.current
   const { updateTask, setCurrentTask, addLabel, removeLabel, hydrateTaskLabels } = useTaskStore()
   const position = useViewStore((s) => s.detailPanelPosition)
   const panelSize = useViewStore((s) => s.detailPanelSize)
@@ -297,7 +301,9 @@ export function DetailPanel(): React.JSX.Element | null {
     <div
       ref={panelRef}
       data-detail-panel
-      className={`relative flex-shrink-0 border-foreground/10 bg-background overflow-hidden ${
+      {...motionProps}
+      data-edge={isSide ? 'side' : 'bottom'}
+      className={`ui-surface ui-panel ui-detail-panel relative flex-shrink-0 border-foreground/10 bg-background overflow-hidden ${
         isSide ? 'border-l' : 'border-t'
       }`}
       style={panelStyle}
@@ -394,7 +400,7 @@ function DetailPanelContent({
           {isTemplate ? 'Template' : 'Task Details'}
           <button
             onClick={() => navigator.clipboard.writeText(task.id)}
-            className="font-mono text-[8px] tracking-normal text-muted/30 transition-colors hover:text-muted/60"
+            className="font-mono text-[8px] tracking-normal text-muted transition-colors hover:text-muted"
             title={`Copy ID: ${task.id}`}
           >
             #{task.id.slice(0, 6)}
@@ -576,8 +582,8 @@ interface SectionProps {
 
 function Section({ label, children, fieldIndex, labelIcon }: SectionProps): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-1.5" data-detail-field={fieldIndex}>
-      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
+    <div className="ui-detail-field flex flex-col" data-detail-field={fieldIndex}>
+      <span className="ui-section-label flex items-center gap-1.5">
         {label}
         {labelIcon}
       </span>

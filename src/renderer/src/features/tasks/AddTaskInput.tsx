@@ -210,7 +210,7 @@ export const AddTaskInput = forwardRef<AddTaskInputHandle, AddTaskInputProps>(
             onKeyDown={handleKeyDown}
             placeholder={`Add to ${viewName}...`}
             disabled={disabled}
-            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted/40 disabled:opacity-50 focus:outline-none"
+            className="flex-1 bg-transparent text-[15px] font-light tracking-tight text-foreground placeholder:text-muted disabled:opacity-50 focus:outline-none"
           />
         </div>
 
