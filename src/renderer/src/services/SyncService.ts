@@ -591,7 +591,11 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
             while (pending.length && isOnline) {
               const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
               const rows = snapshots.map((value) => JSON.parse(value).row)
+              if (item.entry.table_name === 'user_settings') {
+                for (const row of rows.filter((row) => row?.key === 'theme_id')) await item.descriptor!.remoteUpsert(row, context)
+              }
               const values = rows.filter(Boolean)
+                .filter((row) => item.entry.table_name !== 'user_settings' || row.key !== 'theme_id')
                 .filter((row) => item.entry.table_name !== 'user_themes' || canSyncTheme(row))
                 .map((row) => item.descriptor!.toRemote(row))
               if (values.length) {

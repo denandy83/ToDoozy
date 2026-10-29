@@ -37,12 +37,12 @@ export function canonicalThemeReference(db: DatabaseSync, id: string | null, use
 
 export function remapThemeReferences(db: DatabaseSync, alias: Theme, canonical: string): void {
   if (!presetForStoredTheme(db, alias)) return
-  const settings = db.prepare("SELECT user_id,value,updated_at FROM settings WHERE key='theme_id' AND value=? AND deleted_at IS NULL")
-    .all(alias.id) as Array<{ user_id: string; value: string; updated_at: string }>
+  const settings = db.prepare("SELECT user_id FROM settings WHERE key='theme_id' AND value=? AND deleted_at IS NULL")
+    .all(alias.id) as Array<{ user_id: string }>
   for (const setting of settings) {
     if (!alias.is_builtin && alias.owner_id !== setting.user_id) continue
-    db.prepare("UPDATE settings SET value=?,updated_at=? WHERE user_id=? AND key='theme_id'")
-      .run(canonical, retirementStamp(setting.updated_at), setting.user_id)
+    db.prepare("UPDATE settings SET value=? WHERE user_id=? AND key='theme_id'")
+      .run(canonical, setting.user_id)
   }
 }
 

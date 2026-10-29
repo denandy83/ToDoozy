@@ -524,7 +524,10 @@ async function pushSettingImmediate(key: string, value: string, userId: string, 
     // covers the first-time fullUpload path and the debounced flush (#98/#114).
     if (isSettingSyncExcluded(key)) return
     const id = `${userId}:${key}`
-    const payload = {
+    const descriptor = SYNC_TABLES.settings!
+    const selection = key === 'theme_id' ? await descriptor.localGetById(id, origin.api) : null
+    if (key === 'theme_id' && !selection) return
+    const payload = selection ? descriptor.toRemote(selection) : {
       id,
       user_id: userId,
       key,
@@ -538,12 +541,14 @@ async function pushSettingImmediate(key: string, value: string, userId: string, 
     }
     try {
       const supabase = (await origin.client())!
-      const { error } = await supabase.from('user_settings').upsert(payload)
-      if (error) await reportPushFailure(origin, 'pushSetting', error, 'user_settings', id, JSON.stringify(payload))
-      else {
-        await markSynced(origin)
-        logEvent('info', 'sync', `Pushed setting "${key}"`, `id=${id}`)
+      if (selection) {
+        await descriptor.remoteUpsert(selection, { api: origin.api, client: supabase, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+      } else {
+        const { error } = await supabase.from('user_settings').upsert(payload)
+        if (error) throw error
       }
+      await markSynced(origin)
+      logEvent('info', 'sync', `Pushed setting "${key}"`, `id=${id}`)
     } catch (err) {
       await reportPushFailure(origin, 'pushSetting', err, 'user_settings', id, JSON.stringify(payload))
     }
@@ -1366,7 +1371,7 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
     if (!context || await context.isCurrent()) syncStore.setFirstSyncProgress(75)
     const { data: remoteSettings } = await supabase
       .from('user_settings')
-      .select('key, value')
+      .select('*')
       .eq('user_id', userId)
 
     if (remoteSettings) {
@@ -1377,7 +1382,8 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
         // re-establish the very leak #114 closed. Filter through the same
         // single-sourced exclusion list the push paths use.
         if (isSettingSyncExcluded(setting.key)) continue
-        await api.settings.set(userId, setting.key, setting.value)
+        if (setting.key === 'theme_id') await SYNC_TABLES.settings!.localApplyRemote(setting, api)
+        else await api.settings.set(userId, setting.key, setting.value)
       }
     }
 

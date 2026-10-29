@@ -798,6 +798,14 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
 
   async remoteUpsert(local, context) {
     const supabase = context?.client ?? await getSupabase()
+    if (local.key === 'theme_id') {
+      const { data: remote, error } = await supabase.from('user_settings').select('*').eq('id', `${local.user_id}:${local.key}`).maybeSingle()
+      if (error) throw error
+      if (remote && Date.parse(remote.updated_at) >= Date.parse(local.updated_at)) {
+        await settingsDescriptor.localApplyRemote(remote, context?.api)
+        return
+      }
+    }
     const { error } = await supabase.from('user_settings').upsert(settingsDescriptor.toRemote(local))
     if (error) throw error
   },

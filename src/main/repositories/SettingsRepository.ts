@@ -35,7 +35,7 @@ export class SettingsRepository {
 
   set(userId: string, key: string, value: string | null): void {
     if (key === 'theme_id') value = canonicalThemeReference(this.db, value, userId)
-    const now = new Date().toISOString()
+    const now = key === 'theme_id' ? retirementStamp(this.findRaw(userId, key)?.updated_at) : new Date().toISOString()
     this.db
       .prepare(
         `INSERT INTO settings (user_id, key, value, updated_at, deleted_at)
@@ -92,7 +92,8 @@ export class SettingsRepository {
       )
       for (const setting of settings) {
         const value = setting.key === 'theme_id' ? canonicalThemeReference(this.db, setting.value, userId) : setting.value
-        stmt.run(userId, setting.key, value, now)
+        const stamp = setting.key === 'theme_id' ? retirementStamp(this.findRaw(userId, setting.key)?.updated_at) : now
+        stmt.run(userId, setting.key, value, stamp)
       }
     })
   }
@@ -161,7 +162,7 @@ export class SettingsRepository {
         remote.user_id,
         remote.key,
         value,
-        value !== remote.value ? retirementStamp(remote.updated_at) : toCanonicalIso(remote.updated_at),
+        toCanonicalIso(remote.updated_at),
         toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findRaw(remote.user_id, remote.key)!
