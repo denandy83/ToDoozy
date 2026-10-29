@@ -482,11 +482,7 @@ A built-in MCP (Model Context Protocol) server runs locally when the app is open
 
 ## 14. Theme System
 
-8-color palette applied as CSS custom properties: `--bg`, `--fg`, `--fg-secondary`, `--fg-muted`, `--muted`, `--accent`, `--accent-fg`, `--border`.
-
-**12 built-in themes**: Standard Dark/Light, Warm Earth (dark/light), Ocean Blue (dark/light), Amethyst (dark/light), Forest (dark/light), Rosewood (dark/light), Claude (dark/light).
-
-Settings > Themes: mode toggle, preset dropdown, 8 color pickers, live UI preview (mock sidebar + task cards), create/apply/save buttons. Preview is live — app updates in real-time while editing. "Apply" button required to persist a theme change.
+See [Themes](HELP.md#themes) for the current user workflow, customization and sync behavior. [Color and typography](docs/design-system.md#color-and-typography) owns the implementation contracts and links to the authoritative catalog and token definitions.
 
 ---
 
@@ -823,8 +819,7 @@ Activity log entries with `action: 'comment'` and `new_value` as the comment tex
 6. Conflicts resolved by **last-write-wins** using `updated_at` timestamp
 
 ### What Syncs
-- Tasks, labels, task_labels, statuses, projects, project_members, activity_log
-- NOT synced: `is_in_my_day` (per-user, local only), themes (per-device), settings (per-device), window state
+See [Sync & Multi-Device](HELP.md#sync--multi-device) for account sync and [Themes](HELP.md#themes) for built-in/custom theme behavior. Window state stays device-local.
 
 ### Sync Indicators
 - Sidebar footer shows sync status: green dot (synced), yellow spinner (syncing), red dot (offline/error)
@@ -849,7 +844,7 @@ Every interaction pattern must be used consistently across the entire app. No on
 | **Toast** | Undo system, sync errors, teammate activity, notifications | Bottom-center, auto-dismiss after 5s, optional action button (e.g. "Undo"). Stacks if multiple. Same animation everywhere. |
 | **ContextMenu** | Task right-click (list view, kanban view) | Identical menu regardless of where the task is displayed. Same flyout submenus, same positioning logic. |
 | **Avatar** | Task row (assigned_to), kanban card, detail panel, member list, activity log, presence indicators | Consistent size (16px in rows, 24px in detail, 32px in member list). Shows initials if no avatar_url. |
-| **Modal** | Settings, project settings, invite member, filter builder, confirm delete | Consistent backdrop (dark blur), animation (fade + zoom-in-95), escape to close, click-outside to close. |
+| **Modal** | Settings, project settings, invite member, filter builder, confirm delete | Consistent backdrop (dark blur), shared [dialog presence](docs/design-system.md#surfaces), escape to close, click-outside to close. |
 | **EmptyState** | Every list view, kanban columns, search results, archive, labels settings | Consistent illustration style + message + optional CTA button. Never a blank void. |
 
 ### Interaction Patterns (same everywhere)
@@ -863,24 +858,15 @@ Every interaction pattern must be used consistently across the entire app. No on
 | **Autosave** | 1s debounce on all text inputs (title, description, label names in settings, project name). No save button for text. Visual save indicator optional. |
 | **Loading states** | Spinner or skeleton, never a blank screen. Same spinner component. Toast for operations that take >500ms. |
 | **Keyboard dismiss** | Escape always closes the topmost overlay/panel/menu. Consistent across: detail panel, settings modal, context menu, command palette, focus timer, review mode, label picker. |
-| **Drag visual** | Ghost card overlay (same as task row but 80% opacity). Drop indicators: horizontal line for above/below, background highlight for inside/column. Same in list and kanban. |
+| **Drag visual** | Ghost and settlement follow [Surfaces](docs/design-system.md#surfaces). Drop indicators: horizontal line for above/below, background highlight for inside/column. Same in list and kanban. |
 
 ### Typography Scale
 
-| Use | Class | Example |
-|-----|-------|---------|
-| View title | `text-3xl font-light tracking-[0.15em] uppercase` | MY DAY |
-| Section label | `text-[10px] font-bold uppercase tracking-[0.3em]` | TO DO |
-| Task title | `text-[15px] font-light tracking-tight` (weight varies by priority) | Buy groceries |
-| Metadata | `text-[10px] font-bold uppercase tracking-widest` | 2026-03-18 |
-| Badge/chip | `text-[9px] font-bold uppercase tracking-wider` | URGENT |
-| Button label | `text-[11px] font-bold uppercase tracking-widest` | APPLY |
-| Body text | `text-sm font-light` | Task description content |
-| Hint text | `text-[10px] opacity-40` | Cmd+V to paste |
+See [Color and typography](docs/design-system.md#color-and-typography) for the current workspace scale and preserved sidebar treatment.
 
 ### Spacing
 
-- Task row padding: `py-3.5 px-4`
+- Task row metrics: see [Color and typography](docs/design-system.md#color-and-typography).
 - Kanban card padding: `p-3.5`
 - Section gaps: `mb-6` between sections, `mb-1` between task rows
 - Panel padding: `p-6`
@@ -889,15 +875,7 @@ Every interaction pattern must be used consistently across the entire app. No on
 
 ### Animation
 
-All animations respect `prefers-reduced-motion`. When reduced motion is on, replace all transitions with instant state changes.
-
-- **Panel open**: `animate-in slide-in-from-bottom/right duration-300`
-- **Modal open**: `animate-in fade-in zoom-in-95 duration-200`
-- **Context menu**: `animate-in fade-in zoom-in duration-100`
-- **Toast**: `animate-in slide-in-from-bottom duration-200`, auto-dismiss with fade-out
-- **Drag**: No animation on drop (instant snap). Ghost overlay follows cursor.
-- **Theme change**: `transition-colors duration-300` on root element
-- **Sidebar expand/collapse**: `transition-[width] duration-200 ease-out`
+See [Surfaces](docs/design-system.md#surfaces) for the current presence, timing owners, keyboard/reduced-motion behavior and pointer-drop settlement.
 
 ---
 

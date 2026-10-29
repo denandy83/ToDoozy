@@ -99,7 +99,7 @@ GitHub CI runs type checking, tests, lint and a production build on pull request
 | **Configurable statuses** | Per-project status CRUD; 3 defaults seeded; tasks reassigned before delete |
 | **Priority system** | 5 levels with configurable color bar, badges, background tint, font weight, auto-sort |
 | **Global labels** | Labels shared across all projects; per-project assignment; filter bar in every view |
-| **Theme system** | 18 built-in themes (9 dark, 9 light), custom and pastel color pickers, live preview |
+| **Theme system** | Built-in dark/light presets, custom and pastel color pickers, live preview; see [Themes](HELP.md#themes) |
 | **Context menu** | Right-click flyout with status, priority, recurrence, labels, snooze submenus |
 | **Command palette** | Cmd+K full-text search with operators: `p:`, `l:`, `s:`, `due:`, `has:` |
 | **Smart input** | `@label`, `p:priority`, `d:date` inline parsing in all task inputs |

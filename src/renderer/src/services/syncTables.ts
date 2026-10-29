@@ -1,4 +1,5 @@
 import type { SyncTableName } from '../../../preload/index.d'
+import type { PostgrestMaybeSingleResponse } from '@supabase/supabase-js'
 import type {
   Task,
   Status,
@@ -57,7 +58,7 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
   // Local-side ops (renderer calls window.api.* under the hood)
   localList(scopeId: string, includeTombstones: boolean, api?: typeof window.api): Promise<TLocal[]>
   localGetById(id: string, api?: typeof window.api): Promise<TLocal | null>
-  /** Upsert with the remote's `updated_at` and `deleted_at` preserved (no NOW() bump). */
+  /** Preserve remote clocks/tombstones; legacy theme retirement may advance its cleanup clock. */
   localApplyRemote(remote: TRemote, api?: typeof window.api, context?: SyncContext): Promise<void>
   /** Returns max(updated_at) on local active rows, or null if empty. */
   localMaxUpdatedAt(scopeId: string, api?: typeof window.api): Promise<string | null>
@@ -669,7 +670,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     if (!canSyncTheme(local)) return
     const supabase = context?.client ?? await getSupabase()
     const api = context?.api ?? window.api
-    const read = () => supabase.from('user_themes').select('*').eq('id', local.id).eq('user_id', local.owner_id!).maybeSingle()
+    const read = (): PromiseLike<PostgrestMaybeSingleResponse<RemoteTheme>> => supabase.from('user_themes').select('*').eq('id', local.id).eq('user_id', local.owner_id!).maybeSingle()
     const { data: remote, error } = await read()
     if (error) throw error
     context?.assertCurrent()
@@ -861,7 +862,7 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     if (local.key === 'theme_id') {
       const api = context?.api ?? window.api
       const id = `${local.user_id}:${local.key}`
-      const read = () => supabase.from('user_settings').select('*').eq('id', id).eq('user_id', local.user_id).eq('key', local.key).maybeSingle()
+      const read = (): PromiseLike<PostgrestMaybeSingleResponse<RemoteSetting>> => supabase.from('user_settings').select('*').eq('id', id).eq('user_id', local.user_id).eq('key', local.key).maybeSingle()
       const { data: remote, error } = await read()
       if (error) throw error
       context?.assertCurrent()

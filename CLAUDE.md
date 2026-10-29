@@ -105,13 +105,7 @@ This prevents expensive re-exploration across sessions and keeps investigation c
 - Keyboard-first: every feature must be usable without a mouse
 
 ## Typography Scale
-- View title: `text-3xl font-light tracking-[0.15em] uppercase`
-- Section label: `text-[10px] font-bold uppercase tracking-[0.3em]`
-- Task title: `text-[15px] font-light tracking-tight`
-- Metadata: `text-[10px] font-bold uppercase tracking-widest`
-- Badge/chip: `text-[9px] font-bold uppercase tracking-wider`
-- Button label: `text-[11px] font-bold uppercase tracking-widest`
-- Body text: `text-sm font-light`
+See [Color and typography](docs/design-system.md#color-and-typography) for the current workspace scale and the preserved sidebar treatment.
 
 ## Testing
 - Write Vitest unit tests for all repository methods, filter logic, and utility functions.

@@ -148,8 +148,8 @@ export class SettingsRepository {
   }
 
   /**
-   * Sync-only: write a setting as-is, preserving remote timestamps and deleted_at.
-   * Skips when local row's updated_at is newer (LWW).
+   * Sync-only: preserve remote clocks/tombstones and normalize theme references.
+   * Equal-clock theme identity repairs do not represent a new user choice.
    */
   applyRemote(remote: Setting): Setting {
     return withTransaction(this.db, () => this.applyRemoteRow(remote))
@@ -158,8 +158,8 @@ export class SettingsRepository {
   private applyRemoteRow(remote: Setting): Setting {
     const existing = this.findRaw(remote.user_id, remote.key)
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
-    // the same instant but do not string-compare reliably. Skip when the local
-    // row is newer or equal (remote not strictly newer).
+    // the same instant but do not string-compare reliably. Theme references can
+    // still converge at equal clocks without advancing the accepted choice.
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       if (remote.key === 'theme_id' && !remote.deleted_at && !existing.deleted_at && Date.parse(existing.updated_at) === Date.parse(remote.updated_at)) {
         const value = normalizeThemeSelection(this.db, remote)

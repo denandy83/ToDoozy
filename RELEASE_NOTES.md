@@ -4,7 +4,7 @@ User-facing changes by date. Most recent first.
 
 ---
 
-## v1.11.0
+## v1.11.0 (release candidate)
 
 - Menus, popups, panels and notifications now share consistent fades and movement. Keyboard actions stay immediate, and dragging has clearer feedback.
 - Pastels are available for every theme color adjustment, alongside six new soft light/dark presets and improved contrast controls.

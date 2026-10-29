@@ -122,9 +122,9 @@ export class ThemeRepository {
   }
 
   /**
-   * Sync-only: write a theme as-is, preserving remote timestamps and deleted_at.
-   * Skips when local row's updated_at is newer (LWW). Built-in themes are
-   * never overwritten — they're seeded locally and don't round-trip.
+   * Sync-only: canonical built-ins stay local and legacy preset aliases retire.
+   * Named custom rows use LWW, except when reclaiming a retired preset identity;
+   * that recovery must remain possible even when cleanup advanced its clock.
    */
   applyRemote(remote: Theme): Theme {
     return withTransaction(this.db, () => this.applyRemoteRow(remote))
