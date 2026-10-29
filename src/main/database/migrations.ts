@@ -1,5 +1,5 @@
-import { randomUUID } from 'crypto'
-import { BUILTIN_THEMES } from '../../shared/themeCatalog'
+import { BUILTIN_THEMES, builtinThemeId } from '../../shared/themeCatalog'
+import { repairBuiltinThemes } from './themeRepair'
 import type { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_THEMES, DEFAULT_SETTINGS } from './seed'
 
@@ -787,8 +787,8 @@ const migration_30: Migration = (db) => {
   const exists = db.prepare('SELECT id FROM themes WHERE name = ? AND is_builtin = 1')
   const insert = db.prepare('INSERT INTO themes (id, name, mode, config, is_builtin) VALUES (?, ?, ?, ?, 1)')
   for (const theme of BUILTIN_THEMES.slice(12)) {
-    if (!exists.get(theme.name)) insert.run(randomUUID(), theme.name, theme.mode, JSON.stringify(theme.config))
+    if (!exists.get(theme.name)) insert.run(builtinThemeId(theme.name), theme.name, theme.mode, JSON.stringify(theme.config))
   }
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28, migration_29, migration_30]
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28, migration_29, migration_30, repairBuiltinThemes]

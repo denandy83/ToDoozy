@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { SyncQueueEntry, Task } from '../../../shared/types'
+import type { SyncQueueEntry, Task, Theme } from '../../../shared/types'
+import { BUILTIN_THEMES, builtinThemeId } from '../../../shared/themeCatalog'
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { pinned.token = options.accessToken; return pinned.client }) }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
@@ -49,6 +50,25 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 describe('durable sync retries', () => {
+  it('drops queued builtin uploads and sends current preset cleanup tombstones instead of stale active copies', async () => {
+    const config = JSON.stringify(BUILTIN_THEMES[0].config)
+    const base = { mode: 'dark', config, is_builtin: 0, owner_id: 'u', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-10-29T12:00:00Z', deleted_at: null }
+    const rows: Record<string, Theme> = {
+      preset: { ...base, id: builtinThemeId('Standard Dark'), name: 'Standard Dark', is_builtin: 1, owner_id: null },
+      alias: { ...base, id: 'old-copy', name: 'Standard Dark', deleted_at: base.updated_at },
+      custom: { ...base, id: 'aviobook', name: 'Aviobook Dark' }
+    }
+    const byId = new Map(Object.values(rows).map((theme) => [theme.id, theme]))
+    Object.assign(window.api, { themes: { findById: vi.fn(async (id: string) => byId.get(id)) } })
+    queue = Object.values(rows).map((theme, index) => entry(`q${index}`, 'user_themes', { ...theme, deleted_at: null }))
+    const mock = clientMock()
+    vi.mocked(getSupabase).mockResolvedValue(mock.client)
+    expect(await processSyncQueue()).toBe(3)
+    const payload = mock.writes.flatMap((write) => write.payload as Array<Record<string, unknown>>)
+    expect(payload.map((theme) => theme.id).sort()).toEqual(['aviobook', 'old-copy'])
+    expect(payload.find((theme) => theme.id === 'old-copy')?.deleted_at).toBe(base.updated_at)
+    expect(queue).toHaveLength(0)
+  })
   it('retains Supabase error-valued writes and shows error instead of green', async () => {
     queue = [entry('q', 'tasks', { id: 't', title: 'old' })]
     const mock = clientMock('RLS denied')

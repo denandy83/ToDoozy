@@ -20,6 +20,7 @@ import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholde
 import { pushLabel, getCachedProjectName } from './PersonalSyncService'
 import { SYNC_TABLES } from './syncTables'
 import { isSuspended } from './powerState'
+import { canSyncTheme } from '../../../shared/themeCatalog'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
@@ -590,7 +591,9 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
             while (pending.length && isOnline) {
               const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
               const rows = snapshots.map((value) => JSON.parse(value).row)
-              const values = rows.filter(Boolean).map((row) => item.descriptor!.toRemote(row))
+              const values = rows.filter(Boolean)
+                .filter((row) => item.entry.table_name !== 'user_themes' || canSyncTheme(row))
+                .map((row) => item.descriptor!.toRemote(row))
               if (values.length) {
                 const { error } = await supabase.from(item.entry.table_name).upsert(values)
                 if (error) {

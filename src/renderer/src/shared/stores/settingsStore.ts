@@ -180,6 +180,7 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
             accent: config.accent ?? '',
             accent_fg: config.accentFg ?? '',
             border: config.border ?? '',
+            sidebar: config.sidebar,
             updated_at: theme.updated_at
           }).catch(() => {})
         })
@@ -200,8 +201,8 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
         set((state) => ({
           themes: { ...state.themes, [theme.id]: theme }
         }))
-        // Push to Supabase
-        try {
+        // Built-in edits stay local; uploading their IDs created duplicate presets.
+        if (!theme.is_builtin) try {
           const config = JSON.parse(theme.config) as Record<string, string>
           import('../../services/PersonalSyncService').then(({ pushTheme }) => {
             pushTheme({
@@ -217,6 +218,7 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
               accent: config.accent ?? '',
               accent_fg: config.accentFg ?? '',
               border: config.border ?? '',
+              sidebar: config.sidebar,
               updated_at: theme.updated_at
             }).catch(() => {})
           })

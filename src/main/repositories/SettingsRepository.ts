@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Setting } from '../../shared/types'
+import { canonicalThemeReference, retirementStamp } from '../database/themeRepair'
 
 export class SettingsRepository {
   constructor(private db: DatabaseSync) {}
@@ -33,6 +34,7 @@ export class SettingsRepository {
   }
 
   set(userId: string, key: string, value: string | null): void {
+    if (key === 'theme_id') value = canonicalThemeReference(this.db, value, userId)
     const now = new Date().toISOString()
     this.db
       .prepare(
@@ -89,7 +91,8 @@ export class SettingsRepository {
            deleted_at = NULL`
       )
       for (const setting of settings) {
-        stmt.run(userId, setting.key, setting.value, now)
+        const value = setting.key === 'theme_id' ? canonicalThemeReference(this.db, setting.value, userId) : setting.value
+        stmt.run(userId, setting.key, value, now)
       }
     })
   }
@@ -143,6 +146,8 @@ export class SettingsRepository {
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
+    const value = remote.key === 'theme_id' && !remote.deleted_at
+      ? canonicalThemeReference(this.db, remote.value, remote.user_id) : remote.value
     this.db
       .prepare(
         `INSERT INTO settings (user_id, key, value, updated_at, deleted_at)
@@ -155,8 +160,8 @@ export class SettingsRepository {
       .run(
         remote.user_id,
         remote.key,
-        remote.value,
-        toCanonicalIso(remote.updated_at),
+        value,
+        value !== remote.value ? retirementStamp(remote.updated_at) : toCanonicalIso(remote.updated_at),
         toCanonicalIso(remote.deleted_at ?? null)
       )
     return this.findRaw(remote.user_id, remote.key)!

@@ -4,6 +4,13 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.11.0
+
+- Menus, popups, panels and notifications now share consistent fades and movement. Keyboard actions stay immediate, and dragging has clearer feedback.
+- Pastels are available for every theme color adjustment, alongside six new soft light/dark presets and improved contrast controls.
+- Refined task rows, headings, details and controls follow the selected design; the sidebar layout stays familiar.
+- Fixed the sync bug that created repeated copies of built-in themes. Upgrading cleans up those copies while keeping your theme choice and named custom themes.
+
 ## v1.8.0
 
 - **Fix: Labels that vanished from a project are back** — Some labels you'd applied to tasks (often ones added from another device or via the assistant) had silently disappeared from a project's filter bar, label picker, and even the task chips, because the project↔label link was never recorded. ToDoozy now rebuilds those links from your tasks on launch and keeps them in sync from then on, so the labels reappear everywhere they belong.

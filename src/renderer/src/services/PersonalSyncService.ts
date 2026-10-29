@@ -16,12 +16,13 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase, safeRefresh } from '../lib/supabase'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
-import type { Task, Status, Label, ThemeConfig } from '../../../shared/types'
+import type { Task, Status, Label } from '../../../shared/types'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { currentProjectLink, projectLinkSuperseded, writeProjectLabelChoices } from './projectLabelIntent'
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
+import { builtinTheme, canSyncTheme } from '../../../shared/themeCatalog'
 
 /**
  * Returns true if a live Supabase session exists. All push/delete functions
@@ -776,6 +777,7 @@ export async function pushTheme(theme: {
   updated_at?: string
   deleted_at?: string | null
 }): Promise<void> {
+  if (builtinTheme(theme.name, theme.mode) && !theme.deleted_at) return
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     const payload = {
@@ -1152,8 +1154,9 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
 
     // 6. Push themes (parse config JSON inline)
     try {
-      const themes = await api.themes.list(userId)
+      const themes = await api.themes.findAllByOwner(userId, { includeTombstones: true })
       for (const theme of themes) {
+        if (!canSyncTheme(theme) || theme.owner_id !== userId) continue
         try {
           const config = JSON.parse(theme.config) as Record<string, string>
           if (!await context.isCurrent()) return
@@ -1172,7 +1175,8 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
             border: config.border ?? '',
             sidebar: config.sidebar,
             created_at: theme.created_at,
-            updated_at: theme.updated_at
+            updated_at: theme.updated_at,
+            deleted_at: theme.deleted_at
           })
         } catch { /* skip themes with invalid config */ }
       }
@@ -1431,37 +1435,9 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
 
     if (remoteThemes) {
       for (const theme of remoteThemes) {
-        const existing = await api.themes.findById(theme.id)
-        if (existing) continue
-        const themeBg = theme.bg ?? ''
-        const themeNum = parseInt(themeBg.replace('#', ''), 16)
-        const themeBrightness = ((themeNum >> 16) & 0xff) + ((themeNum >> 8) & 0xff) + (themeNum & 0xff)
-        const themeAmt = themeBrightness < 384 ? 12 : -8
-        const sidebarR = Math.min(255, Math.max(0, ((themeNum >> 16) & 0xff) + themeAmt))
-        const sidebarG = Math.min(255, Math.max(0, ((themeNum >> 8) & 0xff) + themeAmt))
-        const sidebarB = Math.min(255, Math.max(0, (themeNum & 0xff) + themeAmt))
-        const config: ThemeConfig = {
-          bg: themeBg,
-          fg: theme.fg ?? '',
-          fgSecondary: theme.fg_secondary ?? theme.surface ?? '',
-          fgMuted: theme.fg_muted ?? '',
-          muted: theme.muted ?? '',
-          accent: theme.accent ?? '',
-          accentFg: theme.accent_fg ?? '',
-          border: theme.border ?? '',
-          sidebar: `#${((sidebarR << 16) | (sidebarG << 8) | sidebarB).toString(16).padStart(6, '0')}`
-        }
-        try {
-          await api.themes.create({
-            id: theme.id,
-            name: theme.name,
-            mode: theme.mode,
-            config: JSON.stringify(config),
-            owner_id: userId
-          })
-        } catch (e) {
-          console.error(`[PersonalSync] fullPull: failed to create theme "${theme.name}" (${theme.id}):`, e)
-        }
+        if (context && !await context.isCurrent()) return
+        // The shared path preserves tombstones, sidebar, clocks and legacy preset retirement.
+        await SYNC_TABLES.themes!.localApplyRemote(theme, api)
       }
     }
 

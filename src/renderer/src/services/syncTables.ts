@@ -16,6 +16,7 @@ import { readAll } from './readAll'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
+import { canSyncTheme } from '../../../shared/themeCatalog'
 
 export type { SyncTableName }
 
@@ -656,6 +657,7 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   },
 
   async remoteUpsert(local, context) {
+    if (!canSyncTheme(local)) return
     const supabase = context?.client ?? await getSupabase()
     const { error } = await supabase.from('user_themes').upsert(themesDescriptor.toRemote(local))
     if (error) throw error

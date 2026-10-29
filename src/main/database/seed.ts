@@ -1,10 +1,8 @@
-import { randomUUID } from 'crypto'
-
-import { BUILTIN_THEMES } from '../../shared/themeCatalog'
+import { BUILTIN_THEMES, builtinThemeId } from '../../shared/themeCatalog'
 export type { ThemeConfig } from '../../shared/types'
 
 // The first twelve names belong to migration 1; later presets are added explicitly.
-export const DEFAULT_THEMES = BUILTIN_THEMES.slice(0, 12).map((theme) => ({ ...theme, id: randomUUID() }))
+export const DEFAULT_THEMES = BUILTIN_THEMES.slice(0, 12).map((theme) => ({ ...theme, id: builtinThemeId(theme.name) }))
 
 export const DEFAULT_SETTINGS: Array<{ key: string; value: string }> = [
   { key: 'theme_id', value: DEFAULT_THEMES[0].id },

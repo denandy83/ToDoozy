@@ -1,4 +1,4 @@
-import type { ThemeConfig } from './types'
+import type { Theme, ThemeConfig } from './types'
 
 export interface BuiltInThemeDefinition { name: string; mode: 'dark' | 'light'; config: ThemeConfig }
 
@@ -413,6 +413,19 @@ const LEGACY_BUILTIN_CONFIGS: Record<string, ThemeConfig> = {
 
 export const DEFAULT_THEME_CONFIG = BUILTIN_THEMES[0].config
 export const BUILTIN_CONFIGS = Object.fromEntries(BUILTIN_THEMES.map((theme) => [theme.name, theme.config]))
+
+export function builtinTheme(name: string, mode: string): BuiltInThemeDefinition | undefined {
+  return BUILTIN_THEMES.find((theme) => theme.name === name && theme.mode === mode)
+}
+
+/** Local preset identities must be identical on every device. They never become cloud theme rows. */
+export function builtinThemeId(name: string): string {
+  return `builtin-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+}
+
+export function canSyncTheme(theme: Pick<Theme, 'name' | 'mode' | 'is_builtin' | 'deleted_at'>): boolean {
+  return !theme.is_builtin && (!builtinTheme(theme.name, theme.mode) || Boolean(theme.deleted_at))
+}
 
 export function resolveBuiltinConfig(name: string, builtin: number, config: ThemeConfig): ThemeConfig {
   const legacy = LEGACY_BUILTIN_CONFIGS[name]

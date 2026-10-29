@@ -63,3 +63,11 @@ Live persistence, network sync, reduced-motion emulation, and frame-by-frame mid
 - Implementation preview: `http://100.110.218.110/reviews/2026-10-29-todoozy-design/implemented/`.
 - Independent evidence: `/Users/alfred/Documents/Codex/2026-10-29/todoozy-design-review/private/independent-verification.md`.
 - Shared maintenance conventions: `docs/design-system.md`.
+
+## Duplicate theme correction and release preparation
+
+The user clarified that same-named preset copies were bug artifacts, not intentional variants. The first follow-up only labelled them and was insufficient. The root cause is fullUpload listing built-ins with per-install random IDs, then fullPull recreating them as custom rows. The repair uses stable local preset IDs, an archived/soft-deleted consolidation migration, selection remapping, preset exclusion from every sync writer and preservation of real custom sidebar/timestamp/tombstone fields. Full sync and queued retries use current retired state instead of recreating copies. Genuine named custom themes remain intact.
+
+The user requested a signed release including design updates and this actual repair. Release preparation is on `codex/design-release-1-11-0`, through no-mistakes. A Developer ID Application certificate is now available; notarization credentials/profile and the existing coordinated archive rollout prerequisite are being checked. No release publication is implied by source or candidate-build completion.
+
+Release environment check found the existing `todoozy-notary` profile in iCloud Keychain; notarytool authenticated successfully. Final theme verification passed independent migration, bootstrap, queue, selection and custom-preservation exercises. The repository suite passed 94 files / 1,670 tests, with typecheck and zero lint errors. No live theme records or backend schema were changed during testing. The coordinated archive rollout prerequisite still applies to publication of the current desktop source.
