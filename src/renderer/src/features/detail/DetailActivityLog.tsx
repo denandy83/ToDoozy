@@ -121,7 +121,7 @@ export function DetailActivityLog({ taskId }: DetailActivityLogProps): React.JSX
         <div className="ml-3 border-l border-border pl-3">
           {loading && <p className="text-[10px] text-muted">Loading...</p>}
           {!loading && entries.length === 0 && (
-            <p className="text-[10px] text-muted/60">No activity recorded</p>
+            <p className="text-[10px] text-muted">No activity recorded</p>
           )}
           {entries.map((entry) => (
             <ActivityEntry key={entry.id} entry={entry} userName={entry.user_id ? formatUserName(userMap.get(entry.user_id) ?? { display_name: null, email: 'unknown' }) : null} timezone={timezone} />
@@ -154,13 +154,13 @@ function ActivityEntry({ entry, userName, timezone }: ActivityEntryProps): React
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
           {entry.action}
         </span>
-        <span className="text-[10px] text-muted/60">{timeStr}</span>
+        <span className="text-[10px] text-muted">{timeStr}</span>
       </div>
       {userName && (
-        <span className="text-[10px] text-muted/60">by {userName}</span>
+        <span className="text-[10px] text-muted">by {userName}</span>
       )}
       {(entry.old_value || entry.new_value) && (
-        <div className="mt-0.5 text-[10px] text-muted/80">
+        <div className="mt-0.5 text-[10px] text-muted">
           {entry.old_value && (
             <span className="line-through">{entry.old_value}</span>
           )}

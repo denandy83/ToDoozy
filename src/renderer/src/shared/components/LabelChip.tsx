@@ -1,3 +1,4 @@
+import { useSemanticColor } from '../hooks/useSemanticColor'
 import { useCallback } from 'react'
 import { X } from 'lucide-react'
 
@@ -9,6 +10,7 @@ interface LabelChipProps {
 }
 
 export function LabelChip({ name, color, onRemove, onClick }: LabelChipProps): React.JSX.Element {
+  const appearance = useSemanticColor(color)
   const handleRemove = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -33,10 +35,10 @@ export function LabelChip({ name, color, onRemove, onClick }: LabelChipProps): R
 
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider cursor-default"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 ui-metadata cursor-default"
       style={{
         backgroundColor: `${color}20`,
-        color: color,
+        color: appearance.text,
         border: `1px solid ${color}30`
       }}
       onClick={onClick}

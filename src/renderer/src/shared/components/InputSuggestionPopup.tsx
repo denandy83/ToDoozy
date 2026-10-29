@@ -114,7 +114,7 @@ export function InputSuggestionPopup({
   return createPortal(
     <div
       ref={containerRef}
-      className="fixed w-56 rounded-lg border border-border bg-surface py-1 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+      className="ui-input-suggestions fixed w-56 rounded-lg border border-border bg-surface py-1 shadow-xl "
       style={{
         top: adjustedTop,
         left: adjustedLeft,
@@ -124,7 +124,7 @@ export function InputSuggestionPopup({
       {items.map((item, index) => (
         <button
           key={item.id}
-          className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light transition-colors ${
+          className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light  ${
             index === highlightedIndex ? 'bg-foreground/6' : ''
           }`}
           onMouseEnter={() => setHighlightedIndex(index)}

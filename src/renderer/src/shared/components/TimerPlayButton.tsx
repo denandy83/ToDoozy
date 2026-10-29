@@ -1,3 +1,6 @@
+import { useFocusRestore } from '../hooks/useFocusRestore'
+import { useFocusTrap } from '../hooks/useFocusTrap'
+import { usePresence } from '../motion/usePresence'
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, forwardRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Play } from 'lucide-react'
@@ -20,9 +23,12 @@ interface TimerPlayButtonProps {
 
 export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButtonProps): React.JSX.Element {
   const [popupOpen, setPopupOpen] = useState(false)
+  const popupPresence = usePresence(popupOpen, 'menu')
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
+  useFocusRestore(popupPresence.present, popupRef)
+  useFocusTrap(popupRef, popupPresence.present)
   const settings = useTimerSettings()
   const isTimerRunning = useTimerStore((s) => s.isRunning)
   const startTimer = useTimerStore((s) => s.startTimer)
@@ -100,7 +106,7 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         ref={btnRef}
         onClick={handleClick}
         disabled={isTimerRunning}
-        className="flex-shrink-0 rounded p-0.5 text-muted/0 transition-colors group-hover:text-muted/50 hover:text-foreground hover:bg-foreground/6 disabled:opacity-30 disabled:cursor-not-allowed"
+        className="ui-icon-button ui-row-action flex-shrink-0 rounded text-muted/0 transition-colors group-hover:text-muted hover:text-foreground hover:bg-foreground/6 disabled:opacity-30 disabled:cursor-not-allowed"
         title={isTimerRunning ? 'Timer already running' : 'Start timer'}
         aria-label="Start timer"
         tabIndex={0}
@@ -108,9 +114,10 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
         <Play size={12} fill="currentColor" />
       </button>
 
-      {popupOpen && anchorRect &&
+      {popupPresence.present && anchorRect &&
         createPortal(
           <TimerPopup
+            motionProps={popupPresence.props}
             ref={popupRef}
             anchorRect={anchorRect}
             settings={settings}
@@ -124,6 +131,7 @@ export function TimerPlayButton({ taskId, taskTitle, projectId }: TimerPlayButto
 }
 
 interface TimerPopupProps {
+  motionProps: ReturnType<typeof usePresence>['props']
   anchorRect: DOMRect
   settings: TimerSettings
   onStart: (params: StartParams) => void
@@ -136,7 +144,7 @@ const SEGMENT_BTN_ACTIVE = 'bg-accent/12 border border-accent/15 text-accent'
 const SEGMENT_BTN_INACTIVE = 'border border-transparent text-muted hover:bg-foreground/6 hover:text-foreground'
 
 const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPopup(
-  { anchorRect, settings, onStart, onClose },
+  { anchorRect, settings, onStart, onClose, motionProps },
   ref
 ) {
   const [mode, setMode] = useState<TimerMode>(settings.defaultMode)
@@ -177,6 +185,7 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
 
     el.style.left = `${left}px`
     el.style.top = `${top}px`
+    el.style.transformOrigin = `${anchorRect.left + anchorRect.width/2-left}px ${top >= anchorRect.bottom ? '0px' : popupH+'px'}`
   }, [anchorRect, mode, duration, ref])
 
   useEffect(() => {
@@ -206,9 +215,10 @@ const TimerPopup = forwardRef<HTMLDivElement, TimerPopupProps>(function TimerPop
   return (
     <div
       ref={ref}
+      {...motionProps}
       onKeyDown={handleKeyDown}
       tabIndex={-1}
-      className="fixed z-[9999] flex h-[224px] w-[260px] flex-col rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-100"
+      className="ui-surface ui-menu fixed z-[9999] flex h-[224px] w-[260px] flex-col rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:duration-100"
       style={{ top: -9999, left: -9999 }}
     >
       <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">

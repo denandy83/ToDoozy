@@ -157,7 +157,7 @@ export function DetailSubtasks({ taskId, projectId }: DetailSubtasksProps): Reac
               }
             }}
             placeholder="Subtask title..."
-            className="flex-1 bg-transparent text-[13px] font-light text-foreground placeholder:text-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            className="flex-1 bg-transparent text-[13px] font-light text-foreground placeholder:text-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           />
         </div>
       )}

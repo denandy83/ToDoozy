@@ -1,3 +1,4 @@
+import { useSemanticColor } from '../../shared/hooks/useSemanticColor'
 import { useState, useCallback, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useTaskStore } from '../../shared/stores'
@@ -57,6 +58,7 @@ export function StatusSection({
   disableDrag,
   readOnly
 }: StatusSectionProps): React.JSX.Element {
+  const headingColor = useSemanticColor(bucketColor ?? status.color ?? '#888888')
   const [collapsed, setCollapsed] = useState(false)
   const expandedTaskIds = useTaskStore((s) => s.expandedTaskIds)
   const toggleExpanded = useTaskStore((s) => s.toggleExpanded)
@@ -96,12 +98,12 @@ export function StatusSection({
           }`}
         />
         <span
-          className="text-[10px] font-bold uppercase tracking-[0.3em]"
-          style={{ color: (bucketColor ?? status.color) || undefined }}
+          className="ui-section-label"
+          style={{ color: headingColor.text }}
         >
           {bucketName ?? status.name}
         </span>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+        <span className="ui-metadata text-muted">
           {topLevel.length}
         </span>
       </button>
@@ -144,7 +146,7 @@ export function StatusSection({
               )
             })}
             {sorted.length === 0 && (
-              <p className="px-4 py-3 text-sm font-light text-muted/40">No tasks</p>
+              <p className="px-4 py-3 text-sm font-light text-muted">No tasks</p>
             )}
           </div>
       )}

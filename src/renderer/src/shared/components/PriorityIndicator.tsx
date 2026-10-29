@@ -1,12 +1,7 @@
+import { useSemanticColor } from '../hooks/useSemanticColor'
 import { useCallback } from 'react'
 
-const PRIORITY_LEVELS = [
-  { value: 0, label: 'None', color: '#888888' },
-  { value: 1, label: 'Low', color: '#22c55e' },
-  { value: 2, label: 'Normal', color: '#3b82f6' },
-  { value: 3, label: 'High', color: '#f59e0b' },
-  { value: 4, label: 'Urgent', color: '#ef4444' }
-] as const
+import { PRIORITY_LEVELS } from '../../../../shared/taskPriorities'
 
 interface PriorityIndicatorProps {
   currentPriority: number
@@ -38,6 +33,7 @@ interface PriorityButtonProps {
 }
 
 function PriorityButton({ level, isActive, onSelect }: PriorityButtonProps): React.JSX.Element {
+  const appearance = useSemanticColor(level.color)
   const handleClick = useCallback(() => {
     onSelect(level.value)
   }, [level.value, onSelect])
@@ -67,12 +63,12 @@ function PriorityButton({ level, isActive, onSelect }: PriorityButtonProps): Rea
     <button
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+      className={`rounded px-2 py-1 ui-metadata transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         isActive
           ? 'text-accent-fg'
           : 'text-muted hover:bg-foreground/6'
       }`}
-      style={isActive ? { backgroundColor: level.color } : undefined}
+      style={isActive ? { backgroundColor: level.color, color: appearance.onFill } : undefined}
       role="radio"
       aria-checked={isActive}
       aria-label={level.label}

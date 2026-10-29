@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { migrations } from './migrations'
+import { BUILTIN_THEMES } from '../../shared/themeCatalog'
 
 // migration_25 (the project_labels backfill) lives at index 24. Running
 // migrations[0..23] builds the schema up to v24 — project_labels already has
@@ -102,5 +103,41 @@ describe('migration_25 — project_labels backfill', () => {
     runBackfill(db)
 
     expect((db.prepare('SELECT COUNT(*) c FROM project_labels WHERE label_id = ?').get('l1') as { c: number }).c).toBe(1)
+  })
+})
+
+describe('soft theme installation', () => {
+  it.each(BUILTIN_THEMES.slice(12))('preserves a preexisting custom $name and its selection through every upgrade', (preset) => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      for (const migration of migrations.slice(0, 29)) migration(db)
+      const config = ' { "accent": "#abcDEF", "bg": "#123456", "extra": "keep me" } '
+      db.prepare('INSERT INTO themes (id,name,mode,config,is_builtin,owner_id,created_at,updated_at) VALUES (?,?,?,?,0,?,?,?)')
+        .run('custom-soft', preset.name, preset.mode, config, 'u1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z')
+      db.prepare("INSERT INTO settings (user_id,key,value,updated_at) VALUES ('u1','theme_id','custom-soft','2026-01-02T00:00:00.000Z')").run()
+      const theme = db.prepare("SELECT * FROM themes WHERE id='custom-soft'").get()
+      const selection = db.prepare("SELECT * FROM settings WHERE user_id='u1' AND key='theme_id'").get()
+      for (const migration of migrations.slice(29)) migration(db)
+      expect(db.prepare("SELECT * FROM themes WHERE id='custom-soft'").get()).toEqual(theme)
+      expect(db.prepare("SELECT * FROM settings WHERE user_id='u1' AND key='theme_id'").get()).toEqual(selection)
+      expect(db.prepare("SELECT * FROM theme_duplicate_archive WHERE id='custom-soft'").get()).toBeUndefined()
+    } finally { db.close() }
+  })
+
+  it('adds three pairs once without changing custom colors or the selected theme', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      for (const migration of migrations.slice(0, 29)) migration(db)
+      const selected = db.prepare("SELECT id, config FROM themes WHERE name='Standard Dark'").get() as { id: string; config: string }
+      const custom = JSON.stringify({ bg: '#e7b7c8', accent: '#b6d9c7' })
+      db.prepare("INSERT INTO themes (id,name,mode,config,is_builtin) VALUES ('custom-pastel','Soft Sage Dark','dark',?,0)").run(custom)
+      db.prepare("UPDATE settings SET value=? WHERE key='theme_id'").run(selected.id)
+      migrations[29](db)
+      migrations[29](db)
+      expect((db.prepare("SELECT COUNT(*) AS count FROM themes WHERE is_builtin=1 AND name LIKE 'Soft %'").get() as { count: number }).count).toBe(6)
+      expect((db.prepare("SELECT config FROM themes WHERE id='custom-pastel'").get() as { config: string }).config).toBe(custom)
+      expect((db.prepare("SELECT value FROM settings WHERE key='theme_id'").get() as { value: string }).value).toBe(selected.id)
+      expect((db.prepare('SELECT config FROM themes WHERE id=?').get(selected.id) as { config: string }).config).toBe(selected.config)
+    } finally { db.close() }
   })
 })

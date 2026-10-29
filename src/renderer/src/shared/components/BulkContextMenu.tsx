@@ -1,3 +1,6 @@
+import { usePresence } from '../motion/usePresence'
+import { useRef as useRetainedRef } from 'react'
+import { pushPopup } from '../utils/popupStack'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -25,15 +28,19 @@ import { useViewStore } from '../stores/viewStore'
 type SubmenuId = 'status' | 'priority' | 'labels' | 'snooze'
 
 export function BulkContextMenu(): React.JSX.Element | null {
-  const { isOpen, isBulk, position, bulkTaskIds, close } = useContextMenuStore()
+  const { isOpen, isBulk, position, bulkTaskIds: liveTaskIds, close } = useContextMenuStore()
+  const presence = usePresence(isOpen && isBulk, 'menu')
+  const retainedIds = useRetainedRef(liveTaskIds)
+  if (isOpen && isBulk) retainedIds.current = liveTaskIds
+  const bulkTaskIds = retainedIds.current
   const menuRef = useRef<HTMLDivElement>(null)
   const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
 
-  useFocusRestore()
-  useFocusTrap(menuRef, isOpen && isBulk)
+  useFocusRestore(presence.present, menuRef)
+  useFocusTrap(menuRef, presence.present)
 
   const tasks = useTaskStore((s) => s.tasks)
   const { bulkUpdateTasks, setPendingBulkDeleteTasks, deleteTask, clearSelection } = useTaskStore()
@@ -91,9 +98,15 @@ export function BulkContextMenu(): React.JSX.Element | null {
     }
   }, [])
 
-  const handleSubmenuEnter = useCallback((id: SubmenuId | null) => {
+  useEffect(() => {
+    if (isOpen && activeSubmenu) return pushPopup(() => setActiveSubmenu(null))
+    return undefined
+  }, [isOpen, activeSubmenu])
+
+  const handleSubmenuEnter = useCallback((id: SubmenuId | null, instant = false) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
+    if (instant) setActiveSubmenu(id)
+    else hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
   }, [])
 
   const handleSubmenuLeave = useCallback(() => {
@@ -109,7 +122,7 @@ export function BulkContextMenu(): React.JSX.Element | null {
     [close]
   )
 
-  if (!isOpen || !isBulk || bulkTaskIds.length === 0) return null
+  if (!presence.present || bulkTaskIds.length === 0) return null
 
   // Check if any selected task is currently in My Day
   const anyInMyDay = bulkTaskIds.some((id) => tasks[id]?.is_in_my_day === 1)
@@ -142,8 +155,9 @@ export function BulkContextMenu(): React.JSX.Element | null {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl"
-      style={{ left: menuPos.x, top: menuPos.y }}
+      {...presence.props}
+      className="ui-surface ui-menu fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl"
+      style={{ left: menuPos.x, top: menuPos.y, transformOrigin: `${Math.max(0, position.x-menuPos.x)}px ${Math.max(0, position.y-menuPos.y)}px` }}
       role="menu"
       aria-label="Bulk task context menu"
     >

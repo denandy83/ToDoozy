@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../../shared/motion/MotionPresence'
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { Project } from '../../../../../shared/types'
@@ -52,8 +53,7 @@ export function MyDayProjectSelector({
         <ChevronDown size={10} className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100">
+      {<MotionPresence open={Boolean(open)}>{() => (open) ? (<div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:duration-100">
           <div className="max-h-48 overflow-y-auto py-1">
             {projects.map((p) => (
               <button
@@ -76,8 +76,7 @@ export function MyDayProjectSelector({
               </button>
             ))}
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

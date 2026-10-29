@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { migrations } from '../database/migrations'
 import { ThemeRepository } from './ThemeRepository'
 import type { Theme } from '../../shared/types'
+import { builtinThemeId } from '../../shared/themeCatalog'
 
 function createTestDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:')
@@ -244,5 +245,46 @@ describe('ThemeRepository — applyRemote', () => {
     }
     repo.applyRemote(remote)
     expect(repo.findById('builtin-1')!.name).toBe('Default')
+  })
+
+  it.each([
+    { id: builtinThemeId('Standard Dark'), name: 'Standard Dark', mode: 'dark' },
+    { id: builtinThemeId('Standard Light'), name: 'Standard Light', mode: 'light' },
+    { id: 'builtin-unknown-dark', name: 'Default', mode: 'dark' },
+    { id: 'builtin-unknown-light', name: 'Default', mode: 'light' }
+  ])('preserves $id against remote replacements and tombstones', ({ id, name, mode }) => {
+    db.prepare(
+      `INSERT OR REPLACE INTO themes (id, name, mode, config, is_builtin, owner_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, NULL, ?, ?)`
+    ).run(id, name, mode, sampleConfig, '2026-04-25T10:00:00.000Z', '2026-04-25T10:00:00.000Z')
+    const original = repo.findById(id)!
+    for (const replacement of [
+      { name: 'My Theme', mode: 'dark' },
+      { name: 'My Theme', mode: 'light' },
+      { name: 'Forest Dark', mode: 'dark' },
+      { name: 'Forest Light', mode: 'light' }
+    ]) {
+      for (const deleted_at of [null, '2090-01-01T00:00:00.000Z']) {
+        const remote: Theme = {
+          ...original, ...replacement, config: '{}', is_builtin: 0, owner_id: ownerId,
+          updated_at: '2090-01-01T00:00:00.000Z', deleted_at
+        }
+        expect(repo.applyRemote(remote)).toEqual(original)
+        expect(repo.findById(id)).toEqual(original)
+      }
+    }
+  })
+
+  it('recovers a genuine custom rename of a known original builtin alias', () => {
+    db.prepare(
+      `INSERT INTO themes (id, name, mode, config, is_builtin, owner_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, NULL, ?, ?)`
+    ).run('old-install', 'Standard Dark', 'dark', sampleConfig, '2026-04-25T10:00:00.000Z', '2090-01-01T00:00:00.000Z')
+    const remote: Theme = {
+      ...repo.findById('old-install')!, name: 'My Theme', is_builtin: 0, owner_id: ownerId,
+      updated_at: '2026-04-26T10:00:00.000Z'
+    }
+    expect(repo.applyRemote(remote)).toEqual(remote)
+    expect(repo.findById(remote.id)).toEqual(remote)
   })
 })

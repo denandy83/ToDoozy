@@ -1,15 +1,75 @@
 @import "tailwindcss";
 
+/* Shared interaction contract. Keyboard selection is never animated. */
+:root {
+  --ui-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ui-enter: 160ms;
+  --ui-exit: 100ms;
+}
+.ui-surface {
+  opacity: 1;
+  transition-property: opacity, transform;
+  transition-duration: var(--ui-enter);
+  transition-timing-function: var(--ui-ease-out);
+  transform-origin: var(--ui-origin, top left);
+}
+.ui-surface[data-state="closed"] { opacity: 0; transform: translateY(-4px) scale(.97); pointer-events: none; transition-duration: var(--ui-exit); }
+@starting-style { .ui-surface[data-state="open"]:not([data-instant="true"]) { opacity: 0; transform: translateY(-4px) scale(.97); } }
+.ui-dialog { --ui-enter: 220ms; --ui-exit: 140ms; transform-origin: center; }
+.ui-panel { --ui-enter: 240ms; --ui-exit: 160ms; transform-origin: right center; }
+.ui-panel[data-state="closed"] { transform: translateX(16px); }
+@starting-style { .ui-panel[data-state="open"]:not([data-instant="true"]) { transform: translateX(16px); } }
+.ui-panel[data-edge="bottom"][data-state="closed"] { transform: translateY(16px); }
+@starting-style { .ui-panel[data-edge="bottom"][data-state="open"]:not([data-instant="true"]) { transform: translateY(16px); } }
+.ui-toast { --ui-enter: 180ms; --ui-exit: 120ms; }
+.ui-toast[data-state="closed"] { transform: translateY(8px); }
+@starting-style { .ui-toast[data-state="open"]:not([data-instant="true"]) { transform: translateY(8px); } }
+.ui-modal-backdrop, .ui-modal-backdrop[data-state="closed"] { transform: none; }
+@starting-style { .ui-modal-backdrop[data-state="open"]:not([data-instant="true"]) { transform: none; } }
+.ui-modal-content { transition: transform var(--ui-enter) var(--ui-ease-out); }
+.ui-modal-backdrop[data-state="closed"]>.ui-modal-content { transform: scale(.97); transition-duration: var(--ui-exit); }
+@starting-style { .ui-modal-backdrop[data-state="open"]:not([data-instant="true"])>.ui-modal-content { transform: scale(.97); } }
+.ui-surface[data-instant="true"], .ui-surface[data-instant="true"]>.ui-modal-content { transition: none; }
+.ui-submenu-shell { position: absolute; inset: 0; pointer-events: none; }
+.ui-submenu-shell>* { pointer-events: auto; }
+.ui-tooltip { transition: opacity 125ms ease; }
+.ui-calendar-motion { display: contents; }
+.ui-calendar-motion .react-datepicker-popper { opacity: 1; transform-origin: top left; transition: opacity var(--ui-enter) var(--ui-ease-out), scale var(--ui-enter) var(--ui-ease-out), translate var(--ui-enter) var(--ui-ease-out); }
+.ui-calendar-motion .react-datepicker-popper[data-placement^="top"] { transform-origin: bottom left; }
+.ui-calendar-motion[data-state="closed"] .react-datepicker-popper { opacity: 0; scale: .97; translate: 0 -4px; transition-duration: var(--ui-exit); }
+@starting-style { .ui-calendar-motion[data-state="open"]:not([data-instant="true"]) .react-datepicker-popper { opacity: 0; scale: .97; translate: 0 -4px; } }
+.ui-calendar-motion[data-instant="true"] .react-datepicker-popper { transition: none; }
+.ui-command-palette, .ui-command-palette *, .ui-input-suggestions, .ui-input-suggestions * { transition: none; animation: none; }
+html[data-input-modality="keyboard"] .ui-tooltip { transition: none; }
+:where(main, .ui-surface) button { transition: background-color 100ms ease, color 100ms ease, scale 120ms var(--ui-ease-out); }
+html[data-input-modality="keyboard"] :where(main, .ui-surface) button { transition: none; }
+@media (prefers-reduced-motion: no-preference) { html[data-input-modality="pointer"] :where(main, .ui-surface) button:not([aria-roledescription="draggable"]):active { scale: .97; } }
+.ui-icon-button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; min-height: 26px; }
+.ui-task-row { min-height: 46px; padding-block: 10px; border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent); transition: none; }
+.ui-task-row:focus-within .ui-row-action, .ui-task-row:hover .ui-row-action { opacity: 1; }
+.ui-task-row:focus-within .ui-row-action:not(.text-danger), .ui-task-row:hover .ui-row-action:not(.text-danger) { color: var(--color-muted); }
+.ui-workspace-heading { font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -.035em; text-transform: none; }
+.ui-section-label { font-size: 12px; line-height: 1.4; font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--color-fg-secondary); }
+.ui-metadata { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.ui-detail-field { gap: 9px; padding-bottom: 12px; }
+.ui-detail-panel input, .ui-detail-panel textarea { font-weight: 400; }
+.ui-detail-panel .tiptap-editor-content { font-size: 14px; line-height: 1.65; }
+.ui-color-swatches { display: flex; flex-direction: column; gap: 12px; width: 100%; min-width: 185px; }
+.ui-color-swatch { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-foreground) 15%, transparent); }
+.ui-color-swatch[aria-pressed="true"] { outline: 2px solid var(--color-foreground); outline-offset: 2px; }
+.bg-danger { color: var(--color-danger-fg, #fff); }
+.bg-success { color: var(--color-success-fg, #fff); }
+
 @theme {
   --color-background: #1a1a2e;
   --color-foreground: #e0e0e0;
   --color-fg-secondary: #b0b0b0;
-  --color-fg-muted: #666666;
-  --color-accent: #6366f1;
-  --color-accent-fg: #ffffff;
+  --color-fg-muted: #8e8e8e;
+  --color-accent: #7f82f4;
+  --color-accent-fg: #262626;
   --color-surface: #16213e;
   --color-border: #2a2a4a;
-  --color-muted: #888888;
+  --color-muted: #8e8e8e;
   --color-danger: #ef4444;
   --color-success: #22c55e;
   --color-sidebar: #26263a;
@@ -24,7 +84,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  transition: background-color 300ms, color 300ms;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -41,9 +100,6 @@ code {
   -webkit-user-select: text;
 }
 
-* {
-  transition: background-color 300ms, color 300ms, border-color 300ms;
-}
 
 html.is-dragging,
 html.is-dragging * {
@@ -56,7 +112,8 @@ html.is-dragging * {
 
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline: 2px solid var(--color-focus, var(--color-accent));
+  outline-offset: 3px;
   border-radius: 0.25rem;
 }
 
@@ -105,13 +162,13 @@ html.is-dragging * {
 
 .react-datepicker__day:hover {
   background-color: var(--color-accent) !important;
-  color: white !important;
+  color: var(--color-accent-fg) !important;
   border-radius: 0.3rem !important;
 }
 
 .react-datepicker__day--selected {
   background-color: var(--color-accent) !important;
-  color: white !important;
+  color: var(--color-accent-fg) !important;
 }
 
 /* Keyboard-selected mirrors the selected day-of-month across navigated months
@@ -162,12 +219,12 @@ html.is-dragging * {
 
 .react-datepicker__time-list-item:hover {
   background-color: var(--color-accent) !important;
-  color: white !important;
+  color: var(--color-accent-fg) !important;
 }
 
 .react-datepicker__time-list-item--selected {
   background-color: var(--color-accent) !important;
-  color: white !important;
+  color: var(--color-accent-fg) !important;
 }
 
 .react-datepicker__triangle {
@@ -361,4 +418,33 @@ html.is-dragging * {
 
 .tippy-box[data-theme~='tiptap'] .tippy-arrow {
   display: none;
+}
+
+/* Fill hue and readable text are separate roles, including custom pastel accents. */
+.text-accent { color: var(--color-accent-text, var(--color-accent)); }
+aside {
+  --color-foreground: var(--color-sidebar-foreground, #e0e0e0);
+  --color-fg-secondary: var(--color-sidebar-fg-secondary, #b0b0b0);
+  --color-fg-muted: var(--color-sidebar-fg-muted, #8e8e8e);
+  --color-muted: var(--color-sidebar-muted, #8e8e8e);
+  --color-accent-text: var(--color-sidebar-accent-text, #7f82f4);
+  --color-danger: var(--color-sidebar-danger, #ef4444);
+  --color-success: var(--color-sidebar-success, #22c55e);
+}
+
+.ui-surface {
+  --color-foreground: var(--color-canvas-foreground, #e0e0e0);
+  --color-fg-secondary: var(--color-canvas-fg-secondary, #b0b0b0);
+  --color-fg-muted: var(--color-canvas-fg-muted, #8e8e8e);
+  --color-muted: var(--color-canvas-muted, #8e8e8e);
+  --color-accent-text: var(--color-canvas-accent-text, #7f82f4);
+  --color-danger: var(--color-canvas-danger, #ef4444);
+  --color-success: var(--color-canvas-success, #22c55e);
+  --color-focus: var(--color-canvas-focus, #7f82f4);
+}
+aside { --color-focus: var(--color-sidebar-focus, #7f82f4); }
+
+.ui-task-row[aria-selected="true"] {
+  --color-muted: var(--color-selected-muted);
+  --color-fg-secondary: var(--color-selected-secondary);
 }

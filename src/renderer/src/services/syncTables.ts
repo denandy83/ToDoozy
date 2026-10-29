@@ -1,4 +1,5 @@
 import type { SyncTableName } from '../../../preload/index.d'
+import type { PostgrestMaybeSingleResponse } from '@supabase/supabase-js'
 import type {
   Task,
   Status,
@@ -16,6 +17,9 @@ import { readAll } from './readAll'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
+import { BUILTIN_THEMES, builtinThemeId, canSyncTheme } from '../../../shared/themeCatalog'
+import { refreshSyncedTheme, useSettingsStore } from '../shared/stores/settingsStore'
+import { hydrationContext } from '../shared/stores/hydrationContext'
 
 export type { SyncTableName }
 
@@ -54,8 +58,8 @@ export interface SyncTableDescriptor<TLocal, TRemote> {
   // Local-side ops (renderer calls window.api.* under the hood)
   localList(scopeId: string, includeTombstones: boolean, api?: typeof window.api): Promise<TLocal[]>
   localGetById(id: string, api?: typeof window.api): Promise<TLocal | null>
-  /** Upsert with the remote's `updated_at` and `deleted_at` preserved (no NOW() bump). */
-  localApplyRemote(remote: TRemote, api?: typeof window.api): Promise<void>
+  /** Preserve remote clocks/tombstones; legacy theme retirement may advance its cleanup clock. */
+  localApplyRemote(remote: TRemote, api?: typeof window.api, context?: SyncContext): Promise<void>
   /** Returns max(updated_at) on local active rows, or null if empty. */
   localMaxUpdatedAt(scopeId: string, api?: typeof window.api): Promise<string | null>
 
@@ -570,7 +574,7 @@ SYNC_TABLES.labels = labelsDescriptor as SyncTableDescriptor<unknown, unknown>
 // `is_builtin` themes never round-trip — they're seeded locally per release
 // and excluded from `findAllByOwner`. The remote table has no `is_builtin`.
 
-interface RemoteTheme {
+export interface RemoteTheme {
   id: string
   user_id: string
   name: string
@@ -622,6 +626,13 @@ function parseThemeConfig(json: string): ThemeConfig {
   }
 }
 
+async function acceptThemeState<T>(userId: string, merge: () => Promise<T>, context?: SyncContext): Promise<T> {
+  const origin = context ?? (useSettingsStore.getState().userId === userId ? hydrationContext() : null)
+  const accepted = await merge()
+  if (origin) await refreshSyncedTheme(userId, origin)
+  return accepted
+}
+
 const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   name: 'themes',
   remoteName: 'user_themes',
@@ -637,8 +648,8 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
     return api.themes.findById(id)
   },
 
-  async localApplyRemote(remote, api = window.api) {
-    await api.themes.applyRemote(themesDescriptor.fromRemote(remote))
+  async localApplyRemote(remote, api = window.api, context) {
+    await acceptThemeState(remote.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(remote)), context)
   },
 
   async localMaxUpdatedAt(ownerId, api = window.api) {
@@ -656,18 +667,40 @@ const themesDescriptor: SyncTableDescriptor<Theme, RemoteTheme> = {
   },
 
   async remoteUpsert(local, context) {
+    if (!canSyncTheme(local)) return
     const supabase = context?.client ?? await getSupabase()
-    const { error } = await supabase.from('user_themes').upsert(themesDescriptor.toRemote(local))
+    const api = context?.api ?? window.api
+    const read = (): PromiseLike<PostgrestMaybeSingleResponse<RemoteTheme>> => supabase.from('user_themes').select('*').eq('id', local.id).eq('user_id', local.owner_id!).maybeSingle()
+    const { data: remote, error } = await read()
     if (error) throw error
+    context?.assertCurrent()
+    const current = remote ? await acceptThemeState(remote.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(remote)), context) : await api.themes.findById(local.id)
+    if (!current || !canSyncTheme(current) || await api.themes.isPresetAlias(current)) return
+    const payload = themesDescriptor.toRemote(current)
+    if (remote) {
+      if (!await api.themes.isPresetAlias(themesDescriptor.fromRemote(remote)) && Date.parse(current.updated_at) <= Date.parse(remote.updated_at)) return
+      context?.assertCurrent()
+      let update = supabase.from('user_themes').update(payload).eq('id', local.id).eq('user_id', local.owner_id!).eq('name', remote.name).eq('mode', remote.mode).eq('updated_at', remote.updated_at)
+      update = remote.deleted_at == null ? update.is('deleted_at', null) : update.eq('deleted_at', remote.deleted_at)
+      const result = await update.select('*').maybeSingle()
+      if (result.error) throw result.error
+      if (result.data) return
+    } else {
+      context?.assertCurrent()
+      const result = await supabase.from('user_themes').upsert(payload, { onConflict: 'id', ignoreDuplicates: true }).select('*').maybeSingle()
+      if (result.error) throw result.error
+      if (result.data) return
+    }
+    const latest = await read()
+    if (latest.error) throw latest.error
+    const latestTheme = latest.data
+    if (!latestTheme) throw new Error('Theme identity changed during sync')
+    await acceptThemeState(latestTheme.user_id, () => api.themes.applyRemote(themesDescriptor.fromRemote(latestTheme)), context)
   },
 
-  async remoteSoftDelete(id, deletedAt, context) {
-    const supabase = context?.client ?? await getSupabase()
-    const { error } = await supabase
-      .from('user_themes')
-      .update({ deleted_at: deletedAt, updated_at: deletedAt })
-      .eq('id', id)
-    if (error) throw error
+  async remoteSoftDelete(id, _deletedAt, context) {
+    const local = await (context?.api ?? window.api).themes.findById(id)
+    if (local?.deleted_at) await themesDescriptor.remoteUpsert(local, context)
   },
 
   async remoteMaxUpdatedAt(userId, context) {
@@ -742,13 +775,30 @@ SYNC_TABLES.themes = themesDescriptor as SyncTableDescriptor<unknown, unknown>
 // is reconstructed in `toRemote` and split in `fromRemote`. Global defaults
 // (user_id = '') are seeded locally per release and excluded from sync.
 
-interface RemoteSetting {
+export interface RemoteSetting {
   id: string
   user_id: string
   key: string
   value: string | null
   updated_at: string
   deleted_at: string | null
+}
+
+async function resolveSelectionTheme(setting: Setting, api: typeof window.api, context?: SyncContext): Promise<void> {
+  if (setting.deleted_at) return
+  const source = await api.settings.themeReferenceSource(setting.user_id, setting.value, setting.updated_at)
+  for (const id of new Set([source, setting.value])) {
+    if (!id || BUILTIN_THEMES.some((theme) => builtinThemeId(theme.name) === id)) continue
+    const client = context?.client ?? await getSupabase()
+    const { data, error } = await client.from('user_themes').select('*').eq('id', id).eq('user_id', setting.user_id).maybeSingle()
+    if (error) throw error
+    context?.assertCurrent()
+    if (data) {
+      const incoming = themesDescriptor.fromRemote(data)
+      const current = await acceptThemeState(setting.user_id, () => api.themes.applyRemote(incoming), context)
+      if (!await api.themes.isPresetAlias(current) && await api.themes.isPresetAlias(incoming)) await themesDescriptor.remoteUpsert(current, context)
+    }
+  }
 }
 
 const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
@@ -775,9 +825,23 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
     return isSettingSyncExcluded(key) ? null : rows.find((row) => row.key === key) ?? null
   },
 
-  async localApplyRemote(remote, api = window.api) {
+  async localApplyRemote(remote, api = window.api, context) {
     if (isSettingSyncExcluded(settingsDescriptor.fromRemote(remote).key)) return
-    await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
+    if (remote.key === 'theme_id') {
+      const local = await api.settings.findRaw(remote.user_id, remote.key)
+      if (local && Date.parse(local.updated_at) === Date.parse(remote.updated_at) && local.value !== remote.value) {
+        const client = context?.client ?? await getSupabase()
+        const { data, error } = await client.from('user_settings').select('*').eq('id', remote.id).eq('user_id', remote.user_id).eq('key', remote.key).maybeSingle()
+        if (error) throw error
+        context?.assertCurrent()
+        if (!data) return
+        remote = data
+      }
+      await resolveSelectionTheme(settingsDescriptor.fromRemote(remote), api, context)
+    }
+    if (remote.key === 'theme_id') {
+      await acceptThemeState(remote.user_id, () => api.settings.applyRemote(settingsDescriptor.fromRemote(remote)), context)
+    } else await api.settings.applyRemote(settingsDescriptor.fromRemote(remote))
   },
 
   async localMaxUpdatedAt(userId, api = window.api) {
@@ -796,12 +860,57 @@ const settingsDescriptor: SyncTableDescriptor<Setting, RemoteSetting> = {
 
   async remoteUpsert(local, context) {
     const supabase = context?.client ?? await getSupabase()
+    if (local.key === 'theme_id') {
+      const api = context?.api ?? window.api
+      const id = `${local.user_id}:${local.key}`
+      const read = (): PromiseLike<PostgrestMaybeSingleResponse<RemoteSetting>> => supabase.from('user_settings').select('*').eq('id', id).eq('user_id', local.user_id).eq('key', local.key).maybeSingle()
+      const { data: remote, error } = await read()
+      if (error) throw error
+      context?.assertCurrent()
+      await resolveSelectionTheme(local, api, context)
+      if (remote) await resolveSelectionTheme(settingsDescriptor.fromRemote(remote), api, context)
+      const current = await settingsDescriptor.localGetById(id, api)
+      if (!current) return
+      local = current
+      const payload = settingsDescriptor.toRemote(local)
+      if (remote) {
+        const localMs = Date.parse(local.updated_at)
+        const remoteMs = Date.parse(remote.updated_at)
+        const rewrite = localMs === remoteMs && !local.deleted_at && !remote.deleted_at && remote.value !== local.value &&
+          await api.settings.canRewriteThemeReference(local.user_id, remote.value, local.value, local.updated_at)
+        if (remoteMs > localMs || (remoteMs === localMs && !rewrite)) {
+          await settingsDescriptor.localApplyRemote(remote, api, context)
+          return
+        }
+        context?.assertCurrent()
+        let update = supabase.from('user_settings').update(payload).eq('id', payload.id).eq('user_id', local.user_id).eq('key', local.key).eq('updated_at', remote.updated_at)
+        update = remote.value === null ? update.is('value', null) : update.eq('value', remote.value)
+        update = remote.deleted_at == null ? update.is('deleted_at', null) : update.eq('deleted_at', remote.deleted_at)
+        const result = await update.select('*').maybeSingle()
+        if (result.error) throw result.error
+        if (result.data) return
+      } else {
+        const result = await supabase.from('user_settings').upsert(payload, { onConflict: 'id', ignoreDuplicates: true }).select('*').maybeSingle()
+        if (result.error) throw result.error
+        if (result.data) return
+      }
+      const latest = await read()
+      if (latest.error) throw latest.error
+      if (!latest.data) throw new Error('Theme selection changed during sync')
+      await settingsDescriptor.localApplyRemote(latest.data, api, context)
+      return
+    }
     const { error } = await supabase.from('user_settings').upsert(settingsDescriptor.toRemote(local))
     if (error) throw error
   },
 
   async remoteSoftDelete(id, deletedAt, context) {
     const supabase = context?.client ?? await getSupabase()
+    if (id.endsWith(':theme_id')) {
+      const local = await settingsDescriptor.localGetById(id, context?.api)
+      if (local?.deleted_at) await settingsDescriptor.remoteUpsert(local, context)
+      return
+    }
     const { error } = await supabase
       .from('user_settings')
       .update({ deleted_at: deletedAt, updated_at: deletedAt })
@@ -1213,7 +1322,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   // compare equal.
   const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)
 
-  if (storedHigh && desc.name !== 'projects' && desc.name !== 'tasks') {
+  if (storedHigh && desc.name !== 'projects' && desc.name !== 'tasks' && desc.name !== 'settings' && desc.name !== 'themes') {
     const highMs = tsMs(storedHigh)
     const localStale = !localMax || tsMs(localMax) <= highMs
     const remoteStale = !remoteMax || tsMs(remoteMax) <= highMs
@@ -1269,7 +1378,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   for (const remote of remoteOnlyRows) {
     try {
       if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
-      await desc.localApplyRemote(remote, api)
+      await desc.localApplyRemote(remote, api, context)
       stats.pulled++
     } catch {
       stats.failed++
@@ -1282,9 +1391,18 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     if (!remoteById.has(id)) continue
     let local = localById.get(id)!
     const remote = remoteById.get(id)!
+    if (desc.name === 'themes') {
+      try {
+        await desc.localApplyRemote(remote, api, context)
+        const current = await desc.localGetById(id, api)
+        if (current) await desc.remoteUpsert(current, context)
+        stats.inSync++
+      } catch { stats.failed++ }
+      continue
+    }
     if (desc.name === 'projects' || desc.name === 'tasks') {
       try {
-        await desc.localApplyRemote(remote, api)
+        await desc.localApplyRemote(remote, api, context)
         local = (await desc.localGetById(id, api))!
         const merged = desc.toRemote(local) as unknown as Project
         const original = remote as unknown as Project
@@ -1295,10 +1413,17 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
         }
       } catch { stats.failed++; continue }
     }
-    const localUpdatedAt = desc.toRemote(local).updated_at
+    const localRemote = desc.toRemote(local)
+    const localUpdatedAt = localRemote.updated_at
     const localMs = tsMs(localUpdatedAt)
     const remoteMs = tsMs(remote.updated_at)
     if (localMs === remoteMs) {
+      if (desc.name === 'settings' && 'key' in localRemote && localRemote.key === 'theme_id' && 'value' in localRemote && 'value' in remote) {
+        try {
+          if (localRemote.value !== remote.value) await desc.remoteUpsert(local, context)
+          else await refreshSyncedTheme(scopeId, context)
+        } catch { stats.failed++; continue }
+      }
       stats.inSync++
       continue
     }
@@ -1312,7 +1437,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     } else {
       try {
         if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
-        await desc.localApplyRemote(remote, api)
+        await desc.localApplyRemote(remote, api, context)
         stats.pulled++
       } catch {
         stats.failed++

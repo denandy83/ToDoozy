@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { EASE_OUT, REORDER_DURATION, immediateMotion } from '../../shared/motion/motion'
+import { ColorSwatches } from '../../shared/components/ColorSwatches'
+import { MotionPresence } from '../../shared/motion/MotionPresence'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent, useDroppable } from '@dnd-kit/core'
@@ -23,6 +26,7 @@ import {
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme, useSetting } from '../../shared/stores/settingsStore'
+import { findThemeForMode } from '../../shared/utils/themeChoices'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
@@ -38,7 +42,7 @@ import appIcon from '../../assets/icon.png'
 import type { Project } from '../../../../shared/types'
 import { NavItem } from './NavItem'
 import { MAX_VISIBLE_PROJECTS, shouldAutoExpandProjects } from './sidebarProjects'
-import { PROJECT_COLORS, pickNextProjectColor } from '../projects/projectColors'
+import { pickNextProjectColor } from '../projects/projectColors'
 
 interface SidebarProps {
   viewCounts: { 'my-day': number; archive: number; templates: number }
@@ -103,7 +107,7 @@ export function Sidebar({
   const setSelectedProject = useViewStore((s) => s.setSelectedProject)
   const currentTheme = useSettingsStore(selectCurrentTheme)
   const themes = useSettingsStore((s) => s.themes)
-  const { setSetting, setCurrentTheme } = useSettingsStore()
+  const { setSetting } = useSettingsStore()
   const sidebarRef = useRef<HTMLElement>(null)
   const isDarkMode = currentTheme?.mode === 'dark'
   const [projectsExpanded, setProjectsExpanded] = useState(false)
@@ -247,24 +251,18 @@ export function Sidebar({
   const handleToggleDayNight = useCallback(async () => {
     if (!currentTheme) return
     const newMode = isDarkMode ? 'light' : 'dark'
-    const currentName = currentTheme.name.replace(/ (Dark|Light)$/, '')
-    const match = Object.values(themes).find((t) => {
-      const name = t.name.replace(/ (Dark|Light)$/, '')
-      return name === currentName && t.mode === newMode
-    })
-    const target = match ?? Object.values(themes).find((t) => t.mode === newMode)
+    const target = findThemeForMode(currentTheme, Object.values(themes), newMode)
     if (target) {
       try {
         const config = JSON.parse(target.config) as ThemeConfig
         applyThemeConfig(config)
         await setSetting('theme_id', target.id)
         await setSetting('theme_mode', newMode)
-        setCurrentTheme(target.id)
       } catch {
         // Ignore parse errors
       }
     }
-  }, [currentTheme, isDarkMode, themes, setSetting, setCurrentTheme])
+  }, [currentTheme, isDarkMode, themes, setSetting])
 
   const clearLabelFilters = useLabelStore((s) => s.clearLabelFilters)
 
@@ -327,6 +325,21 @@ export function Sidebar({
   const [viewContextMenu, setViewContextMenu] = useState<{ viewId: string; x: number; y: number } | null>(null)
   const viewContextRef = useRef<HTMLDivElement>(null)
 
+  useLayoutEffect(() => {
+    const menu = viewContextRef.current
+    if (!viewContextMenu || !menu) return
+    const place = (): void => {
+      const left = Math.max(8, Math.min(viewContextMenu.x, window.innerWidth - menu.offsetWidth - 8))
+      const top = Math.max(8, Math.min(viewContextMenu.y, window.innerHeight - menu.offsetHeight - 8))
+      menu.style.left = `${left}px`
+      menu.style.top = `${top}px`
+      menu.style.transformOrigin = `${viewContextMenu.x - left}px ${viewContextMenu.y - top}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [viewContextMenu])
+
   useEffect(() => {
     if (!viewContextMenu) return
     const handler = (e: MouseEvent): void => {
@@ -372,20 +385,16 @@ export function Sidebar({
           <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background p-2">
             <input ref={addAreaRef} type="text" value={newAreaName} onChange={(e) => setNewAreaName(e.target.value)} tabIndex={-1}
               onKeyDown={(e) => { if (e.key === 'Enter' && newAreaName.trim()) handleCreateArea(); if (e.key === 'Escape') { e.stopPropagation(); setAddingArea(false); setNewAreaName('') } }}
-              placeholder="Folder name..." className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none" />
+              placeholder="Folder name..." className="flex-1 bg-transparent text-[12px] font-light text-foreground placeholder:text-muted focus:outline-none" />
           </div>
         )}
         {addingProject && (
           <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-background p-2">
             <input ref={addProjectRef} type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} tabIndex={-1}
               onKeyDown={(e) => { if (e.key === 'Enter' && newProjectName.trim()) handleCreateProject(); if (e.key === 'Escape') { e.stopPropagation(); setAddingProject(false); setNewProjectName(''); setNewProjectColor(pickNextProjectColor(projects.map((p) => p.color))) } }}
-              placeholder="Project name..." className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted/40 focus:outline-none" />
+              placeholder="Project name..." className="w-full bg-transparent text-[12px] font-light text-foreground placeholder:text-muted focus:outline-none" />
             <div className="flex items-center gap-1">
-              {PROJECT_COLORS.map((c) => (
-                <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setNewProjectColor(c) }}
-                  className={`h-4 w-4 rounded-full ${newProjectColor === c ? 'ring-2 ring-foreground/30 ring-offset-1 ring-offset-background' : ''}`}
-                  style={{ backgroundColor: c }} />
-              ))}
+              <ColorSwatches value={newProjectColor} onChange={setNewProjectColor} />
             </div>
           </div>
         )}
@@ -400,7 +409,7 @@ export function Sidebar({
                   <FolderOpen size={12} className="flex-shrink-0 text-muted" />
                   <span className="flex-1 text-[13px] font-light tracking-tight text-muted">{area.name}</span>
                   {/* no count for folders */}
-                  {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted/50" /> : <ChevronUp size={12} className="text-muted/50" />}
+                  {area.is_collapsed === 1 ? <ChevronDown size={12} className="text-muted" /> : <ChevronUp size={12} className="text-muted" />}
                 </button>
                 {area.is_collapsed === 0 && (
                   <div className="relative flex flex-col gap-0.5 pl-5">
@@ -588,25 +597,18 @@ export function Sidebar({
       </div>
 
       {/* Saved view context menu (color picker) */}
-      {viewContextMenu && (
-        <div
+      {<MotionPresence open={Boolean(viewContextMenu)}>{() => (viewContextMenu) ? (<div
           ref={viewContextRef}
-          className="fixed z-[100] rounded-lg border border-border bg-surface p-2 shadow-lg"
+          role="dialog"
+          aria-label="Saved view colors"
+          className="fixed z-[100] max-h-[calc(100dvh-16px)] max-w-[calc(100dvw-16px)] overflow-auto rounded-lg border border-border bg-surface p-2 shadow-lg"
           style={{ left: viewContextMenu.x, top: viewContextMenu.y }}
         >
           <div className="text-[9px] font-bold uppercase tracking-[0.3em] text-muted mb-1.5">Color</div>
-          <div className="flex flex-wrap gap-1" style={{ maxWidth: 120 }}>
-            {['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16', '#6366f1', '#e11d48'].map((c) => (
-              <button
-                key={c}
-                onClick={() => handleChangeViewColor(viewContextMenu.viewId, c)}
-                className="h-5 w-5 rounded-full transition-transform hover:scale-110"
-                style={{ backgroundColor: c, border: savedViews.find((v) => v.id === viewContextMenu.viewId)?.color === c ? '2px solid var(--foreground)' : '2px solid transparent' }}
-              />
-            ))}
+          <div className="flex flex-wrap gap-1" style={{ width: 220 }}>
+            <ColorSwatches value={viewContextMenu?.viewId ? savedViews.find((v) => v.id === viewContextMenu.viewId)?.color ?? '#6366f1' : '#6366f1'} onChange={(color) => { if (viewContextMenu) void handleChangeViewColor(viewContextMenu.viewId, color) }} />
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </aside>
   )
 }
@@ -734,8 +736,7 @@ function SyncStatusIcon(): React.JSX.Element {
           style={{ backgroundColor: dotColor[effectiveStatus] }}
         />
       </button>
-      {showTooltip && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-lg border border-border bg-surface p-2 shadow-lg">
+      {<MotionPresence open={Boolean(showTooltip)}>{() => (showTooltip) ? (<div className="absolute left-0 top-full z-50 mt-1 min-w-[200px] rounded-lg border border-border bg-surface p-2 shadow-lg">
           <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
             {effectiveLabel}
           </div>
@@ -758,8 +759,7 @@ function SyncStatusIcon(): React.JSX.Element {
           <div className="mt-1 text-[9px] font-light text-muted">
             Last synced: {formatTime(lastSyncedAt)}
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }
@@ -782,13 +782,13 @@ interface SortableViewItemProps {
 }
 
 function SortableViewItem({ view, count, active, onClick, onContextMenu }: SortableViewItemProps): React.JSX.Element {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: view.id })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: view.id, transition: { duration: immediateMotion() ? 0 : REORDER_DURATION, easing: EASE_OUT } })
   const [mouseDown, setMouseDown] = useState(false)
   const grabbing = isDragging || mouseDown
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1
+    opacity: isDragging ? 0.85 : 1
   }
 
   return (
@@ -851,10 +851,10 @@ function ProjectNavItem({
         {project.name}
       </span>
       {memberCount > 1 && (
-        <Users size={12} className="flex-shrink-0 text-muted/50" />
+        <Users size={12} className="flex-shrink-0 text-muted" />
       )}
       {count > 0 && (
-        <span className="text-[10px] font-bold tabular-nums text-muted/50">{count}</span>
+        <span className="text-[10px] font-bold tabular-nums text-muted">{count}</span>
       )}
     </button>
   )

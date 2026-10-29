@@ -4,6 +4,15 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.11.0 (release candidate)
+
+- **Consistent motion** — Shared fades and movement for menus, pickers, popups, dialogs, panels and notifications, with immediate keyboard navigation and reduced-motion support. Dragging uses readable ghosts and consistent settling feedback.
+- **Softer themes and colors** — Eight pastel swatches throughout theme adjustments and other color pickers; Soft Lavender, Soft Sage and Soft Blush in light/dark pairs; clearer contrast and an explicit text-contrast repair action.
+- **Interface refinement** — Approved heading, task row, detail panel and control changes. The existing sidebar layout is preserved.
+- **Duplicate theme repair** — Built-in presets no longer upload as device-specific custom themes. On upgrade, duplicate preset copies are archived and retired, selections map to one preset per name/mode, and named custom themes remain intact. Old sync/queue replays cannot recreate the copies.
+
+Publication remains pending release validation, Apple notarization and the coordinated backend/client rollout described below.
+
 ## v1.10.0 (unreleased)
 
 Release and backend activation remain gated by the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade).

@@ -1,6 +1,6 @@
 # ToDoozy UI Reference
 
-This is the single source of truth for UI patterns in ToDoozy. Every UI change must be consistent with this document. Read it before making any visual change.
+This reference covers shared components and layout patterns. [Interface and motion conventions](docs/design-system.md) owns the current motion, color and typography rules. Read both before making a visual change.
 
 ---
 
@@ -19,33 +19,11 @@ This is the single source of truth for UI patterns in ToDoozy. Every UI change m
 
 ### Theme Tokens (CSS Custom Properties)
 
-Every color in the app comes from these 8 tokens. Never hardcode colors outside of priority/label accents.
-
-| Token | Purpose | Default (Standard Dark) |
-|-------|---------|------------------------|
-| `--color-background` | Page background | `#1a1a2e` |
-| `--color-foreground` | Primary text | `#e0e0e0` |
-| `--color-fg-secondary` | Secondary text | `#b0b0b0` |
-| `--color-fg-muted` | Muted/disabled text | `#666666` |
-| `--color-accent` | Interactive elements, selection | `#6366f1` |
-| `--color-accent-fg` | Text on accent backgrounds | `#ffffff` |
-| `--color-surface` | Cards, panels, menus | Derived from bg (+12 dark, -8 light) |
-| `--color-border` | Borders, dividers | `#2a2a4a` |
-| `--color-muted` | Muted backgrounds | `#888888` |
-| `--color-danger` | Destructive actions | `#ef4444` |
-| `--color-success` | Positive states | `#22c55e` |
-
-Theme changes apply via `useThemeApplicator.ts` which sets these on `document.documentElement`. Global transition: `background-color 300ms, color 300ms, border-color 300ms`.
+See [Color and typography](docs/design-system.md#color-and-typography) for token owners, derived foregrounds and contrast rules. Use theme roles rather than hardcoded text colors.
 
 ### Priority Colors
 
-| Level | Value | Color | Weight Modifier |
-|-------|-------|-------|-----------------|
-| None | 0 | `#888888` | `font-light` |
-| Low | 1 | `#22c55e` | `font-light` |
-| Normal | 2 | `#3b82f6` | `font-light` |
-| High | 3 | `#f59e0b` | `font-normal` |
-| Urgent | 4 | `#ef4444` | `font-medium` |
+[`taskPriorities.ts`](src/shared/taskPriorities.ts) owns priority labels, values and fill colors. Readable semantic text and indicator colors follow [Color and typography](docs/design-system.md#color-and-typography).
 
 ### Opacity Scale
 
@@ -60,26 +38,13 @@ Standard opacity modifiers used throughout the app:
 | 20% | `/20` | `20` | Label chip background |
 | 30% | `/30` | `30` | Active filter border, archive |
 | 40% | `/40` | `40` | Filter glow shadow |
-| 50% | `/50` | — | Drag overlay |
 | 80% | `/80` | — | Button hover |
 
 ---
 
 ## Typography Scale
 
-Every text element must use one of these. No exceptions.
-
-| Use | Classes | Example |
-|-----|---------|---------|
-| View title | `text-3xl font-light tracking-[0.15em] uppercase` | MY DAY, BACKLOG |
-| Section label | `text-[10px] font-bold uppercase tracking-[0.3em]` | NOT STARTED, LABELS |
-| Task title | `text-[15px] font-light tracking-tight` | Buy groceries |
-| Detail title | `text-xl font-light tracking-tight` | (task title in detail panel) |
-| Metadata | `text-[10px] font-bold uppercase tracking-widest` | 2026-03-18, 3/5 |
-| Badge/chip | `text-[9px] font-bold uppercase tracking-wider` | URGENT, TODOOZY |
-| Button label | `text-[11px] font-bold uppercase tracking-widest` | APPLY, CREATE |
-| Body text | `text-sm font-light` | Description content |
-| Hint text | `text-[10px] opacity-40` | Cmd+V to paste |
+See [Color and typography](docs/design-system.md#color-and-typography) for the current workspace scale and the preserved sidebar treatment.
 
 ---
 
@@ -98,10 +63,7 @@ hover:bg-foreground/6
 Optional faint border. Used on: menu items, buttons, task rows, nav items, label chips.
 
 ### Focus
-```
-focus:outline-none focus-visible:ring-1 focus-visible:ring-accent
-```
-Used on: all interactive elements. Visible keyboard focus indicator.
+The shared focus treatment follows [Color and typography](docs/design-system.md#color-and-typography). Keep a visible keyboard focus indicator on interactive elements.
 
 ### Destructive
 - Always `text-danger` or `hover:bg-danger/10`
@@ -126,27 +88,27 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 **File:** `shared/components/PriorityIndicator.tsx`
 **Props:** `currentPriority`, `onPriorityChange()`
 **Behavior:** 5 inline buttons. Click to select.
-**Active:** White text + colored background. **Inactive:** `text-muted hover:bg-foreground/6`
+**Active:** Readable foreground derived for the priority fill. **Inactive:** `text-muted hover:bg-foreground/6`
 
 ### PriorityBadge
 **File:** `shared/components/PriorityBadge.tsx`
 **Props:** `priority: number`
 **Behavior:** Compact display. Hidden for None (0) and Normal (2). Shows icon + label for High/Urgent.
-**Style:** `inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider`
+**Style:** Compact inline badge using the shared metadata typography.
 **Background:** Priority color at 15% opacity.
 
 ### LabelChip
 **File:** `shared/components/LabelChip.tsx`
 **Props:** `name`, `color`, `onRemove?()`, `onClick?()`
-**Style:** `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider`
-**Colors (inline):** `backgroundColor: ${color}20`, `color: color`, `border: 1px solid ${color}30`
+**Style:** Rounded inline chip using the shared metadata typography.
+**Colors:** Preserve the stored hue for fill/border and derive readable text with `useSemanticColor`; see [Color and typography](docs/design-system.md#color-and-typography).
 **Keyboard:** Enter/Space to click, Backspace/Delete to remove.
 
 ### LabelPicker
 **File:** `shared/components/LabelPicker.tsx`
 **Props:** `allLabels[]`, `assignedLabelIds: Set`, `onToggleLabel()`, `onCreateLabel()`, `onClose()`
 **Size:** w-56, rounded-lg, border.
-**Animation:** `motion-safe:animate-in fade-in zoom-in duration-100`
+**Animation:** Shared menu presence; see [Surfaces](docs/design-system.md#surfaces).
 **Modes:** Label list (toggle with checkmarks) or new-label mode (name + color picker).
 
 ### DatePicker
@@ -162,7 +124,7 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 **Props:** `open`, `onClose()`, `children`, `title?`
 **Backdrop:** `fixed inset-0 z-50 bg-black/50 backdrop-blur-sm`
 **Card:** `max-w-lg rounded-xl border border-border bg-surface p-10 shadow-2xl`
-**Animation:** `motion-safe:animate-in fade-in zoom-in-95 duration-200`
+**Animation:** Shared dialog presence; see [Surfaces](docs/design-system.md#surfaces).
 **Close:** X button (top-right) + Escape key + click outside.
 
 ### Toast
@@ -170,7 +132,7 @@ These 11 components are the building blocks of the UI. Use them everywhere — n
 **Hook:** `useToast()` returns `{ addToast() }`
 **Position:** Fixed bottom-center stack.
 **Style:** `rounded-lg border border-border bg-surface px-4 py-3 shadow-xl`
-**Animation:** `motion-safe:animate-in slide-in-from-bottom duration-200`
+**Animation:** Shared toast presence; see [Surfaces](docs/design-system.md#surfaces).
 **Auto-dismiss:** 5000ms. Variants: `default` | `danger`.
 **Optional action:** Button with `text-accent hover:underline`.
 
@@ -246,18 +208,7 @@ Applied globally — no class needed. All scrollable areas use this consistently
 
 ## Animations
 
-| Element | Animation | Duration |
-|---------|-----------|----------|
-| Modal open | `animate-in fade-in zoom-in-95` | 200ms |
-| Context menu | `animate-in fade-in zoom-in` | 100ms |
-| Label picker | `animate-in fade-in zoom-in` | 100ms |
-| Toast | `animate-in slide-in-from-bottom` | 200ms |
-| Sidebar | `transition-[width] ease-out` | 200ms |
-| Theme change | `transition-colors` (global) | 300ms |
-| Drag & drop | No animation on drop (instant snap) | — |
-| Kanban card | `animate-in fade-in` | 150ms |
-
-All wrapped in `motion-safe:` prefix. Reduced motion: `animation-duration: 0.01ms`.
+See [Surfaces](docs/design-system.md#surfaces) for presence, timing owners, keyboard/reduced-motion behavior and pointer-drop settlement.
 
 ---
 
@@ -297,7 +248,7 @@ Common icons:
 - Library: `@dnd-kit`
 - Activation: PointerSensor (8px) + KeyboardSensor
 - Drop indicators: horizontal line (above/below), `bg-accent/8 scale-[1.01]` (inside)
-- Ghost overlay: same as card at 50% opacity
+- Ghost overlay and drop settlement follow [Surfaces](docs/design-system.md#surfaces).
 - Cursor zones: top 20% = above, middle 60% = inside, bottom 20% = below
 - **No grip/drag handles.** Items are dragged by clicking and holding anywhere on the row. No visible drag icons or grip dots.
 - **Activation distance:** PointerSensor requires 8px of movement before drag starts, preventing accidental drags from clicks.
@@ -305,7 +256,7 @@ Common icons:
 ### Form Inputs
 - Text: `bg-transparent text-sm font-light text-foreground focus:outline-none`
 - Border: `border border-border focus:border-accent`
-- Color picker: native HTML5, `h-6 w-6 rounded border-0 bg-transparent p-0`
+- Color picker: shared `ColorSwatches` / `ColorPicker`; see [Color and typography](docs/design-system.md#color-and-typography).
 
 ---
 
@@ -313,7 +264,7 @@ Common icons:
 
 | Context | Padding | Gap |
 |---------|---------|-----|
-| Task row | `py-3.5 px-4` | — |
+| Task row | Shared `.ui-task-row` metrics; see [Color and typography](docs/design-system.md#color-and-typography) | — |
 | Kanban card | `p-3.5` | — |
 | Modal | `p-10` | — |
 | Panel | `p-6` | `gap-5` |

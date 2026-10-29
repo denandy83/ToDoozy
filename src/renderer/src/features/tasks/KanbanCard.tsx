@@ -54,8 +54,8 @@ export function KanbanCard({
       ? 'font-medium'
       : task.priority >= 3
         ? 'font-normal'
-        : 'font-light'
-    : 'font-light'
+        : 'font-normal'
+    : 'font-normal'
 
   const {
     attributes,
@@ -77,7 +77,7 @@ export function KanbanCard({
   const isDropInside = dropIndicator?.targetId === task.id && dropIndicator.intent === 'inside'
 
   const style = isDragOverlay
-    ? { opacity: 0.8 }
+    ? { opacity: 0.85 }
     : {
         opacity: filterOpacity !== undefined ? filterOpacity : isDragging ? 0.3 : 1
       }
@@ -133,10 +133,11 @@ export function KanbanCard({
   return (
     <div
       ref={setNodeRef}
+      data-layout-task={isDragOverlay ? undefined : task.id}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       onKeyDown={handleKeyDown}
-      className={`relative cursor-pointer select-none rounded-lg border p-3.5 transition-all motion-safe:duration-150 ${
+      className={`relative cursor-pointer select-none rounded-lg border p-3.5 ${
         isSelected
           ? 'border-accent/15 bg-accent/12'
           : 'border-border hover:border-foreground/10 hover:bg-foreground/6'
@@ -192,7 +193,7 @@ export function KanbanCard({
           )}
 
           {dueDateStr && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted">
+            <span className="inline-flex items-center gap-1 ui-metadata text-muted">
               <Calendar size={10} />
               {dueDateStr}
             </span>

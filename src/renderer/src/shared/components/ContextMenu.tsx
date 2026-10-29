@@ -1,3 +1,6 @@
+import { usePresence } from '../motion/usePresence'
+import { useRef as useRetainedRef } from 'react'
+import { pushPopup } from '../utils/popupStack'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -30,15 +33,19 @@ import {
 type SubmenuId = 'status' | 'priority' | 'recurrence' | 'labels' | 'snooze' | 'timer'
 
 export function ContextMenu(): React.JSX.Element | null {
-  const { isOpen, position, taskId, close } = useContextMenuStore()
+  const { isOpen, position, taskId: liveTaskId, close } = useContextMenuStore()
+  const presence = usePresence(isOpen && !useContextMenuStore.getState().isBulk, 'menu')
+  const retainedId = useRetainedRef(liveTaskId)
+  if (isOpen && !useContextMenuStore.getState().isBulk) retainedId.current = liveTaskId
+  const taskId = retainedId.current
   const menuRef = useRef<HTMLDivElement>(null)
   const [activeSubmenu, setActiveSubmenu] = useState<SubmenuId | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuPos, setMenuPos] = useState(position)
   const [openLeft, setOpenLeft] = useState(false)
 
-  useFocusRestore()
-  useFocusTrap(menuRef, isOpen)
+  useFocusRestore(presence.present, menuRef)
+  useFocusTrap(menuRef, presence.present)
 
   const task = useTaskStore((s) => (taskId ? s.tasks[taskId] : null))
   const projectId = task?.project_id ?? ''
@@ -98,9 +105,15 @@ export function ContextMenu(): React.JSX.Element | null {
     }
   }, [])
 
-  const handleSubmenuEnter = useCallback((id: SubmenuId | null) => {
+  useEffect(() => {
+    if (isOpen && activeSubmenu) return pushPopup(() => setActiveSubmenu(null))
+    return undefined
+  }, [isOpen, activeSubmenu])
+
+  const handleSubmenuEnter = useCallback((id: SubmenuId | null, instant = false) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
+    if (instant) setActiveSubmenu(id)
+    else hoverTimerRef.current = setTimeout(() => setActiveSubmenu(id), 150)
   }, [])
 
   const handleSubmenuLeave = useCallback(() => {
@@ -116,7 +129,7 @@ export function ContextMenu(): React.JSX.Element | null {
     [close]
   )
 
-  if (!isOpen || !task) return null
+  if (!presence.present || !task) return null
 
   const assignedLabelIds = new Set(taskLabels.map((l) => l.id))
   const isInMyDay = task.is_in_my_day === 1
@@ -158,8 +171,9 @@ export function ContextMenu(): React.JSX.Element | null {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl"
-      style={{ left: menuPos.x, top: menuPos.y }}
+      {...presence.props}
+      className="ui-surface ui-menu fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl"
+      style={{ left: menuPos.x, top: menuPos.y, transformOrigin: `${Math.max(0, position.x-menuPos.x)}px ${Math.max(0, position.y-menuPos.y)}px` }}
       role="menu"
       aria-label="Task context menu"
     >

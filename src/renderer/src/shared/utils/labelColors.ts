@@ -1,8 +1,10 @@
+import { PASTEL_COLORS } from './colorPalette'
 import type { Label } from '../../../../shared/types'
 
 export const LABEL_COLORS = [
   '#888888', '#ef4444', '#f59e0b', '#22c55e',
-  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'
+  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4',
+  ...PASTEL_COLORS
 ]
 
 /** Pick the color from LABEL_COLORS with the fewest existing labels using it. */

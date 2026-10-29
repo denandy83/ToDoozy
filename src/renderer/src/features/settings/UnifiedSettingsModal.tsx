@@ -1,3 +1,4 @@
+import { usePresence } from '../../shared/motion/usePresence'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { LogOut } from 'lucide-react'
 import { Modal } from '../../shared/components/Modal'
@@ -29,6 +30,7 @@ export function UnifiedSettingsModal({
   projectId,
   initialTab
 }: UnifiedSettingsModalProps): React.JSX.Element | null {
+  const dialogPresence = usePresence(open, 'dialog')
   const [activeTab, setActiveTab] = useState<Tab>((initialTab as Tab) ?? 'profile')
   const projects = useProjectStore(selectAllProjects)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId)
@@ -43,6 +45,7 @@ export function UnifiedSettingsModal({
   const [shake, setShake] = useState(false)
   const [themeDirty, setThemeDirty] = useState(false)
 
+  useEffect(() => { if (!dialogPresence.present) setActiveTab((initialTab as Tab) ?? 'profile') }, [dialogPresence.present, initialTab])
   useEffect(() => { if (open && projectId) setSelectedProjectId(projectId) }, [open, projectId])
   useEffect(() => { if (open && selectedProjectId) hydrateStatuses(selectedProjectId) }, [open, selectedProjectId, hydrateStatuses])
   useEffect(() => { if (open && initialTab) setActiveTab(initialTab as Tab) }, [open, initialTab])
@@ -74,18 +77,17 @@ export function UnifiedSettingsModal({
 
   const handleClose = useCallback((): void => {
     if (activeTab === 'appearance' && themeDirty) {
-      showUnsavedThemeToast(() => { setActiveTab('profile'); onClose() })
+      showUnsavedThemeToast(() => { onClose() })
       return
     }
     if (activeTab === 'appearance') appearanceRef.current?.themeRef.current?.revert()
-    setActiveTab('profile')
     onClose()
   }, [onClose, activeTab, themeDirty, showUnsavedThemeToast])
 
   const handleLogout = useCallback(async () => { await logout(); handleClose() }, [logout, handleClose])
   const handleProjectChange = useCallback((id: string) => setSelectedProjectId(id), [])
 
-  if (!open) return null
+  if (!dialogPresence.present) return null
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'profile', label: 'Profile' },

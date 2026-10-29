@@ -40,7 +40,7 @@ interface UseDragAndDropReturn {
   dragState: DragState
   handleDragStart: (event: DragStartEvent) => void
   handleDragOver: (event: DragOverEvent) => void
-  handleDragEnd: (event: DragEndEvent) => void
+  handleDragEnd: (event: DragEndEvent) => Promise<boolean>
   handleDragCancel: () => void
   collisionDetection: CollisionDetection
 }
@@ -213,7 +213,7 @@ export function useDragAndDrop({
       })
       dropIndicatorRef.current = null
 
-      if (!over || !activeTask) return
+      if (!over || !activeTask) return false
 
       const overId = over.id as string
 
@@ -223,7 +223,7 @@ export function useDragAndDrop({
         const selected = getSelectedTaskIds?.() ?? []
         const taskIds = selected.length > 1 && selected.includes(activeId) ? selected : [activeId]
         await onMoveToView(taskIds, viewId)
-        return
+        return true
       }
 
       // Handle kanban column drops — bucket columns (My Day) or regular status columns
@@ -232,26 +232,27 @@ export function useDragAndDrop({
         if (columnId.startsWith('__bucket_') && onBucketDrop) {
           const bucketKey = columnId.replace('__bucket_', '')
           await onBucketDrop(activeId, bucketKey)
-          return
+          return true
         }
         if (onStatusChangeRef.current && columnId !== activeTask.status_id) {
           await onStatusChangeRef.current(activeId, columnId)
+          return true
         }
-        return
+        return false
       }
 
       // Handle calendar day drops
       if (overId.startsWith('calendar-day-') && onCalendarDayDrop) {
         const date = overId.replace('calendar-day-', '')
         await onCalendarDayDrop(activeId, date)
-        return
+        return true
       }
 
       // Don't drop on self
-      if (overId === activeId) return
+      if (overId === activeId) return false
 
       const overTask = tasks[overId]
-      if (!overTask) return
+      if (!overTask) return false
 
       // Read intent from the saved indicator (not from cleared state)
       const intent = savedIndicator?.targetId === overId
@@ -291,6 +292,7 @@ export function useDragAndDrop({
 
         await onReorder(newOrder.map((t) => t.id))
       }
+      return true
     },
     [tasks, onReorder, onReparent, onMoveToView, getTasksForParent, cleanupPointerListener, clearDwellTimer]
   )

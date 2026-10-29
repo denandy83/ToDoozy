@@ -287,7 +287,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ## Projects
 
 ### Project CRUD
-- Create via "+ New Project" in sidebar; name, color (8-color palette), emoji icon
+- Create via "+ New Project" in sidebar; name, shared vivid/pastel color picker, emoji icon
 - Edit in project settings (name, color, icon)
 - Delete project (with confirmation and task cleanup)
 - Default "Personal" project auto-created on first login
@@ -326,13 +326,8 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ## Theme System
 
-- 9-color palette as CSS custom properties (accent, background, surface, foreground, border, muted, primary, secondary, **sidebar**)
-- **Sidebar color:** Independent color control for the left panel background via `--color-sidebar` CSS variable (`ThemeConfig.sidebar`). Sidebar.tsx uses `bg-sidebar`; the field syncs cross-device and is exported/imported with themes.
-- 12 built-in themes: 6 dark (Midnight, Obsidian, Forest, Ocean, Crimson, Violet), 6 light variants — all updated with sidebar values
-- Settings > Themes: mode toggle, preset dropdown, color pickers (9 per theme including Sidebar), live UI preview
-- Apply button required to persist; create and save custom themes
-- **Theme import / export:** Export any theme as a JSON file and import it back. Enables sharing and cross-device backup of custom color palettes. Available via Export / Import buttons in the theme editor.
-- **Status:** Complete (updated v1.5.5)
+- See [Themes](HELP.md#themes) for presets, customization, pastels, import/export and cross-device behavior.
+- See [Color and typography](docs/design-system.md#color-and-typography) for token ownership, contrast derivation and duplicate-preset repair contracts.
 
 ---
 
@@ -552,7 +547,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ### macOS Build
 - Production build via `npm run dist:mac` produces DMG + ZIP in `dist/`
 - electron-builder configuration for macOS arm64
-- Ad-hoc code signing required after build: `codesign --force --deep --sign - dist/mac-arm64/ToDoozy.app`
+- Signing, notarization and bundled files follow [electron-builder.yml](electron-builder.yml). Release activation requires the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade).
 - **Status:** Complete (2026-03-31)
 
 ### Multi-User Data Isolation

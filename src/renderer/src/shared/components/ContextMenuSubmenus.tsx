@@ -1,3 +1,4 @@
+import { readableColor } from '../../../../shared/colorContrast'
 import { useState, useCallback } from 'react'
 import { Check } from 'lucide-react'
 import { PRIORITY_LEVELS } from './PriorityIndicator'
@@ -49,7 +50,7 @@ export function StatusSubmenu({ task, statuses, openLeft, onStatusChange }: Stat
           onClick={() => onStatusChange(status.id)}
           className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-light text-foreground transition-colors hover:bg-foreground/6"
         >
-          <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+          <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: status.color, color: readableColor('#ffffff', [status.color]) }} />
           <span className="flex-1">{status.name}</span>
           {task.status_id === status.id && <Check size={14} className="text-accent" />}
         </button>
@@ -242,7 +243,7 @@ export function StatusRow({ task, statuses, onStatusChange }: StatusRowProps): R
               ? 'text-accent-fg'
               : 'text-muted hover:bg-foreground/6'
           }`}
-          style={task.status_id === status.id ? { backgroundColor: status.color } : undefined}
+          style={task.status_id === status.id ? { backgroundColor: status.color, color: readableColor('#ffffff', [status.color]) } : undefined}
           title={status.name}
         >
           {status.name}

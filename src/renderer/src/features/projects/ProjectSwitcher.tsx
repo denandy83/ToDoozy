@@ -1,3 +1,5 @@
+import { readableColor } from '../../../../shared/colorContrast'
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, Plus, Settings, Folder } from 'lucide-react'
 import { useProjectStore, selectAllProjects, selectCurrentProject } from '../../shared/stores'
@@ -45,7 +47,7 @@ export function ProjectSwitcher({
           className="flex h-6 w-6 items-center justify-center rounded"
           style={{ backgroundColor: currentProject?.color ?? '#888' }}
         >
-          <Folder size={14} className="text-accent-fg" />
+          <Folder size={14} style={{ color: readableColor('#ffffff', [currentProject?.color ?? '#888888']) }} />
         </div>
         <span className="flex-1 truncate text-sm font-light text-foreground">
           {currentProject?.name ?? 'Select Project'}
@@ -56,8 +58,7 @@ export function ProjectSwitcher({
         />
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full z-40 mt-1 w-full min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100">
+      {<MotionPresence open={Boolean(open)}>{() => (open) ? (<div className="absolute left-0 top-full z-40 mt-1 w-full min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl motion-safe:duration-100">
           <div className="max-h-64 overflow-y-auto py-1">
             {projects.map((project) => (
               <button
@@ -76,7 +77,7 @@ export function ProjectSwitcher({
                   className="flex h-5 w-5 items-center justify-center rounded"
                   style={{ backgroundColor: project.color }}
                 >
-                  <Folder size={12} className="text-accent-fg" />
+                  <Folder size={12} style={{ color: readableColor('#ffffff', [project.color]) }} />
                 </div>
                 <span className="flex-1 truncate text-sm font-light">{project.name}</span>
                 <button
@@ -108,8 +109,7 @@ export function ProjectSwitcher({
               </span>
             </button>
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

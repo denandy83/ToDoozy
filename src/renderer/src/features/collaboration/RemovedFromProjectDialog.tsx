@@ -1,3 +1,4 @@
+import { useDismissibleSurface } from '../../shared/motion/useDismissibleSurface'
 import { useProjectStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { User } from '../../../../shared/types'
@@ -17,13 +18,16 @@ interface RemovedFromProjectDialogProps {
 export function RemovedFromProjectDialog({
   removedFromProject,
   currentUser,
-  onClose
+  onClose: finishClose
 }: RemovedFromProjectDialogProps): React.JSX.Element {
+  const surface = useDismissibleSurface(finishClose)
+  const onClose = surface.close
+
   const { addToast } = useToast()
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-      <div className="w-80 rounded-lg border border-border bg-surface p-5 shadow-xl">
+    <div {...surface.props} className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+      <div className="ui-modal-content w-80 rounded-lg border border-border bg-surface p-5 shadow-xl">
         <h3 className="text-sm font-light text-foreground">
           You were removed from <span className="font-medium">{removedFromProject.name}</span>
         </h3>

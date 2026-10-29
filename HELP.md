@@ -87,7 +87,7 @@ To make an existing task a subtask, drag it on top of another task (aim for the 
 
 ### Drag and drop
 - Drag a task up or down to reorder it within the same status group
-- A full-width ghost row follows your cursor vertically while the original fades in place
+- A full-width ghost row follows your cursor while the original fades in place
 - Drop indicator lines show where the task will land (above or below the target)
 - Drag onto the middle of a task → make it a subtask (the target highlights)
 - Drag a task onto a project in the sidebar → move it to that project
@@ -316,10 +316,14 @@ In **Settings → Appearance → Priority Display**, you can toggle visual indic
 Go to **Settings → Appearance → Theme** to change the app's appearance.
 
 - Toggle between **dark** and **light** mode
-- Choose from 12 built-in themes
-- Customize any of the 8 color slots with the color pickers
-- Click **Apply** to save your changes
-- Use **Save as new theme** to keep a custom theme
+- Choose a preset under **Built-in themes** or a saved custom theme under **My themes**. Soft Lavender, Soft Sage and Soft Blush each have dark and light variants.
+- Click any color square for **Vivid**, **Pastel** and custom color choices, including the background, sidebar, text, accent and border. Click the hex value to enter an exact color.
+- Preview edits immediately. **Improve text contrast** adjusts text colors while keeping your chosen fills; review the preview and click **Apply** (or the save icon) to persist color changes.
+- Choose **+ New Theme...** to save a named custom theme. Built-in family names are reserved. Use the export/import icons to back up or share a theme as JSON.
+
+Your selected theme and named custom themes sync across devices. Edits to a built-in preset stay on this device; save a named custom theme to sync those colors.
+
+Upgrading consolidates bug-created preset copies while retaining the selected preset or genuine named custom theme. Original duplicate rows and selection references remain recoverable in the local archive. Built-in presets and your custom themes stay separate in the picker.
 
 ---
 
@@ -536,7 +540,7 @@ A sun/moon icon at the bottom of the sidebar lets you toggle between dark and li
 
 ## Sync & Multi-Device
 
-All data syncs automatically to Supabase in the background. SQLite is the local source of truth.
+Account data syncs automatically to Supabase in the background. SQLite is the local source of truth. See [Themes](#themes) for built-in and custom theme sync behavior.
 
 ### How it works
 - Changes push to Supabase in the background after each edit
@@ -544,7 +548,7 @@ All data syncs automatically to Supabase in the background. SQLite is the local 
 - A sync status icon in the sidebar shows connection state (green = synced, orange = syncing, red = offline)
 
 ### New device setup
-Log in on a new device and all your data — tasks, projects, settings, themes, saved views, and areas — pulls down automatically. No manual import needed.
+Log in on a new device to pull down your synced data automatically. No manual import needed.
 
 ### Offline support
 - **Personal projects** — fully usable offline. Create, edit, and complete tasks without internet. Changes sync when you reconnect.

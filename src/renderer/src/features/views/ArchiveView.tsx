@@ -1,5 +1,6 @@
 import { useMemo, useRef, useEffect, useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { Task, Project } from '../../../../shared/types'
@@ -329,9 +330,10 @@ export function ArchiveView(): React.JSX.Element {
   return (
     <div ref={containerRef} className="flex flex-1 flex-col overflow-hidden" tabIndex={-1}>
       {/* Right-click context menu */}
-      {contextMenu && createPortal(
+      {createPortal(
+        <MotionPresence open={Boolean(contextMenu)}>{() => contextMenu ? (
         <div
-          className="fixed z-[9999] w-52 rounded-lg border border-border bg-surface p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+          className="fixed z-[9999] w-52 rounded-lg border border-border bg-surface p-1 shadow-lg"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -350,7 +352,7 @@ export function ArchiveView(): React.JSX.Element {
           >
             Delete
           </button>
-        </div>,
+        </div>) : null}</MotionPresence>,
         document.body
       )}
       {/* Filter bar — always visible (showProjectFilter). isSavedView suppresses

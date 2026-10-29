@@ -2,9 +2,16 @@ import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
+import { builtinTheme, builtinThemeId } from '../../shared/themeCatalog'
+import { archiveTheme, presetForStoredTheme, remapThemeReferences, restoreThemeReferences, retirementStamp } from '../database/themeRepair'
 
 export class ThemeRepository {
   constructor(private db: DatabaseSync) {}
+
+  isPresetAlias(theme: Theme): boolean {
+    const preset = presetForStoredTheme(this.db, theme)
+    return Boolean(preset && theme.id !== builtinThemeId(preset.name))
+  }
 
   // Raw — sync layer needs to see tombstones to compare timestamps.
   findById(id: string): Theme | undefined {
@@ -80,6 +87,7 @@ export class ThemeRepository {
   }
 
   create(input: CreateThemeInput & { owner_id?: string }): Theme {
+    if (builtinTheme(input.name, input.mode)) throw new Error('Built-in theme names are reserved. Choose another name.')
     const now = new Date().toISOString()
     this.db
       .prepare(
@@ -91,7 +99,7 @@ export class ThemeRepository {
   }
 
   update(id: string, input: UpdateThemeInput): Theme | undefined {
-    const now = new Date().toISOString()
+    const now = retirementStamp(this.findById(id)?.updated_at)
     const sets: string[] = ['updated_at = ?']
     const values: (string | null)[] = [now]
 
@@ -114,17 +122,33 @@ export class ThemeRepository {
   }
 
   /**
-   * Sync-only: write a theme as-is, preserving remote timestamps and deleted_at.
-   * Skips when local row's updated_at is newer (LWW). Built-in themes are
-   * never overwritten — they're seeded locally and don't round-trip.
+   * Sync-only: canonical built-ins stay local and legacy preset aliases retire.
+   * Named custom rows use LWW, except when reclaiming a retired preset identity;
+   * that recovery must remain possible even when cleanup advanced its clock.
    */
   applyRemote(remote: Theme): Theme {
+    return withTransaction(this.db, () => this.applyRemoteRow(remote))
+  }
+
+  private applyRemoteRow(remote: Theme): Theme {
     const existing = this.findById(remote.id)
-    if (existing && existing.is_builtin === 1) return existing
+    const existingPreset = existing && presetForStoredTheme(this.db, existing)
+    if (existing?.is_builtin === 1 && (!existingPreset || existing.id === builtinThemeId(existingPreset.name))) return existing
+    const preset = presetForStoredTheme(this.db, remote)
+    if (existing && !existingPreset && preset) return existing
+    if (existing && !existingPreset && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing
+    const alias = preset && remote.id !== builtinThemeId(preset.name)
+    const referenceSource = existingPreset ? existing! : remote
+    if (alias) {
+      if (existing?.deleted_at && !existing.is_builtin && existing.owner_id === remote.owner_id && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing
+      archiveTheme(this.db, referenceSource)
+      const stamp = remote.deleted_at ? toCanonicalIso(remote.updated_at)! : retirementStamp(existing?.updated_at, remote.updated_at)
+      remote = { ...remote, is_builtin: 0, deleted_at: remote.deleted_at ?? stamp, updated_at: stamp }
+    }
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).
-    if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
+    if (existing && !(existingPreset && !preset) && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db
@@ -135,6 +159,7 @@ export class ThemeRepository {
            name = excluded.name,
            mode = excluded.mode,
            config = excluded.config,
+           is_builtin = excluded.is_builtin,
            owner_id = excluded.owner_id,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
@@ -151,6 +176,8 @@ export class ThemeRepository {
         toCanonicalIso(remote.updated_at),
         toCanonicalIso(remote.deleted_at ?? null)
       )
+    if (alias) remapThemeReferences(this.db, referenceSource, builtinThemeId(preset.name))
+    if (!preset && !remote.deleted_at) restoreThemeReferences(this.db, remote)
     return this.findById(remote.id)!
   }
 
@@ -163,7 +190,7 @@ export class ThemeRepository {
       const row = this.findById(id)
       if (!row || row.deleted_at) return false
       if (row.is_builtin === 1) return false
-      const now = new Date().toISOString()
+      const now = retirementStamp(row.updated_at)
       const result = this.db
         .prepare('UPDATE themes SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
         .run(now, now, id)

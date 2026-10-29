@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -689,8 +690,7 @@ function ActivityHeatmap({ data, weekStartDay = 1 }: ActivityHeatmapProps): Reac
         <span className="ml-1 text-[8px] text-muted">More</span>
       </div>
       {/* Instant tooltip */}
-      {tooltip && (
-        <div
+      {<MotionPresence open={Boolean(tooltip)}>{() => (tooltip) ? (<div
           className="pointer-events-none fixed z-[9999] flex flex-col gap-0.5 rounded border border-border bg-surface px-2 py-1.5 shadow-lg"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
@@ -704,8 +704,7 @@ function ActivityHeatmap({ data, weekStartDay = 1 }: ActivityHeatmapProps): Reac
               tooltip.updated > 0 ? `${tooltip.updated} updated` : null
             ].filter(Boolean).join(' · ') || 'No activity'}
           </span>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

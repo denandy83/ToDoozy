@@ -11,7 +11,8 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
-import { chunkArray, fullPull, fullUpload, initSync, pushSetting } from './PersonalSyncService'
+import { chunkArray, fullPull, fullUpload, initSync, pushSetting, pushTheme } from './PersonalSyncService'
+import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
@@ -72,24 +73,23 @@ interface QueryResult {
  * always resolves to a benign empty/success result. Enough for fullUpload's
  * upserts, RPCs and count-verification queries to complete without a network.
  */
-function makeSupabase(): SupabaseClient {
-  const result: QueryResult = { error: null, data: [], count: 0 }
-  const chain: Record<string, unknown> = {}
-  const chainMethods = [
-    'select', 'insert', 'upsert', 'update', 'delete',
-    'eq', 'neq', 'in', 'is', 'order', 'limit', 'or', 'filter', 'match'
-  ]
-  for (const method of chainMethods) chain[method] = (): Record<string, unknown> => chain
-  chain.single = (): Promise<QueryResult> => Promise.resolve(result)
-  chain.maybeSingle = (): Promise<QueryResult> => Promise.resolve(result)
-  chain.then = (resolve: (value: QueryResult) => unknown): unknown => resolve(result)
+function makeSupabase(records: UpsertRecord[] = [], tableRows: Record<string, unknown[]> = {}): SupabaseClient {
+  const make = (table: string): Record<string, unknown> => {
+    const result: QueryResult = { error: null, data: tableRows[table] ?? [], count: 0 }
+    const chain: Record<string, unknown> = {}
+    for (const method of ['select','insert','update','delete','eq','neq','in','is','order','limit','or','filter','match']) {
+      chain[method] = (): Record<string, unknown> => chain
+    }
+    chain.upsert = (payload: unknown): Record<string, unknown> => { records.push({table,payload}); result.data = Array.isArray(payload) ? payload : [payload]; return chain }
+    chain.single = (): Promise<QueryResult> => Promise.resolve(result)
+    chain.maybeSingle = async () => ({ ...result, data: result.data[0] ?? null })
+    chain.then = (resolve: (value: QueryResult) => unknown): unknown => resolve(result)
+    return chain
+  }
   const supabase = {
-    auth: {
-      getSession: (): Promise<{ data: { session: { user: { id: string } } } }> =>
-        Promise.resolve({ data: { session: { user: { id: USER_ID } } } })
-    },
-    from: (): Record<string, unknown> => chain,
-    rpc: (): Promise<QueryResult> => Promise.resolve(result)
+    auth: { getSession: async () => ({ data: { session: { user: { id: USER_ID } } } }) },
+    from: make,
+    rpc: async () => ({error:null,data:[],count:0})
   }
   pinnedProducer.client = supabase
   return supabase as unknown as SupabaseClient
@@ -102,6 +102,8 @@ interface ApiHarness {
   statusesFindByProjectId: ReturnType<typeof vi.fn>
   projectsGetProjectsForUser: ReturnType<typeof vi.fn>
   settingsSet: ReturnType<typeof vi.fn>
+  themesFindAllByOwner: ReturnType<typeof vi.fn>
+  themesApplyRemote: ReturnType<typeof vi.fn>
 }
 
 function ownedProject(): Record<string, unknown> {
@@ -128,6 +130,9 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
   const statusesFindByProjectId = vi.fn((): Promise<unknown[]> => Promise.resolve([]))
   const empty = (): Promise<unknown[]> => Promise.resolve([])
 
+  const themesFindAllByOwner = vi.fn(empty)
+  const themesApplyRemote = vi.fn(async (theme: unknown) => theme)
+
   useAuthStore.setState({ currentUser: { id: USER_ID } as never })
   const api = {
     auth: { getSupabaseConfig: async () => ({ url: 'https://example.invalid', anonKey: 'synthetic' }) },
@@ -150,10 +155,10 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
       getLabels: empty
     },
     projectAreas: { findByUserId: empty },
-    themes: { list: empty }
+    themes: { list: empty, findAllByOwner: themesFindAllByOwner, findById: async (id: string) => (await themesFindAllByOwner() as Array<{ id: string }>).find((theme) => theme.id === id), isPresetAlias: async (theme: Parameters<typeof presetForTheme>[0]) => Boolean(presetForTheme(theme)), applyRemote: themesApplyRemote }
   }
   vi.stubGlobal('window', { api })
-  return { settings, labelsFindAll, statusesFindByProjectId, projectsGetProjectsForUser, settingsSet }
+  return { settings, labelsFindAll, statusesFindByProjectId, projectsGetProjectsForUser, settingsSet, themesFindAllByOwner, themesApplyRemote }
 }
 
 // ── pushSetting never emits the plaintext api_key to user_settings (#114) ──
@@ -202,6 +207,7 @@ describe('pushSetting api_key exclusion (#114)', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
+
 
   it('never upserts api_key to user_settings, even after the debounce flushes', async () => {
     const records: UpsertRecord[] = []
@@ -307,6 +313,51 @@ describe('fullUpload / initSync last_sync_at handling (#106)', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it.each(BUILTIN_THEMES)('eager upload distinguishes custom $name from original preset copies', async (preset) => {
+    const h = installApi({ hasProject: true })
+    const records: UpsertRecord[] = []
+    vi.mocked(getSupabase).mockResolvedValue(makeSupabase(records))
+    const theme = { id: 'custom', user_id: USER_ID, name: preset.name, mode: preset.mode,
+      bg: '#000000', fg: '#ffffff', fg_secondary: '#aaaaaa', fg_muted: '#888888', muted: '#888888',
+      accent: '#cccccc', accent_fg: '#111111', border: '#333333', sidebar: '#123456' }
+    h.themesFindAllByOwner.mockResolvedValue([{ id: theme.id, name: theme.name, mode: theme.mode, owner_id: USER_ID, is_builtin: 0, config: JSON.stringify({ bg: theme.bg, fg: theme.fg, fgSecondary: theme.fg_secondary, fgMuted: theme.fg_muted, muted: theme.muted, accent: theme.accent, accentFg: theme.accent_fg, border: theme.border, sidebar: theme.sidebar }), created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', deleted_at: null }] as never)
+    await pushTheme(theme)
+    const uploaded = records.filter((record) => record.table === 'user_themes')
+    expect(uploaded).toHaveLength(preset.name.startsWith('Soft ') ? 1 : 0)
+    if (uploaded.length) expect(uploaded[0].payload).toMatchObject(theme)
+  })
+
+  it('bootstrap uploads owned genuine customs while quarantining preset copies and cleanup tombstones', async () => {
+    const h = installApi({ hasProject: true })
+    const records: UpsertRecord[] = []
+    vi.mocked(getSupabase).mockResolvedValue(makeSupabase(records))
+    const config = JSON.stringify({bg:'#000000',fg:'#ffffff',fgSecondary:'#cccccc',fgMuted:'#888888',muted:'#888888',accent:'#c8bce7',accentFg:'#111111',border:'#333333',sidebar:'#aabbcc'})
+    const base = {mode:'dark',config,is_builtin:0,owner_id:USER_ID,created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',deleted_at:null}
+    h.themesFindAllByOwner.mockResolvedValue([
+      {...base,id:'builtin',name:'Standard Dark',is_builtin:1,owner_id:null},
+      {...base,id:'old-copy',name:'Standard Dark'},
+      {...base,id:'custom',name:'Aviobook Dark'},
+      {...base,id:'custom-soft',name:'Soft Sage Dark'},
+      {...base,id:'deleted-custom',name:'Old custom Dark',deleted_at:base.updated_at},
+      {...base,id:'retired-copy',name:'Standard Dark',deleted_at:base.updated_at}
+    ])
+    await fullUpload(USER_ID)
+    expect(h.themesFindAllByOwner).toHaveBeenCalledWith(USER_ID,{includeTombstones:true})
+    const themes = records.filter((record)=>record.table==='user_themes').map((record)=>record.payload as Record<string,unknown>)
+    expect(themes.map((theme)=>theme.id).sort()).toEqual(['custom','custom-soft','deleted-custom'])
+    expect(themes.find((theme)=>theme.id==='custom')?.sidebar).toBe('#aabbcc')
+  })
+
+  it('bootstrap pull uses the shared theme path with exact custom sidebar, clocks and tombstone', async () => {
+    const h = installApi({hasProject:false})
+    const remote = {id:'custom',user_id:USER_ID,name:'Soft Sage Dark',mode:'dark',bg:'#000000',fg:'#ffffff',fg_secondary:'#cccccc',fg_muted:'#888888',muted:'#888888',accent:'#c8bce7',accent_fg:'#111111',surface:'#cccccc',border:'#333333',sidebar:'#aabbcc',created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',deleted_at:'2026-01-02T00:00:00Z'}
+    vi.mocked(getSupabase).mockResolvedValue(makeSupabase([],{user_themes:[remote]}))
+    await fullPull(USER_ID)
+    expect(h.themesApplyRemote).toHaveBeenCalledWith(expect.objectContaining({id:remote.id,created_at:remote.created_at,updated_at:remote.updated_at,deleted_at:remote.deleted_at}))
+    const local = h.themesApplyRemote.mock.calls[0][0] as unknown as {config:string}
+    expect(JSON.parse(local.config).sidebar).toBe(remote.sidebar)
   })
 
   it('sets last_sync_at only after a successful upload completes', async () => {

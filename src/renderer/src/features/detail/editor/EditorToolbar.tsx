@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../../shared/motion/MotionPresence'
 import { useState, useRef, useEffect } from 'react'
 import type { Editor } from '@tiptap/react'
 import {
@@ -74,8 +75,7 @@ export function EditorToolbar({ editor, taskId }: EditorToolbarProps): React.JSX
           {currentHeading}
           <ChevronDown size={10} />
         </button>
-        {headingOpen && (
-          <div className="absolute left-0 top-full z-[10000] mt-1 w-32 rounded-lg border border-border bg-surface py-1 shadow-xl">
+        {<MotionPresence open={Boolean(headingOpen)}>{() => (headingOpen) ? (<div className="absolute left-0 top-full z-[10000] mt-1 w-32 rounded-lg border border-border bg-surface py-1 shadow-xl">
             {([1, 2, 3] as const).map((level) => (
               <button
                 key={level}
@@ -93,8 +93,7 @@ export function EditorToolbar({ editor, taskId }: EditorToolbarProps): React.JSX
                 Heading {level}
               </button>
             ))}
-          </div>
-        )}
+          </div>) : null}</MotionPresence>}
       </div>
 
       <Separator />

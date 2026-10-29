@@ -1,3 +1,4 @@
+import { MotionPresence } from '../../shared/motion/MotionPresence'
 /**
  * Assignee picker dropdown for shared projects.
  * Shows project members with avatar circles and emails.
@@ -75,8 +76,7 @@ export function AssigneePicker({
         )}
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-background shadow-xl">
+      {<MotionPresence open={Boolean(open)}>{() => (open) ? (<div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-background shadow-xl">
           <div className="border-b border-border px-3 py-2">
             <h4 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted">
               Assign to
@@ -117,8 +117,7 @@ export function AssigneePicker({
               </button>
             ))}
           </div>
-        </div>
-      )}
+        </div>) : null}</MotionPresence>}
     </div>
   )
 }

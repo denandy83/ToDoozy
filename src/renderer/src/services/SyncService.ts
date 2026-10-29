@@ -590,7 +590,13 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
             while (pending.length && isOnline) {
               const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
               const rows = snapshots.map((value) => JSON.parse(value).row)
-              const values = rows.filter(Boolean).map((row) => item.descriptor!.toRemote(row))
+              if (item.entry.table_name === 'user_settings' || item.entry.table_name === 'user_themes') {
+                for (const row of rows.filter((row) => row && (item.entry.table_name === 'user_themes' || row.key === 'theme_id'))) await item.descriptor!.remoteUpsert(row, context)
+              }
+              const values = rows.filter(Boolean)
+                .filter((row) => item.entry.table_name !== 'user_settings' || row.key !== 'theme_id')
+                .filter(() => item.entry.table_name !== 'user_themes')
+                .map((row) => item.descriptor!.toRemote(row))
               if (values.length) {
                 const { error } = await supabase.from(item.entry.table_name).upsert(values)
                 if (error) {
@@ -609,6 +615,10 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
               const changed: Work[] = []
               for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
                 const candidate = pending[rowIndex]
+                if (!rows[rowIndex] && (candidate.entry.table_name === 'user_themes' || (candidate.entry.table_name === 'user_settings' && candidate.entry.row_id.endsWith(':theme_id')))) {
+                  await complete(candidate)
+                  continue
+                }
                 if (!rows[rowIndex]) {
                   const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
                   await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)

@@ -155,7 +155,7 @@ export function SlashCommandMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in motion-safe:duration-100"
+      className="fixed z-[10000] w-52 rounded-lg border border-border bg-surface py-1 shadow-xl motion-safe:duration-100"
       style={{ top: position.top, left: position.left }}
     >
       {SLASH_COMMANDS.map((cmd, i) => (

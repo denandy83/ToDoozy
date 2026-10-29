@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { usePresence } from '../../shared/motion/usePresence'
+import { useState, useEffect, useCallback } from 'react'
 import { Modal } from '../../shared/components/Modal'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { ColorPicker } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
+import { ThemeOptions } from './ThemeOptions'
+import { findThemeForMode, isReservedThemeFamily } from '../../shared/utils/themeChoices'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
 interface ThemeSettingsModalProps {
@@ -12,17 +15,7 @@ interface ThemeSettingsModalProps {
   onClose: () => void
 }
 
-const DEFAULT_CONFIG: ThemeConfig = {
-  bg: '#1a1a2e',
-  fg: '#e0e0e0',
-  fgSecondary: '#b0b0b0',
-  fgMuted: '#666666',
-  muted: '#888888',
-  accent: '#6366f1',
-  accentFg: '#ffffff',
-  border: '#2a2a4a',
-  sidebar: '#26263a'
-}
+import { DEFAULT_THEME_CONFIG as DEFAULT_CONFIG, resolveBuiltinConfig } from '../../../../shared/themeCatalog'
 
 const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
   bg: 'Background',
@@ -38,7 +31,7 @@ const COLOR_LABELS: Record<keyof ThemeConfig, string> = {
 
 function parseConfig(theme: Theme): ThemeConfig {
   try {
-    const c = JSON.parse(theme.config) as Partial<ThemeConfig>
+    const c = resolveBuiltinConfig(theme.name, theme.is_builtin, JSON.parse(theme.config) as ThemeConfig)
     const bg = c.bg ?? DEFAULT_CONFIG.bg
     if (!c.sidebar) {
       const num = parseInt(bg.replace('#', ''), 16)
@@ -56,8 +49,9 @@ function parseConfig(theme: Theme): ThemeConfig {
 }
 
 export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): React.JSX.Element | null {
+  const dialogPresence = usePresence(open, 'dialog')
   const currentTheme = useSettingsStore(selectCurrentTheme)
-  const { setSetting, setCurrentTheme, createTheme, updateTheme } = useSettingsStore()
+  const { setSetting, createTheme, updateTheme } = useSettingsStore()
   const { addToast } = useToast()
 
   const [mode, setMode] = useState<'dark' | 'light'>('dark')
@@ -67,10 +61,6 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
   const [hasChanges, setHasChanges] = useState(false)
 
   const themesForMode = useThemesByMode(mode)
-  const sortedThemes = useMemo(
-    () => [...themesForMode].sort((a, b) => a.name.localeCompare(b.name)),
-    [themesForMode]
-  )
 
   // Initialize from current theme when modal opens
   useEffect(() => {
@@ -89,14 +79,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
     (newMode: 'dark' | 'light') => {
       setMode(newMode)
       // Find the current theme's equivalent in the new mode, or pick first
-      const themesInMode = Object.values(useSettingsStore.getState().themes).filter(
-        (t) => t.mode === newMode
-      )
-      const match = themesInMode.find((t) => {
-        const currentName = currentTheme?.name.replace(/ (Dark|Light)$/, '') ?? ''
-        return t.name.replace(/ (Dark|Light)$/, '') === currentName
-      })
-      const target = match ?? themesInMode[0]
+      const target = findThemeForMode(currentTheme, Object.values(useSettingsStore.getState().themes), newMode)
       if (target) {
         setSelectedThemeId(target.id)
         setEditConfig(parseConfig(target))
@@ -147,14 +130,13 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       // Save as current theme
       await setSetting('theme_id', selectedThemeId)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(selectedThemeId)
       setHasChanges(false)
       addToast({ message: 'Theme applied' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to apply theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [selectedThemeId, editConfig, mode, updateTheme, setSetting, setCurrentTheme, addToast])
+  }, [selectedThemeId, editConfig, mode, updateTheme, setSetting, addToast])
 
   // Save as new custom theme
   const handleSaveAs = useCallback(async () => {
@@ -164,6 +146,10 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       return
     }
 
+    if (isReservedThemeFamily(name)) {
+      addToast({ message: 'Built-in theme names are reserved. Choose another name.', variant: 'danger' })
+      return
+    }
     try {
       const theme = await createTheme({
         id: crypto.randomUUID(),
@@ -174,7 +160,6 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       setSelectedThemeId(theme.id)
       await setSetting('theme_id', theme.id)
       await setSetting('theme_mode', mode)
-      setCurrentTheme(theme.id)
       setCustomName('')
       setHasChanges(false)
       addToast({ message: `Theme "${theme.name}" created` })
@@ -182,7 +167,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       const msg = err instanceof Error ? err.message : 'Failed to create theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [customName, mode, editConfig, createTheme, setSetting, setCurrentTheme, addToast])
+  }, [customName, mode, editConfig, createTheme, setSetting, addToast])
 
   // Revert to saved theme on cancel
   const handleClose = useCallback(() => {
@@ -192,7 +177,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
     onClose()
   }, [currentTheme, onClose])
 
-  if (!open) return null
+  if (!dialogPresence.present) return null
 
   return (
     <Modal open={open} onClose={handleClose} title="Theme Settings">
@@ -221,15 +206,12 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Preset</span>
           <select
+            aria-label="Theme"
             value={selectedThemeId ?? ''}
             onChange={(e) => handlePresetChange(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
           >
-            {sortedThemes.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
+            <ThemeOptions themes={themesForMode} />
           </select>
         </div>
 

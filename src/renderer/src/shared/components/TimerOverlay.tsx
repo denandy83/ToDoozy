@@ -214,7 +214,7 @@ export function TimerOverlay(): React.JSX.Element | null {
 
         {/* Task title */}
         {taskTitle && (
-          <p className="mt-6 max-w-2xl truncate text-sm font-light text-muted/60">
+          <p className="mt-6 max-w-2xl truncate text-sm font-light text-muted">
             {taskTitle}
           </p>
         )}
@@ -292,7 +292,7 @@ export function TimerOverlay(): React.JSX.Element | null {
         <div className="flex w-80 flex-col border-l border-border/30 p-6 overflow-y-auto">
           <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Description</p>
           <div
-            className="text-sm font-light leading-relaxed text-muted/80 [&_h1]:text-base [&_h1]:font-medium [&_h1]:text-foreground/70 [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-medium [&_h2]:text-foreground/70 [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:text-foreground/70 [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:text-xs [&_pre]:rounded-lg [&_pre]:bg-foreground/10 [&_pre]:p-3 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_blockquote]:border-l-2 [&_blockquote]:border-muted/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_p]:my-1 [&_strong]:font-medium [&_strong]:text-foreground/70"
+            className="text-sm font-light leading-relaxed text-muted [&_h1]:text-base [&_h1]:font-medium [&_h1]:text-foreground/70 [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-medium [&_h2]:text-foreground/70 [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:text-foreground/70 [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:text-xs [&_pre]:rounded-lg [&_pre]:bg-foreground/10 [&_pre]:p-3 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_blockquote]:border-l-2 [&_blockquote]:border-muted/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_p]:my-1 [&_strong]:font-medium [&_strong]:text-foreground/70"
             dangerouslySetInnerHTML={{ __html: descriptionHtml }}
           />
         </div>

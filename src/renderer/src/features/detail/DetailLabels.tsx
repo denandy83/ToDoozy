@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
+import { MotionPresence } from '../../shared/motion/MotionPresence'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { LabelChip } from '../../shared/components/LabelChip'
 import { LabelPicker } from '../../shared/components/LabelPicker'
@@ -25,7 +26,7 @@ export function DetailLabels({
   const rowRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
 
-  const assignedIds = new Set(assignedLabels.map((l) => l.id))
+  const assignedIds = useMemo(() => new Set(assignedLabels.map((l) => l.id)), [assignedLabels])
 
   // Remove a label and restore focus to the previous chip (or +Add if none remain)
   const handleRemoveLabel = useCallback(
@@ -96,8 +97,7 @@ export function DetailLabels({
         </button>
       </div>
 
-      {dropdownOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1">
+      <MotionPresence open={dropdownOpen}><div className="absolute left-0 top-full z-50 mt-1">
           <LabelPicker
             allLabels={allLabels}
             assignedLabelIds={assignedIds}
@@ -110,7 +110,7 @@ export function DetailLabels({
             projectId={projectId}
           />
         </div>
-      )}
+      </MotionPresence>
     </div>
   )
 }

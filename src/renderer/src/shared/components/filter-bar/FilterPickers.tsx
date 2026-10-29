@@ -1,3 +1,4 @@
+import { SemanticColorText } from '../SemanticColorText'
 import { useState, useRef, useEffect } from 'react'
 import { Search, Minus, Plus, Calendar } from 'lucide-react'
 import type { Label, Project } from '../../../../../shared/types'
@@ -23,7 +24,7 @@ export function PriorityFilterPicker({ active, excluded, onToggle, onExcludeTogg
 
   return (
     <div className="min-w-[160px] rounded-lg border border-border bg-surface p-1 shadow-lg">
-      <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Priority</div>
+      <div className="mb-1 px-2 pt-1 ui-section-label text-muted">Priority</div>
       <div className="px-1 pb-1">
         <OperatorToggle value={operator} onChange={setOperator} />
       </div>
@@ -38,9 +39,9 @@ export function PriorityFilterPicker({ active, excluded, onToggle, onExcludeTogg
             onChange={() => currentToggle(opt.value)}
             className="accent-accent h-3 w-3"
           />
-          <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: opt.color }}>
+          <SemanticColorText className="ui-metadata" color={opt.color}>
             {opt.label}
-          </span>
+          </SemanticColorText>
         </label>
       ))}
       <button
@@ -109,7 +110,7 @@ export function LabelFilterPicker({ labels, active, excluded, onToggle, onExclud
 
   return (
     <div className="min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-lg">
-      <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Labels</div>
+      <div className="mb-1 px-2 pt-1 ui-section-label text-muted">Labels</div>
       <div className="px-1 pb-1">
         <LabelOperatorToggle value={operator} onChange={handleOperatorChange} />
         <div className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 focus-within:border-accent">
@@ -121,7 +122,7 @@ export function LabelFilterPicker({ labels, active, excluded, onToggle, onExclud
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search labels..."
-            className="flex-1 bg-transparent text-[11px] font-light text-foreground placeholder:text-muted/50 focus:outline-none"
+            className="flex-1 bg-transparent text-[11px] font-light text-foreground placeholder:text-muted focus:outline-none"
             autoComplete="off"
           />
         </div>
@@ -200,7 +201,7 @@ export function ProjectFilterPicker({ projects, active, excluded, onToggle, onEx
 
   return (
     <div className="min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-lg">
-      <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Projects</div>
+      <div className="mb-1 px-2 pt-1 ui-section-label text-muted">Projects</div>
       <div className="px-1 pb-1">
         <OperatorToggle value={operator} onChange={setOperator} />
         <div className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 focus-within:border-accent">
@@ -212,7 +213,7 @@ export function ProjectFilterPicker({ projects, active, excluded, onToggle, onEx
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search projects..."
-            className="flex-1 bg-transparent text-[11px] font-light text-foreground placeholder:text-muted/50 focus:outline-none"
+            className="flex-1 bg-transparent text-[11px] font-light text-foreground placeholder:text-muted focus:outline-none"
             autoComplete="off"
           />
         </div>
@@ -270,7 +271,7 @@ export function StatusFilterPicker({ statuses, active, excluded, onToggle, onExc
 
   return (
     <div className="min-w-[160px] rounded-lg border border-border bg-surface p-1 shadow-lg">
-      <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Status</div>
+      <div className="mb-1 px-2 pt-1 ui-section-label text-muted">Status</div>
       <div className="px-1 pb-1">
         <OperatorToggle value={operator} onChange={setOperator} />
       </div>
@@ -285,7 +286,7 @@ export function StatusFilterPicker({ statuses, active, excluded, onToggle, onExc
             onChange={() => currentToggle(s.id)}
             className="accent-accent h-3 w-3"
           />
-          <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest">
+          <span className="flex items-center gap-1.5 ui-metadata">
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
             {s.name}
           </span>
@@ -338,12 +339,12 @@ export function DueDateFilterPicker({ activePreset, activeRange, onSelectPreset,
 
   return (
     <div className="min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-lg">
-      <div className="mb-1 px-2 pt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Due Date</div>
+      <div className="mb-1 px-2 pt-1 ui-section-label text-muted">Due Date</div>
       {DUE_DATE_PRESETS.map((preset) => (
         <button
           key={preset.value}
           onClick={() => { onSelectPreset(activePreset === preset.value ? null : preset.value) }}
-          className={`block w-full rounded px-2 py-1 text-left text-[11px] font-bold uppercase tracking-widest transition-colors hover:bg-foreground/6 ${
+          className={`block w-full rounded px-2 py-1 text-left ui-metadata transition-colors hover:bg-foreground/6 ${
             activePreset === preset.value ? 'text-accent' : 'text-foreground'
           }`}
         >
@@ -355,7 +356,7 @@ export function DueDateFilterPicker({ activePreset, activeRange, onSelectPreset,
       <div className="mt-1 border-t border-border pt-1">
         <button
           onClick={() => setShowCustom(!showCustom)}
-          className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] font-bold uppercase tracking-widest transition-colors hover:bg-foreground/6 ${
+          className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left ui-metadata transition-colors hover:bg-foreground/6 ${
             showCustom || activeRange ? 'text-accent' : 'text-foreground'
           }`}
         >
@@ -369,7 +370,7 @@ export function DueDateFilterPicker({ activePreset, activeRange, onSelectPreset,
             <div className="flex overflow-hidden rounded-lg border border-border">
               <button
                 onClick={() => setMode('relative')}
-                className={`flex-1 px-3 py-1 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                className={`flex-1 px-3 py-1 ui-metadata transition-colors ${
                   mode === 'relative' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
                 }`}
               >
@@ -377,7 +378,7 @@ export function DueDateFilterPicker({ activePreset, activeRange, onSelectPreset,
               </button>
               <button
                 onClick={() => setMode('absolute')}
-                className={`flex-1 px-3 py-1 text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                className={`flex-1 px-3 py-1 ui-metadata transition-colors ${
                   mode === 'absolute' ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-foreground/6'
                 }`}
               >
@@ -467,7 +468,7 @@ function OffsetInput({ label, value, onChange, optional }: OffsetInputProps): Re
 
   return (
     <div className="flex items-center gap-2">
-      <span className="w-8 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{label}</span>
+      <span className="w-8 ui-section-label text-muted">{label}</span>
       <div className="flex flex-1 items-center gap-0.5">
         <button
           onClick={() => onChange(numValue - 1)}
@@ -488,7 +489,7 @@ function OffsetInput({ label, value, onChange, optional }: OffsetInputProps): Re
           }}
           onKeyDown={handleKeyDown}
           placeholder={optional ? '—' : '0'}
-          className="w-12 rounded border border-border bg-transparent px-1.5 py-0.5 text-center text-[11px] font-light text-foreground placeholder:text-muted/50 focus:border-accent focus:outline-none"
+          className="w-12 rounded border border-border bg-transparent px-1.5 py-0.5 text-center text-[11px] font-light text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
         />
         <button
           onClick={() => onChange(numValue + 1)}
@@ -525,7 +526,7 @@ interface DateInputProps {
 function DateInput({ label, value, onChange, optional, min }: DateInputProps): React.JSX.Element {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-8 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">{label}</span>
+      <span className="w-8 ui-section-label text-muted">{label}</span>
       <input
         type="date"
         value={value}
@@ -560,7 +561,7 @@ function DueDatePreview({ fromOffset, toOffset }: DueDatePreviewProps): React.JS
   }
 
   return (
-    <div className="text-[9px] font-light text-muted/70">
+    <div className="text-[9px] font-light text-muted">
       {toStr ? `${fromStr} → ${toStr}` : `from ${fromStr}`}
     </div>
   )
@@ -579,7 +580,7 @@ export function KeywordFilterInput({ initial, onSubmit, onClose, inputRef }: Key
   const [value, setValue] = useState(initial)
   return (
     <div className="min-w-[200px] rounded-lg border border-border bg-surface p-2 shadow-lg">
-      <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Keyword</div>
+      <div className="mb-1 ui-section-label text-muted">Keyword</div>
       <div className="flex items-center gap-1">
         <Search size={12} className="text-muted" />
         <input
