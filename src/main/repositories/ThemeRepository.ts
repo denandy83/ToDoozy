@@ -3,10 +3,15 @@ import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
 import { builtinTheme, builtinThemeId } from '../../shared/themeCatalog'
-import { archiveTheme, archivedTheme, presetForStoredTheme, remapThemeReferences, restoreThemeReferences, retirementStamp } from '../database/themeRepair'
+import { archiveTheme, presetForStoredTheme, remapThemeReferences, restoreThemeReferences, retirementStamp } from '../database/themeRepair'
 
 export class ThemeRepository {
   constructor(private db: DatabaseSync) {}
+
+  isPresetAlias(theme: Theme): boolean {
+    const preset = presetForStoredTheme(this.db, theme)
+    return Boolean(preset && theme.id !== builtinThemeId(preset.name))
+  }
 
   // Raw — sync layer needs to see tombstones to compare timestamps.
   findById(id: string): Theme | undefined {
@@ -94,7 +99,7 @@ export class ThemeRepository {
   }
 
   update(id: string, input: UpdateThemeInput): Theme | undefined {
-    const now = new Date().toISOString()
+    const now = retirementStamp(this.findById(id)?.updated_at)
     const sets: string[] = ['updated_at = ?']
     const values: (string | null)[] = [now]
 
@@ -128,10 +133,9 @@ export class ThemeRepository {
   private applyRemoteRow(remote: Theme): Theme {
     const existing = this.findById(remote.id)
     const existingPreset = existing && presetForStoredTheme(this.db, existing)
-    if (existing && !existingPreset && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing
-    const original = archivedTheme(this.db, remote.id)
     const preset = presetForStoredTheme(this.db, remote)
-    const restoringCustom = !preset && original && presetForStoredTheme(this.db, original) && isRemoteNewer(original.updated_at, remote.updated_at) && (!existing || (existing.deleted_at && existingPreset))
+    if (existing && !existingPreset && preset) return existing
+    if (existing && !existingPreset && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing
     const alias = preset && remote.id !== builtinThemeId(preset.name)
     const referenceSource = existingPreset ? existing! : remote
     if (alias) {
@@ -139,11 +143,11 @@ export class ThemeRepository {
       archiveTheme(this.db, referenceSource)
       const stamp = remote.deleted_at ? toCanonicalIso(remote.updated_at)! : retirementStamp(existing?.updated_at, remote.updated_at)
       remote = { ...remote, is_builtin: 0, deleted_at: remote.deleted_at ?? stamp, updated_at: stamp }
-    } else if (existing?.is_builtin === 1) return existing
+    } else if (existing?.is_builtin === 1 && existingPreset && existing.id === builtinThemeId(existingPreset.name)) return existing
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).
-    if (existing && !restoringCustom && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
+    if (existing && !(existingPreset && !preset) && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
     this.db
@@ -172,7 +176,7 @@ export class ThemeRepository {
         toCanonicalIso(remote.deleted_at ?? null)
       )
     if (alias) remapThemeReferences(this.db, referenceSource, builtinThemeId(preset.name))
-    if (restoringCustom && !remote.deleted_at) restoreThemeReferences(this.db, remote)
+    if (!preset && !remote.deleted_at) restoreThemeReferences(this.db, remote)
     return this.findById(remote.id)!
   }
 
@@ -185,7 +189,7 @@ export class ThemeRepository {
       const row = this.findById(id)
       if (!row || row.deleted_at) return false
       if (row.is_builtin === 1) return false
-      const now = new Date().toISOString()
+      const now = retirementStamp(row.updated_at)
       const result = this.db
         .prepare('UPDATE themes SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
         .run(now, now, id)

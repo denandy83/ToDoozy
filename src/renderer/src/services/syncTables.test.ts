@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('./syncContext', () => ({ captureSyncContext: async () => ({ api: window.api, client: supabaseHolder.client, assertCurrent: () => undefined, isCurrent: async () => true, scope: 'synthetic' }) }))
 import type { SyncTableDescriptor, RemoteActivityRow } from './syncTables'
-import { BUILTIN_THEMES } from '../../../shared/themeCatalog'
+import { PostgrestClient } from '@supabase/postgrest-js'
+import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'
 import type { Theme } from '../../../shared/types'
 
 // pullActivityLogForProject talks to Supabase directly — swap the client for
@@ -23,10 +24,15 @@ describe('theme reconciliation eligibility', () => {
   it.each(BUILTIN_THEMES)('preserves custom $name values while suppressing preset copies', async (preset) => {
     const { SYNC_TABLES } = await import('./syncTables')
     const writes: unknown[] = []
-    supabaseHolder.client = { from: () => ({ upsert: async (value: unknown) => { writes.push(value); return { error: null } } }) }
+    supabaseHolder.client = new PostgrestClient('https://example.invalid', { fetch: async (_input, init) => {
+      if (init?.method === 'POST') { const payload = JSON.parse(String(init.body)); writes.push(payload); return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } }) }
+      return new Response('[]', { headers: { 'Content-Type': 'application/json' } })
+    } })
     const config = { ...preset.config, sidebar: '#aBcDEF', accent: '#123456' }
     const theme: Theme = { id: 'custom', name: preset.name, mode: preset.mode, config: JSON.stringify(config),
       owner_id: 'user-1', is_builtin: 0, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', deleted_at: null }
+    let current = theme
+    vi.stubGlobal('window', { api: { themes: { findById: async () => current, isPresetAlias: async (row: Theme) => Boolean(presetForTheme(row)), applyRemote: async (row: Theme) => { current = row; return current } } } })
     await SYNC_TABLES.themes!.remoteUpsert(theme)
     const custom = preset.name.startsWith('Soft ')
     expect(writes).toHaveLength(custom ? 1 : 0)
@@ -38,8 +44,10 @@ describe('theme reconciliation eligibility', () => {
     }
     await SYNC_TABLES.themes!.remoteUpsert({ ...theme, is_builtin: 1 })
     expect(writes).toHaveLength(custom ? 1 : 0)
-    await SYNC_TABLES.themes!.remoteUpsert({ ...theme, deleted_at: theme.updated_at })
-    expect(writes.at(-1)).toMatchObject({ id: theme.id, deleted_at: theme.updated_at })
+    current = { ...theme, deleted_at: theme.updated_at }
+    await SYNC_TABLES.themes!.remoteUpsert(current)
+    expect(writes).toHaveLength(custom ? 2 : 0)
+    if (custom) expect(writes.at(-1)).toMatchObject({ id: theme.id, deleted_at: theme.updated_at })
   })
 })
 

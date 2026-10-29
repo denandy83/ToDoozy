@@ -195,6 +195,7 @@ export interface ActivityLogAPI {
 }
 
 export interface SettingsAPI {
+  themeReferenceSource(userId: string, value: string | null, updatedAt: string): Promise<string | null>
   canRewriteThemeReference(userId: string, from: string | null, to: string | null, updatedAt: string): Promise<boolean>
   get(userId: string, key: string): Promise<string | null>
   set(userId: string, key: string, value: string | null): Promise<void>
@@ -213,6 +214,7 @@ export interface SettingsAPI {
 }
 
 export interface ThemesAPI {
+  isPresetAlias(theme: Theme): Promise<boolean>
   findById(id: string): Promise<Theme | null>
   list(userId: string): Promise<Theme[]>
   listByMode(mode: string, userId: string): Promise<Theme[]>

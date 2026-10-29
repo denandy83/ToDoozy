@@ -764,58 +764,20 @@ export async function deleteProjectAreaFromSupabase(areaId: string): Promise<voi
 /**
  * Push a theme to user_themes in Supabase.
  */
-export async function pushTheme(theme: {
-  id: string
-  user_id: string
-  name: string
-  mode: string
-  bg: string
-  fg: string
-  fg_secondary: string
-  fg_muted: string
-  muted: string
-  accent: string
-  accent_fg: string
-  border: string
-  sidebar?: string
-  created_at?: string
-  updated_at?: string
-  deleted_at?: string | null
-}): Promise<void> {
-  if (!canSyncTheme(theme)) return
+export async function pushTheme(theme: { id: string }): Promise<void> {
   return withSyncProducer(async (origin) => {
-    const now = new Date().toISOString()
-    const payload = {
-      id: theme.id,
-      user_id: theme.user_id,
-      name: theme.name,
-      mode: theme.mode,
-      bg: theme.bg,
-      fg: theme.fg,
-      fg_secondary: theme.fg_secondary,
-      fg_muted: theme.fg_muted,
-      muted: theme.muted,
-      accent: theme.accent,
-      accent_fg: theme.accent_fg,
-      // Legacy column, still NOT NULL — kept in sync with fg_secondary.
-      surface: theme.fg_secondary,
-      border: theme.border,
-      sidebar: theme.sidebar ?? null,
-      created_at: theme.created_at ?? now,
-      updated_at: theme.updated_at ?? now,
-      deleted_at: theme.deleted_at ?? null
-    }
-    if (!(await hasLiveSession(origin, 'pushTheme', `id=${theme.id}`))) return
+    const descriptor = SYNC_TABLES.themes!
+    const local = await origin.api.themes.findById(theme.id)
+    if (!local || local.owner_id !== origin.userId || !canSyncTheme(local)) return
+    const payload = descriptor.toRemote(local)
+    if (!(await hasLiveSession(origin, 'pushTheme', `id=${local.id}`))) return
     try {
       const supabase = (await origin.client())!
-      const { error } = await supabase.from('user_themes').upsert(payload)
-      if (error) await reportPushFailure(origin, 'pushTheme', error, 'user_themes', theme.id, JSON.stringify(payload))
-      else {
-        await markSynced(origin)
-        logEvent('info', 'sync', `Pushed theme "${theme.name}"`, `id=${theme.id} mode=${theme.mode}`)
-      }
+      await descriptor.remoteUpsert(local, { api: origin.api, client: supabase, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+      await markSynced(origin)
+      logEvent('info', 'sync', `Pushed theme "${local.name}"`, `id=${local.id} mode=${local.mode}`)
     } catch (err) {
-      await reportPushFailure(origin, 'pushTheme', err, 'user_themes', theme.id, JSON.stringify(payload))
+      await reportPushFailure(origin, 'pushTheme', err, 'user_themes', local.id, JSON.stringify(payload))
     }
   })
 }
@@ -827,22 +789,16 @@ export async function pushTheme(theme: {
  */
 export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
   return withSyncProducer(async (origin) => {
+    const local = await origin.api.themes.findById(themeId)
+    if (!local?.deleted_at || local.owner_id !== origin.userId) return
+    const descriptor = SYNC_TABLES.themes!
     if (!(await hasLiveSession(origin, 'deleteTheme', `id=${themeId}`))) return
     try {
-      const supabase = (await origin.client())!
-      const now = new Date().toISOString()
-      const { error } = await supabase
-        .from('user_themes')
-        .update({ deleted_at: now, updated_at: now })
-        .eq('id', themeId)
-      if (error) {
-        await reportPushFailure(origin, 'deleteTheme', error, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
-      } else {
-        await markSynced(origin)
-        logEvent('info', 'sync', 'Soft-deleted theme', `id=${themeId}`)
-      }
-    } catch (err) {
-      await reportPushFailure(origin, 'deleteTheme', err, 'user_themes', themeId, JSON.stringify({ id: themeId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
+      const client = (await origin.client())!
+      await descriptor.remoteUpsert(local, { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+      await markSynced(origin)
+    } catch (error) {
+      await reportPushFailure(origin, 'deleteTheme', error, 'user_themes', themeId, JSON.stringify(descriptor.toRemote(local)))
     }
   })
 }
@@ -1158,32 +1114,14 @@ export async function fullUpload(userId: string, context?: SyncContext): Promise
       }
     } catch { /* areas might not exist */ }
 
-    // 6. Push themes (parse config JSON inline)
+    // 6. Push themes
     try {
       const themes = await api.themes.findAllByOwner(userId, { includeTombstones: true })
       for (const theme of themes) {
         if (!canSyncTheme(theme) || theme.owner_id !== userId) continue
         try {
-          const config = JSON.parse(theme.config) as Record<string, string>
           if (!await context.isCurrent()) return
-          await pushTheme({
-            id: theme.id,
-            user_id: userId,
-            name: theme.name,
-            mode: theme.mode,
-            bg: config.bg ?? '',
-            fg: config.fg ?? '',
-            fg_secondary: config.fgSecondary ?? '',
-            fg_muted: config.fgMuted ?? '',
-            muted: config.muted ?? '',
-            accent: config.accent ?? '',
-            accent_fg: config.accentFg ?? '',
-            border: config.border ?? '',
-            sidebar: config.sidebar,
-            created_at: theme.created_at,
-            updated_at: theme.updated_at,
-            deleted_at: theme.deleted_at
-          })
+          await pushTheme(theme)
         } catch { /* skip themes with invalid config */ }
       }
     } catch { /* themes might not exist */ }
@@ -1383,7 +1321,7 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
         // re-establish the very leak #114 closed. Filter through the same
         // single-sourced exclusion list the push paths use.
         if (isSettingSyncExcluded(setting.key)) continue
-        if (setting.key === 'theme_id') await SYNC_TABLES.settings!.localApplyRemote(setting, api)
+        if (setting.key === 'theme_id') await SYNC_TABLES.settings!.localApplyRemote(setting, api, context)
         else await api.settings.set(userId, setting.key, setting.value)
       }
     }
@@ -1444,7 +1382,7 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
       for (const theme of remoteThemes) {
         if (context && !await context.isCurrent()) return
         // The shared path preserves tombstones, sidebar, clocks and legacy preset retirement.
-        await SYNC_TABLES.themes!.localApplyRemote(theme, api)
+        await SYNC_TABLES.themes!.localApplyRemote(theme, api, context)
       }
     }
 

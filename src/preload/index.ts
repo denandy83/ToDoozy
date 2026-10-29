@@ -143,6 +143,7 @@ const api: TodoozyAPI = {
   },
 
   settings: {
+    themeReferenceSource: (userId, value, updatedAt) => ipcRenderer.invoke('settings:themeReferenceSource', userId, value, updatedAt),
     canRewriteThemeReference: (userId, from, to, updatedAt) => ipcRenderer.invoke('settings:canRewriteThemeReference', userId, from, to, updatedAt),
     get: (userId, key) => ipcRenderer.invoke('settings:get', userId, key),
     set: (userId, key, value) => ipcRenderer.invoke('settings:set', userId, key, value),
@@ -158,6 +159,7 @@ const api: TodoozyAPI = {
   },
 
   themes: {
+    isPresetAlias: (theme) => ipcRenderer.invoke('themes:isPresetAlias', theme),
     findById: (id) => ipcRenderer.invoke('themes:findById', id),
     list: (userId) => ipcRenderer.invoke('themes:list', userId),
     listByMode: (mode, userId) => ipcRenderer.invoke('themes:listByMode', mode, userId),

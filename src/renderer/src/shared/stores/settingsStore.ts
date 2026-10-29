@@ -163,28 +163,9 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       set((state) => ({
         themes: { ...state.themes, [theme.id]: theme }
       }))
-      // Push to Supabase
-      try {
-        const config = JSON.parse(theme.config) as Record<string, string>
-        import('../../services/PersonalSyncService').then(({ pushTheme }) => {
-          pushTheme({
-            id: theme.id,
-            user_id: userId,
-            name: theme.name,
-            mode: theme.mode,
-            bg: config.bg ?? '',
-            fg: config.fg ?? '',
-            fg_secondary: config.fgSecondary ?? '',
-            fg_muted: config.fgMuted ?? '',
-            muted: config.muted ?? '',
-            accent: config.accent ?? '',
-            accent_fg: config.accentFg ?? '',
-            border: config.border ?? '',
-            sidebar: config.sidebar,
-            updated_at: theme.updated_at
-          }).catch(() => {})
-        })
-      } catch { /* skip if config parse fails */ }
+      import('../../services/PersonalSyncService').then(({ pushTheme }) => {
+        pushTheme(theme).catch(() => {})
+      })
       return theme
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create theme'
@@ -195,34 +176,15 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
 
   async updateTheme(id: string, input: UpdateThemeInput): Promise<Theme | null> {
     try {
-      const { userId } = get()
       const theme = await window.api.themes.update(id, input)
       if (theme) {
         set((state) => ({
           themes: { ...state.themes, [theme.id]: theme }
         }))
         // Built-in edits stay local; uploading their IDs created duplicate presets.
-        if (!theme.is_builtin) try {
-          const config = JSON.parse(theme.config) as Record<string, string>
-          import('../../services/PersonalSyncService').then(({ pushTheme }) => {
-            pushTheme({
-              id: theme.id,
-              user_id: userId,
-              name: theme.name,
-              mode: theme.mode,
-              bg: config.bg ?? '',
-              fg: config.fg ?? '',
-              fg_secondary: config.fgSecondary ?? '',
-              fg_muted: config.fgMuted ?? '',
-              muted: config.muted ?? '',
-              accent: config.accent ?? '',
-              accent_fg: config.accentFg ?? '',
-              border: config.border ?? '',
-              sidebar: config.sidebar,
-              updated_at: theme.updated_at
-            }).catch(() => {})
-          })
-        } catch { /* skip if config parse fails */ }
+        if (!theme.is_builtin) import('../../services/PersonalSyncService').then(({ pushTheme }) => {
+          pushTheme(theme).catch(() => {})
+        })
       }
       return theme
     } catch (err) {

@@ -12,7 +12,7 @@ vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
 import { chunkArray, fullPull, fullUpload, initSync, pushSetting, pushTheme } from './PersonalSyncService'
-import { BUILTIN_THEMES } from '../../../shared/themeCatalog'
+import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
@@ -80,9 +80,9 @@ function makeSupabase(records: UpsertRecord[] = [], tableRows: Record<string, un
     for (const method of ['select','insert','update','delete','eq','neq','in','is','order','limit','or','filter','match']) {
       chain[method] = (): Record<string, unknown> => chain
     }
-    chain.upsert = (payload: unknown): Record<string, unknown> => { records.push({table,payload}); return chain }
+    chain.upsert = (payload: unknown): Record<string, unknown> => { records.push({table,payload}); result.data = Array.isArray(payload) ? payload : [payload]; return chain }
     chain.single = (): Promise<QueryResult> => Promise.resolve(result)
-    chain.maybeSingle = (): Promise<QueryResult> => Promise.resolve(result)
+    chain.maybeSingle = async () => ({ ...result, data: result.data[0] ?? null })
     chain.then = (resolve: (value: QueryResult) => unknown): unknown => resolve(result)
     return chain
   }
@@ -131,7 +131,7 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
   const empty = (): Promise<unknown[]> => Promise.resolve([])
 
   const themesFindAllByOwner = vi.fn(empty)
-  const themesApplyRemote = vi.fn(async (_theme: unknown) => undefined)
+  const themesApplyRemote = vi.fn(async (theme: unknown) => theme)
 
   useAuthStore.setState({ currentUser: { id: USER_ID } as never })
   const api = {
@@ -155,7 +155,7 @@ function installApi(opts: { hasProject: boolean }): ApiHarness {
       getLabels: empty
     },
     projectAreas: { findByUserId: empty },
-    themes: { list: empty, findAllByOwner: themesFindAllByOwner, applyRemote: themesApplyRemote }
+    themes: { list: empty, findAllByOwner: themesFindAllByOwner, findById: async (id: string) => (await themesFindAllByOwner() as Array<{ id: string }>).find((theme) => theme.id === id), isPresetAlias: async (theme: Parameters<typeof presetForTheme>[0]) => Boolean(presetForTheme(theme)), applyRemote: themesApplyRemote }
   }
   vi.stubGlobal('window', { api })
   return { settings, labelsFindAll, statusesFindByProjectId, projectsGetProjectsForUser, settingsSet, themesFindAllByOwner, themesApplyRemote }
@@ -316,19 +316,20 @@ describe('fullUpload / initSync last_sync_at handling (#106)', () => {
   })
 
   it.each(BUILTIN_THEMES)('eager upload distinguishes custom $name from original preset copies', async (preset) => {
-    installApi({ hasProject: true })
+    const h = installApi({ hasProject: true })
     const records: UpsertRecord[] = []
     vi.mocked(getSupabase).mockResolvedValue(makeSupabase(records))
     const theme = { id: 'custom', user_id: USER_ID, name: preset.name, mode: preset.mode,
       bg: '#000000', fg: '#ffffff', fg_secondary: '#aaaaaa', fg_muted: '#888888', muted: '#888888',
       accent: '#cccccc', accent_fg: '#111111', border: '#333333', sidebar: '#123456' }
+    h.themesFindAllByOwner.mockResolvedValue([{ id: theme.id, name: theme.name, mode: theme.mode, owner_id: USER_ID, is_builtin: 0, config: JSON.stringify({ bg: theme.bg, fg: theme.fg, fgSecondary: theme.fg_secondary, fgMuted: theme.fg_muted, muted: theme.muted, accent: theme.accent, accentFg: theme.accent_fg, border: theme.border, sidebar: theme.sidebar }), created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', deleted_at: null }] as never)
     await pushTheme(theme)
     const uploaded = records.filter((record) => record.table === 'user_themes')
     expect(uploaded).toHaveLength(preset.name.startsWith('Soft ') ? 1 : 0)
     if (uploaded.length) expect(uploaded[0].payload).toMatchObject(theme)
   })
 
-  it('bootstrap uploads only owned custom rows and cleanup tombstones, never preset copies', async () => {
+  it('bootstrap uploads owned genuine customs while quarantining preset copies and cleanup tombstones', async () => {
     const h = installApi({ hasProject: true })
     const records: UpsertRecord[] = []
     vi.mocked(getSupabase).mockResolvedValue(makeSupabase(records))
@@ -345,9 +346,8 @@ describe('fullUpload / initSync last_sync_at handling (#106)', () => {
     await fullUpload(USER_ID)
     expect(h.themesFindAllByOwner).toHaveBeenCalledWith(USER_ID,{includeTombstones:true})
     const themes = records.filter((record)=>record.table==='user_themes').map((record)=>record.payload as Record<string,unknown>)
-    expect(themes.map((theme)=>theme.id).sort()).toEqual(['custom','custom-soft','deleted-custom','retired-copy'])
+    expect(themes.map((theme)=>theme.id).sort()).toEqual(['custom','custom-soft','deleted-custom'])
     expect(themes.find((theme)=>theme.id==='custom')?.sidebar).toBe('#aabbcc')
-    expect(themes.find((theme)=>theme.id==='retired-copy')?.deleted_at).toBe(base.updated_at)
   })
 
   it('bootstrap pull uses the shared theme path with exact custom sidebar, clocks and tombstone', async () => {

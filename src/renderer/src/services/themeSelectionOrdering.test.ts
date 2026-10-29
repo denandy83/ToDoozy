@@ -15,7 +15,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, optio
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(async () => network.client), safeRefresh: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn(async () => ({ user: { id: 'user-1' } }) as Session) }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
-import { fullPull, fullUpload, pushSetting, deleteSettingFromSupabase } from './PersonalSyncService'
+import { fullPull, fullUpload, pushSetting, pushTheme, deleteThemeFromSupabase, deleteSettingFromSupabase } from './PersonalSyncService'
 import { processSyncQueue, setOnlineStatus } from './SyncService'
 import { requireSession } from './sessionRecovery'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
@@ -50,8 +50,11 @@ function cloud() {
   const tables = new Map<string, Map<string, Record<string, unknown>>>()
   const writes: Array<{ table: string; payload: Record<string, unknown> }> = []
   let beforeWrite: (() => void) | undefined
+  let writeTable = 'user_settings'
   let afterRead: (() => void) | undefined
+  let readTable = 'user_settings'
   let failMutation = false
+  let failTable = 'user_settings'
   const tableRows = (table: string): Map<string, Record<string, unknown>> => {
     if (!tables.has(table)) tables.set(table, new Map())
     return tables.get(table)!
@@ -64,8 +67,9 @@ function cloud() {
     const headers = new Headers(init?.headers)
     const mutation = method === 'POST' || method === 'PATCH'
     const selectionMutation = mutation && table === 'user_settings' && JSON.parse(String(init?.body)).key === 'theme_id'
-    if (selectionMutation && beforeWrite) { const hook = beforeWrite; beforeWrite = undefined; hook() }
-    if (selectionMutation && failMutation) {
+    const themeMutation = mutation && table === 'user_themes' && JSON.parse(String(init?.body)).id === aliasId
+    if (mutation && table === writeTable && beforeWrite && (themeMutation || selectionMutation)) { const hook = beforeWrite; beforeWrite = undefined; hook() }
+    if (mutation && table === failTable && failMutation && (themeMutation || selectionMutation)) {
       failMutation = false
       return new Response(JSON.stringify({ message: 'Synthetic transport failure', code: 'write_failed' }), { status: 400 })
     }
@@ -106,7 +110,7 @@ function cloud() {
       rows.sort((a, b) => String(a[key]).localeCompare(String(b[key])) * (direction === 'desc' ? -1 : 1))
     }
     if (url.searchParams.has('limit')) rows = rows.slice(0, Number(url.searchParams.get('limit')))
-    if (method === 'GET' && url.searchParams.has('id') && afterRead) { const hook = afterRead; afterRead = undefined; hook() }
+    if (method === 'GET' && table === readTable && url.searchParams.has('id') && (table !== 'user_themes' || url.searchParams.get('id') === `eq.${aliasId}`) && afterRead) { const hook = afterRead; afterRead = undefined; hook() }
     const responseHeaders = { 'Content-Type': 'application/json', 'Content-Range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` }
     if (method === 'HEAD') return new Response(null, { headers: responseHeaders })
     if (headers.get('Accept') === 'application/vnd.pgrst.object+json') {
@@ -119,11 +123,12 @@ function cloud() {
     client, writes,
     put(setting: Setting) { tableRows('user_settings').set(`${setting.user_id}:${setting.key}`, { ...setting, id: `${setting.user_id}:${setting.key}` }) },
     putTheme(row: Record<string, unknown>) { tableRows('user_themes').set(String(row.id), row) },
+    getTheme(id: string) { return tableRows('user_themes').get(id) },
     purgeThemes() { tableRows('user_themes').clear() },
     get() { return tableRows('user_settings').get(`${userId}:theme_id`)! },
-    onWrite(hook: () => void) { beforeWrite = hook },
-    onRead(hook: () => void) { afterRead = hook },
-    failNextMutation() { failMutation = true }
+    onWrite(hook: () => void, table = 'user_settings') { beforeWrite = hook; writeTable = table },
+    onRead(hook: () => void, table = 'user_settings') { afterRead = hook; readTable = table },
+    failNextMutation(table = 'user_settings') { failMutation = true; failTable = table }
   }
 }
 function install(device: ReturnType<typeof database>, server: ReturnType<typeof cloud>): { context: SyncContext; queue: SyncQueueEntry[] } {
@@ -134,6 +139,7 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
   const api = {
     auth: { getSupabaseConfig: async () => ({ url: 'https://example.invalid', anonKey: 'synthetic' }) },
     settings: {
+      themeReferenceSource: async (user: string, value: string | null, stamp: string) => device.settings.themeReferenceSource(user, value, stamp),
       canRewriteThemeReference: async (user: string, from: string | null, to: string | null, stamp: string) => device.settings.canRewriteThemeReference(user, from, to, stamp),
       get: async (user: string, key: string) => device.settings.get(user, key),
       getAll: async (user: string) => device.settings.getAll(user),
@@ -143,7 +149,7 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
       findMaxUpdatedAt: async (user: string) => device.settings.findMaxUpdatedAt(user),
       applyRemote: async (row: Setting) => device.settings.applyRemote(row)
     },
-    themes: { findAllByOwner: async (user: string, options: { includeTombstones?: boolean }) => device.themes.findAllByOwner(user, options), applyRemote: async (row: Theme) => device.themes.applyRemote(row) },
+    themes: { findById: async (id: string) => device.themes.findById(id), isPresetAlias: async (theme: Theme) => device.themes.isPresetAlias(theme), findMaxUpdatedAt: async (user: string) => device.themes.findMaxUpdatedAt(user), findAllByOwner: async (user: string, options: { includeTombstones?: boolean }) => device.themes.findAllByOwner(user, options), applyRemote: async (row: Theme) => device.themes.applyRemote(row) },
     projects: { getProjectsForUser: async () => [] },
     labels: { findAll: async () => [] },
     savedViews: { findByUserId: async () => [] },
@@ -193,6 +199,20 @@ async function publish(path: PublishPath, installed: ReturnType<typeof install>)
     await processSyncQueue(installed.context)
   } else await reconcileTable(SYNC_TABLES.settings!, userId, userId, installed.context)
 }
+
+async function publishTheme(path: PublishPath, device: ReturnType<typeof database>, installed: ReturnType<typeof install>): Promise<void> {
+  const theme = device.themes.findById(aliasId)!
+  if (path === 'eager') await pushTheme(theme)
+  else if (path === 'full upload') await fullUpload(userId, installed.context)
+  else if (path === 'queued') {
+    installed.queue.push({ id: `theme-${installed.queue.length}`, table_name: 'user_themes', row_id: aliasId, operation: 'UPDATE', payload: JSON.stringify(SYNC_TABLES.themes!.toRemote(theme)), created_at: upgrade })
+    await processSyncQueue(installed.context)
+  } else await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+}
+
+function genuine(original: Theme, updatedAt = newer): Theme {
+  return { ...original, name: 'Aviobook Dark', updated_at: updatedAt, deleted_at: null, config: JSON.stringify({ ...BUILTIN_THEMES[0].config, accent: '#b6d9c7', sidebar: '#123456' }) }
+}
 afterEach(() => {
   vi.clearAllTimers()
   vi.useRealTimers()
@@ -201,6 +221,238 @@ afterEach(() => {
 })
 
 describe('theme selection intent ordering', () => {
+  it('commits a normalized setting and its raw-reference provenance atomically', () => {
+    const device = database()
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    device.db.exec(`CREATE TRIGGER reject_selection BEFORE UPDATE ON settings WHEN NEW.updated_at='${newer}' BEGIN SELECT RAISE(ABORT,'synthetic selection failure'); END`)
+    expect(() => device.settings.applyRemote(selection(aliasId, newer))).toThrow('synthetic selection failure')
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(canonical, older))
+    expect(device.settings.themeReferenceSource(userId, canonical, newer)).toBe(canonical)
+  })
+  it('recovers a genuine rename of an original builtin install ID after local retirement', () => {
+    const device = database()
+    device.db.prepare('UPDATE themes SET is_builtin=1,owner_id=NULL WHERE id=?').run(aliasId)
+    const original = device.themes.findById(aliasId)!
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    device.settings.applyRemote(selection(aliasId, newer))
+    const renamed = { ...genuine(original), is_builtin: 0, owner_id: userId }
+    expect(device.themes.applyRemote(renamed)).toEqual(renamed)
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, newer))
+  })
+
+  it('full pull resolves the current genuine identity before normalizing its newer explicit selection', async () => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    const server = cloud()
+    server.put(selection(aliasId, newer))
+    server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original)) as Record<string, unknown>)
+    const installed = install(device, server)
+    await fullPull(userId, installed.context)
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, newer))
+    expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+    expect(server.get()).toMatchObject(selection(aliasId, newer))
+  })
+  it.each(paths)('%s resolves a genuine cloud rename before cleanup clocks can win', async (path) => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    const cleanup = device.themes.findById(aliasId)!
+    expect(Date.parse(cleanup.updated_at)).toBeGreaterThan(Date.parse(newer))
+    const renamed = genuine(original)
+    const server = cloud()
+    server.putTheme(SYNC_TABLES.themes!.toRemote(renamed) as Record<string, unknown>)
+    const installed = install(device, server)
+    await publishTheme(path, device, installed)
+    expect(device.themes.findById(aliasId)).toMatchObject({ name: renamed.name, updated_at: newer, deleted_at: null })
+    expect(JSON.parse(device.themes.findById(aliasId)!.config)).toEqual(JSON.parse(renamed.config))
+    expect(server.getTheme(aliasId)).toMatchObject({ name: renamed.name, updated_at: newer, deleted_at: null, accent: '#b6d9c7', sidebar: '#123456' })
+    expect(server.writes.some((write) => write.table === 'user_themes' && write.payload.id === aliasId && write.payload.deleted_at)).toBe(false)
+  })
+
+  it('preserves a recovered custom against higher cleanup replay and then repairs the cloud', async () => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    const cleanup = device.themes.findById(aliasId)!
+    const renamed = genuine(original)
+    device.themes.applyRemote(renamed)
+    const server = cloud()
+    server.putTheme(SYNC_TABLES.themes!.toRemote(cleanup) as Record<string, unknown>)
+    const installed = install(device, server)
+    await fullPull(userId, installed.context)
+    expect(device.themes.findById(aliasId)).toEqual(renamed)
+    await installed.context.api.syncMeta.setHighWater(userId, userId, 'themes', cleanup.updated_at)
+    expect((await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)).failed).toBe(0)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: renamed.name, updated_at: newer, deleted_at: null, accent: '#b6d9c7', sidebar: '#123456' })
+    const writes = server.writes.length
+    await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    expect(server.writes).toHaveLength(writes)
+  })
+
+  it('drops a purged queued cleanup instead of replaying its destructive snapshot', async () => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    repairBuiltinThemes(device.db)
+    const cleanup = device.themes.findById(aliasId)!
+    device.themes.hardDelete(aliasId)
+    const server = cloud()
+    server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original)) as Record<string, unknown>)
+    const installed = install(device, server)
+    installed.queue.push({ id: 'purged-cleanup', table_name: 'user_themes', row_id: aliasId, operation: 'UPDATE', payload: JSON.stringify(SYNC_TABLES.themes!.toRemote(cleanup)), created_at: upgrade })
+    expect(await processSyncQueue(installed.context)).toBe(1)
+    expect(installed.queue).toHaveLength(0)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+    expect(server.writes).toHaveLength(0)
+  })
+
+  it.each(paths)('%s protects concurrent genuine identity during conditional repair and first insert', async (path) => {
+    for (const initial of ['cleanup', 'absent']) {
+      const device = database()
+      const original = device.themes.findById(aliasId)!
+      repairBuiltinThemes(device.db)
+      const cleanup = device.themes.findById(aliasId)!
+      device.themes.applyRemote(genuine(original))
+      const concurrent = { ...genuine(original, '2090-01-01T00:00:00.000Z'), name: 'Later custom Dark' }
+      const server = cloud()
+      if (initial === 'cleanup') server.putTheme(SYNC_TABLES.themes!.toRemote(cleanup) as Record<string, unknown>)
+      server.onWrite(() => server.putTheme(SYNC_TABLES.themes!.toRemote(concurrent) as Record<string, unknown>), 'user_themes')
+      const installed = install(device, server)
+      await publishTheme(path, device, installed)
+      expect(server.getTheme(aliasId)).toMatchObject({ name: concurrent.name, updated_at: concurrent.updated_at, deleted_at: null })
+      expect(device.themes.findById(aliasId)).toMatchObject({ name: concurrent.name, updated_at: concurrent.updated_at, deleted_at: null })
+      expect(server.writes.filter((write) => write.table === 'user_themes' && write.payload.id === aliasId)).toHaveLength(0)
+    }
+  })
+
+  it.each(paths)('%s retries failed genuine-theme repair without publishing cleanup', async (path) => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    repairBuiltinThemes(device.db)
+    const cleanup = device.themes.findById(aliasId)!
+    device.themes.applyRemote(genuine(original))
+    const server = cloud()
+    server.putTheme(SYNC_TABLES.themes!.toRemote(cleanup) as Record<string, unknown>)
+    const installed = install(device, server)
+    server.failNextMutation('user_themes')
+    await publishTheme(path, device, installed)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: cleanup.name, deleted_at: cleanup.deleted_at })
+    expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+    if (path !== 'reconcile') expect(installed.queue).toHaveLength(1)
+    if (path === 'reconcile') await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    else await processSyncQueue(installed.context)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+    expect(installed.queue).toHaveLength(0)
+  })
+
+  it.each(paths)('%s pins theme identity resolution to its account and database', async (path) => {
+    for (const change of ['account', 'database']) {
+      useAuthStore.setState({ currentUser: { id: userId } as never })
+      const device = database()
+      const original = device.themes.findById(aliasId)!
+      repairBuiltinThemes(device.db)
+      const cleanup = device.themes.findById(aliasId)!
+      device.themes.applyRemote(genuine(original))
+      const other = database()
+      const otherOriginal = other.themes.findById(aliasId)!
+      const server = cloud()
+      server.putTheme(SYNC_TABLES.themes!.toRemote(cleanup) as Record<string, unknown>)
+      const installed = install(device, server)
+      server.onRead(() => {
+        if (change === 'account') useAuthStore.setState({ currentUser: { id: 'other-user' } as never })
+        else install(other, server)
+      }, 'user_themes')
+      await publishTheme(path, device, installed)
+      expect(server.getTheme(aliasId)).toMatchObject({ name: cleanup.name, deleted_at: cleanup.deleted_at })
+      expect(server.writes.filter((write) => write.table === 'user_themes' && write.payload.id === aliasId)).toHaveLength(0)
+      expect(other.themes.findById(aliasId)).toEqual(otherOriginal)
+    }
+  })
+
+  it.each(paths)('%s quarantines aliases instead of creating destructive cleanup writes', async (path) => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    repairBuiltinThemes(device.db)
+    const server = cloud()
+    server.onRead(() => server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original)) as Record<string, unknown>), 'user_themes')
+    const installed = install(device, server)
+    await publishTheme(path, device, installed)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+    expect(server.writes.filter((write) => write.table === 'user_themes' && write.payload.id === aliasId)).toHaveLength(0)
+    await reconcileTable(SYNC_TABLES.themes!, userId, userId, installed.context)
+    expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', updated_at: newer, deleted_at: null })
+  })
+
+  it('preserves real explicit deletion of a future-dated genuine custom', async () => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    repairBuiltinThemes(device.db)
+    device.themes.applyRemote(genuine(original, '2090-01-01T00:00:00.000Z'))
+    const server = cloud()
+    server.putTheme(SYNC_TABLES.themes!.toRemote(device.themes.findById(aliasId)!) as Record<string, unknown>)
+    const installed = install(device, server)
+    expect(device.themes.delete(aliasId)).toBe(true)
+    const deleted = device.themes.findById(aliasId)!
+    expect(Date.parse(deleted.updated_at)).toBeGreaterThan(Date.parse('2090-01-01T00:00:00.000Z'))
+    await deleteThemeFromSupabase(aliasId)
+    expect(server.getTheme(aliasId)).toMatchObject({ name: deleted.name, updated_at: deleted.updated_at, deleted_at: deleted.deleted_at })
+    await fullPull(userId, installed.context)
+    expect(device.themes.findById(aliasId)).toMatchObject({ deleted_at: deleted.deleted_at, updated_at: deleted.updated_at })
+  })
+
+  it.each(paths)('%s resolves a newer raw selection before theme pull instead of publishing a stale preset identity', async (path) => {
+    for (const stamp of [newer, '2090-01-01T10:00:00.000Z']) {
+      const device = database()
+      const original = device.themes.findById(aliasId)!
+      device.settings.applyRemote(selection(aliasId, older))
+      repairBuiltinThemes(device.db)
+      const server = cloud()
+      server.put(selection(aliasId, stamp))
+      server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original, stamp)) as Record<string, unknown>)
+      const installed = install(device, server)
+      await publish(path, installed)
+      expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, stamp))
+      expect(server.get()).toMatchObject(selection(aliasId, stamp))
+      expect(device.themes.findById(aliasId)).toMatchObject({ name: 'Aviobook Dark', deleted_at: null, updated_at: stamp })
+      expect(server.writes.some((write) => write.table === 'user_settings' && write.payload.key === 'theme_id' && write.payload.value === canonical)).toBe(false)
+    }
+  })
+
+  it.each([false, true])('retains every normalized selection version for late identity recovery, purged=%s', async (purged) => {
+    const device = database()
+    const original = device.themes.findById(aliasId)!
+    device.settings.applyRemote(selection(aliasId, older))
+    repairBuiltinThemes(device.db)
+    device.settings.applyRemote(selection(aliasId, newer))
+    device.settings.applyRemote(selection(aliasId, newer.replace('Z', '+00:00')))
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(canonical, newer))
+    expect(device.settings.themeReferenceSource(userId, canonical, newer)).toBe(aliasId)
+    if (purged) device.themes.hardDelete(aliasId)
+    device.themes.applyRemote(genuine(original))
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, newer))
+    device.settings.applyRemote(selection(canonical, newer))
+    device.settings.applyRemote(selection(aliasId, newer))
+    expect(device.settings.findRaw(userId, 'theme_id')).toEqual(selection(aliasId, newer))
+    const server = cloud()
+    server.put(selection(canonical, newer))
+    server.putTheme(SYNC_TABLES.themes!.toRemote(genuine(original)) as Record<string, unknown>)
+    const installed = install(device, server)
+    await publish('reconcile', installed)
+    expect(server.get()).toMatchObject(selection(aliasId, newer))
+    for (const explicit of ['named-custom', builtinThemeId('Ocean Blue Dark')]) {
+      device.settings.set(userId, 'theme_id', explicit)
+      const chosen = device.settings.findRaw(userId, 'theme_id')!
+      device.themes.applyRemote(genuine(original, '2091-01-01T00:00:00.000Z'))
+      device.settings.applyRemote(selection(aliasId, newer))
+      expect(device.settings.findRaw(userId, 'theme_id')).toEqual(chosen)
+      expect(device.settings.themeReferenceSource(userId, explicit, chosen.updated_at)).toBe(explicit)
+    }
+  })
   it.each([
     [older, newer], [newer, newer], ['2090-01-01T09:00:00.000Z', '2090-01-01T10:00:00.000Z'], ['2090-01-01T10:00:00.000Z', '2090-01-01T10:00:00.000Z']
   ])('keeps a current named custom theme through stale/equal name replay at %s / %s', async (replayStamp, renameStamp) => {
@@ -385,7 +637,7 @@ describe('theme selection intent ordering', () => {
     ['2090-10-29T09:00:00.000Z', '2090-10-29T10:00:00.000Z', upgrade]
   ])('preserves selection versions through migration at %s / %s / %s', (oldStamp, newStamp, clock) => {
     vi.setSystemTime(clock)
-    for (const winner of ['named-custom', builtinThemeId('Nord Dark')]) {
+    for (const winner of ['named-custom', builtinThemeId('Ocean Blue Dark')]) {
       const a = database()
       const b = database()
       a.settings.applyRemote(selection(aliasId, oldStamp))
@@ -449,7 +701,7 @@ describe('theme selection intent ordering', () => {
   })
 
   it.each(['eager', 'full upload', 'queued', 'reconcile'] as const)('%s keeps a newer remote choice instead of promoting the old alias', async (path) => {
-    for (const [oldStamp, newStamp, clock] of [[older, newer, upgrade], ['2090-01-01T09:00:00.000Z', '2090-01-01T10:00:00.000Z', '2099-01-01T11:00:00.000Z']]) for (const winner of ['named-custom', builtinThemeId('Nord Dark')]) {
+    for (const [oldStamp, newStamp, clock] of [[older, newer, upgrade], ['2090-01-01T09:00:00.000Z', '2090-01-01T10:00:00.000Z', '2099-01-01T11:00:00.000Z']]) for (const winner of ['named-custom', builtinThemeId('Ocean Blue Dark')]) {
       vi.setSystemTime(clock)
       const device = database()
       const peer = database()

@@ -2,13 +2,17 @@ import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Setting } from '../../shared/types'
-import { canonicalThemeReference, canRewriteThemeReference, retirementStamp } from '../database/themeRepair'
+import { canonicalThemeReference, canRewriteThemeReference, normalizeThemeSelection, themeReferenceSource, retirementStamp } from '../database/themeRepair'
 
 export class SettingsRepository {
   constructor(private db: DatabaseSync) {}
 
   canRewriteThemeReference(userId: string, from: string | null, to: string | null, updatedAt: string): boolean {
     return canRewriteThemeReference(this.db, userId, from, to, updatedAt)
+  }
+
+  themeReferenceSource(userId: string, value: string | null, updatedAt: string): string | null {
+    return themeReferenceSource(this.db, userId, value, updatedAt)
   }
 
   /**
@@ -38,8 +42,12 @@ export class SettingsRepository {
   }
 
   set(userId: string, key: string, value: string | null): void {
-    if (key === 'theme_id') value = canonicalThemeReference(this.db, value, userId)
+    return withTransaction(this.db, () => this.setRow(userId, key, value))
+  }
+
+  private setRow(userId: string, key: string, value: string | null): void {
     const now = key === 'theme_id' ? retirementStamp(this.findRaw(userId, key)?.updated_at) : new Date().toISOString()
+    if (key === 'theme_id') value = normalizeThemeSelection(this.db, { user_id: userId, key, value, updated_at: now, deleted_at: null })
     this.db
       .prepare(
         `INSERT INTO settings (user_id, key, value, updated_at, deleted_at)
@@ -95,8 +103,8 @@ export class SettingsRepository {
            deleted_at = NULL`
       )
       for (const setting of settings) {
-        const value = setting.key === 'theme_id' ? canonicalThemeReference(this.db, setting.value, userId) : setting.value
         const stamp = setting.key === 'theme_id' ? retirementStamp(this.findRaw(userId, setting.key)?.updated_at) : now
+        const value = setting.key === 'theme_id' ? normalizeThemeSelection(this.db, { ...setting, user_id: userId, updated_at: stamp, deleted_at: null }) : setting.value
         stmt.run(userId, setting.key, value, stamp)
       }
     })
@@ -144,15 +152,26 @@ export class SettingsRepository {
    * Skips when local row's updated_at is newer (LWW).
    */
   applyRemote(remote: Setting): Setting {
+    return withTransaction(this.db, () => this.applyRemoteRow(remote))
+  }
+
+  private applyRemoteRow(remote: Setting): Setting {
     const existing = this.findRaw(remote.user_id, remote.key)
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
+      if (remote.key === 'theme_id' && !remote.deleted_at && !existing.deleted_at && Date.parse(existing.updated_at) === Date.parse(remote.updated_at)) {
+        const value = canonicalThemeReference(this.db, remote.value, remote.user_id)
+        if (canRewriteThemeReference(this.db, remote.user_id, existing.value, value, remote.updated_at)) {
+          this.db.prepare("UPDATE settings SET value=? WHERE user_id=? AND key='theme_id'").run(value, remote.user_id)
+          return this.findRaw(remote.user_id, remote.key)!
+        }
+      }
       return existing
     }
     const value = remote.key === 'theme_id' && !remote.deleted_at
-      ? canonicalThemeReference(this.db, remote.value, remote.user_id) : remote.value
+      ? normalizeThemeSelection(this.db, remote) : remote.value
     this.db
       .prepare(
         `INSERT INTO settings (user_id, key, value, updated_at, deleted_at)
