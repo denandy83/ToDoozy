@@ -656,7 +656,7 @@ export function AppLayout(): React.JSX.Element {
   const hasDetailPanel = showDetailPanel && selectedTaskIds.size === 1
   const isSidePanel = detailPanelPosition === 'side'
   const detailPresence = usePresence(hasDetailPanel, 'panel')
-  useLayoutMotion(mainRef, allTasks)
+  const captureDropLayout = useLayoutMotion(mainRef, allTasks)
 
   return (
     <DndContext
@@ -664,7 +664,7 @@ export function AppLayout(): React.JSX.Element {
       collisionDetection={collisionDetection}
       onDragStart={(event) => { dragWidthRef.current = (event.active.rect.current.initial?.width ?? 0); handleDragStart(event) }}
       onDragOver={handleDragOver}
-      onDragEnd={(event) => { markPointerReorder(); handleDragEnd(event) }}
+      onDragEnd={(event) => { captureDropLayout(); markPointerReorder(); handleDragEnd(event) }}
       onDragCancel={handleDragCancel}
     >
       <div className="flex h-screen w-screen bg-background text-foreground">

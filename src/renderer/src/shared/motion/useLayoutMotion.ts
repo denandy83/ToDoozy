@@ -1,18 +1,25 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react'
+import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react'
 import { canAnimateReorder, EASE_OUT, REORDER_DURATION } from './motion'
 
+function layoutRects(container: HTMLElement | null): Map<string, DOMRect> {
+  const rects = new Map<string, DOMRect>()
+  container?.querySelectorAll<HTMLElement>('[data-layout-task]').forEach((element) => {
+    rects.set(element.dataset.layoutTask!, element.getBoundingClientRect())
+  })
+  return rects
+}
+
 /** FLIP only after an explicit pointer drop; data refreshes and keyboard actions remain instant. */
-export function useLayoutMotion(container: RefObject<HTMLElement | null>, revision: unknown): void {
+export function useLayoutMotion(container: RefObject<HTMLElement | null>, revision: unknown): () => void {
   const previous = useRef(new Map<string, DOMRect>())
   const animations = useRef<Animation[]>([])
   useLayoutEffect(() => {
     animations.current.forEach((animation) => animation.cancel())
     animations.current = []
-    const next = new Map<string, DOMRect>()
+    const next = layoutRects(container.current)
     container.current?.querySelectorAll<HTMLElement>('[data-layout-task]').forEach((element) => {
       const id = element.dataset.layoutTask!
-      const rect = element.getBoundingClientRect()
-      next.set(id, rect)
+      const rect = next.get(id)!
       const old = previous.current.get(id)
       if (!old || !canAnimateReorder() || document.documentElement.classList.contains('is-dragging')) return
       const x = old.left - rect.left, y = old.top - rect.top
@@ -22,4 +29,9 @@ export function useLayoutMotion(container: RefObject<HTMLElement | null>, revisi
     previous.current = next
     return () => { animations.current.forEach((animation) => animation.cancel()) }
   }, [container, revision])
+  return useCallback(() => {
+    animations.current.forEach((animation) => animation.cancel())
+    animations.current = []
+    previous.current = layoutRects(container.current)
+  }, [container])
 }

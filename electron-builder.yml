@@ -3,13 +3,10 @@ productName: ToDoozy
 directories:
   buildResources: resources
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack:
-  - resources/**
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
 extraResources:
   - from: resources/iconTemplate.png
     to: iconTemplate.png

@@ -158,15 +158,15 @@ export function LabelPicker({
           onClose()
         }
       }
-      if (e.key === 'ArrowDown' && !newLabelMode) {
+      if (e.key === 'ArrowDown' && e.target === searchInputRef.current) {
         e.preventDefault()
         setHighlightedIndex((prev) => Math.min(prev + 1, totalItems))
       }
-      if (e.key === 'ArrowUp' && !newLabelMode) {
+      if (e.key === 'ArrowUp' && e.target === searchInputRef.current) {
         e.preventDefault()
         setHighlightedIndex((prev) => Math.max(prev - 1, 0))
       }
-      if (e.key === 'Enter' && !newLabelMode) {
+      if (e.key === 'Enter' && e.target === searchInputRef.current) {
         e.preventDefault()
         if (highlightedIndex < filteredLabels.length) {
           onToggleLabel(filteredLabels[highlightedIndex].id)
@@ -190,7 +190,7 @@ export function LabelPicker({
         }
         return
       }
-      if (e.key === 'Enter' && newLabelMode) {
+      if (e.key === 'Enter' && e.target === nameInputRef.current) {
         e.preventDefault()
         handleCreateLabel()
       }
