@@ -22,7 +22,7 @@ import { currentProjectLink, projectLinkSuperseded, writeProjectLabelChoices } f
 import { SYNC_TABLES, reconcileTable, pullActivityLogForProject } from './syncTables'
 import { isSuspended } from './powerState'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
-import { builtinTheme, canSyncTheme } from '../../../shared/themeCatalog'
+import { canSyncTheme } from '../../../shared/themeCatalog'
 
 /**
  * Returns true if a live Supabase session exists. All push/delete functions
@@ -777,7 +777,7 @@ export async function pushTheme(theme: {
   updated_at?: string
   deleted_at?: string | null
 }): Promise<void> {
-  if (builtinTheme(theme.name, theme.mode) && !theme.deleted_at) return
+  if (!canSyncTheme(theme)) return
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     const payload = {

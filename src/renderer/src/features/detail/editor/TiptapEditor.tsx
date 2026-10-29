@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createDescriptionAutosave } from './descriptionAutosave'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -281,14 +282,16 @@ export function TiptapEditor({ content, taskId, onChange, readOnly }: TiptapEdit
         <BubbleToolbar editor={editor} />
       </div>
 
-      {linkPopover && (
+      {linkPopover && createPortal(
         <LinkPopover
+          key={`${linkPopover.url}:${linkPopover.top}:${linkPopover.left}`}
           editor={editor}
           position={linkPopover}
           url={linkPopover.url}
           text={linkPopover.text}
           onClose={() => setLinkPopover(null)}
-        />
+        />,
+        document.body
       )}
     </div>
   )

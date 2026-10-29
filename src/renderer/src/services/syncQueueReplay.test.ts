@@ -56,16 +56,17 @@ describe('durable sync retries', () => {
     const rows: Record<string, Theme> = {
       preset: { ...base, id: builtinThemeId('Standard Dark'), name: 'Standard Dark', is_builtin: 1, owner_id: null },
       alias: { ...base, id: 'old-copy', name: 'Standard Dark', deleted_at: base.updated_at },
-      custom: { ...base, id: 'aviobook', name: 'Aviobook Dark' }
+      custom: { ...base, id: 'aviobook', name: 'Aviobook Dark' },
+      soft: { ...base, id: 'custom-soft', name: 'Soft Sage Dark' }
     }
     const byId = new Map(Object.values(rows).map((theme) => [theme.id, theme]))
     Object.assign(window.api, { themes: { findById: vi.fn(async (id: string) => byId.get(id)) } })
     queue = Object.values(rows).map((theme, index) => entry(`q${index}`, 'user_themes', { ...theme, deleted_at: null }))
     const mock = clientMock()
     vi.mocked(getSupabase).mockResolvedValue(mock.client)
-    expect(await processSyncQueue()).toBe(3)
+    expect(await processSyncQueue()).toBe(4)
     const payload = mock.writes.flatMap((write) => write.payload as Array<Record<string, unknown>>)
-    expect(payload.map((theme) => theme.id).sort()).toEqual(['aviobook', 'old-copy'])
+    expect(payload.map((theme) => theme.id).sort()).toEqual(['aviobook', 'custom-soft', 'old-copy'])
     expect(payload.find((theme) => theme.id === 'old-copy')?.deleted_at).toBe(base.updated_at)
     expect(queue).toHaveLength(0)
   })

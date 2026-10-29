@@ -423,8 +423,13 @@ export function builtinThemeId(name: string): string {
   return `builtin-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 }
 
-export function canSyncTheme(theme: Pick<Theme, 'name' | 'mode' | 'is_builtin' | 'deleted_at'>): boolean {
-  return !theme.is_builtin && (!builtinTheme(theme.name, theme.mode) || Boolean(theme.deleted_at))
+export function presetForTheme(theme: Pick<Theme, 'name' | 'mode'> & { is_builtin?: number }): BuiltInThemeDefinition | undefined {
+  return theme.is_builtin || Object.hasOwn(LEGACY_BUILTIN_CONFIGS, theme.name)
+    ? builtinTheme(theme.name, theme.mode) : undefined
+}
+
+export function canSyncTheme(theme: Pick<Theme, 'name' | 'mode'> & { is_builtin?: number; deleted_at?: string | null }): boolean {
+  return !theme.is_builtin && (!presetForTheme(theme) || Boolean(theme.deleted_at))
 }
 
 export function resolveBuiltinConfig(name: string, builtin: number, config: ThemeConfig): ThemeConfig {

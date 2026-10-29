@@ -13,11 +13,12 @@ export function groupThemeChoices(themes: readonly Theme[]): Array<{
   )
   return [true, false].map((builtin) => {
     const members = sorted.filter((theme) => Boolean(theme.is_builtin) === builtin)
+    if (builtin) return { label: 'Built-in themes', options: members.map((theme) => ({ id: theme.id, label: theme.name })) }
     const counts = new Map<string, number>()
     const positions = new Map<string, number>()
     for (const theme of members) counts.set(nameKey(theme.name), (counts.get(nameKey(theme.name)) ?? 0) + 1)
     return {
-      label: builtin ? 'Built-in themes' : 'My themes',
+      label: 'My themes',
       options: members.map((theme) => {
         const key = nameKey(theme.name)
         const position = (positions.get(key) ?? 0) + 1
@@ -25,9 +26,7 @@ export function groupThemeChoices(themes: readonly Theme[]): Array<{
         const count = counts.get(key)!
         return {
           id: theme.id,
-          label: builtin
-            ? `${theme.name}${count > 1 ? ` (Preset ${position})` : ''}`
-            : `${theme.name} (Custom${count > 1 ? ` ${position}` : ''})`
+          label: `${theme.name} (Custom${count > 1 ? ` ${position}` : ''})`
         }
       })
     }

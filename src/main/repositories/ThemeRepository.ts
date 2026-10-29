@@ -3,7 +3,7 @@ import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Theme, ThemeConfig, CreateThemeInput, UpdateThemeInput } from '../../shared/types'
 import { builtinTheme, builtinThemeId } from '../../shared/themeCatalog'
-import { archiveTheme, remapThemeReferences, retirementStamp } from '../database/themeRepair'
+import { archiveTheme, presetForStoredTheme, remapThemeReferences, retirementStamp } from '../database/themeRepair'
 
 export class ThemeRepository {
   constructor(private db: DatabaseSync) {}
@@ -127,7 +127,7 @@ export class ThemeRepository {
 
   private applyRemoteRow(remote: Theme): Theme {
     const existing = this.findById(remote.id)
-    const preset = builtinTheme(remote.name, remote.mode)
+    const preset = presetForStoredTheme(this.db, remote) ?? (existing && presetForStoredTheme(this.db, existing))
     const alias = preset && remote.id !== builtinThemeId(preset.name)
     if (alias) {
       if (existing?.deleted_at && !existing.is_builtin && existing.owner_id === remote.owner_id && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing

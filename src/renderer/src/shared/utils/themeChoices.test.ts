@@ -9,6 +9,15 @@ function theme(id: string, overrides: Partial<Theme> = {}): Theme {
 }
 
 describe('theme choices with legacy same-name variants', () => {
+  it('uses catalog names for builtins without introducing preset numbering', () => {
+    expect(groupThemeChoices([
+      theme('builtin-a', { is_builtin: 1, owner_id: null }),
+      theme('builtin-b', { is_builtin: 1, owner_id: null })
+    ])).toEqual([{ label: 'Built-in themes', options: [
+      { id: 'builtin-a', label: 'Standard Dark' }, { id: 'builtin-b', label: 'Standard Dark' }
+    ] }])
+  })
+
   it('keeps every ID/config and gives built-in/custom variants distinct, stable labels', () => {
     const builtin = theme('builtin', { is_builtin: 1, owner_id: null })
     const a = theme('custom-a', { config: '{"bg":"#000000"}' })

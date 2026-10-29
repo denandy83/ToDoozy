@@ -1,4 +1,5 @@
 import { MotionPresence } from '../motion/MotionPresence'
+import { useFocusRestore } from '../hooks/useFocusRestore'
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import { X, Plus, Save } from 'lucide-react'
 import {
@@ -116,6 +117,7 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
   const filterButtonRef = useRef<HTMLButtonElement>(null)
   const keywordInputRef = useRef<HTMLInputElement>(null)
   const [pickerPos, setPickerPos] = useState<{ left: number; top: number } | null>(null)
+  useFocusRestore(dropdownOpen || Boolean(activeFilterType), dropdownRef)
 
   const projectStatuses = useStatusesByProject(projectId ?? '')
 
@@ -128,8 +130,19 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
         setActiveFilterType(null)
       }
     }
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setDropdownOpen(false)
+      setActiveFilterType(null)
+      filterButtonRef.current?.focus()
+      e.stopPropagation()
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [dropdownOpen, activeFilterType])
 
   // Focus keyword input when opening
@@ -295,8 +308,8 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
             </div>) : null}</MotionPresence>}
 
           {/* Filter picker popups */}
-          {activeFilterType && pickerPos && (
-            <div ref={dropdownRef} style={{ position: 'fixed', left: pickerPos.left, top: pickerPos.top, zIndex: 50 }}>
+          <MotionPresence open={Boolean(activeFilterType && pickerPos)}>{() => activeFilterType && pickerPos ? (
+            <div style={{ position: 'fixed', left: pickerPos.left, top: pickerPos.top, zIndex: 50 }}>
               {activeFilterType === 'priority' && (
                 <PriorityFilterPicker
                   active={priorityFilters}
@@ -354,7 +367,7 @@ export function FilterBar({ labels, projectId, isSavedView, showProjectFilter, o
                 />
               )}
             </div>
-          )}
+          ) : null}</MotionPresence>
         </div>
 
         {/* Sort */}

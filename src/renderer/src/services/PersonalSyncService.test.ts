@@ -11,7 +11,8 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
 vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
 
-import { chunkArray, fullPull, fullUpload, initSync, pushSetting } from './PersonalSyncService'
+import { chunkArray, fullPull, fullUpload, initSync, pushSetting, pushTheme } from './PersonalSyncService'
+import { BUILTIN_THEMES } from '../../../shared/themeCatalog'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
@@ -207,6 +208,7 @@ describe('pushSetting api_key exclusion (#114)', () => {
     vi.useRealTimers()
   })
 
+
   it('never upserts api_key to user_settings, even after the debounce flushes', async () => {
     const records: UpsertRecord[] = []
     vi.mocked(getSupabase).mockResolvedValue(makeRecordingSupabase(records))
@@ -313,6 +315,19 @@ describe('fullUpload / initSync last_sync_at handling (#106)', () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(BUILTIN_THEMES)('eager upload distinguishes custom $name from original preset copies', async (preset) => {
+    installApi({ hasProject: true })
+    const records: UpsertRecord[] = []
+    vi.mocked(getSupabase).mockResolvedValue(makeSupabase(records))
+    const theme = { id: 'custom', user_id: USER_ID, name: preset.name, mode: preset.mode,
+      bg: '#000000', fg: '#ffffff', fg_secondary: '#aaaaaa', fg_muted: '#888888', muted: '#888888',
+      accent: '#cccccc', accent_fg: '#111111', border: '#333333', sidebar: '#123456' }
+    await pushTheme(theme)
+    const uploaded = records.filter((record) => record.table === 'user_themes')
+    expect(uploaded).toHaveLength(preset.name.startsWith('Soft ') ? 1 : 0)
+    if (uploaded.length) expect(uploaded[0].payload).toMatchObject(theme)
+  })
+
   it('bootstrap uploads only owned custom rows and cleanup tombstones, never preset copies', async () => {
     const h = installApi({ hasProject: true })
     const records: UpsertRecord[] = []
@@ -323,20 +338,21 @@ describe('fullUpload / initSync last_sync_at handling (#106)', () => {
       {...base,id:'builtin',name:'Standard Dark',is_builtin:1,owner_id:null},
       {...base,id:'old-copy',name:'Standard Dark'},
       {...base,id:'custom',name:'Aviobook Dark'},
+      {...base,id:'custom-soft',name:'Soft Sage Dark'},
       {...base,id:'deleted-custom',name:'Old custom Dark',deleted_at:base.updated_at},
       {...base,id:'retired-copy',name:'Standard Dark',deleted_at:base.updated_at}
     ])
     await fullUpload(USER_ID)
     expect(h.themesFindAllByOwner).toHaveBeenCalledWith(USER_ID,{includeTombstones:true})
     const themes = records.filter((record)=>record.table==='user_themes').map((record)=>record.payload as Record<string,unknown>)
-    expect(themes.map((theme)=>theme.id).sort()).toEqual(['custom','deleted-custom','retired-copy'])
+    expect(themes.map((theme)=>theme.id).sort()).toEqual(['custom','custom-soft','deleted-custom','retired-copy'])
     expect(themes.find((theme)=>theme.id==='custom')?.sidebar).toBe('#aabbcc')
     expect(themes.find((theme)=>theme.id==='retired-copy')?.deleted_at).toBe(base.updated_at)
   })
 
   it('bootstrap pull uses the shared theme path with exact custom sidebar, clocks and tombstone', async () => {
     const h = installApi({hasProject:false})
-    const remote = {id:'custom',user_id:USER_ID,name:'Aviobook Dark',mode:'dark',bg:'#000000',fg:'#ffffff',fg_secondary:'#cccccc',fg_muted:'#888888',muted:'#888888',accent:'#c8bce7',accent_fg:'#111111',surface:'#cccccc',border:'#333333',sidebar:'#aabbcc',created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',deleted_at:'2026-01-02T00:00:00Z'}
+    const remote = {id:'custom',user_id:USER_ID,name:'Soft Sage Dark',mode:'dark',bg:'#000000',fg:'#ffffff',fg_secondary:'#cccccc',fg_muted:'#888888',muted:'#888888',accent:'#c8bce7',accent_fg:'#111111',surface:'#cccccc',border:'#333333',sidebar:'#aabbcc',created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',deleted_at:'2026-01-02T00:00:00Z'}
     vi.mocked(getSupabase).mockResolvedValue(makeSupabase([],{user_themes:[remote]}))
     await fullPull(USER_ID)
     expect(h.themesApplyRemote).toHaveBeenCalledWith(expect.objectContaining({id:remote.id,created_at:remote.created_at,updated_at:remote.updated_at,deleted_at:remote.deleted_at}))

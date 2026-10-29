@@ -27,6 +27,56 @@ function insert(db: DatabaseSync, theme: Theme): void {
 }
 
 describe('preset duplicate repair', () => {
+  it.each(BUILTIN_THEMES)('classifies $name by legacy or builtin provenance across migration and replay', (preset) => {
+    const db = database()
+    const repo = new ThemeRepository(db)
+    const settings = new SettingsRepository(db)
+    const legacy = !preset.name.startsWith('Soft ')
+    const candidate = row('candidate', { name: preset.name, mode: preset.mode, config: ' {"bg":"#aBcDEF","custom":true} ' })
+    insert(db, candidate)
+    settings.set('user-1', 'theme_id', candidate.id)
+    const selection = settings.findRaw('user-1', 'theme_id')
+    repairBuiltinThemes(db)
+    if (legacy) {
+      expect(repo.findById(candidate.id)?.deleted_at).not.toBeNull()
+      expect(settings.get('user-1', 'theme_id')).toBe(builtinThemeId(preset.name))
+    } else {
+      expect(repo.findById(candidate.id)).toEqual(candidate)
+      expect(settings.findRaw('user-1', 'theme_id')).toEqual(selection)
+    }
+    const replay = { ...candidate, updated_at: '2090-01-01T00:00:00.000Z' }
+    const result = repo.applyRemote(replay)
+    expect(canSyncTheme(candidate)).toBe(!legacy)
+    expect(canSyncTheme(result)).toBe(true)
+    if (legacy) expect(Date.parse(result.deleted_at!)).toBeGreaterThan(Date.parse(replay.updated_at))
+    else {
+      expect(result).toEqual(replay)
+      settings.applyRemote({ user_id: 'user-1', key: 'theme_id', value: candidate.id, updated_at: replay.updated_at, deleted_at: null })
+      expect(settings.get('user-1', 'theme_id')).toBe(candidate.id)
+    }
+    const tombstone = { ...replay, deleted_at: '2090-01-02T00:00:00.000Z', updated_at: '2090-01-02T00:00:00.000Z' }
+    expect(repo.applyRemote(tombstone)).toEqual(tombstone)
+  })
+
+  it('keeps archived builtin provenance for Soft aliases through replay and purge', () => {
+    const db = database()
+    const repo = new ThemeRepository(db)
+    const settings = new SettingsRepository(db)
+    const alias = row('soft-builtin-copy', { name: 'Soft Sage Dark', is_builtin: 1, owner_id: null })
+    insert(db, alias)
+    settings.set('user-1', 'theme_id', alias.id)
+    repairBuiltinThemes(db)
+    const remote = { ...alias, is_builtin: 0, owner_id: 'user-1', updated_at: '2090-01-01T00:00:00.000Z' }
+    for (const stamp of ['2090-01-01T00:00:00.000Z', '2091-01-01T00:00:00.000Z']) {
+      const retired = repo.applyRemote({ ...remote, updated_at: stamp })
+      expect(Date.parse(retired.deleted_at!)).toBeGreaterThan(Date.parse(stamp))
+      expect(canSyncTheme(retired)).toBe(true)
+      repo.hardDelete(alias.id)
+      settings.applyRemote({ user_id: 'user-1', key: 'theme_id', value: alias.id, updated_at: stamp, deleted_at: null })
+      expect(settings.get('user-1', 'theme_id')).toBe(builtinThemeId(alias.name))
+    }
+  })
+
   it('leaves one preset per name/mode, preserves selected builtin colors and genuine custom rows, and archives copies', () => {
     const db = database()
     const repo = new ThemeRepository(db)

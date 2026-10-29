@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Editor } from '@tiptap/react'
 import { ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { normalizeUrl } from './TiptapEditor'
+import { useDismissibleSurface } from '../../../shared/motion/useDismissibleSurface'
+import { useFocusRestore } from '../../../shared/hooks/useFocusRestore'
 
 interface LinkPopoverProps {
   editor: Editor
@@ -23,6 +25,10 @@ export function LinkPopover({
   const [editText, setEditText] = useState(text)
   const popoverRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
+  const surface = useDismissibleSurface(onClose, 'menu')
+  const open = surface.props['data-state'] === 'open'
+  const close = surface.close
+  useFocusRestore(open, popoverRef)
 
   useEffect(() => {
     if (isEditing && urlInputRef.current) {
@@ -31,15 +37,16 @@ export function LinkPopover({
   }, [isEditing])
 
   useEffect(() => {
+    if (!open) return
     const handleClick = (e: MouseEvent): void => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onClose()
+        close()
       }
     }
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onClose()
+        close()
       }
     }
     document.addEventListener('mousedown', handleClick)
@@ -48,7 +55,7 @@ export function LinkPopover({
       document.removeEventListener('mousedown', handleClick)
       document.removeEventListener('keydown', handleKeyDown, true)
     }
-  }, [onClose])
+  }, [open, close])
 
   const handleSave = useCallback(() => {
     const { from, to } = editor.state.selection
@@ -70,18 +77,19 @@ export function LinkPopover({
         return true
       })
       .run()
-    onClose()
-  }, [editor, editUrl, editText, text, onClose])
+    close()
+  }, [editor, editUrl, editText, text, close])
 
   const handleRemove = useCallback(() => {
     editor.chain().focus().extendMarkRange('link').unsetLink().run()
-    onClose()
-  }, [editor, onClose])
+    close()
+  }, [editor, close])
 
   return (
     <div
       ref={popoverRef}
-      className="fixed z-[10000] w-64 rounded-lg border border-border bg-surface p-3 shadow-xl motion-safe:duration-100"
+      {...surface.props}
+      className="ui-surface ui-menu fixed z-[10000] w-64 rounded-lg border border-border bg-surface p-3 shadow-xl"
       style={{ top: position.top, left: position.left }}
     >
       {isEditing ? (
@@ -109,7 +117,7 @@ export function LinkPopover({
           />
           <div className="flex justify-end gap-2">
             <button
-              onClick={onClose}
+              onClick={close}
               className="rounded px-2 py-1 text-[11px] font-bold uppercase tracking-widest text-muted hover:bg-foreground/6"
             >
               Cancel

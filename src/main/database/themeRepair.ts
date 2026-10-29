@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { Theme } from '../../shared/types'
-import { BUILTIN_THEMES, builtinTheme, builtinThemeId } from '../../shared/themeCatalog'
+import { BUILTIN_THEMES, builtinThemeId, presetForTheme } from '../../shared/themeCatalog'
 
 export function retirementStamp(...timestamps: Array<string | null | undefined>): string {
   return new Date(Math.max(Date.now(), ...timestamps.map((stamp) => (Date.parse(stamp ?? '') || 0) + 1))).toISOString()
@@ -12,20 +12,31 @@ export function archiveTheme(db: DatabaseSync, theme: Theme): void {
     .run(theme.id, JSON.stringify({ theme, selections }), new Date().toISOString())
 }
 
+function archivedTheme(db: DatabaseSync, id: string): Theme | undefined {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='theme_duplicate_archive'").get()) return undefined
+  const saved = db.prepare('SELECT snapshot FROM theme_duplicate_archive WHERE id=?').get(id) as { snapshot: string } | undefined
+  if (saved) { try { return JSON.parse(saved.snapshot).theme as Theme } catch { return undefined } }
+  return undefined
+}
+
+export function presetForStoredTheme(db: DatabaseSync, theme: Theme): ReturnType<typeof presetForTheme> {
+  const archived = archivedTheme(db, theme.id)
+  return presetForTheme(theme) ?? (archived && presetForTheme(archived))
+}
+
 export function canonicalThemeReference(db: DatabaseSync, id: string | null, userId: string): string | null {
   if (!id) return id
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='theme_duplicate_archive'").get()) return id
-  let alias = db.prepare('SELECT * FROM themes WHERE id=?').get(id) as unknown as Theme | undefined
-  if (!alias && db.prepare("SELECT 1 FROM sqlite_master WHERE name='theme_duplicate_archive'").get()) {
-    const saved = db.prepare('SELECT snapshot FROM theme_duplicate_archive WHERE id=?').get(id) as { snapshot: string } | undefined
-    if (saved) { try { alias = JSON.parse(saved.snapshot).theme as Theme } catch { /* Retain unknown references. */ } }
-  }
-  if (!alias || (!alias.is_builtin && alias.owner_id !== userId) || !builtinTheme(alias.name, alias.mode)) return id
-  const canonical = builtinThemeId(alias.name)
+  const alias = (db.prepare('SELECT * FROM themes WHERE id=?').get(id) as unknown as Theme | undefined) ?? archivedTheme(db, id)
+  if (!alias || (!alias.is_builtin && alias.owner_id !== userId)) return id
+  const preset = presetForStoredTheme(db, alias)
+  if (!preset) return id
+  const canonical = builtinThemeId(preset.name)
   return db.prepare('SELECT 1 FROM themes WHERE id=? AND is_builtin=1 AND deleted_at IS NULL').get(canonical) ? canonical : id
 }
 
 export function remapThemeReferences(db: DatabaseSync, alias: Theme, canonical: string): void {
+  if (!presetForStoredTheme(db, alias)) return
   const settings = db.prepare("SELECT user_id,value,updated_at FROM settings WHERE key='theme_id' AND value=? AND deleted_at IS NULL")
     .all(alias.id) as Array<{ user_id: string; value: string; updated_at: string }>
   for (const setting of settings) {
@@ -44,6 +55,7 @@ export function repairBuiltinThemes(db: DatabaseSync): void {
       .all(preset.name, preset.mode) as unknown as Theme[]
     const stable = rows.find((row) => row.id === canonical)
     if (stable && !stable.is_builtin) throw new Error('A custom theme occupies a reserved preset identity')
+    const aliases = rows.filter((row) => presetForStoredTheme(db, row))
     // Preserve existing builtin edits, never promote a user's bug-copy colors into a shared preset.
     const selections = db.prepare("SELECT value FROM settings WHERE key='theme_id' AND deleted_at IS NULL ORDER BY CASE WHEN user_id='' THEN 1 ELSE 0 END,updated_at DESC")
       .all() as Array<{ value: string }>
@@ -59,7 +71,7 @@ export function repairBuiltinThemes(db: DatabaseSync): void {
       archiveTheme(db, stable)
       db.prepare('UPDATE themes SET config=?,updated_at=? WHERE id=?').run(source.config, source.updated_at, canonical)
     }
-    for (const row of rows) {
+    for (const row of aliases) {
       if (row.id === canonical) continue
       archiveTheme(db, row)
       if (!row.deleted_at) {
