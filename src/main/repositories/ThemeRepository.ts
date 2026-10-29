@@ -133,6 +133,7 @@ export class ThemeRepository {
   private applyRemoteRow(remote: Theme): Theme {
     const existing = this.findById(remote.id)
     const existingPreset = existing && presetForStoredTheme(this.db, existing)
+    if (existing?.is_builtin === 1 && (!existingPreset || existing.id === builtinThemeId(existingPreset.name))) return existing
     const preset = presetForStoredTheme(this.db, remote)
     if (existing && !existingPreset && preset) return existing
     if (existing && !existingPreset && !isRemoteNewer(existing.updated_at, remote.updated_at)) return existing
@@ -143,7 +144,7 @@ export class ThemeRepository {
       archiveTheme(this.db, referenceSource)
       const stamp = remote.deleted_at ? toCanonicalIso(remote.updated_at)! : retirementStamp(existing?.updated_at, remote.updated_at)
       remote = { ...remote, is_builtin: 0, deleted_at: remote.deleted_at ?? stamp, updated_at: stamp }
-    } else if (existing?.is_builtin === 1 && existingPreset && existing.id === builtinThemeId(existingPreset.name)) return existing
+    }
     // LWW via numeric epoch (Date.parse): local `Z` vs PostgREST `+00:00` are
     // the same instant but do not string-compare reliably. Skip when the local
     // row is newer or equal (remote not strictly newer).
