@@ -1,4 +1,5 @@
 import type { usePresence } from '../../shared/motion/usePresence'
+import { isTabHandledLocally } from '../../shared/utils/tabNavigation'
 import { useCallback, useRef, useEffect, useState } from 'react'
 import { X, PanelBottom, PanelRight, AlertTriangle } from 'lucide-react'
 import { useTaskStore, selectCurrentTask, useTaskLabelsHook } from '../../shared/stores'
@@ -79,6 +80,7 @@ export function DetailPanel({ motionProps }: { motionProps?: ReturnType<typeof u
 
       // Tab cycling through detail fields (with subfield support for complex fields like DatePicker)
       if (e.key === 'Tab' && panel.contains(document.activeElement)) {
+        if (isTabHandledLocally(e, panel)) return
         const fieldElements = Array.from(
           panel.querySelectorAll<HTMLElement>('[data-detail-field]')
         ).sort((a, b) => {

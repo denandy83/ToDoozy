@@ -1,4 +1,5 @@
 import { sortSubtasksForDisplay } from '../../shared/utils/sortTasks'
+import { isTabHandledLocally } from '../../shared/utils/tabNavigation'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { visibleTaskIdsWithAncestors } from './filterHierarchy'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
@@ -812,14 +813,13 @@ export function TaskListView({ projectId, projectName, dropIndicator }: TaskList
   useEffect(() => {
     const handleTab = (e: KeyboardEvent): void => {
       if (e.key !== 'Tab') return
+      if (isTabHandledLocally(e)) return
       const container = containerRef.current
       if (!container) return
       // Only handle when focus is inside this container
       if (!container.contains(document.activeElement)) return
       // Don't intercept Tab in text inputs
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
-      // Don't intercept Tab when a date/time picker dropdown is open
-      if (document.activeElement?.closest('.react-datepicker-popper')) return
       e.preventDefault()
       const tasks = flatTasks
       if (tasks.length === 0) return

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isTabHandledLocally } from '../../../shared/utils/tabNavigation'
 import type { Task, Status } from '../../../../../shared/types'
 import { useTaskStore } from '../../../shared/stores'
 import { shouldForceDelete } from '../../../shared/utils/shiftDelete'
@@ -266,6 +267,7 @@ export function useMyDayKeyboardNav({
   useEffect(() => {
     const handleTab = (e: KeyboardEvent): void => {
       if (e.key !== 'Tab') return
+      if (isTabHandledLocally(e)) return
       const container = containerRef.current
       if (!container) return
       // Only handle when focus is inside this container (not on body, detail panel, or popups)

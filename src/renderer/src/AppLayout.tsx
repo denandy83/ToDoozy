@@ -1,4 +1,5 @@
 import { ColorSwatches } from './shared/components/ColorSwatches'
+import { isTabHandledLocally } from './shared/utils/tabNavigation'
 import { usePresence } from './shared/motion/usePresence'
 import { useLayoutMotion } from './shared/motion/useLayoutMotion'
 import { EASE_OUT, REORDER_DURATION, immediateMotion, subscribeMotionInput } from './shared/motion/motion'
@@ -341,10 +342,9 @@ export function AppLayout(): React.JSX.Element {
 
       // Tab/Shift+Tab cycles projects when in project view (only when no task is selected)
       if (e.key === 'Tab' && currentView === 'project' && sortedProjects.length > 1) {
-        if (e.defaultPrevented) return
+        if (isTabHandledLocally(e)) return
         const target = e.target as HTMLElement
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-        if (target.closest('.ui-surface, .ui-color-swatches, dialog, [role="dialog"], [role="alertdialog"], [role="menu"]')) return
         // Don't cycle projects if any task is selected — Tab should cycle tasks instead
         const { selectedTaskIds } = useTaskStore.getState()
         if (selectedTaskIds.size > 0) return
