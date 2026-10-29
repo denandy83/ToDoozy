@@ -10,7 +10,6 @@ export const EASE_OUT = 'cubic-bezier(0.23, 1, 0.32, 1)'
 export const REORDER_DURATION = 160
 let modality: 'pointer' | 'keyboard' = 'pointer'
 let subscribers = 0
-let layoutUntil = 0
 
 function pointer(): void { modality = 'pointer'; document.documentElement.dataset.inputModality = modality }
 function keyboard(event: KeyboardEvent): void {
@@ -33,5 +32,3 @@ export function subscribeMotionInput(): () => void {
 }
 export function reducedMotion(): boolean { return typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) }
 export function immediateMotion(): boolean { return modality === 'keyboard' || reducedMotion() }
-export function markPointerReorder(): void { layoutUntil = immediateMotion() ? 0 : Date.now() + 2000 }
-export function canAnimateReorder(): boolean { return !immediateMotion() && Date.now() < layoutUntil }

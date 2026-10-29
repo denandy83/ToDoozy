@@ -3,12 +3,14 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { DndContext, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useLayoutMotion } from '../src/renderer/src/shared/motion/useLayoutMotion'
-import { markPointerReorder, subscribeMotionInput } from '../src/renderer/src/shared/motion/motion'
+import { subscribeMotionInput } from '../src/renderer/src/shared/motion/motion'
 import { useDragAndDrop } from '../src/renderer/src/features/tasks/useDragAndDrop'
 import { TaskRow } from '../src/renderer/src/features/tasks/TaskRow'
 import { KanbanCard } from '../src/renderer/src/features/tasks/KanbanCard'
 import { LabelPicker } from '../src/renderer/src/shared/components/LabelPicker'
-import type { Label, Task } from '../src/shared/types'
+import { Sidebar } from '../src/renderer/src/features/sidebar/Sidebar'
+import { useSavedViewStore } from '../src/renderer/src/shared/stores/savedViewStore'
+import type { Label, Task, Status, SavedView } from '../src/shared/types'
 import '../src/renderer/src/assets/main.css'
 
 const container = document.getElementById('root')!
@@ -17,9 +19,16 @@ const pause = (ms = 0): Promise<void> => new Promise((resolve) => setTimeout(res
 const render = async (content: ReactNode): Promise<void> => { flushSync(() => root.render(content)); await pause(30) }
 const noop = (): void => {}
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message) }
-const ipc = (window as unknown as { require: (name: string) => { ipcRenderer: { invoke: (channel: string, value: string) => Promise<void> } } }).require('electron').ipcRenderer
+const ipc = (window as unknown as { require: (name: string) => { ipcRenderer: { invoke: (channel: string, value: unknown) => Promise<void> } } }).require('electron').ipcRenderer
 const key = async (value: string): Promise<void> => { await ipc.invoke('verify:keyboard', value); await pause(30) }
 const text = async (value: string): Promise<void> => { await ipc.invoke('verify:text', value); await pause(30) }
+const viewport = async (width: number, height: number): Promise<void> => { await ipc.invoke('verify:viewport', { width, height }); await pause(50) }
+async function click(element: HTMLElement): Promise<void> {
+  element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+  element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  element.click()
+  await pause(30)
+}
 function button(value: string): HTMLButtonElement {
   const found = [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === value)
   assert(found, `Missing button: ${value}`)
@@ -30,19 +39,31 @@ const tasks = Object.fromEntries(Array.from({ length: 8 }, (_, order_index) => {
   return [task.id, task]
 }))
 const persisted: string[][] = []
-let controls: { start(id: string): void; end(id: string, over: string | null): Promise<void>; cancel(): void }
+const dropEffects: string[] = []
+let failNext = false
+let controls: { start(id: string): void; end(id: string, over: string | null): Promise<void>; cancel(): void; edit(id: string, status: string): void }
+const statuses = [
+  { id: 'todo', name: 'Todo', color: '#888888', is_default: 1, is_done: 0, order_index: 0 },
+  { id: 'done', name: 'Done', color: '#22c55e', is_default: 0, is_done: 1, order_index: 1 }
+] as Status[]
 function ReorderFixture({ kind }: { kind: 'list' | 'kanban' }): React.JSX.Element {
   const [rows, setRows] = useState(tasks)
   const ref = useRef<HTMLDivElement>(null)
-  const capture = useLayoutMotion(ref, rows)
+  const animateDrop = useLayoutMotion(ref)
+  const edit = (id: string, status: string): void => setRows((current) => ({ ...current, [id]: { ...current[id], status_id: status } }))
   useEffect(subscribeMotionInput, [])
   const dnd = useDragAndDrop({ tasks: rows,
     onReorder: async (ids) => {
       await pause(20)
+      if (failNext) { failNext = false; throw new Error('Synthetic persistence failure') }
       persisted.push(ids)
       setRows(Object.fromEntries(ids.map((id, order_index) => [id, { ...rows[id], order_index }])))
     },
-    onReparent: async () => {},
+    onReparent: async () => { dropEffects.push('reparent') },
+    onStatusChange: async (id, status) => { dropEffects.push('status'); edit(id, status) },
+    onMoveToView: async () => { dropEffects.push('navigation') },
+    onBucketDrop: async () => { dropEffects.push('bucket') },
+    onCalendarDayDrop: async () => { dropEffects.push('calendar') },
     getTasksForParent: () => Object.values(rows).sort((a, b) => a.order_index - b.order_index)
   })
   useEffect(() => {
@@ -52,19 +73,18 @@ function ReorderFixture({ kind }: { kind: 'list' | 'kanban' }): React.JSX.Elemen
   controls = {
     start(id) { flushSync(() => dnd.handleDragStart({ active: { id } } as DragStartEvent)) },
     async end(id, over) {
-      capture()
-      markPointerReorder()
-      await dnd.handleDragEnd({ active: { id }, over: over ? { id: over } : null } as DragEndEvent)
+      await animateDrop(() => dnd.handleDragEnd({ active: { id }, over: over ? { id: over } : null } as DragEndEvent))
       await pause(30)
     },
-    cancel() { flushSync(() => dnd.handleDragCancel()) }
+    cancel() { flushSync(() => dnd.handleDragCancel()) },
+    edit(id, status) { flushSync(() => edit(id, status)) }
   }
   return <DndContext><div ref={ref} id="scroll" style={{ width: 360, height: 180, overflow: 'auto' }}>
-    <div id="layout" style={{ width: 720, display: kind === 'kanban' ? 'grid' : 'block', gridTemplateColumns: 'repeat(2, 350px)' }}>
+    <div id="layout" style={{ width: 720, minHeight: 720, display: kind === 'kanban' ? 'grid' : 'block', gridTemplateColumns: 'repeat(2, 350px)' }}>
       {Object.values(rows).sort((a, b) => a.order_index - b.order_index).map((task) => kind === 'list'
-        ? <TaskRow key={task.id} task={task} statuses={[]} allLabels={[]} isSelected={false} depth={0} isExpanded={false}
-          onSelect={noop} onStatusChange={noop} onTitleChange={noop} onDelete={noop} onToggleExpanded={noop} onAddLabel={noop} onRemoveLabel={noop} onCreateLabel={noop} />
-        : <KanbanCard key={task.id} task={task} statuses={[]} isSelected={false} onSelect={noop} onStatusChange={noop} onDeleteTask={noop} />)}
+        ? <TaskRow key={task.id} task={task} statuses={statuses} allLabels={[]} isSelected={false} depth={0} isExpanded={false}
+          onSelect={noop} onStatusChange={edit} onTitleChange={noop} onDelete={noop} onToggleExpanded={noop} onAddLabel={noop} onRemoveLabel={noop} onCreateLabel={noop} />
+        : <KanbanCard key={task.id} task={task} statuses={statuses} isSelected={false} onSelect={noop} onStatusChange={edit} onDeleteTask={noop} />)}
     </div>
   </div></DndContext>
 }
@@ -105,12 +125,37 @@ async function verify(): Promise<string> {
         Math.abs(Number(delta[2]) - (before.get(id)!.top - after.get(id)!.top)) < 1, `${kind} animation includes stale scroll/reflow displacement for ${id}`)
     }
     recorded.length = 0
-    controls.start('task-7')
-    await controls.end('task-7', null)
-    controls.start('task-7')
-    await controls.end('task-7', 'task-7')
+    scroll.scrollTop += 100
+    scroll.scrollLeft += 100
+    await pause(30)
+    if (kind === 'list') {
+      const statusButton = [...container.querySelectorAll<HTMLButtonElement>('[aria-label^="Status:"]')].find((element) => {
+        const rect = element.getBoundingClientRect()
+        const bounds = scroll.getBoundingClientRect()
+        return rect.top >= bounds.top && rect.bottom <= bounds.bottom
+      })!
+      assert(statusButton, 'List has no visible status control')
+      const oldStatus = statusButton.getAttribute('aria-label')
+      await click(statusButton)
+      assert(statusButton.getAttribute('aria-label') !== oldStatus, 'Status click did not edit the task')
+    } else {
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      controls.edit('task-0', 'done')
+    }
+    assert(recorded.length === 0, `${kind} post-settlement scroll/status edit reused drop geometry`)
+    for (const over of [null, 'task-7', 'unknown-target', 'kanban-column-todo']) {
+      controls.start('task-7')
+      await controls.end('task-7', over)
+      scroll.scrollTop -= 10
+      scroll.scrollLeft -= 10
+      await pause(20)
+      controls.edit('task-0', 'done')
+      assert(persisted.length === count + 1 && recorded.length === 0, `${kind} invalid/self drop armed a later edit`)
+    }
     controls.start('task-7')
     controls.cancel()
+    scroll.scrollTop -= 10
+    controls.edit('task-1', 'done')
     assert(persisted.length === count + 1 && recorded.length === 0, `${kind} invalid/cancelled drops changed tasks`)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     controls.start('task-6')
@@ -123,6 +168,34 @@ async function verify(): Promise<string> {
     await controls.end('task-5', 'task-6')
     assert(persisted.length === count + 3 && recorded.length === 0, `${kind} reduced-motion reorder should persist without animation`)
     window.matchMedia = matchMedia
+    document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    controls.start('task-4')
+    const scrollingDrop = controls.end('task-4', 'task-5')
+    scroll.scrollTop -= 20
+    scroll.scrollLeft += 20
+    await scrollingDrop
+    assert(persisted.length === count + 4 && recorded.length === 0, `${kind} reused geometry after scrolling during persistence`)
+    controls.start('task-3')
+    const interruptedDrop = controls.end('task-3', 'task-4')
+    document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    controls.edit('task-2', 'done')
+    await interruptedDrop
+    assert(persisted.length === count + 5 && recorded.length === 0, `${kind} animated an unrelated edit during persistence`)
+    failNext = true
+    controls.start('task-2')
+    let failed = false
+    try { await controls.end('task-2', 'task-3') } catch { failed = true }
+    controls.edit('task-1', 'todo')
+    assert(failed && persisted.length === count + 5 && recorded.length === 0, `${kind} failed persistence armed an animation`)
+    const effects = dropEffects.length
+    for (const over of ['nav-my-day', 'kanban-column-done', 'kanban-column-__bucket_in-progress', 'calendar-day-2026-10-30']) {
+      controls.start('task-7')
+      await controls.end('task-7', over)
+      scroll.scrollLeft += 5
+      controls.edit('task-0', 'todo')
+      assert(recorded.length === 0, `${kind} drop action armed a later task edit`)
+    }
+    assert(dropEffects.slice(effects).join(',') === 'navigation,status,bucket,calendar', `${kind} drop callbacks changed`)
   }
   Element.prototype.animate = animate
   await render(null)
@@ -166,7 +239,66 @@ async function verify(): Promise<string> {
   await key('Escape')
   assert(closes === 1, 'Picker Escape did not close')
   await render(null)
-  return `Reorder and label behavior passed: list/kanban scroll and reflow on both axes, persistence, invalid/cancelled drops, keyboard/reduced motion, ${swatches.length} native Enter swatches, input/Create submission and Escape`
+
+  const colorWrites: Array<{ id: string; color: string }> = []
+  const savedView = { id: 'synthetic-view', name: 'Synthetic saved view', color: '#6366f1', filter_config: '{}', order_index: 0 } as SavedView
+  useSavedViewStore.setState({ views: [savedView], updateView: async (id, updates) => {
+    colorWrites.push({ id, color: updates.color! })
+    useSavedViewStore.setState((state) => ({ views: state.views.map((view) => view.id === id ? { ...view, ...updates } : view) }))
+  } })
+  await render(<Sidebar projects={[]} projectCounts={{}} viewCounts={{ 'my-day': 0, archive: 0, templates: 0 }} onSettings={noop} onHelp={noop} />)
+  const menu = (): HTMLElement | null => container.querySelector('[aria-label="Saved view colors"]')
+  const inside = (element: HTMLElement, message: string): void => {
+    const rect = element.getBoundingClientRect()
+    assert(rect.left >= 7 && rect.top >= 7 && rect.right <= innerWidth - 7 && rect.bottom <= innerHeight - 7, message)
+  }
+  const openMenu = async (x: number, y: number): Promise<HTMLElement> => {
+    const target = [...container.querySelectorAll('span')].find((element) => element.textContent === savedView.name)!
+    assert(target, 'Saved view is missing from the sidebar')
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: x, clientY: y }))
+    await pause(200)
+    assert(menu(), 'Saved view context menu did not open')
+    return menu()!
+  }
+  for (const [width, height, x, y] of [[1024, 768, 40, 650], [1024, 768, 1000, 750], [240, 180, 230, 170], [180, 160, 170, 150]]) {
+    await viewport(width, height)
+    const popup = await openMenu(x, y)
+    inside(popup, `Saved view popup escaped ${width}x${height} viewport`)
+    const choices = [...popup.querySelectorAll<HTMLButtonElement>('.ui-color-swatch')]
+    assert(choices.length === swatches.length, 'Saved view popup lost vivid or pastel choices')
+    for (const choice of [...choices, popup.querySelector<HTMLInputElement>('input[type="color"]')!]) {
+      choice.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      await pause()
+      inside(choice, `${choice.getAttribute('aria-label')} is unreachable in ${width}x${height}`)
+      const bounds = choice.getBoundingClientRect()
+      assert(choice.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)), 'Color control is clipped by its popup')
+    }
+    if (height < 200) assert(popup.scrollHeight > popup.clientHeight, 'Small-window popup did not allow vertical scrolling')
+    const pastel = popup.querySelector<HTMLButtonElement>('[role="group"][aria-label="Pastel colors"] button')!
+    pastel.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    await click(pastel)
+    await pause(150)
+    assert(!menu() && colorWrites.at(-1)?.id === savedView.id && colorWrites.at(-1)?.color === '#c8bce7', 'Pastel selection did not update the saved view and close')
+    const customPopup = await openMenu(x, y)
+    const customInput = customPopup.querySelector<HTMLInputElement>('input[type="color"]')!
+    customInput.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    inside(customInput, 'Custom color control is unreachable')
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(customInput, '#123456')
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    customInput.dispatchEvent(new Event('change', { bubbles: true }))
+    await pause(180)
+    assert(!menu() && colorWrites.at(-1)?.color === '#123456', 'Custom color selection did not persist and close')
+  }
+  await viewport(1024, 768)
+  const resizingMenu = await openMenu(1000, 750)
+  await viewport(180, 160)
+  inside(resizingMenu, 'Open saved view popup escaped after resizing')
+  const customAfterResize = resizingMenu.querySelector<HTMLInputElement>('input[type="color"]')!
+  customAfterResize.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  inside(customAfterResize, 'Custom color is unreachable after resizing')
+  await render(null)
+  return `Drop, label and sidebar behavior passed: scoped list/kanban motion on both axes, post-settlement status edits, invalid/self/cancelled/failed drops, in-flight scroll/input, persistence, keyboard/reduced motion, ${swatches.length} native swatches, bottom/right and small-window saved-view colors`
 }
 
 Object.assign(window, { popupMotionResult: verify() })

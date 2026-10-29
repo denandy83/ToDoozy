@@ -1,7 +1,7 @@
 import { ColorSwatches } from './shared/components/ColorSwatches'
 import { usePresence } from './shared/motion/usePresence'
 import { useLayoutMotion } from './shared/motion/useLayoutMotion'
-import { EASE_OUT, REORDER_DURATION, immediateMotion, markPointerReorder, subscribeMotionInput } from './shared/motion/motion'
+import { EASE_OUT, REORDER_DURATION, immediateMotion, subscribeMotionInput } from './shared/motion/motion'
 import { MotionPresence } from './shared/motion/MotionPresence'
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
@@ -656,7 +656,7 @@ export function AppLayout(): React.JSX.Element {
   const hasDetailPanel = showDetailPanel && selectedTaskIds.size === 1
   const isSidePanel = detailPanelPosition === 'side'
   const detailPresence = usePresence(hasDetailPanel, 'panel')
-  const captureDropLayout = useLayoutMotion(mainRef, allTasks)
+  const animateDropLayout = useLayoutMotion(mainRef)
 
   return (
     <DndContext
@@ -664,7 +664,7 @@ export function AppLayout(): React.JSX.Element {
       collisionDetection={collisionDetection}
       onDragStart={(event) => { dragWidthRef.current = (event.active.rect.current.initial?.width ?? 0); handleDragStart(event) }}
       onDragOver={handleDragOver}
-      onDragEnd={(event) => { captureDropLayout(); markPointerReorder(); handleDragEnd(event) }}
+      onDragEnd={(event) => { void animateDropLayout(() => handleDragEnd(event)) }}
       onDragCancel={handleDragCancel}
     >
       <div className="flex h-screen w-screen bg-background text-foreground">

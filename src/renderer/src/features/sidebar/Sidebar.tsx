@@ -1,7 +1,7 @@
 import { EASE_OUT, REORDER_DURATION, immediateMotion } from '../../shared/motion/motion'
 import { ColorSwatches } from '../../shared/components/ColorSwatches'
 import { MotionPresence } from '../../shared/motion/MotionPresence'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTaskStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent, useDroppable } from '@dnd-kit/core'
@@ -326,6 +326,21 @@ export function Sidebar({
   const [viewContextMenu, setViewContextMenu] = useState<{ viewId: string; x: number; y: number } | null>(null)
   const viewContextRef = useRef<HTMLDivElement>(null)
 
+  useLayoutEffect(() => {
+    const menu = viewContextRef.current
+    if (!viewContextMenu || !menu) return
+    const place = (): void => {
+      const left = Math.max(8, Math.min(viewContextMenu.x, window.innerWidth - menu.offsetWidth - 8))
+      const top = Math.max(8, Math.min(viewContextMenu.y, window.innerHeight - menu.offsetHeight - 8))
+      menu.style.left = `${left}px`
+      menu.style.top = `${top}px`
+      menu.style.transformOrigin = `${viewContextMenu.x - left}px ${viewContextMenu.y - top}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [viewContextMenu])
+
   useEffect(() => {
     if (!viewContextMenu) return
     const handler = (e: MouseEvent): void => {
@@ -585,7 +600,9 @@ export function Sidebar({
       {/* Saved view context menu (color picker) */}
       {<MotionPresence open={Boolean(viewContextMenu)}>{() => (viewContextMenu) ? (<div
           ref={viewContextRef}
-          className="fixed z-[100] rounded-lg border border-border bg-surface p-2 shadow-lg"
+          role="dialog"
+          aria-label="Saved view colors"
+          className="fixed z-[100] max-h-[calc(100dvh-16px)] max-w-[calc(100dvw-16px)] overflow-auto rounded-lg border border-border bg-surface p-2 shadow-lg"
           style={{ left: viewContextMenu.x, top: viewContextMenu.y }}
         >
           <div className="text-[9px] font-bold uppercase tracking-[0.3em] text-muted mb-1.5">Color</div>

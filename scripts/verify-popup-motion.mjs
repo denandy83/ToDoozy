@@ -9,6 +9,7 @@ if (process.versions.electron) {
     event.sender.sendInputEvent({ type: 'keyUp', keyCode })
   })
   ipcMain.handle('verify:text', (event, text) => event.sender.insertText(text))
+  ipcMain.handle('verify:viewport', (event, { width, height }) => BrowserWindow.fromWebContents(event.sender).setContentSize(width, height))
   const timeout = setTimeout(() => { console.error('Popup verification timed out'); app.exit(1) }, 45000)
   app.whenReady().then(async () => {
     try {
