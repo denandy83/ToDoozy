@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { useViewStore } from '../../shared/stores/viewStore'
 import { useSettingsStore, selectCurrentTheme, useSetting } from '../../shared/stores/settingsStore'
+import { findThemeForMode } from '../../shared/utils/themeChoices'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import type { ViewId } from '../../shared/stores/viewStore'
 import { useLabelStore } from '../../shared/stores/labelStore'
@@ -250,12 +251,7 @@ export function Sidebar({
   const handleToggleDayNight = useCallback(async () => {
     if (!currentTheme) return
     const newMode = isDarkMode ? 'light' : 'dark'
-    const currentName = currentTheme.name.replace(/ (Dark|Light)$/, '')
-    const match = Object.values(themes).find((t) => {
-      const name = t.name.replace(/ (Dark|Light)$/, '')
-      return name === currentName && t.mode === newMode
-    })
-    const target = match ?? Object.values(themes).find((t) => t.mode === newMode)
+    const target = findThemeForMode(currentTheme, Object.values(themes), newMode)
     if (target) {
       try {
         const config = JSON.parse(target.config) as ThemeConfig

@@ -1,11 +1,13 @@
 import { usePresence } from '../../shared/motion/usePresence'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Modal } from '../../shared/components/Modal'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { ColorPicker } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
+import { ThemeOptions } from './ThemeOptions'
+import { findThemeForMode, hasThemeFamily } from '../../shared/utils/themeChoices'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
 interface ThemeSettingsModalProps {
@@ -59,10 +61,6 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
   const [hasChanges, setHasChanges] = useState(false)
 
   const themesForMode = useThemesByMode(mode)
-  const sortedThemes = useMemo(
-    () => [...themesForMode].sort((a, b) => a.name.localeCompare(b.name)),
-    [themesForMode]
-  )
 
   // Initialize from current theme when modal opens
   useEffect(() => {
@@ -81,14 +79,7 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
     (newMode: 'dark' | 'light') => {
       setMode(newMode)
       // Find the current theme's equivalent in the new mode, or pick first
-      const themesInMode = Object.values(useSettingsStore.getState().themes).filter(
-        (t) => t.mode === newMode
-      )
-      const match = themesInMode.find((t) => {
-        const currentName = currentTheme?.name.replace(/ (Dark|Light)$/, '') ?? ''
-        return t.name.replace(/ (Dark|Light)$/, '') === currentName
-      })
-      const target = match ?? themesInMode[0]
+      const target = findThemeForMode(currentTheme, Object.values(useSettingsStore.getState().themes), newMode)
       if (target) {
         setSelectedThemeId(target.id)
         setEditConfig(parseConfig(target))
@@ -156,6 +147,10 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       return
     }
 
+    if (hasThemeFamily(name, Object.values(useSettingsStore.getState().themes))) {
+      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+      return
+    }
     try {
       const theme = await createTheme({
         id: crypto.randomUUID(),
@@ -213,15 +208,12 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Preset</span>
           <select
+            aria-label="Theme"
             value={selectedThemeId ?? ''}
             onChange={(e) => handlePresetChange(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
           >
-            {sortedThemes.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
+            <ThemeOptions themes={themesForMode} />
           </select>
         </div>
 

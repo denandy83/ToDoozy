@@ -24,6 +24,8 @@ Use `useFocusRestore` with the surface's active/present state and container ref.
 
 `ColorSwatches` provides named vivid/pastel choices and custom hex entry. Theme adjustments use this same control for every editable color role. `Improve text contrast` is an explicit action: it adjusts text roles while preserving chosen fills. The sidebar and canvas have separate derived readable foregrounds, so a dark sidebar can accompany a pastel canvas.
 
+Theme pickers separate Built-in themes from My themes. Legacy custom variants with the same stored name receive stable Custom 1/2 display labels; their IDs and configurations stay intact. New custom families and renames must use an available name. Counterpart actions require an unambiguous family with the same owner and built-in/custom kind; never choose another variant by name alone. Mode switching falls back to a built-in preset when a custom family is ambiguous.
+
 Preserve the stored hue for dots, fills and user selections. Use `useSemanticColor` or `SemanticColorText` for readable task/status/priority/filter text; derive text on solid fills with `readableColor`. Evaluate composited backgrounds, not just raw swatches. Normal text targets 4.5:1, required non-text indicators 3:1. Decorative separators do not carry essential meaning.
 
 Task rows have a 46 px minimum height, regular 15 px titles and 11 px metadata. Main view headings use 24 px semibold sentence case, and property/section labels use normal tracking and readable 12 px text. Do not reintroduce universal color transitions or animate keyboard selection.

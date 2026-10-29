@@ -1,11 +1,13 @@
 import { contrastRatio, isHexColor, surfaceColor, repairThemeText } from '../../../../shared/colorContrast'
-import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef, useRef } from 'react'
+import { useState, useEffect, useCallback, useImperativeHandle, forwardRef, useRef } from 'react'
 import { useSettingsStore, selectCurrentTheme, useThemesByMode } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { Trash2, RotateCcw, Save, Download, Upload, Pencil } from 'lucide-react'
 import { ColorSquare, ColorHex } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
+import { ThemeOptions } from './ThemeOptions'
+import { findThemeCounterpart, findThemeForMode, hasThemeFamily } from '../../shared/utils/themeChoices'
 import { Modal } from '../../shared/components/Modal'
 import {
   serializeThemePair,
@@ -154,10 +156,6 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const themesMap = useSettingsStore((s) => s.themes)
 
   const themesForMode = useThemesByMode(mode)
-  const sortedThemes = useMemo(
-    () => [...themesForMode].sort((a, b) => a.name.localeCompare(b.name)),
-    [themesForMode]
-  )
 
   useEffect(() => {
     if (currentTheme) {
@@ -173,14 +171,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const handleModeChange = useCallback(
     async (newMode: 'dark' | 'light') => {
       setMode(newMode)
-      const themesInMode = Object.values(useSettingsStore.getState().themes).filter(
-        (t) => t.mode === newMode
-      )
-      const match = themesInMode.find((t) => {
-        const currentName = currentTheme?.name.replace(/ (Dark|Light)$/, '') ?? ''
-        return t.name.replace(/ (Dark|Light)$/, '') === currentName
-      })
-      const target = match ?? themesInMode[0]
+      const target = findThemeForMode(currentTheme, Object.values(useSettingsStore.getState().themes), newMode)
       if (target) {
         setSelectedThemeId(target.id)
         setEditConfig(parseConfig(target))
@@ -236,13 +227,9 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       setChangedKeys(new Set())
 
       // Only offer counterpart update if colors were actually edited
-      const currentName = selectedTheme?.name ?? ''
-      const baseName = currentName.replace(/ (Dark|Light)$/, '')
       const counterpartMode = mode === 'dark' ? 'light' : 'dark'
       const allThemes = useSettingsStore.getState().themes
-      const counterpart = Object.values(allThemes).find(
-        (t) => t.id !== selectedThemeId && t.name.replace(/ (Dark|Light)$/, '') === baseName && t.mode === counterpartMode
-      )
+      const counterpart = findThemeCounterpart(selectedTheme, Object.values(allThemes))
 
       if (counterpart && colorsEdited) {
         setBlocked(true)
@@ -276,7 +263,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const msg = err instanceof Error ? err.message : 'Failed to apply theme'
       addToast({ message: msg, variant: 'danger' })
     }
-  }, [selectedThemeId, selectedTheme, editConfig, mode, updateTheme, setSetting, setCurrentTheme, addToast])
+  }, [selectedThemeId, selectedTheme, editConfig, mode, colorsEdited, changedKeys, updateTheme, setSetting, setCurrentTheme, addToast])
 
   const handleRevert = useCallback(() => {
     if (currentTheme) {
@@ -337,20 +324,17 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       handleCancelRename()
       return
     }
+    if (hasThemeFamily(newBase, Object.values(useSettingsStore.getState().themes))) {
+      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+      return
+    }
     try {
       const currentSuffix = selectedTheme.mode === 'dark' ? 'Dark' : 'Light'
       await updateTheme(selectedThemeId, { name: `${newBase} ${currentSuffix}` })
 
-      const counterpartMode = selectedTheme.mode === 'dark' ? 'light' : 'dark'
-      const counterpartSuffix = counterpartMode === 'dark' ? 'Dark' : 'Light'
+      const counterpartSuffix = selectedTheme.mode === 'dark' ? 'Light' : 'Dark'
       const allThemes = useSettingsStore.getState().themes
-      const counterpart = Object.values(allThemes).find(
-        (t) =>
-          t.id !== selectedThemeId &&
-          stripModeSuffix(t.name) === oldBase &&
-          t.mode === counterpartMode &&
-          !t.is_builtin
-      )
+      const counterpart = findThemeCounterpart(selectedTheme, Object.values(allThemes))
       if (counterpart) {
         await updateTheme(counterpart.id, { name: `${newBase} ${counterpartSuffix}` })
       }
@@ -368,18 +352,15 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
   const executeDeleteTheme = useCallback(async () => {
     if (!selectedThemeId || !canDeleteSelected) return
     const themeName = selectedTheme?.name ?? ''
-    const baseName = themeName.replace(/ (Dark|Light)$/, '')
     const allThemes = useSettingsStore.getState().themes
-    const counterpart = Object.values(allThemes).find(
-      (t) => t.id !== selectedThemeId && t.name.replace(/ (Dark|Light)$/, '') === baseName && !t.is_builtin
-    )
+    const counterpart = findThemeCounterpart(selectedTheme, Object.values(allThemes))
 
     try {
       await deleteTheme(selectedThemeId)
       if (counterpart) await deleteTheme(counterpart.id)
 
       const standard = Object.values(useSettingsStore.getState().themes).find(
-        (t) => t.name === 'Standard Dark'
+        (t) => t.name === 'Standard Dark' && t.is_builtin === 1
       )
       if (standard) {
         const config = parseConfig(standard)
@@ -392,7 +373,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
         setCurrentTheme(standard.id)
       }
       setConfigEdited(false)
-      addToast({ message: `Deleted "${baseName}" themes` })
+      addToast({ message: `Deleted "${themeName}"${counterpart ? ' and its counterpart' : ''}` })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to delete theme'
       addToast({ message: msg, variant: 'danger' })
@@ -401,10 +382,10 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
 
   const handleDeleteTheme = useCallback(() => {
     if (!selectedTheme) return
-    const baseName = selectedTheme.name.replace(/ (Dark|Light)$/, '')
+    const counterpart = findThemeCounterpart(selectedTheme, Object.values(useSettingsStore.getState().themes))
     setBlocked(true)
     addToast({
-      message: `Delete "${baseName}" theme?`,
+      message: `Delete "${selectedTheme.name}"${counterpart ? ' and its counterpart' : ''}?`,
       persistent: true,
       actions: [
         { label: 'Delete', variant: 'danger', onClick: () => { executeDeleteTheme(); setBlocked(false) } },
@@ -435,7 +416,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       const counterpartOriginal = BUILTIN_CONFIGS[counterpartName]
       if (counterpartOriginal) {
         const allThemes = useSettingsStore.getState().themes
-        const counterpart = Object.values(allThemes).find((t) => t.name === counterpartName)
+        const counterpart = findThemeCounterpart(selectedTheme, Object.values(allThemes))
         if (counterpart && JSON.stringify(parseConfig(counterpart)) !== JSON.stringify(counterpartOriginal)) {
           setBlocked(true)
           addToast({
@@ -481,6 +462,10 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       addToast({ message: 'Enter a name for the custom theme', variant: 'danger' })
       return
     }
+    if (hasThemeFamily(name, Object.values(useSettingsStore.getState().themes))) {
+      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+      return
+    }
     try {
       const counterpartMode = mode === 'dark' ? 'light' : 'dark'
 
@@ -523,9 +508,7 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
     const base = stripModeSuffix(selected.name)
     const all = Object.values(themesMap)
     const selectedConfig = parseConfig(selected)
-    const counterpartMode = selected.mode === 'dark' ? 'light' : 'dark'
-    const counterpartName = `${base} ${counterpartMode === 'dark' ? 'Dark' : 'Light'}`
-    const counterpart = all.find((t) => t.name === counterpartName && t.mode === counterpartMode)
+    const counterpart = findThemeCounterpart(selected, all)
     const counterpartConfig: ThemeConfig = counterpart
       ? parseConfig(counterpart)
       : generateCounterpartConfig(selectedConfig)
@@ -677,15 +660,12 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
         ) : (
           <>
             <select
+              aria-label="Theme"
               value={selectedThemeId ?? ''}
               onChange={(e) => handlePresetChangeOrNew(e.target.value)}
-              className="w-48 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
+              className="w-64 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
             >
-              {sortedThemes.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
+              <ThemeOptions themes={themesForMode} />
               <option value="__new__">+ New Theme...</option>
             </select>
             <button
