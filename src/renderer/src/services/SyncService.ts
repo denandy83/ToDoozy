@@ -616,6 +616,10 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
               const changed: Work[] = []
               for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
                 const candidate = pending[rowIndex]
+                if (!rows[rowIndex] && candidate.entry.table_name === 'user_settings' && candidate.entry.row_id.endsWith(':theme_id')) {
+                  await complete(candidate)
+                  continue
+                }
                 if (!rows[rowIndex]) {
                   const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
                   await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)

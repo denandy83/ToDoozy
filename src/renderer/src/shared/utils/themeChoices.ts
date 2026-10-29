@@ -1,5 +1,6 @@
 import type { Theme } from '../../../../shared/types'
 import { stripModeSuffix } from './themeIO'
+import { BUILTIN_THEMES } from '../../../../shared/themeCatalog'
 
 const nameKey = (name: string): string => name.trim().toLowerCase()
 const familyKey = (theme: Theme): string => nameKey(stripModeSuffix(theme.name))
@@ -55,6 +56,6 @@ export function findThemeForMode(theme: Theme | null | undefined, themes: readon
     ?? presets.find((other) => familyKey(other) === 'standard') ?? presets[0]
 }
 
-export function hasThemeFamily(name: string, themes: readonly Theme[]): boolean {
-  return themes.some((theme) => !theme.deleted_at && familyKey(theme) === nameKey(name))
+export function isReservedThemeFamily(name: string): boolean {
+  return BUILTIN_THEMES.some((theme) => nameKey(stripModeSuffix(theme.name)) === nameKey(stripModeSuffix(name)))
 }

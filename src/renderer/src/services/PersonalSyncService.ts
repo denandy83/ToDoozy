@@ -853,6 +853,7 @@ export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
  */
 export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
   return withSyncProducer(async (origin) => {
+    if (key === 'theme_id') return pushSettingImmediate(key, '', userId, origin)
     const id = `${userId}:${key}`
     if (!(await hasLiveSession(origin, 'deleteSetting', `id=${id}`))) return
     try {

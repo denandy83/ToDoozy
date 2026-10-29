@@ -7,7 +7,7 @@ import { applyThemeConfig } from '../../shared/hooks/useThemeApplicator'
 import { ColorPicker } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
 import { ThemeOptions } from './ThemeOptions'
-import { findThemeForMode, hasThemeFamily } from '../../shared/utils/themeChoices'
+import { findThemeForMode, isReservedThemeFamily } from '../../shared/utils/themeChoices'
 import type { ThemeConfig, Theme } from '../../../../shared/types'
 
 interface ThemeSettingsModalProps {
@@ -147,8 +147,8 @@ export function ThemeSettingsModal({ open, onClose }: ThemeSettingsModalProps): 
       return
     }
 
-    if (hasThemeFamily(name, Object.values(useSettingsStore.getState().themes))) {
-      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+    if (isReservedThemeFamily(name)) {
+      addToast({ message: 'Built-in theme names are reserved. Choose another name.', variant: 'danger' })
       return
     }
     try {

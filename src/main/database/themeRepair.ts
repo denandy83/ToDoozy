@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { Theme } from '../../shared/types'
+import type { Theme, Setting } from '../../shared/types'
 import { BUILTIN_THEMES, builtinThemeId, presetForTheme } from '../../shared/themeCatalog'
 
 export function retirementStamp(...timestamps: Array<string | null | undefined>): string {
@@ -12,16 +12,44 @@ export function archiveTheme(db: DatabaseSync, theme: Theme): void {
     .run(theme.id, JSON.stringify({ theme, selections }), new Date().toISOString())
 }
 
-function archivedTheme(db: DatabaseSync, id: string): Theme | undefined {
+function archivedRecord(db: DatabaseSync, id: string): { theme: Theme; selections: Setting[] } | undefined {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='theme_duplicate_archive'").get()) return undefined
   const saved = db.prepare('SELECT snapshot FROM theme_duplicate_archive WHERE id=?').get(id) as { snapshot: string } | undefined
-  if (saved) { try { return JSON.parse(saved.snapshot).theme as Theme } catch { return undefined } }
+  if (saved) { try { return JSON.parse(saved.snapshot) } catch { return undefined } }
   return undefined
+}
+
+export function archivedTheme(db: DatabaseSync, id: string): Theme | undefined {
+  return archivedRecord(db, id)?.theme
 }
 
 export function presetForStoredTheme(db: DatabaseSync, theme: Theme): ReturnType<typeof presetForTheme> {
   const archived = archivedTheme(db, theme.id)
-  return presetForTheme(theme) ?? (archived && presetForTheme(archived))
+  return presetForTheme(theme) ?? (archived && theme.name === archived.name && theme.mode === archived.mode ? presetForTheme(archived) : undefined)
+}
+
+export function restoreThemeReferences(db: DatabaseSync, theme: Theme): void {
+  const record = archivedRecord(db, theme.id)
+  if (!record) return
+  const preset = presetForTheme(record.theme)
+  if (!preset) return
+  for (const original of record.selections) {
+    if (original.deleted_at || theme.owner_id !== original.user_id || (!record.theme.is_builtin && record.theme.owner_id !== original.user_id)) continue
+    const current = db.prepare("SELECT * FROM settings WHERE user_id=? AND key='theme_id'").get(original.user_id) as unknown as Setting | undefined
+    if (!current || current.deleted_at || current.value !== builtinThemeId(preset.name) || Date.parse(current.updated_at) !== Date.parse(original.updated_at)) continue
+    db.prepare("UPDATE settings SET value=? WHERE user_id=? AND key='theme_id'").run(theme.id, original.user_id)
+  }
+}
+
+export function canRewriteThemeReference(db: DatabaseSync, userId: string, from: string | null, to: string | null, updatedAt: string): boolean {
+  if (from === to) return false
+  if (canonicalThemeReference(db, from, userId) === to) return true
+  if (!to) return false
+  const record = archivedRecord(db, to)
+  const current = db.prepare('SELECT * FROM themes WHERE id=? AND deleted_at IS NULL').get(to) as unknown as Theme | undefined
+  const preset = record && presetForTheme(record.theme)
+  if (!record || !preset || !current || current.owner_id !== userId || presetForStoredTheme(db, current) || Date.parse(current.updated_at) <= Date.parse(record.theme.updated_at)) return false
+  return from === builtinThemeId(preset.name) && record.selections.some((setting) => setting.user_id === userId && !setting.deleted_at && Date.parse(setting.updated_at) === Date.parse(updatedAt))
 }
 
 export function canonicalThemeReference(db: DatabaseSync, id: string | null, userId: string): string | null {

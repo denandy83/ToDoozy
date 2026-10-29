@@ -772,6 +772,10 @@ export function registerIpcHandlers(): void {
     return getRepos().settings.findRaw(userId, key) ?? null
   })
 
+  handle('settings:canRewriteThemeReference', (_e, userId: string, from: string | null, to: string | null, updatedAt: string) => {
+    return getRepos().settings.canRewriteThemeReference(userId, from, to, updatedAt)
+  })
+
   // ── Themes ─────────────────────────────────────────────────────────
   handle('themes:findById', (_e, id: string) => {
     return getRepos().themes.findById(id) ?? null

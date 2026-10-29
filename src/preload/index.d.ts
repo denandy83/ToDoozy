@@ -195,6 +195,7 @@ export interface ActivityLogAPI {
 }
 
 export interface SettingsAPI {
+  canRewriteThemeReference(userId: string, from: string | null, to: string | null, updatedAt: string): Promise<boolean>
   get(userId: string, key: string): Promise<string | null>
   set(userId: string, key: string, value: string | null): Promise<void>
   getAll(userId: string): Promise<Setting[]>

@@ -2,10 +2,14 @@ import type { DatabaseSync } from 'node:sqlite'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 import type { Setting } from '../../shared/types'
-import { canonicalThemeReference, retirementStamp } from '../database/themeRepair'
+import { canonicalThemeReference, canRewriteThemeReference, retirementStamp } from '../database/themeRepair'
 
 export class SettingsRepository {
   constructor(private db: DatabaseSync) {}
+
+  canRewriteThemeReference(userId: string, from: string | null, to: string | null, updatedAt: string): boolean {
+    return canRewriteThemeReference(this.db, userId, from, to, updatedAt)
+  }
 
   /**
    * Read a setting. Tombstoned rows are treated as absent so callers
@@ -174,7 +178,7 @@ export class SettingsRepository {
   delete(userId: string, key: string): boolean {
     const row = this.findRaw(userId, key)
     if (!row || row.deleted_at) return false
-    const now = new Date().toISOString()
+    const now = key === 'theme_id' ? retirementStamp(row.updated_at) : new Date().toISOString()
     const result = this.db
       .prepare(
         `UPDATE settings SET deleted_at = ?, updated_at = ?

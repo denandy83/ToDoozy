@@ -7,7 +7,7 @@ import { Trash2, RotateCcw, Save, Download, Upload, Pencil } from 'lucide-react'
 import { ColorSquare, ColorHex } from './ColorPicker'
 import { ThemePreview } from './ThemePreview'
 import { ThemeOptions } from './ThemeOptions'
-import { findThemeCounterpart, findThemeForMode, hasThemeFamily } from '../../shared/utils/themeChoices'
+import { findThemeCounterpart, findThemeForMode, isReservedThemeFamily } from '../../shared/utils/themeChoices'
 import { Modal } from '../../shared/components/Modal'
 import {
   serializeThemePair,
@@ -324,8 +324,8 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       handleCancelRename()
       return
     }
-    if (hasThemeFamily(newBase, Object.values(useSettingsStore.getState().themes))) {
-      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+    if (isReservedThemeFamily(newBase)) {
+      addToast({ message: 'Built-in theme names are reserved. Choose another name.', variant: 'danger' })
       return
     }
     try {
@@ -462,8 +462,8 @@ export const ThemeSettingsContent = forwardRef<ThemeSettingsHandle, ThemeSetting
       addToast({ message: 'Enter a name for the custom theme', variant: 'danger' })
       return
     }
-    if (hasThemeFamily(name, Object.values(useSettingsStore.getState().themes))) {
-      addToast({ message: 'A theme with that name already exists. Choose another name.', variant: 'danger' })
+    if (isReservedThemeFamily(name)) {
+      addToast({ message: 'Built-in theme names are reserved. Choose another name.', variant: 'danger' })
       return
     }
     try {

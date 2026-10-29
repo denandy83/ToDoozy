@@ -173,6 +173,12 @@ async function verifyLabelPalette(position: 'side' | 'bottom', reduced: boolean)
   range.collapse(true)
   window.getSelection()!.removeAllRanges()
   window.getSelection()!.addRange(range)
+  const tiptap = (editor as HTMLElement & { editor: import('@tiptap/core').Editor }).editor
+  const expectedPosition = tiptap.view.posAtDOM(secondItem, 0)
+  await new Promise(requestAnimationFrame)
+  await waitFor(() => tiptap.view.hasFocus() && tiptap.state.selection.empty && tiptap.state.selection.from === expectedPosition, 'Synthetic selection did not reach ProseMirror').catch((error) => {
+    throw new Error(`${error.message}: expected=${expectedPosition}, actual=${tiptap.state.selection.from}, focused=${tiptap.view.hasFocus()}, domOffset=${window.getSelection()?.anchorOffset}, domTarget=${window.getSelection()?.anchorNode === secondItem}`)
+  })
   await key('Tab')
   assert(editor.querySelector('li li') && document.activeElement === editor, 'Editor Tab indentation was overridden')
   await key('Tab', true)

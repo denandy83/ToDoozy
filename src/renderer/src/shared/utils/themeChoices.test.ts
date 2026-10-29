@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Theme } from '../../../../shared/types'
-import { findThemeCounterpart, findThemeForMode, groupThemeChoices, hasThemeFamily } from './themeChoices'
+import { findThemeCounterpart, findThemeForMode, groupThemeChoices, isReservedThemeFamily } from './themeChoices'
 
 function theme(id: string, overrides: Partial<Theme> = {}): Theme {
   return { id, name: 'Standard Dark', mode: 'dark', config: '{}', is_builtin: 0,
@@ -79,11 +79,14 @@ describe('theme choices with legacy same-name variants', () => {
     expect(findThemeForMode(dark, [dark, secondDark, light], 'light')).toBeUndefined()
   })
 
-  it('reserves existing family names across case and mode, while allowing new names', () => {
-    const themes = [theme('a'), theme('b', { name: 'Forest Light', mode: 'light' })]
-    expect(hasThemeFamily(' standard ', themes)).toBe(true)
-    expect(hasThemeFamily('forest', themes)).toBe(true)
-    expect(hasThemeFamily('My Lavender', themes)).toBe(false)
-    expect(hasThemeFamily('Standard', [theme('deleted', { deleted_at: '2026-01-02' })])).toBe(false)
+  it('reserves catalog families while allowing repeated genuine custom names', () => {
+    expect(isReservedThemeFamily(' standard ')).toBe(true)
+    expect(isReservedThemeFamily('FOREST')).toBe(true)
+    expect(isReservedThemeFamily('Soft Sage')).toBe(true)
+    expect(isReservedThemeFamily('Aviobook')).toBe(false)
+    expect(isReservedThemeFamily('AVIOBOOK')).toBe(false)
+    expect(groupThemeChoices([theme('a', { name: 'Aviobook Dark' }), theme('b', { name: 'Aviobook Dark' })])[0].options).toEqual([
+      { id: 'a', label: 'Aviobook Dark (Custom 1)' }, { id: 'b', label: 'Aviobook Dark (Custom 2)' }
+    ])
   })
 })

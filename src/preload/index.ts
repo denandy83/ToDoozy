@@ -143,6 +143,7 @@ const api: TodoozyAPI = {
   },
 
   settings: {
+    canRewriteThemeReference: (userId, from, to, updatedAt) => ipcRenderer.invoke('settings:canRewriteThemeReference', userId, from, to, updatedAt),
     get: (userId, key) => ipcRenderer.invoke('settings:get', userId, key),
     set: (userId, key, value) => ipcRenderer.invoke('settings:set', userId, key, value),
     getAll: (userId) => ipcRenderer.invoke('settings:getAll', userId),
