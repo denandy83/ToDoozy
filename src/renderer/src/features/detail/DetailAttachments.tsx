@@ -39,7 +39,7 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
                 const restored = await origin.api.attachments.restore(attachment.id)
                 if (!await origin.isCurrent()) return
                 if (!restored) throw new Error('Attachment is no longer available')
-                addAttachment(restored)
+                await addAttachment(restored, origin)
               } catch {
                 if (await origin.isCurrent()) addToast({ message: 'Could not restore attachment', variant: 'danger' })
               }

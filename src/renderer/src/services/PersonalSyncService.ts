@@ -112,9 +112,6 @@ function clearAuthFailures(): void {
 /** Track which projects have been confirmed in Supabase this session */
 const confirmedProjects = new Set<string>()
 
-/** Recently deleted task IDs — prevents pull from resurrecting tasks before Supabase delete completes */
-const recentlyDeletedIds = new Set<string>()
-
 /** Per-project timestamp of last successful pull — only fetch rows modified after this */
 const lastPullAt = new Map<string, string>()
 
@@ -239,7 +236,6 @@ export async function pushTask(task: Task, producer?: SyncProducer): Promise<voi
  */
 export async function deleteTaskFromSupabase(taskId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
-    recentlyDeletedIds.add(taskId)
     if (!(await hasLiveSession(origin, 'deleteTask', `task=${taskId}`))) return
     try {
       const supabase = (await origin.client())!
@@ -558,11 +554,11 @@ async function pushSettingImmediate(key: string, value: string, userId: string, 
 /**
  * Push a setting to Supabase with 5s debounce to batch rapid changes.
  */
-export function pushSetting(key: string, value: string, userId: string): void {
+export function pushSetting(key: string, value: string, userId: string, origin = captureSyncProducer()): void {
   // Defense-in-depth: excluded keys (api_key) are device-local secrets and must
   // never be buffered/flushed to Supabase user_settings (#98/#114).
   if (isSettingSyncExcluded(key)) return
-  pendingSettings.set(`${userId}:${key}`, { key, value, userId, origin: captureSyncProducer() })
+  pendingSettings.set(`${userId}:${key}`, { key, value, userId, origin })
   if (settingsFlushTimer) clearTimeout(settingsFlushTimer)
   settingsFlushTimer = setTimeout(flushSettingsBuffer, 5_000)
 }
@@ -764,7 +760,7 @@ export async function deleteProjectAreaFromSupabase(areaId: string, producer?: S
 /**
  * Push a theme to user_themes in Supabase.
  */
-export async function pushTheme(theme: { id: string }): Promise<void> {
+export async function pushTheme(theme: { id: string }, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const descriptor = SYNC_TABLES.themes!
     const local = await origin.api.themes.findById(theme.id)
@@ -779,7 +775,7 @@ export async function pushTheme(theme: { id: string }): Promise<void> {
     } catch (err) {
       await reportPushFailure(origin, 'pushTheme', err, 'user_themes', local.id, JSON.stringify(payload))
     }
-  })
+  }, producer)
 }
 
 /**
@@ -787,7 +783,7 @@ export async function pushTheme(theme: { id: string }): Promise<void> {
  * Hard-DELETE is reserved for the 30-day purge job; tombstones propagate
  * via Realtime UPDATE so other devices can drop the row.
  */
-export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
+export async function deleteThemeFromSupabase(themeId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const local = await origin.api.themes.findById(themeId)
     if (!local?.deleted_at || local.owner_id !== origin.userId) return
@@ -800,14 +796,14 @@ export async function deleteThemeFromSupabase(themeId: string): Promise<void> {
     } catch (error) {
       await reportPushFailure(origin, 'deleteTheme', error, 'user_themes', themeId, JSON.stringify(descriptor.toRemote(local)))
     }
-  })
+  }, producer)
 }
 
 /**
  * Soft-delete a setting in Supabase by stamping deleted_at + updated_at.
  * Hard-DELETE is reserved for the 30-day purge job.
  */
-export async function deleteSettingFromSupabase(key: string, userId: string): Promise<void> {
+export async function deleteSettingFromSupabase(key: string, userId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (key === 'theme_id') return pushSettingImmediate(key, '', userId, origin)
     const id = `${userId}:${key}`
@@ -828,7 +824,7 @@ export async function deleteSettingFromSupabase(key: string, userId: string): Pr
     } catch (err) {
       await reportPushFailure(origin, 'deleteSetting', err, 'user_settings', id, JSON.stringify({ id, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     }
-  })
+  }, producer)
 }
 
 /**
@@ -1648,7 +1644,6 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     const orderedRemoteTasks = remoteTaskOrder(remoteTasks)
 
     for (const rt of orderedRemoteTasks) {
-      if (recentlyDeletedIds.has(rt.id)) continue
       const existing = await api.tasks.findById(rt.id)
       if (!existing) {
         // New task — create locally
@@ -1775,35 +1770,61 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
  * reconcile triggered by the same boot's WS hiccup).
  */
 let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
+let pendingReconcile: { userId: string; background: boolean; context: Promise<SyncContext | null> } | null = null
 let lastReconcileAt = 0
+let lastReconcileScope = ''
 const RECONCILE_COOLDOWN_MS = 30_000
-export async function reconcile(userId: string): Promise<{ pushed: number; pulled: number }> {
+export function reconcile(userId: string, background = false): Promise<{ pushed: number; pulled: number }> {
+  if (!navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || useAuthStore.getState().currentUser?.id !== userId) {
+    return Promise.resolve({ pushed: 0, pulled: 0 })
+  }
+  const context = captureSyncContext(() => navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline).catch(() => null)
+  pendingReconcile = { userId, background: background && (pendingReconcile?.background ?? true), context }
   if (reconcileInFlight) return reconcileInFlight
-  if (Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS) {
-    logEvent('info', 'sync', 'Reconcile skipped — within cooldown')
-    return { pushed: 0, pulled: 0 }
-  }
-  if (!navigator.onLine) {
-    logEvent('info', 'sync', 'Reconcile skipped — offline')
-    return { pushed: 0, pulled: 0 }
-  }
-  // Check session upfront — if there's no session, do NOT touch the cooldown.
-  // Otherwise a pre-login reconcile attempt would block the first real reconcile
-  // after sign-in for 30 seconds, leaving the user staring at "last sync: never".
-  if (useAuthStore.getState().currentUser?.id !== userId) return { pushed: 0, pulled: 0 }
-  const context = await captureSyncContext().catch(() => null)
-  if (!context) return { pushed: 0, pulled: 0 }
-  reconcileInFlight = reconcileImpl(userId, context)
-  try {
-    const result = await reconcileInFlight
-    lastReconcileAt = Date.now()
-    return result
-  } finally {
-    reconcileInFlight = null
-  }
+  reconcileInFlight = (async () => {
+    let result = { pushed: 0, pulled: 0 }
+    try {
+      while (pendingReconcile) {
+        const request = pendingReconcile
+        pendingReconcile = null
+        const origin = await request.context
+        if (!origin || !await origin.isCurrent()) continue
+        if (!request.background && origin.scope === lastReconcileScope && Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS) continue
+        const next = await reconcileImpl(request.userId, origin, request.background)
+        result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
+        if (!request.background && await origin.isCurrent()) {
+          lastReconcileAt = Date.now()
+          lastReconcileScope = origin.scope
+        }
+      }
+      return result
+    } finally { reconcileInFlight = null }
+  })()
+  return reconcileInFlight
 }
 
-async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pushed: number; pulled: number }> {
+export async function requestSyncCatchUp(context: SyncContext): Promise<void> {
+  const userId = useAuthStore.getState().currentUser?.id
+  if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
+  await reconcile(userId, true)
+}
+
+async function hydrateReconciledStores(userId: string, context: SyncContext): Promise<void> {
+  if (!navigator.onLine || isSuspended() || !await context.isCurrent()) return
+  const [{ useProjectStore }, { useTaskStore }, { useLabelStore }, { useSavedViewStore }, { useProjectAreaStore }, { useSettingsStore }, { useTemplateStore }] = await Promise.all([
+    import('../shared/stores/projectStore'), import('../shared/stores/taskStore'), import('../shared/stores/labelStore'),
+    import('../shared/stores/savedViewStore'), import('../shared/stores/projectAreaStore'), import('../shared/stores/settingsStore'), import('../shared/stores/templateStore')
+  ])
+  if (!await context.isCurrent() || isSuspended() || !navigator.onLine) return
+  await Promise.all([
+    useProjectStore.getState().hydrateProjects(userId), useTaskStore.getState().hydrateAllForUser(userId),
+    useLabelStore.getState().hydrateAllLabels(), useSavedViewStore.getState().hydrate(userId),
+    useProjectAreaStore.getState().hydrate(userId), useSettingsStore.getState().hydrateSettings(),
+    useSettingsStore.getState().hydrateThemes(), useTemplateStore.getState().hydrateProjectTemplates(userId)
+  ])
+}
+
+async function reconcileImpl(userId: string, context: SyncContext, background: boolean): Promise<{ pushed: number; pulled: number }> {
   let totalPushed = 0
   let totalPulled = 0
   try {
@@ -1859,7 +1880,13 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
 
     // 2. Project-scoped: per personal project, statuses then tasks.
     const allProjects = await api.projects.getProjectsForUser(userId)
-    const personalProjects = allProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
+    if (background) {
+      for (const project of allProjects.filter((p) => p.is_archived === 1)) await pullProjectMetadata(project.id, context)
+    }
+    const monitoredProjects = background
+      ? (await api.projects.getProjectsForUser(userId)).filter((p) => p.is_archived !== 1)
+      : allProjects
+    const personalProjects = monitoredProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
 
     // activity_log is pull-only (no descriptor — see syncTables.ts): an
     // incremental sweep cursored on (project_id, created_at). Safety net for
@@ -1885,7 +1912,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
       await pullActivity(project.id)
     }
 
-    for (const project of allProjects.filter((p) => p.is_shared === 1)) {
+    for (const project of monitoredProjects.filter((p) => p.is_shared === 1)) {
       if (pendingStatusProjects.has(project.id)) continue
       await pullNewTasks(project.id, context)
       await pullActivity(project.id)
@@ -1908,7 +1935,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     // shape as task_labels. Diff by key set, push deltas, pull missing rows
     // (with tombstone propagation).
     try {
-      const localProjectLabels = await api.labels.getProjectLabelsForOwner(userId)
+      const localProjectLabels = (await api.labels.getProjectLabelsForOwner(userId)).filter((link) => personalProjects.some((project) => project.id === link.project_id))
       const pairKey = (projectId: string, labelId: string): string => `${projectId}::${labelId}`
       const localByKey = new Map<
         string,
@@ -2063,7 +2090,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     // pulls to materialize; if it doesn't, the fetch returns empty and we
     // log without breaking the rest of reconcile.
     try {
-      const sharedProjects = allProjects.filter((p) => p.is_shared === 1)
+      const sharedProjects = monitoredProjects.filter((p) => p.is_shared === 1)
       if (sharedProjects.length > 0) {
         const sharedProjectIds = sharedProjects.map((p) => p.id)
         const plPairKey = (projectId: string, labelId: string): string =>
@@ -2282,7 +2309,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
       logEvent('error', 'sync', 'Reconcile: shared-project labels failed', msg)
     }
 
-    for (const project of allProjects) {
+    for (const project of monitoredProjects) {
       const ids=(await api.tasks.findAllByProject(project.id)).map((task)=>task.id)
       totalPulled += await pullTaskLabelsForTasks(ids,userId,context)
       await syncTaskLabelChoices(supabase,ids,api,context.scope)
@@ -2301,6 +2328,7 @@ async function reconcileImpl(userId: string, context: SyncContext): Promise<{ pu
     // notification per app start spammed the inbox without conveying
     // anything actionable.
 
+    if (background) await hydrateReconciledStores(userId, context)
     return { pushed: totalPushed, pulled: totalPulled }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -2526,6 +2554,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
+        void requestSyncCatchUp(context).catch(() => {})
         useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
         useSyncStore.getState().setConnectionLost(false)
         logEvent('info', 'realtime', `Subscribed to personal project`, `${pName} topic=${subTopic} chState=${chState}`)
@@ -2585,6 +2614,7 @@ function schedulePersonalReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           state.attempt = 0
           useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
+          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
           return
         }
@@ -2622,9 +2652,12 @@ export function pauseReconnectsForSuspend(): void {
  * when the browser comes back online, and by the SessionBanner manual retry.
  */
 export async function forceReconnectAllPersonal(): Promise<void> {
+  if (!navigator.onLine || isSuspended()) return
+  const context = await captureSyncContext()
   useSyncStore.getState().setConnectionLost(false)
   const supabase = await getSupabase()
   for (const [projectId, state] of personalChannelStates.entries()) {
+    if (!await context.isCurrent() || isSuspended() || !navigator.onLine) return
     if (state.cancelled) continue
     state.attempt = 0
     if (state.reconnectTimer) {
@@ -2639,12 +2672,15 @@ export async function forceReconnectAllPersonal(): Promise<void> {
       }
       try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
     }
+    if (state.cancelled || !await context.isCurrent()) continue
     await createPersonalChannel(projectId, state)
   }
-  // Force the per-user channel too — same resume/online/manual-retry triggers.
-  void import('./UserChannelService').then(({ forceReconnectUserChannel }) =>
-    forceReconnectUserChannel().catch(() => {})
-  )
+  await Promise.all([
+    requestSyncCatchUp(context),
+    import('./UserChannelService').then(async ({ forceReconnectUserChannel }) => {
+      if (await context.isCurrent()) await forceReconnectUserChannel()
+    })
+  ])
 }
 
 /**
@@ -2762,18 +2798,7 @@ export function startOnlineMonitoring(): () => void {
     void import('./SyncService').then(({ forceReconnectAllShared }) =>
       forceReconnectAllShared().catch(() => {})
     )
-    // Flush sync queue on reconnect, then run a reconcile pass to detect/repair drift
-    import('./SyncService').then(({ processSyncQueue }) => {
-      processSyncQueue().then((count) => {
-        if (count > 0) console.log(`[PersonalSync] Flushed ${count} queued changes`)
-        import('../shared/stores/authStore').then(({ useAuthStore }) => {
-          const userId = useAuthStore.getState().currentUser?.id
-          if (userId) {
-            reconcile(userId).catch((err) => console.error('[PersonalSync] Reconnect reconcile failed:', err))
-          }
-        })
-      })
-    })
+
   }
 
   const handleOffline = (): void => {

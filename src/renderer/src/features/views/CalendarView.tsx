@@ -1,4 +1,4 @@
-import { localDateKey } from '../../../../shared/localDate'
+import { calendarDateKey, localDateKey } from '../../../../shared/localDate'
 import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Repeat } from 'lucide-react'
@@ -162,11 +162,11 @@ export function CalendarView(): React.JSX.Element {
     for (const task of calendarTasks) {
       // Add to due date
       if (task.due_date) {
-        addToDate(task.due_date.split('T')[0], task, false)
+        addToDate(calendarDateKey(task.due_date), task, false)
       }
       // Add My Day tasks to today (even if they also have a due date on another day)
       if (task.is_in_my_day === 1) {
-        const dueDateStr = task.due_date ? task.due_date.split('T')[0] : null
+        const dueDateStr = task.due_date ? calendarDateKey(task.due_date) : null
         if (dueDateStr !== todayStr) {
           addToDate(todayStr, task, true)
         } else {
@@ -178,7 +178,7 @@ export function CalendarView(): React.JSX.Element {
       if (task.recurrence_rule && task.due_date) {
         const config = parseRecurrence(task.recurrence_rule)
         if (config && !config.afterCompletion) {
-          const dueDateStr = task.due_date.split('T')[0]
+          const dueDateStr = calendarDateKey(task.due_date)
           let cursor = new Date(dueDateStr + 'T00:00:00')
           // Generate up to 60 occurrences to cover the visible grid
           for (let i = 0; i < 60; i++) {

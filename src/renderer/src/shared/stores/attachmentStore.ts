@@ -11,7 +11,7 @@ interface AttachmentState {
 
 interface AttachmentActions {
   hydrateAttachments(taskId: string): Promise<void>
-  addAttachment(attachment: Attachment): void
+  addAttachment(attachment: Attachment, origin: ReturnType<typeof hydrationContext>): Promise<void>
   removeAttachment(id: string): Promise<boolean>
   clearAttachments(): void
 }
@@ -44,7 +44,8 @@ export const useAttachmentStore = createWithEqualityFn<AttachmentStore>((set) =>
     }
   },
 
-  addAttachment(attachment: Attachment): void {
+  async addAttachment(attachment: Attachment, origin: ReturnType<typeof hydrationContext>): Promise<void> {
+    if (!await origin.isCurrent()) return
     set((state) => ({
       attachments: { ...state.attachments, [attachment.id]: attachment }
     }))

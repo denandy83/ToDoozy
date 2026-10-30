@@ -127,3 +127,45 @@ it('includes a local-today timestamp in automatic My Day when its UTC date diffe
     else process.env.TZ=previous
   }
 })
+
+it('tombstones native and remotely deleted subtrees and validates ancestor-first restoration',()=>{
+  task('root');task('child','root');task('grandchild','child');task('sibling')
+  const originals=['root','child','grandchild'].map(id=>repos.tasks.findById(id)!)
+  expect(repos.tasks.delete('root')).toBe(true)
+  expect(repos.tasks.delete('root')).toBe(false)
+  for(const row of originals)expect(repos.tasks.findById(row.id)?.deleted_at).toBeTruthy()
+  expect(repos.tasks.update('sibling',{title:'Ordinary edit'})?.title).toBe('Ordinary edit')
+  const restoredAt=new Date(Date.now()+60_000).toISOString()
+  expect(()=>repos.tasks.applyRemoteTask({...originals[2],updated_at:restoredAt})).toThrow(/active task/)
+  for(const row of originals)repos.tasks.applyRemoteTask({...row,updated_at:restoredAt})
+  expect(repos.tasks.update('grandchild',{title:'Restored edit'})?.title).toBe('Restored edit')
+  const deletedAt=new Date(Date.now()+120_000).toISOString()
+  repos.tasks.applyRemoteTask({...originals[0],updated_at:deletedAt,deleted_at:deletedAt})
+  for(const row of originals)expect(repos.tasks.findById(row.id)?.deleted_at).toBe(deletedAt)
+  repos.tasks.applyRemoteTask({...originals[1],updated_at:restoredAt})
+  expect(repos.tasks.findById('child')?.deleted_at).toBe(deletedAt)
+})
+
+it.each(['tasks','statuses','attachments','activity_log','projects'])('retains every dependency of a queued %s record until acknowledgment',table=>{
+  task('root');task('child','root');task('grandchild','child')
+  const attachment=repos.attachments.create({id:'file',task_id:'grandchild',filename:'synthetic.txt',mime_type:'text/plain',size_bytes:3,file_data:Buffer.from('abc')})
+  repos.activityLog.create({id:'event',task_id:'grandchild',user_id:'u',action:'created'})
+  const old='2000-01-01T00:00:00.000Z'
+  for(const name of ['tasks','statuses','projects','attachments'])db.prepare(`UPDATE ${name} SET deleted_at=?`).run(old)
+  const id=({tasks:'grandchild',statuses:'open-p',attachments:attachment.id,activity_log:'event',projects:'p'} as Record<string,string>)[table]
+  const queue=new SyncQueueRepository(db)
+  const entry=queue.enqueue(table,id,'DELETE',JSON.stringify({id}))
+  expect(()=>purgeOldTombstones(db)).not.toThrow()
+  expect(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id)).toBeDefined()
+  if(['tasks','attachments','activity_log'].includes(table)) {
+    expect(repos.tasks.findById('root')).toBeDefined()
+    expect(repos.tasks.findById('child')).toBeDefined()
+    expect(repos.statuses.findById('open-p')).toBeDefined()
+  }
+  expect(repos.projects.findById('p')).toBeDefined()
+  queue.dequeue(entry.id)
+  purgeOldTombstones(db)
+  expect(repos.projects.findById('p')).toBeUndefined()
+  expect(repos.tasks.findById('grandchild')).toBeUndefined()
+  expect(db.prepare('SELECT id FROM attachments WHERE id=?').get('file')).toBeUndefined()
+})

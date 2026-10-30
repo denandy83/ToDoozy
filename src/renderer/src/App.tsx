@@ -1,3 +1,4 @@
+import { captureSyncContext } from './services/syncContext'
 import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
@@ -213,20 +214,17 @@ function App(): React.JSX.Element {
       const { pullNewTasks, pullProjectMetadata, resetRefreshGate, cacheProjectNames } = await import('./services/PersonalSyncService')
       resetRefreshGate()
 
-      const allProjects = await window.api.projects.getProjectsForUser(userId)
+      const context = await captureSyncContext(() => !disposed && navigator.onLine && !isSuspended())
+      const allProjects = await context.api.projects.getProjectsForUser(userId)
       cacheProjectNames(allProjects)
-      // Personal-pull is for personal projects only. Shared projects sync via
-      // SyncService Realtime — running pullNewTasks on them re-pushes archived
-      // rows back to remote (see PersonalSyncService.ts:1128).
-      const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
       let anyChanged = false
-      for (const project of personalProjects) {
+      for (const project of allProjects) {
         if (disposed || isSuspended() || useAuthStore.getState().currentUser?.id !== userId) return
         if (project.is_archived === 1) {
-          if (await pullProjectMetadata(project.id).catch(()=>false)) anyChanged=true
-          if ((await window.api.projects.findById(project.id))?.is_archived !== 0) continue
+          if (await pullProjectMetadata(project.id, context).catch(()=>false)) anyChanged=true
+          if ((await context.api.projects.findById(project.id))?.is_archived !== 0) continue
         }
-        const pulled = await pullNewTasks(project.id).catch(() => 0)
+        const pulled = await pullNewTasks(project.id, context).catch(() => 0)
         if (pulled > 0) anyChanged = true
       }
       if (disposed || useAuthStore.getState().currentUser?.id !== userId) return

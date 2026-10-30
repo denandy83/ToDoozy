@@ -71,7 +71,7 @@ beforeEach(async () => {
     CREATE TABLE user_labels(id uuid PRIMARY KEY,user_id uuid,name text,color text,order_index integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE project_labels(project_id uuid,label_id uuid,created_at timestamptz,deleted_at timestamptz,PRIMARY KEY(project_id,label_id));
     CREATE TABLE activity_log(id uuid,project_id uuid,created_at timestamptz);`)
-  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261030052303_project_archive_version.sql']) {
+  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261030052303_project_archive_version.sql','20261030221433_task_hierarchy_guard.sql']) {
     await remote.exec(readFileSync(new URL(`../../../../supabase/migrations/${file}`,import.meta.url),'utf8'))
   }
   await remote.query('INSERT INTO projects(id,owner_id,deleted_at) VALUES($1,$2,NULL)',[project,owner])
@@ -994,4 +994,27 @@ it.each([0,1].flatMap((shared)=>['push','remap'].flatMap((caller)=>['Family','É
     for(const link of (await remote.query('SELECT * FROM project_labels WHERE project_id=$1',[project])).rows) fresh.labels.applyRemoteProjectLabel(JSON.parse(JSON.stringify(link)))
     expect(fresh.labels.findByProjectId(project).map((row)=>row.id)).toEqual([family.unrelated])
   } finally {observer.close()}
+},15000)
+
+it('propagates a native subtree deletion through queued root replay and remote tombstones',async()=>{
+  const child=id(1001),grandchild=id(1002)
+  for(const [key,parent] of [[child,task],[grandchild,child]]) {
+    repos.tasks.create({id:key,parent_id:parent,project_id:project,owner_id:owner,status_id:open,title:key})
+    await remote.query('INSERT INTO tasks(id,parent_id,project_id,status_id,owner_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)',[key,parent,project,open,owner,'2000-01-01T00:00:00Z'])
+  }
+  await invoke('tasks:delete',task)
+  for(const key of [task,child,grandchild])expect(repos.tasks.findById(key)?.deleted_at).toBeTruthy()
+  repos.syncQueue.enqueue('tasks',task,'DELETE',JSON.stringify({id:task}))
+  setOnlineStatus(true)
+  expect(await processSyncQueue()).toBe(1)
+  expect((await remote.query('SELECT id FROM tasks WHERE deleted_at IS NULL')).rows).toEqual([])
+  for(const key of [task,child,grandchild]) {
+    const row=(await remote.query('SELECT * FROM tasks WHERE id=$1',[key])).rows[0]
+    repos.tasks.applyRemoteTask({...repos.tasks.findById(key)!,deleted_at:String(row.deleted_at),updated_at:String(row.updated_at)})
+    expect(repos.tasks.findById(key)?.deleted_at).toBeTruthy()
+  }
+  await expect(remote.query('UPDATE tasks SET deleted_at=NULL WHERE id=$1',[grandchild])).rejects.toThrow(/active task/)
+  for(const key of [task,child,grandchild])await remote.query('UPDATE tasks SET deleted_at=NULL WHERE id=$1',[key])
+  await remote.query('UPDATE tasks SET title=$1 WHERE id=$2',['Ordinary restored edit',grandchild])
+  expect((await remote.query('SELECT title FROM tasks WHERE id=$1',[grandchild])).rows[0].title).toBe('Ordinary restored edit')
 },15000)

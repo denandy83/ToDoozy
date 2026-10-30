@@ -37,6 +37,7 @@ import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
 import {
   pullNewTasks,
+  requestSyncCatchUp,
   unsubscribePersonalProject,
   getCachedProjectName
 } from './PersonalSyncService'
@@ -217,6 +218,8 @@ async function handleMembershipDelete(
 }
 
 async function createUserChannel(state: UserChannelState): Promise<void> {
+  const context = await captureSyncContext()
+  if (state.cancelled || useAuthStore.getState().currentUser?.id !== state.userId) return
   const supabase = await getSupabase()
   const { userId } = state
   const channel = supabase
@@ -269,6 +272,7 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
         ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
         : '(no err)'
       if (status === 'SUBSCRIBED') {
+        void requestSyncCatchUp(context).catch(() => {})
         useSyncStore.getState().setChannelHealth(`user:${userId}`, true)
         state.attempt = 0
         logEvent('info', 'realtime', 'Subscribed to user channel', `user=${userId.slice(0, 8)} chState=${chState}`)
@@ -324,6 +328,7 @@ function scheduleUserChannelReconnect(): void {
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
           state.attempt = 0
+          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
           logEvent('info', 'realtime', 'User-channel reconnect skipped — channel auto-rejoined')
           return
         }
@@ -344,8 +349,12 @@ export function pauseUserChannelReconnect(): void {
 
 /** Reset the attempt counter and force a fresh subscribe (resume/online/manual retry). */
 export async function forceReconnectUserChannel(): Promise<void> {
+  if (!navigator.onLine || isSuspended()) return
   const state = userChannelState
   if (!state || state.cancelled) return
+  const context = await captureSyncContext()
+  await requestSyncCatchUp(context)
+  if (state.cancelled || !await context.isCurrent()) return
   state.attempt = 0
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)

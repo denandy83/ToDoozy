@@ -312,6 +312,7 @@ export class TaskRepository {
   // Using create()/update() in sync code stamps NOW into updated_at, which makes
   // the row look "local-newer" on the next pull and triggers a redundant push.
   applyRemoteTask(task: Task): Task {
+    if (!this.db.isTransaction) return withTransaction(this.db, () => this.applyRemoteTask(task))
     const existing = this.findById(task.id)
     if (existing?.deleted_at && !isRemoteNewer(existing.updated_at, task.updated_at)) return existing
     const pendingDeletion = existing && (this.db.prepare("SELECT payload FROM sync_queue WHERE table_name='statuses'").all() as Array<{ payload: string }>).some(({ payload }) => {
@@ -382,6 +383,7 @@ export class TaskRepository {
         toCanonicalIso(task.deleted_at ?? null),
         toCanonicalIso(task.archive_updated_at ?? null)
       )
+    if (task.deleted_at) this.tombstoneSubtree(task.id, task.deleted_at, task.updated_at)
     return this.findById(task.id)!
   }
 
@@ -392,11 +394,20 @@ export class TaskRepository {
   delete(id: string): boolean {
     const existing = this.findById(id)
     if (!existing || existing.deleted_at) return false
-    const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at) + 1)).toISOString()
-    const result = this.db
-      .prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
-      .run(now, now, id)
-    return result.changes > 0
+    const latest = this.db.prepare(`WITH RECURSIVE subtree(id) AS (
+      SELECT id FROM tasks WHERE id=? UNION SELECT t.id FROM tasks t JOIN subtree s ON t.parent_id=s.id
+    ) SELECT MAX(updated_at) AS updated_at FROM tasks WHERE id IN (SELECT id FROM subtree)`).get(id) as { updated_at: string }
+    const now = new Date(Math.max(Date.now(), Date.parse(latest.updated_at) + 1)).toISOString()
+    return this.tombstoneSubtree(id, now, now) > 0
+  }
+
+  private tombstoneSubtree(id: string, deletedAt: string, updatedAt: string): number {
+    const result = this.db.prepare(`WITH RECURSIVE subtree(id) AS (
+      SELECT id FROM tasks WHERE id=?
+      UNION SELECT t.id FROM tasks t JOIN subtree s ON t.parent_id=s.id
+    ) UPDATE tasks SET deleted_at=?, updated_at=MAX(updated_at, ?)
+      WHERE id IN (SELECT id FROM subtree) AND deleted_at IS NULL`).run(id, deletedAt, updatedAt)
+    return Number(result.changes)
   }
 
   /**

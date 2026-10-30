@@ -7,9 +7,13 @@ import { useAttachmentStore } from './attachmentStore'
 import { useTaskStore } from './taskStore'
 import { useTimerStore } from './timerStore'
 import { useNotificationStore } from './notificationStore'
+import { useSettingsStore } from './settingsStore'
+import { captureSyncProducer } from '../../services/syncContext'
+import { hydrationContext } from './hydrationContext'
 import * as personalSync from '../../services/PersonalSyncService'
 
 vi.mock('../../services/PersonalSyncService',()=>({
+  pushSetting:vi.fn(),pushTheme:vi.fn().mockResolvedValue(undefined),deleteThemeFromSupabase:vi.fn().mockResolvedValue(undefined),deleteSettingFromSupabase:vi.fn().mockResolvedValue(undefined),
   pushProjectArea:vi.fn().mockResolvedValue(undefined),
   pushProjectTemplate:vi.fn().mockResolvedValue(undefined),
   pushSavedView:vi.fn().mockResolvedValue(undefined),
@@ -200,4 +204,98 @@ it('carries a delayed callback across an automatically started break',()=>{
   vi.advanceTimersByTime(1000)
   expect(useTimerStore.getState().phase).toBe('break')
   expect(useTimerStore.getState().remainingSeconds).toBe(239)
+})
+
+it.each(['settings','themes','config'])('discards late %s hydration after account/database replacement',async(kind)=>{
+  let finish!:(value:unknown)=>void
+  let entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  const read=()=>{entered();return new Promise(resolve=>{finish=resolve})}
+  Object.assign(window.api,{settings:{getAll:read},themes:{list:read,getConfig:read}})
+  useSettingsStore.getState().setUserId('a')
+  const pending=kind==='settings'?useSettingsStore.getState().hydrateSettings():kind==='themes'?useSettingsStore.getState().hydrateThemes():useSettingsStore.getState().getThemeConfig('shared')
+  await started
+  generation++;useAuthStore.setState({currentUser:{id:'b'} as never})
+  useSettingsStore.setState({userId:'b',settings:{api_key:'B key'},themes:{},error:null})
+  finish(kind==='settings'?[{key:'api_key',value:'A key'}]:[{id:'private-a',name:'Private A'}])
+  const value=await pending
+  if(kind==='config')expect(value).toBeNull()
+  expect(useSettingsStore.getState().settings).toEqual({api_key:'B key'})
+  expect(useSettingsStore.getState().themes).toEqual({})
+  expect(useSettingsStore.getState().error).toBeNull()
+})
+
+it.each([
+  {namespace:'settings',method:'set',run:()=>useSettingsStore.getState().setSetting('theme_id','a-theme')},
+  {namespace:'settings',method:'setMultiple',run:()=>useSettingsStore.getState().setMultipleSettings([{key:'theme_id',value:'a-theme'}])},
+  {namespace:'settings',method:'delete',run:()=>useSettingsStore.getState().deleteSetting('theme_id')},
+  {namespace:'themes',method:'create',run:()=>useSettingsStore.getState().createTheme({id:'shared',name:'Private A',mode:'dark',config:'{}'})},
+  {namespace:'themes',method:'update',run:()=>useSettingsStore.getState().updateTheme('shared',{name:'Private A'})},
+  {namespace:'themes',method:'delete',run:()=>useSettingsStore.getState().deleteTheme('shared')}
+])('fences late $namespace.$method replies and every sync continuation',async({namespace,method,run})=>{
+  let finish!:(value:unknown)=>void
+  let entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  const get=vi.fn().mockResolvedValue(null),list=vi.fn().mockResolvedValue([])
+  Object.assign(window.api,{settings:{get},themes:{list},[namespace]:{get,list,[method]:()=>{entered();return new Promise(resolve=>{finish=resolve})}}})
+  useSettingsStore.getState().setUserId('a')
+  const pending=run()
+  const cancelled=expect(pending).rejects.toThrow(/Sync account or database changed/)
+  await started
+  generation++
+  useAuthStore.setState({currentUser:{id:'b'} as never})
+  useSettingsStore.setState({userId:'b',settings:{theme_id:'b-theme'},themes:{shared:{id:'shared',name:'Private B'} as never}})
+  finish(method==='delete'?true:{id:'shared',name:'Private A',owner_id:'a'})
+  await cancelled;await Promise.resolve()
+  expect(useSettingsStore.getState().settings).toEqual({theme_id:'b-theme'})
+  expect(useSettingsStore.getState().themes.shared.name).toBe('Private B')
+  expect(useSettingsStore.getState().error).toBeNull()
+  expect(get).not.toHaveBeenCalled();expect(list).not.toHaveBeenCalled()
+  for(const publish of Object.values(personalSync))expect(publish).not.toHaveBeenCalled()
+})
+
+it('preserves current-account settings/theme mutation and refresh behavior',async()=>{
+  const settings=new Map<string,string|null>()
+  const themes=new Map<string,unknown>()
+  Object.assign(window.api,{
+    settings:{getAll:async()=>[...settings].map(([key,value])=>({key,value})),get:async(_u:string,key:string)=>settings.get(key)??null,
+      set:async(_u:string,key:string,value:string|null)=>{settings.set(key,value)},setMultiple:async(_u:string,values:Array<{key:string;value:string|null}>)=>{for(const row of values)settings.set(row.key,row.value)},delete:async(_u:string,key:string)=>settings.delete(key)},
+    themes:{list:async()=>[...themes.values()],create:async(input:Record<string,unknown>)=>{themes.set(String(input.id),input);return input},update:async(id:string,input:Record<string,unknown>)=>{const result={...themes.get(id) as object,...input};themes.set(id,result);return result},delete:async(id:string)=>themes.delete(id),getConfig:async()=>({bg:'#000'})}
+  })
+  const store=useSettingsStore.getState();store.setUserId('a')
+  await store.setSetting('theme_id','custom')
+  await store.setMultipleSettings([{key:'ordinary',value:'normal'}])
+  await store.createTheme({id:'custom',name:'Custom',mode:'dark',config:'{}'})
+  await store.updateTheme('custom',{name:'Updated'})
+  await store.hydrateSettings();await store.hydrateThemes()
+  expect(useSettingsStore.getState().themes.custom.name).toBe('Updated')
+  expect(useSettingsStore.getState().currentThemeId).toBe('custom')
+  expect(await store.getThemeConfig('custom')).toEqual({bg:'#000'})
+  await store.deleteSetting('ordinary');await store.deleteTheme('custom')
+  expect(useSettingsStore.getState().settings.ordinary).toBeUndefined()
+  expect(useSettingsStore.getState().themes).toEqual({})
+})
+
+it('rejects stale attachment additions on a database-only replacement',async()=>{
+  const origin=hydrationContext()
+  generation++
+  await useAttachmentStore.getState().addAttachment({id:'old-file',task_id:'shared'} as never,origin)
+  expect(useAttachmentStore.getState().attachments).toEqual({})
+  await useAttachmentStore.getState().addAttachment({id:'current-file',task_id:'shared'} as never,hydrationContext())
+  expect(Object.keys(useAttachmentStore.getState().attachments)).toEqual(['current-file'])
+})
+
+it('stops database operations at the captured lifecycle boundary and resumes ordinary operations with a fresh context',async()=>{
+  let active=true
+  const write=vi.fn().mockResolvedValue(undefined)
+  Object.assign(window.api,{settings:{set:write}})
+  const origin=captureSyncProducer(()=>active)
+  active=false
+  await expect(origin.api.settings.set('a','ordinary','value')).rejects.toThrow('Sync paused')
+  expect(await origin.isCurrent()).toBe(false)
+  expect(write).not.toHaveBeenCalled()
+  active=true
+  const fresh=captureSyncProducer(()=>active)
+  await fresh.api.settings.set('a','ordinary','value')
+  expect(write).toHaveBeenCalledOnce()
 })

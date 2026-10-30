@@ -4,7 +4,9 @@ export function addDaysPreservingTime(baseDueDate: string | null | undefined, da
   const target = new Date()
   target.setDate(target.getDate() + days)
   if (baseDueDate && baseDueDate.includes('T')) {
-    return localDateKey(target) + 'T' + baseDueDate.split('T')[1]
+    const parsed = new Date(baseDueDate)
+    target.setHours(parsed.getHours(), parsed.getMinutes(), parsed.getSeconds(), parsed.getMilliseconds())
+    return target.toISOString()
   }
   return localDateKey(target)
 }

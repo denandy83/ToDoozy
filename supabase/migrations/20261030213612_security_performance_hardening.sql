@@ -98,6 +98,16 @@ DROP POLICY IF EXISTS "Invite can be accepted" ON public.project_invites;
 CREATE POLICY "Owners manage their invitations" ON public.project_invites
   FOR SELECT TO authenticated USING (EXISTS (
     SELECT 1 FROM public.projects p WHERE p.id=project_invites.project_id AND p.owner_id=(SELECT auth.uid())));
+CREATE OR REPLACE FUNCTION public.confirmed_invite_email()
+RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+  SELECT lower(btrim(u.email)) FROM auth.users u
+  WHERE u.id=auth.uid() AND u.email_confirmed_at IS NOT NULL;
+$$;
+REVOKE ALL ON FUNCTION public.confirmed_invite_email() FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.confirmed_invite_email() TO authenticated;
+CREATE POLICY "Recipients read pending invitations" ON public.project_invites
+  FOR SELECT TO authenticated USING (status='pending' AND expires_at>now()
+    AND lower(btrim(target_email))=(SELECT public.confirmed_invite_email()));
 CREATE POLICY "Owners update their invitations" ON public.project_invites
   FOR UPDATE TO authenticated USING (EXISTS (
     SELECT 1 FROM public.projects p WHERE p.id=project_invites.project_id AND p.owner_id=(SELECT auth.uid())))

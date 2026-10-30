@@ -5,18 +5,23 @@ import { migrations } from '../../../main/database/migrations'
 import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
-import { fullPull, reconcile, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
-import { syncProjectDown, processSyncQueue, setOnlineStatus } from './SyncService'
+import { fullPull, reconcile, requestSyncCatchUp, forceReconnectAllPersonal, subscribeToPersonalProject, unsubscribeAllPersonal, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
+import { syncProjectDown, processSyncQueue, setOnlineStatus, subscribeToProject, forceReconnectAllShared, unsubscribeAll } from './SyncService'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshSearchIndex } from './searchSync'
 import { refreshProjectLabels } from './remoteProjectRefresh'
-import type { SyncContext } from './syncContext'
+import { captureSyncContext, type SyncContext } from './syncContext'
+import { subscribeToUserChannel, forceReconnectUserChannel, unsubscribeUserChannel } from './UserChannelService'
+import { useSyncStore } from '../shared/stores/syncStore'
+import { isSuspended } from './powerState'
 
+vi.mock('./powerState',()=>({isSuspended:vi.fn(()=>false)}))
+vi.mock('./sessionRecovery',()=>({requireSession:vi.fn(async()=>({user:{id:'u'},access_token:'synthetic'}))}))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
-vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateLabels: async () => {} }) } }))
+vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateAllLabels: async () => {}, hydrateLabels: async () => {} }) } }))
 vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))
 
 let db: DatabaseSync
@@ -28,6 +33,8 @@ let failedTable: string | null
 let pageCounts: Record<string, number>
 let projectId: string
 let sequence = 0
+let channels: Array<{ state: string; status: (status:string) => void }>
+let beforeQuery: (() => Promise<void>) | null
 
 function parts(value: string): string[] {
   let depth = 0, quoted = false, start = 0
@@ -51,7 +58,12 @@ function matches(row: Record<string, unknown>, predicate: string): boolean {
   return operator === 'eq' ? row[key] === value : String(row[key]) > String(value)
 }
 function makeClient(): SupabaseClient {
-  return { from(table: string) {
+  return {
+    channel() {
+      const channel={state:'joined',status:(_status:string)=>{},on(){return channel},subscribe(callback:(status:string)=>void){channel.status=callback;channels.push(channel);return channel}}
+      return channel
+    }, removeChannel:async()=>{},
+    from(table: string) {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
     let limit = 1000, columns = '*'
@@ -73,7 +85,8 @@ function makeClient(): SupabaseClient {
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
       maybeSingle: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
-      then(resolve: (value: unknown) => unknown) {
+      async then(resolve: (value: unknown) => unknown) {
+        if(beforeQuery){const callback=beforeQuery;beforeQuery=null;await callback()}
         if (values) {
           if (table === 'tasks' && rejectedStatus && values.some((row) => row.status_id === rejectedStatus)) return Promise.resolve(resolve({ data: null, error: { message: 'Status must be active and belong to the task project' } }))
           for (const value of values) {
@@ -105,6 +118,7 @@ function makeClient(): SupabaseClient {
   }, rpc: async () => ({ data: [], error: null }) } as unknown as SupabaseClient
 }
 beforeEach(() => {
+  vi.mocked(captureSyncContext).mockClear()
   projectId = `project-${++sequence}`
   db = new DatabaseSync(':memory:')
   db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
@@ -113,12 +127,15 @@ beforeEach(() => {
   repo.users.create({ id: 'u', email: 'u@example.invalid', display_name: null, avatar_url: null })
   repo.projects.create({ id: projectId, owner_id: 'u', name: 'Project' })
   repo.statuses.create({ id: 'open', project_id: projectId, name: 'Open' })
+  channels=[];beforeQuery=null;vi.mocked(isSuspended).mockReturnValue(false)
   rows = {}; pageCounts = {}; failedTable = null; rejectedStatus = null
   const client = makeClient()
   const api = new Proxy({}, {
     get: (_, ns: keyof typeof repo) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
         if (String(ns) === 'sync') {
+          if (method === 'captureContext') return {userId:'u',generation:sequence}
+          if (method === 'invokeContext') {const [,channel,values]=args;const [namespace,operation]=String(channel).split(':');return (api as Record<string,Record<string,(...args:unknown[])=>unknown>>)[namespace][operation](...values as unknown[])}
           if (method === 'getQueue') return repo.syncQueue.findAll()
           if (method === 'count') return repo.syncQueue.count()
           if (method === 'dequeue') return repo.syncQueue.dequeue(String(args[0]))
@@ -132,9 +149,9 @@ beforeEach(() => {
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })
-  useAuthStore.setState({ currentUser: { id: 'u' } as never })
+  useAuthStore.setState({ currentUser: { id: 'u' } as never, isOffline:false })
 })
-afterEach(() => { db.close(); vi.unstubAllGlobals() })
+afterEach(async () => { await unsubscribeAllPersonal();await unsubscribeAll();await unsubscribeUserChannel();db.close();vi.unstubAllGlobals() })
 
 it('persists every task and status beyond the API cap before advancing either watermark', async () => {
   const stamp = '2026-01-01T00:00:00.000Z'
@@ -446,4 +463,66 @@ it.each([0,1])('keeps clock-ahead family removal through public reconciliation a
     expect(rows.task_labels).toEqual([{task_id:task.id,label_id:label.id,deleted_at:null}])
     expect(repo.labels.findByTaskId(task.id).map((row)=>row.id)).toEqual([label.id])
   } finally {vi.useRealTimers()}
+})
+
+it('reconciles shared and user data on resume even when every channel rejoined while suspended',async()=>{
+  repo.projects.update(projectId,{is_shared:1})
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  await subscribeToProject(projectId)
+  await subscribeToUserChannel('u',{subscribePersonalProject:async()=>{}})
+  vi.mocked(isSuspended).mockReturnValue(true)
+  for(const channel of channels)channel.status('SUBSCRIBED')
+  await Promise.resolve();await Promise.resolve()
+  expect(useSyncStore.getState().realtimeConnected).toBe(true)
+  rows.tasks=[{id:'missed-shared',project_id:projectId,status_id:'open',owner_id:'u',title:'Missed shared task',created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  rows.user_labels=[{id:'missed-label',user_id:'u',name:'Missed label',color:'#fff',order_index:0,created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  const channelCount=channels.length
+  vi.mocked(isSuspended).mockReturnValue(false)
+  await Promise.all([forceReconnectAllShared(),forceReconnectUserChannel()])
+  expect(channels).toHaveLength(channelCount)
+  expect(repo.tasks.findById('missed-shared')?.title).toBe('Missed shared task')
+  expect(repo.labels.findById('missed-label')?.name).toBe('Missed label')
+})
+
+it('retries personal catch-up on an already joined channel and coalesces concurrent sweeps',async()=>{
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  await subscribeToPersonalProject(projectId,()=>{})
+  vi.mocked(isSuspended).mockReturnValue(true)
+  channels[0].status('SUBSCRIBED')
+  vi.mocked(isSuspended).mockReturnValue(false)
+  let finish!:()=>void,entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  beforeQuery=()=>{entered();return new Promise(resolve=>{finish=resolve})}
+  const first=forceReconnectAllPersonal();await started
+  const rest=Array.from({length:5},()=>requestSyncCatchUp(context))
+  await Promise.resolve();await Promise.resolve()
+  rows.tasks=[{id:'missed-personal',project_id:projectId,status_id:'open',owner_id:'u',title:'Missed personal task',created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  finish();await Promise.all([first,...rest])
+  expect(repo.tasks.findById('missed-personal')?.title).toBe('Missed personal task')
+  expect(pageCounts.tasks).toBeLessThanOrEqual(2)
+})
+
+it('keeps routine archived catch-up metadata-only and preserves explicit full reconciliation',async()=>{
+  repo.projects.update(projectId,{is_archived:1})
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  rows.tasks=[{id:'archived-missed',project_id:projectId,status_id:'open',owner_id:'u',title:'Archived task',is_archived:1,created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  await requestSyncCatchUp(context)
+  expect(pageCounts.tasks??0).toBe(0);expect(pageCounts.statuses??0).toBe(0);expect(pageCounts.activity_log??0).toBe(0)
+  expect(repo.tasks.findById('archived-missed')).toBeUndefined()
+  await reconcile('u')
+  expect(repo.tasks.findById('archived-missed')?.title).toBe('Archived task')
+})
+
+it('does no catch-up while suspended, offline or from an expired account context',async()=>{
+  vi.mocked(isSuspended).mockReturnValue(true)
+  await requestSyncCatchUp(context)
+  vi.mocked(isSuspended).mockReturnValue(false)
+  vi.stubGlobal('navigator',{onLine:false});await requestSyncCatchUp(context)
+  vi.stubGlobal('navigator',{onLine:true})
+  context.isCurrent=async()=>false;await requestSyncCatchUp(context)
+  expect(pageCounts).toEqual({})
+  expect(vi.mocked(captureSyncContext)).not.toHaveBeenCalled()
 })

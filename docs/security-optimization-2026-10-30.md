@@ -10,12 +10,12 @@ Do not equate a local benchmark with production disk I/O.
 | Audit references | Change |
 | --- | --- |
 | NAV-01 | Trusted-document preload and IPC checks, navigation/redirect/popup guards, sanitized timer descriptions. |
-| DB-01–06 | Owner-bound sharing; confirmed-email invitation lookup/acceptance; scoped invitation policies and profile reads; explicit named API grants. Ordinary members can update appearance columns only, preventing role escalation. |
-| TASK-01–05 | Recursive copies preserve references and completion; native copies roll back on failure. Parent validation rejects cycles and cross-project graphs. A prospective SQL trigger protects remote writes and restores too. |
+| DB-01–06 | Owner-bound sharing; confirmed-email invitation lookup/acceptance and recipient notification reads; scoped invitation policies and profile reads; explicit named API grants. Ordinary members can update appearance columns only, preventing role escalation. |
+| TASK-01–05 | Recursive copies preserve references and completion; native copies roll back on failure. Parent validation rejects cycles and cross-project graphs. Native and remote deletions tombstone the subtree; prospective SQL triggers protect remote writes and ancestor-first restores. |
 | VIEW-01–02 | Saved-view counts apply due-date and assignee filters; the renderer applies included/excluded assignees. |
 | DATE-01–03 | Monthly day/ordinal recurrence, local calendar date keys, local-day UTC boundaries, and local statistics grouping. |
-| SYNC-01 | Pending queued tombstones and status-delete dependencies survive age-based cleanup. |
-| STATE-01–03 | Account-owned caches/timers reset; stale hydration/mutation replies are fenced by account and database generation; attachment requests are ordered. |
+| SYNC-01 | Queued tombstones, FK prerequisites and cascade ancestors survive age-based cleanup until acknowledgment. |
+| STATE-01–03 | Account-owned caches/timers reset; stale hydration/mutation replies are fenced by account and database generation; settings/themes and file-dialog/create continuations share that boundary; attachment requests are ordered. |
 | TIMER-01 | Interval updates subtract elapsed time, including delayed callbacks and automatic phase transitions. |
 | MCP-01–04 | Stable complete pagination, query failures propagate, rejected/zero-row reorders fail, and release-note writes require a server administrator allowlist. |
 | BOT-01–03 | Explicit service-role membership/owner scope, active-row filters, pagination, bounded recent queries and useful partial creation errors when label writes fail. |
@@ -51,7 +51,13 @@ Observed request counts for 20 unchanged projects: 80 → 60; healthy fallback
 timer traffic: 80 → 0; three reconnect flaps: 320 → 180; maximum concurrent
 catch-up pulls: 3 → 1. Four archived projects reduce the initial 80 requests to
 52. Background archived pulls read project metadata; explicit pulls retain full
-reconciliation. See the dated report for paired timings and index measurements.
+reconciliation. These counts cover the initial and health-driven project sweep;
+the transport fixture stubs channel-triggered reconciliation and does not measure
+resume/rejoin reconciliation traffic. Resume/rejoin now explicitly requests the
+serialized reconciliation for personal, shared and user-scoped data, independently
+of aggregate health. Routine catch-up keeps archived projects metadata-only;
+explicit reconciliation includes their tasks, statuses, activity and labels.
+See the dated report for the original paired timings and index measurements.
 
 Local PGlite/Postgres query timings and cloud `pg_stat_io`/WAL snapshots are
 separate evidence. The latter are cumulative database counters, not host disk or

@@ -21,10 +21,11 @@ export interface SyncProducer {
   scope(): Promise<string>
 }
 
-export function captureSyncProducer(): SyncProducer {
+export function captureSyncProducer(active: () => boolean = () => true): SyncProducer {
   const userId = useAuthStore.getState().currentUser?.id
   const database = window.api.sync.captureContext()
   const assertCurrent = (): void => {
+    if (!active()) throw new Error('Sync paused')
     if (!userId || useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed or signed out')
   }
   const assertDatabase = async (): Promise<void> => {
@@ -71,8 +72,8 @@ export async function withSyncProducer(operation: (origin: SyncProducer) => Prom
   }
 }
 
-export async function captureSyncContext(): Promise<SyncContext> {
-  const origin = captureSyncProducer()
+export async function captureSyncContext(active?: () => boolean): Promise<SyncContext> {
+  const origin = captureSyncProducer(active)
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
