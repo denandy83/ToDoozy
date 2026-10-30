@@ -4,18 +4,18 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
-## v1.11.0 (release candidate)
+## v1.11.0
 
 - **Consistent motion** — Shared fades and movement for menus, pickers, popups, dialogs, panels and notifications, with immediate keyboard navigation and reduced-motion support. Dragging uses readable ghosts and consistent settling feedback.
 - **Softer themes and colors** — Eight pastel swatches throughout theme adjustments and other color pickers; Soft Lavender, Soft Sage and Soft Blush in light/dark pairs; clearer contrast and an explicit text-contrast repair action.
 - **Interface refinement** — Approved heading, task row, detail panel and control changes. The existing sidebar layout is preserved.
 - **Duplicate theme repair** — Built-in presets no longer upload as device-specific custom themes. On upgrade, duplicate preset copies are archived and retired, selections map to one preset per name/mode, and named custom themes remain intact. Old sync/queue replays cannot recreate the copies.
 
-Publication remains pending release validation, Apple notarization and the coordinated backend/client rollout described below.
+See the [release notes](RELEASE_NOTES.md#v1110--30-october-2026) for publication details and downloads.
 
 ## v1.10.0 (unreleased)
 
-Release and backend activation remain gated by the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade).
+See the [rollout receipt](scope.md#2026-10-30--v1110-activated-and-published) for desktop/backend activation status and the [coordinated writer upgrade](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade) for compatibility requirements.
 
 - **Project-label delivery** — Overlapping eager, queued, upload and reconciliation writes recheck current local intent after delivery; failed repair remains queued. Family clocks use the same accented-name comparison as the UI.
 - **Bot release validation** — The candidate container uses Node 22.23.2, matching CI, and generated bot output is excluded from lint without excluding handwritten sources.
@@ -26,7 +26,7 @@ Release and backend activation remain gated by the [coordinated writer upgrade](
 - **Descriptions stay intact** — Opening or leaving the description editor no longer saves untouched content. Remote updates cancel stale pending saves, and title-only MCP edits preserve the description.
 - **Shared project archive and restore** — Only the owner can archive a shared project for everyone. Settings → Projects → Archive provides a permanent way to restore it and its tasks.
 - **Consistent subtasks** — Archived children stay hidden, label filters retain matching nested children and their ancestors, and completed children follow active children with the newest completion first. Keyboard navigation uses the same order.
-- **Task-label removals converge** — Complete remote assignment snapshots now remove obsolete labels without dropping pending local choices. Shared and personal delivery preserve offline and buffered additions/removals, ordinary metadata edits avoid recreating removed assignments, and project-label chip updates stay within their project. Source repair awaits independent verification and signed release.
+- **Task-label removals converge** — Complete remote assignment snapshots now remove obsolete labels without dropping pending local choices. Shared and personal delivery preserve offline and buffered additions/removals, ordinary metadata edits avoid recreating removed assignments, and project-label chip updates stay within their project.
 - **Shared labels and sync reliability** — Project-label changes refresh across members, including renamed definitions. Failed writes remain queued for retry, obsolete buffered writes use current local intent, and account changes cannot replay another account's work.
 - **MCP improvements** — Task references support reference URLs. Status tools support creating, editing, deleting, ensuring and reordering statuses with owner checks, atomic task reassignment and default/done safeguards. Task updates reject a status from another project.
 - **File references and Quick Add** — File URLs retain their scheme and reveal the local target. Suggestion popups explain that typing filters the initial list.
