@@ -69,7 +69,7 @@ beforeEach(async () => {
     CREATE TABLE user_labels(id uuid PRIMARY KEY,user_id uuid,name text,color text,order_index integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE project_labels(project_id uuid,label_id uuid,created_at timestamptz,deleted_at timestamptz,PRIMARY KEY(project_id,label_id));
     CREATE TABLE activity_log(id uuid,project_id uuid,created_at timestamptz);`)
-  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261026102717_project_archive_version.sql']) {
+  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261030052303_project_archive_version.sql']) {
     await remote.exec(readFileSync(new URL(`../../../../supabase/migrations/${file}`,import.meta.url),'utf8'))
   }
   await remote.query('INSERT INTO projects(id,owner_id,deleted_at) VALUES($1,$2,NULL)',[project,owner])

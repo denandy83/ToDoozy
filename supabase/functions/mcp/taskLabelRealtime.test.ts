@@ -12,7 +12,7 @@ it('notifies meaningful assignment changes after the junction mutation without a
       CREATE FUNCTION record_task_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO public.events VALUES(NEW.id); RETURN NEW; END; $$;
       CREATE TRIGGER record_task_update AFTER UPDATE ON tasks FOR EACH ROW EXECUTE FUNCTION record_task_update();
       INSERT INTO tasks VALUES('t','2026-01-01',NULL);`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026111055_task_label_addition_realtime.sql', import.meta.url), 'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052324_task_label_addition_realtime.sql', import.meta.url), 'utf8'))
     const events=async()=> (await db.query<{n:number}>('SELECT count(*)::int AS n FROM events')).rows[0].n
     const before = (await db.query<{updated_at:string}>('SELECT updated_at::text FROM tasks')).rows[0].updated_at
     await db.exec("INSERT INTO task_labels VALUES('t','label',NULL)")
@@ -76,7 +76,7 @@ it('keeps junction notifications inside owner/member RLS and transaction boundar
       GRANT SELECT,UPDATE ON tasks TO authenticated;
       GRANT SELECT,INSERT,UPDATE,DELETE ON task_labels TO authenticated;
       GRANT SELECT ON members TO authenticated; GRANT INSERT ON events TO authenticated;`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026111055_task_label_addition_realtime.sql',import.meta.url),'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052324_task_label_addition_realtime.sql',import.meta.url),'utf8'))
     await db.exec("SET ROLE authenticated; SET request.jwt.claim.sub='owner'; INSERT INTO task_labels VALUES('shared','label',NULL)")
     await db.exec("SET request.jwt.claim.sub='member'; DELETE FROM task_labels WHERE task_id='shared'; INSERT INTO task_labels VALUES('shared','label',NULL)")
     await expect(db.exec("INSERT INTO task_labels VALUES('private','denied',NULL)")).rejects.toThrow(/row-level security/)

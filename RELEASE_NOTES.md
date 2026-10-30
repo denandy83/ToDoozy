@@ -4,12 +4,14 @@ User-facing changes by date. Most recent first.
 
 ---
 
-## v1.11.0 (release candidate)
+## v1.11.0 — 30 October 2026
 
 - Menus, popups, panels and notifications now share consistent fades and movement. Keyboard actions stay immediate, and dragging has clearer feedback.
 - Pastels are available for every theme color adjustment, alongside six new soft light/dark presets and improved contrast controls.
 - Refined task rows, headings, details and controls follow the selected design; the sidebar layout stays familiar.
 - Fixed the sync bug that created repeated copies of built-in themes. Upgrading cleans up those copies while keeping your theme choice and named custom themes.
+
+[Download the signed and notarized Mac release](https://github.com/denandy83/ToDoozy/releases/tag/v1.11.0). Update every device before reopening ToDoozy after the coordinated backend upgrade.
 
 ## v1.8.0
 

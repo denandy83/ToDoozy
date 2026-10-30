@@ -14,7 +14,7 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES ('p','owner','Original',0,'2026-01-01T00:00:00Z');
       INSERT INTO tasks(id,project_id,is_archived,updated_at,deleted_at) VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL);`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql', import.meta.url), 'utf8'))
     const client = { from(table: string) {
       let patch: Record<string, unknown> | null = null, columns = '*'
       const filters: Array<[string, unknown, string]> = []
@@ -101,7 +101,7 @@ it.each([0, 1])('keeps metadata versions independent of archive inheritance=%s',
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,description text,status_id text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES ('p','New','New description',${state},'2026-01-01T20:00Z');
       INSERT INTO tasks(id,project_id,title,description,status_id,is_archived,updated_at,deleted_at) VALUES ('t','p','New','New description','new-status',${state},'2026-01-01T20:00Z',NULL);`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql', import.meta.url), 'utf8'))
     await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T10:00Z';
       INSERT INTO tasks(id,project_id,title,description,status_id,is_archived,updated_at,deleted_at) VALUES ('t','p','Old','Old description','old-status',${1 - state},'2026-01-01T05:00Z',NULL)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,status_id=excluded.status_id,is_archived=excluded.is_archived,updated_at=excluded.updated_at;
@@ -136,7 +136,7 @@ it.each([0, 1])('inherits archive=%s on delayed INSERT/upsert and preserves meta
       INSERT INTO statuses VALUES ('open','p',0,NULL),('done','p',1,NULL);`)
     await db.exec(readFileSync(new URL('../../migrations/20261026094537_task_status_assignment_guard.sql', import.meta.url), 'utf8'))
     await db.exec(readFileSync(new URL('../../migrations/20261026105740_disable_legacy_status_consistency_guard.sql', import.meta.url), 'utf8'))
-    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql', import.meta.url), 'utf8'))
     await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T10:00Z';
       INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('insert','p','Pending','open',NULL,${1-state},'2026-01-01T05:00Z',NULL);
       INSERT INTO tasks(id,project_id,title,status_id,completed_date,is_archived,updated_at,deleted_at) VALUES ('upsert','p','Pending','done',NULL,${1-state},'2026-01-01T05:00Z',NULL)
@@ -174,7 +174,7 @@ it.each([0, 1])('accepts modern metadata without reversing archive=%s and accept
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES ('p','Project',${state},'2026-01-01T00:01Z');
       INSERT INTO tasks VALUES ('t','p','Old',${1-state},'2026-01-01T00:01Z',NULL);`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql', import.meta.url), 'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql', import.meta.url), 'utf8'))
     await db.exec(`UPDATE projects SET archive_updated_at='2026-01-01T00:10Z';
       UPDATE tasks SET is_archived=${state},archive_updated_at='2026-01-01T00:10Z';
       UPDATE tasks SET title='New metadata',updated_at='2026-01-01T00:12Z',is_archived=${1-state},archive_updated_at=NULL;`)
@@ -195,7 +195,7 @@ it.each([0,1])('supports old MCP partial archive=%s without mutating legacy proj
       CREATE TABLE tasks(id text PRIMARY KEY,project_id text,title text,is_archived integer,updated_at timestamptz,deleted_at timestamptz);
       INSERT INTO projects VALUES('p','Project',${1-state},'2020-01-01T01:00Z');
       INSERT INTO tasks VALUES('t','p','Keep title',${1-state},'2020-01-01T01:00Z',NULL),('deleted','p','Deleted',${1-state},'2020-01-01T05:00Z','2020-01-01T05:00Z');`)
-    await db.exec(readFileSync(new URL('../../migrations/20261026102717_project_archive_version.sql',import.meta.url),'utf8'))
+    await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql',import.meta.url),'utf8'))
     await db.exec(`UPDATE tasks SET is_archived=${state},updated_at='2020-01-01T06:00Z' WHERE id='t';`)
     expect((await db.query("SELECT is_archived,updated_at::text AS stamp FROM tasks WHERE id='t'")).rows[0]).toMatchObject({is_archived:state})
     await db.exec(`UPDATE projects SET is_archived=${1-state},archive_updated_at='2020-01-01T10:00Z';
