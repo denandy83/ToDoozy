@@ -1,4 +1,5 @@
 import type { DueDateRange } from '../stores/labelStore'
+import { localDateKey, calendarDateKey } from '../../../../shared/localDate'
 
 /**
  * Resolve a DueDateRange to absolute ISO date strings (YYYY-MM-DD).
@@ -21,7 +22,7 @@ export function resolveDueDateRange(range: DueDateRange): { from: string; to?: s
 }
 
 function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return localDateKey(d)
 }
 
 /**
@@ -37,20 +38,20 @@ export function matchesDueDateFilter(
     const now = new Date()
     const todayStr = toIsoDate(now)
     if (dueDatePreset === 'no_date') return !dueDate
-    if (dueDatePreset === 'overdue') return !!dueDate && dueDate < todayStr
-    if (dueDatePreset === 'today') return !!dueDate && dueDate.slice(0, 10) === todayStr
+    if (dueDatePreset === 'overdue') return !!dueDate && calendarDateKey(dueDate) < todayStr
+    if (dueDatePreset === 'today') return !!dueDate && calendarDateKey(dueDate) === todayStr
     if (dueDatePreset === 'this_week') {
       if (!dueDate) return false
       const endOfWeek = new Date(now)
       endOfWeek.setDate(now.getDate() + (7 - now.getDay()))
-      const dd = dueDate.slice(0, 10)
+      const dd = calendarDateKey(dueDate)
       return dd >= todayStr && dd <= toIsoDate(endOfWeek)
     }
   }
   if (dueDateRange) {
     const resolved = resolveDueDateRange(dueDateRange)
     if (!dueDate) return false
-    const dd = dueDate.slice(0, 10)
+    const dd = calendarDateKey(dueDate)
     if (dd < resolved.from) return false
     if (resolved.to && dd > resolved.to) return false
     return true

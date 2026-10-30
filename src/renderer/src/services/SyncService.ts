@@ -136,6 +136,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
         : '(no err)'
       if (status === 'SUBSCRIBED') {
+        useSyncStore.getState().setChannelHealth(`shared:${projectId}`, true)
         state.attempt = 0
         useSyncStore.getState().setConnectionLost(false)
         const pName = getCachedProjectName(projectId) ?? projectId
@@ -146,6 +147,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           useSyncStore.getState().setStatus('synced')
         }
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        useSyncStore.getState().setChannelHealth(`shared:${projectId}`, false)
         const pName = getCachedProjectName(projectId) ?? projectId
         console.warn(`[Realtime] Project subscription ${status} for "${pName}"`, err ?? '')
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
@@ -199,6 +201,7 @@ function scheduleSharedReconnect(projectId: string): void {
         // See: realtime wake-from-sleep storm fix.
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
+          useSyncStore.getState().setChannelHealth(`shared:${projectId}`, true)
           state.attempt = 0
           const currentStatus = useSyncStore.getState().status
           if (currentStatus === 'offline') useSyncStore.getState().setStatus('synced')
@@ -261,6 +264,7 @@ export async function subscribeToProject(projectId: string): Promise<void> {
     reconnectTimer: null
   }
   channels.set(projectId, state)
+  useSyncStore.getState().setChannelHealth(`shared:${projectId}`, false)
   await createSharedChannel(projectId, state)
 }
 
@@ -270,6 +274,8 @@ export async function subscribeToProject(projectId: string): Promise<void> {
 export async function unsubscribeFromProject(projectId: string): Promise<void> {
   const state = channels.get(projectId)
   if (state) {
+    channels.delete(projectId)
+    useSyncStore.getState().setChannelHealth(`shared:${projectId}`, null)
     state.cancelled = true
     if (state.reconnectTimer) {
       clearTimeout(state.reconnectTimer)
@@ -279,7 +285,6 @@ export async function unsubscribeFromProject(projectId: string): Promise<void> {
       const supabase = await getSupabase()
       try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
     }
-    channels.delete(projectId)
   }
 }
 
@@ -287,18 +292,20 @@ export async function unsubscribeFromProject(projectId: string): Promise<void> {
  * Unsubscribe from all Realtime channels.
  */
 export async function unsubscribeAll(): Promise<void> {
-  const supabase = await getSupabase()
-  for (const state of channels.values()) {
+  const removed = [...channels]
+  channels = new Map()
+  for (const [projectId,state] of removed) {
+    useSyncStore.getState().setChannelHealth(`shared:${projectId}`, null)
     state.cancelled = true
     if (state.reconnectTimer) {
       clearTimeout(state.reconnectTimer)
       state.reconnectTimer = null
     }
-    if (state.channel) {
-      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
-    }
   }
-  channels = new Map()
+  const supabase = await getSupabase()
+  for (const [,state] of removed) {
+    if (state.channel) try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+  }
 }
 
 // ── Write-Through Operations ────────────────────────────────────────

@@ -1,9 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
+import { trustedRendererUrl } from '../../../main/navigation-security'
 import { PGlite } from '@electric-sql/pglite'
 import { readFileSync } from 'node:fs'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { SupabaseClient, Session } from '@supabase/supabase-js'
 import { migrations } from '../../../main/database/migrations'
+import { purgeOldTombstones } from '../../../main/services/PurgeService'
 import { createRepositories } from '../../../main/repositories'
 import { useStatusStore } from '../shared/stores/statusStore'
 import { useAuthStore } from '../shared/stores/authStore'
@@ -28,7 +30,7 @@ vi.mock('../../../main/index', () => ({ registerQuickAddShortcut: vi.fn(), regis
 vi.mock('../../../main/tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
 vi.mock('../shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from '../../../main/ipc-handlers'
-const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(channel)!({}, ...args)
+const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 let beforeRpc: (() => Promise<void>) | null, afterRpc: (() => Promise<void>) | null, failTaskWrites: boolean, failRecovery: boolean, failRecoveryResponse: boolean
 let beforeLabelWrite: (()=>Promise<void>) | null
 let taskUpdates: Array<Record<string,unknown>>
@@ -44,7 +46,7 @@ let assignmentCompletions: string[]
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url,_key,options) => { pinned.token=options.accessToken; return pinned.client }) }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12,'0')}`
 const owner=id(1), project=id(2), open=id(3), source=id(4), done=id(5), task=id(6)
@@ -190,6 +192,26 @@ it('keeps default/done statuses and validates replacement before any local mutat
   expect(repos.syncQueue.count()).toBe(0)
   expect(repos.tasks.findById(task)?.status_id).toBe(source)
 })
+
+it('delivers an offline status deletion after the tombstone retention horizon exactly once',async()=>{
+  local.prepare('UPDATE statuses SET updated_at=? WHERE id=?').run('2020-01-01T00:00:00.000Z',source)
+  local.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run('2020-01-01T00:00:00.000Z',task)
+  await remote.query("UPDATE tasks SET updated_at='2020-01-01T00:00:00.000Z'")
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime('2020-01-02T00:00:00.000Z')
+  await useStatusStore.getState().reassignAndDelete(source,done)
+  expect(repos.syncQueue.count()).toBe(1)
+  vi.setSystemTime('2020-03-15T00:00:00.000Z')
+  purgeOldTombstones(local)
+  expect(repos.statuses.findById(source)).toBeDefined()
+  setOnlineStatus(true)
+  await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  expect((await remote.query<{status_id:string}>('SELECT status_id FROM tasks WHERE id=$1',[task])).rows[0].status_id).toBe(done)
+  expect((await remote.query<{deleted_at:unknown}>('SELECT deleted_at FROM statuses WHERE id=$1',[source])).rows[0].deleted_at).not.toBeNull()
+  expect(rpcCalls).toBe(1)
+  await processSyncQueue()
+  expect(rpcCalls).toBe(1)
+},15000)
 
 it.each(['queued','eager','newer-cloud','denied','same-tick'])('preserves post-deletion full task intent through %s delivery',async (mode) => {
   const t1='2020-01-01T01:00:00.000Z',t10='2020-01-01T10:00:00.000Z',t11='2020-01-01T11:00:00.000Z'

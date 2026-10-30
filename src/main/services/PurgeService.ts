@@ -21,7 +21,8 @@ const PURGEABLE_TABLES = [
   'themes',
   'settings',
   'saved_views',
-  'project_areas'
+  'project_areas',
+  'attachments'
 ] as const
 
 const RETENTION_DAYS = 30
@@ -47,8 +48,15 @@ export function purgeOldTombstones(db: DatabaseSync): PurgeStats {
   let total = 0
 
   for (const table of PURGEABLE_TABLES) {
+    const project = table === 'tasks' ? 'tasks.project_id' : table === 'projects' ? 'projects.id' : null
+    const dependency = project ? `AND NOT EXISTS (
+      SELECT 1 FROM sync_queue q WHERE q.table_name='statuses' AND json_valid(q.payload)
+        AND json_extract(q.payload,'$.status_delete')=1
+        AND COALESCE(json_extract(q.payload,'$.project_id'), (SELECT project_id FROM statuses WHERE id=q.row_id))=${project})` : ''
     const result = db
-      .prepare(`DELETE FROM ${table} WHERE deleted_at IS NOT NULL AND deleted_at < ?`)
+      .prepare(`DELETE FROM ${table} WHERE deleted_at IS NOT NULL AND deleted_at < ?
+        AND NOT EXISTS (SELECT 1 FROM sync_queue q WHERE q.table_name = '${table}' AND q.row_id = ${table === 'settings' ? "settings.user_id || ':' || settings.key" : `${table}.id`})
+        ${dependency}`)
       .run(cutoffIso)
     const removed = Number(result.changes)
     byTable[table] = removed

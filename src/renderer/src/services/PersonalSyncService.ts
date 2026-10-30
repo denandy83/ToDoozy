@@ -579,7 +579,7 @@ export async function pushSavedView(view: {
   sidebar_order: number
   color: string | null
   deleted_at?: string | null
-}): Promise<void> {
+}, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const payload = {
       ...view,
@@ -598,7 +598,7 @@ export async function pushSavedView(view: {
     } catch (err) {
       await reportPushFailure(origin, 'pushSavedView', err, 'user_saved_views', view.id, JSON.stringify(payload))
     }
-  })
+  }, producer)
 }
 
 /**
@@ -613,7 +613,7 @@ export async function pushProjectArea(area: {
   sidebar_order: number
   is_collapsed: number
   deleted_at?: string | null
-}): Promise<void> {
+}, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const payload = {
       ...area,
@@ -632,7 +632,7 @@ export async function pushProjectArea(area: {
     } catch (err) {
       await reportPushFailure(origin, 'pushProjectArea', err, 'user_project_areas', area.id, JSON.stringify(payload))
     }
-  })
+  }, producer)
 }
 
 /**
@@ -648,7 +648,7 @@ export async function pushProjectTemplate(template: {
   created_at: string
   updated_at: string
   deleted_at: string | null
-}): Promise<void> {
+}, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!(await hasLiveSession(origin, 'pushProjectTemplate', `template=${template.id}`))) return
     try {
@@ -675,13 +675,13 @@ export async function pushProjectTemplate(template: {
         JSON.stringify(template)
       )
     }
-  })
+  }, producer)
 }
 
 /**
  * Soft-delete a project template on Supabase.
  */
-export async function deleteProjectTemplateFromSupabase(templateId: string): Promise<void> {
+export async function deleteProjectTemplateFromSupabase(templateId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     const payload = { deleted_at: now, updated_at: now }
@@ -712,13 +712,13 @@ export async function deleteProjectTemplateFromSupabase(templateId: string): Pro
         'UPDATE'
       )
     }
-  })
+  }, producer)
 }
 
 /**
  * Delete a saved view from Supabase.
  */
-export async function deleteSavedViewFromSupabase(viewId: string): Promise<void> {
+export async function deleteSavedViewFromSupabase(viewId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     const payload = { deleted_at: now, updated_at: now }
@@ -735,13 +735,13 @@ export async function deleteSavedViewFromSupabase(viewId: string): Promise<void>
     } catch (err) {
       await reportPushFailure(origin, 'deleteSavedView', err, 'user_saved_views', viewId, JSON.stringify(payload), 'UPDATE')
     }
-  })
+  }, producer)
 }
 
 /**
  * Delete a project area from Supabase.
  */
-export async function deleteProjectAreaFromSupabase(areaId: string): Promise<void> {
+export async function deleteProjectAreaFromSupabase(areaId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     const payload = { deleted_at: now, updated_at: now }
@@ -758,7 +758,7 @@ export async function deleteProjectAreaFromSupabase(areaId: string): Promise<voi
     } catch (err) {
       await reportPushFailure(origin, 'deleteProjectArea', err, 'user_project_areas', areaId, JSON.stringify(payload), 'UPDATE')
     }
-  })
+  }, producer)
 }
 
 /**
@@ -2459,8 +2459,27 @@ async function applyRemoteActivityRow(
 
 async function createPersonalChannel(projectId: string, state: PersonalChannelState): Promise<void> {
   const supabase = await getSupabase()
+  const context = await captureSyncContext()
+  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  if (state.cancelled || !await context.isCurrent()) return
   const channel = supabase
     .channel(`personal:${projectId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
+      void (async () => {
+        if (state.cancelled || !await context.isCurrent()) return
+        await pullProjectMetadata(projectId, context)
+        if (!await context.isCurrent() || state.cancelled) return
+        const nowArchived = (await context.api.projects.findById(projectId))?.is_archived === 1
+        if (nowArchived !== archived) {
+          await unsubscribePersonalProject(projectId)
+          if (!await context.isCurrent()) return
+          await subscribeToPersonalProject(projectId, state.onChange)
+        }
+        state.onChange('project', { project_id: projectId })
+      })().catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
+    })
+  // Archived projects retain only restore/metadata discovery, not task activity.
+  if (!archived) channel
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
@@ -2494,7 +2513,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         })
       }
     )
-    .subscribe((status, err) => {
+  channel.subscribe((status, err) => {
       if (state.cancelled) return
       const pName = projectNameCache.get(projectId) ?? projectId
       console.log(`[Realtime] ${pName}: ${status}`, err ?? '')
@@ -2507,11 +2526,11 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
-        useSyncStore.getState().setRealtimeConnected(true)
+        useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
         useSyncStore.getState().setConnectionLost(false)
         logEvent('info', 'realtime', `Subscribed to personal project`, `${pName} topic=${subTopic} chState=${chState}`)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        useSyncStore.getState().setRealtimeConnected(false)
+        useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
         logEvent(level, 'realtime', `Channel ${status} on personal project`, `${pName} topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         schedulePersonalReconnect(projectId)
@@ -2565,7 +2584,7 @@ function schedulePersonalReconnect(projectId: string): void {
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
           state.attempt = 0
-          useSyncStore.getState().setRealtimeConnected(true)
+          useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
           return
         }
@@ -2615,7 +2634,7 @@ export async function forceReconnectAllPersonal(): Promise<void> {
     if (state.channel) {
       const ch = state.channel as unknown as { state?: string }
       if (ch.state === 'joined') {
-        useSyncStore.getState().setRealtimeConnected(true)
+        useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
         continue
       }
       try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
@@ -2637,6 +2656,7 @@ export async function subscribeToPersonalProject(
   projectId: string,
   onChange: (event: string, data: Record<string, unknown>) => void
 ): Promise<void> {
+  const subscribingUserId = useAuthStore.getState().currentUser?.id
   if (personalChannelStates.has(projectId)) return
   // Don't pile up zombie channels when running in offline-fallback mode —
   // an unauthenticated channel still joins the WebSocket, but Postgres-side
@@ -2650,6 +2670,9 @@ export async function subscribeToPersonalProject(
     return
   }
 
+  // Another setup/discovery caller may have won while session lookup awaited.
+  if (personalChannelStates.has(projectId) || subscribingUserId !== useAuthStore.getState().currentUser?.id) return
+
   const state: PersonalChannelState = {
     channel: null,
     onChange,
@@ -2658,6 +2681,7 @@ export async function subscribeToPersonalProject(
     reconnectTimer: null
   }
   personalChannelStates.set(projectId, state)
+  useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
   await createPersonalChannel(projectId, state)
 }
 
@@ -2668,6 +2692,8 @@ export async function subscribeToPersonalProject(
 export async function unsubscribePersonalProject(projectId: string): Promise<void> {
   const state = personalChannelStates.get(projectId)
   if (!state) return
+  personalChannelStates.delete(projectId)
+  useSyncStore.getState().setChannelHealth(`personal:${projectId}`, null)
   state.cancelled = true
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)
@@ -2677,25 +2703,26 @@ export async function unsubscribePersonalProject(projectId: string): Promise<voi
     const supabase = await getSupabase()
     try { await supabase.removeChannel(state.channel) } catch { /* already dead */ }
   }
-  personalChannelStates.delete(projectId)
 }
 
 /**
  * Unsubscribe from all personal-project Realtime channels.
  */
 export async function unsubscribeAllPersonal(): Promise<void> {
-  const supabase = await getSupabase()
-  for (const state of personalChannelStates.values()) {
+  const removed = [...personalChannelStates]
+  personalChannelStates.clear()
+  for (const [projectId, state] of removed) {
+    useSyncStore.getState().setChannelHealth(`personal:${projectId}`, null)
     state.cancelled = true
     if (state.reconnectTimer) {
       clearTimeout(state.reconnectTimer)
       state.reconnectTimer = null
     }
-    if (state.channel) {
-      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
-    }
   }
-  personalChannelStates.clear()
+  const supabase = await getSupabase()
+  for (const [,state] of removed) {
+    if (state.channel) try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+  }
 }
 
 // ── Online/Offline Detection ─────────────────────────────────────────

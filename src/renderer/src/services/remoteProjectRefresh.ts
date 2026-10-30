@@ -58,8 +58,7 @@ export function scheduleRemoteProjectRefresh(projectId: string, taskId?: string)
       if (!context) return
       context.assertCurrent()
       if (!userId) return
-      const { pullNewTasks, pullProjectMetadata, pullTaskLabelsForTasks } = await import('./PersonalSyncService')
-      await pullProjectMetadata(projectId, context)
+      const { pullNewTasks, pullTaskLabelsForTasks } = await import('./PersonalSyncService')
       await pullNewTasks(projectId, context)
       await refreshProjectLabels(projectId, context)
       const ids = [...(touchedTasks.get(projectId) ?? [])]

@@ -269,9 +269,11 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
         ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
         : '(no err)'
       if (status === 'SUBSCRIBED') {
+        useSyncStore.getState().setChannelHealth(`user:${userId}`, true)
         state.attempt = 0
         logEvent('info', 'realtime', 'Subscribed to user channel', `user=${userId.slice(0, 8)} chState=${chState}`)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
         logEvent(level, 'realtime', `Channel ${status} on user channel`, `user=${userId.slice(0, 8)} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         scheduleUserChannelReconnect()
@@ -376,6 +378,13 @@ export async function subscribeToUserChannel(
     logEvent('warn', 'sync', 'subscribeToUserChannel skipped — no session', `user=${userId.slice(0, 8)}`)
     return
   }
+  // Session lookup can race setup and cross-device discovery. Reserve only once.
+  if (useAuthStore.getState().currentUser?.id !== userId) return
+  if (userChannelState && !userChannelState.cancelled) {
+    if (userChannelState.userId === userId) return
+    await unsubscribeUserChannel()
+    if (userChannelState && !userChannelState.cancelled) return
+  }
   const state: UserChannelState = {
     userId,
     opts,
@@ -385,6 +394,7 @@ export async function subscribeToUserChannel(
     reconnectTimer: null
   }
   userChannelState = state
+  useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
   await createUserChannel(state)
 }
 
@@ -392,7 +402,9 @@ export async function subscribeToUserChannel(
 export async function unsubscribeUserChannel(): Promise<void> {
   const state = userChannelState
   if (!state) return
+  userChannelState = null
   state.cancelled = true
+  useSyncStore.getState().setChannelHealth(`user:${state.userId}`, null)
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)
     state.reconnectTimer = null
@@ -401,5 +413,4 @@ export async function unsubscribeUserChannel(): Promise<void> {
     const supabase = await getSupabase()
     try { await supabase.removeChannel(state.channel) } catch { /* already dead */ }
   }
-  userChannelState = null
 }

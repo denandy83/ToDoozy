@@ -12,6 +12,7 @@ import {
   isPermanentlyDead
 } from '../../services/sessionRecovery'
 import { logEvent } from './logStore'
+import { resetAccountStores } from './accountReset'
 
 let pendingPasswordSave: { email: string; password: string } | null = null
 export function takePendingPasswordSave(): { email: string; password: string } | null {
@@ -702,3 +703,8 @@ export const selectIsAuthenticated = (state: AuthState): boolean => state.isAuth
 export const selectUserId = (state: AuthState): string | null => state.currentUser?.id ?? null
 export const selectIsOffline = (state: AuthState): boolean => state.isOffline
 export const selectIsTokenPermanentlyDead = (state: AuthState): boolean => state.isTokenPermanentlyDead
+
+// Includes direct auth restoration and account switches, not only UI logout.
+useAuthStore.subscribe((state, previous) => {
+  if (state.currentUser?.id !== previous.currentUser?.id) resetAccountStores()
+})

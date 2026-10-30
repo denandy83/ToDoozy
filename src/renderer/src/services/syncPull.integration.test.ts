@@ -14,7 +14,7 @@ import { refreshProjectLabels } from './remoteProjectRefresh'
 import type { SyncContext } from './syncContext'
 
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
 vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateLabels: async () => {} }) } }))
 vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))

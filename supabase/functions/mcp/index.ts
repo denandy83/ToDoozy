@@ -1,3 +1,4 @@
+import { readAll, requireSuccess } from './query.ts'
 import { mutateProjectStatus } from './statusRpc.ts'
 // ToDoozy MCP Server — Supabase Edge Function
 // Streamable HTTP transport with API key authentication via mcp-lite
@@ -163,6 +164,7 @@ function getNextOccurrence(rule: string, fromDate: Date): Date | null {
     }
     case 'months': {
       if (config.monthOrdinal) {
+        next.setDate(1)
         next.setMonth(next.getMonth() + config.interval)
         const targetDay = WEEK_DAYS.indexOf(config.monthOrdinal.day as typeof WEEK_DAYS[number])
         if (config.monthOrdinal.nth === 'last') {
@@ -183,9 +185,9 @@ function getNextOccurrence(rule: string, fromDate: Date): Date | null {
         const targetMonth = next.getMonth() + config.interval
         next.setDate(1)
         next.setMonth(targetMonth)
-        if (config.monthDay !== undefined) {
+        {
           const lastDayOfMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
-          next.setDate(Math.min(config.monthDay, lastDayOfMonth))
+          next.setDate(Math.min(config.monthDay ?? fromDate.getDate(), lastDayOfMonth))
         }
       }
       break
@@ -221,45 +223,49 @@ export class TaskRepo {
 
   async findById(id: string) {
     const projectIds = await this.scope.idArray()
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('id', id).in('project_id', projectIds).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('tasks').select('*').is('deleted_at', null)
+      .eq('id', id).in('project_id', projectIds).maybeSingle())
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
+    const { data } = await readAll(() => this.client.from('tasks').select('*').is('deleted_at', null)
       .eq('project_id', projectId).eq('is_archived', 0).eq('is_template', 0)
-      .is('parent_id', null).order('order_index')
+      .is('parent_id', null), ["id"], [{"column":"order_index","ascending":true}])
     return data ?? []
   }
   async findSubtasks(parentId: string, includeArchived = false) {
     const projectIds = await this.scope.idArray()
-    let query = this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('parent_id', parentId).in('project_id', projectIds).order('order_index')
-    if (!includeArchived) query = query.eq('is_archived', 0)
-    const { data } = await query
+    const { data } = await readAll(() => {
+      let query = this.client.from('tasks').select('*').is('deleted_at', null)
+        .eq('parent_id', parentId).in('project_id', projectIds)
+      if (!includeArchived) query = query.eq('is_archived', 0)
+      return query
+    }, ['id'], [{ column: 'order_index' }])
     return data ?? []
   }
   async findMyDay(userId: string) {
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('owner_id', userId).eq('is_archived', 0).eq('is_template', 0).eq('is_in_my_day', 1)
+    const projectIds = await this.scope.idArray()
+    const { data } = await readAll(() => this.client.from('tasks').select('*').is('deleted_at', null)
+      .eq('owner_id', userId).in('project_id', projectIds).eq('is_archived', 0).eq('is_template', 0).eq('is_in_my_day', 1), ["id"], [])
     return data ?? []
   }
   async findArchived(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('project_id', projectId).eq('is_archived', 1).order('updated_at', { ascending: false })
+    const { data } = await readAll(() => this.client.from('tasks').select('*').is('deleted_at', null)
+      .eq('project_id', projectId).eq('is_archived', 1), ["id"], [{"column":"updated_at","ascending":false}])
     return data ?? []
   }
   async findTemplates(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('project_id', projectId).eq('is_template', 1).order('created_at', { ascending: false })
+    const { data } = await readAll(() => this.client.from('tasks').select('*').is('deleted_at', null)
+      .eq('project_id', projectId).eq('is_template', 1), ["id"], [{"column":"created_at","ascending":false}])
     return data ?? []
   }
   async findAllTemplates(userId: string) {
-    const { data } = await this.client.from('tasks').select('*').is('deleted_at', null)
-      .eq('owner_id', userId).eq('is_template', 1).order('created_at', { ascending: false })
+    const projectIds = await this.scope.idArray()
+    const { data } = await readAll(() => this.client.from('tasks').select('*').is('deleted_at', null)
+      .eq('owner_id', userId).in('project_id', projectIds).eq('is_template', 1), ["id"], [{"column":"created_at","ascending":false}])
     return data ?? []
   }
   async create(input: Record<string, unknown>) {
@@ -281,7 +287,7 @@ export class TaskRepo {
       recurrence_rule: input.recurrence_rule ?? null, reference_url: input.reference_url ?? null,
       created_at: now, updated_at: now
     }
-    const { data, error } = await this.client.from('tasks').insert(record).select().single()
+    const { data, error } = await requireSuccess(this.client.from('tasks').insert(record).select().single())
     if (error) throw new Error(`Failed to create task: ${error.message}`)
     return data
   }
@@ -302,81 +308,70 @@ export class TaskRepo {
       return undefined
     }
     const projectIds = await this.scope.idArray()
-    const { data, error } = await this.client.from('tasks').update(updates)
-      .eq('id', id).in('project_id', projectIds).select().maybeSingle()
+    const { data, error } = await requireSuccess(this.client.from('tasks').update(updates)
+      .eq('id', id).in('project_id', projectIds).select().maybeSingle())
     if (error || !data) return undefined
     return data
   }
   async delete(id: string) {
     const projectIds = await this.scope.idArray()
-    const { data, error } = await this.client.from('tasks').delete()
-      .eq('id', id).in('project_id', projectIds).select('id')
+    const { data, error } = await requireSuccess(this.client.from('tasks').delete()
+      .eq('id', id).in('project_id', projectIds).select('id'))
     // Report success only when a row the caller could access was actually removed.
     return !error && Array.isArray(data) && data.length > 0
   }
   async duplicate(id: string, newId: string) {
-    const original = await this.findById(id)
-    if (!original) return undefined
-    const task = await this.create({
-      id: newId, project_id: original.project_id, owner_id: original.owner_id,
-      title: `${original.title} (copy)`, status_id: original.status_id,
-      description: original.description, priority: original.priority,
-      due_date: original.due_date, parent_id: original.parent_id,
-      order_index: original.order_index + 1, recurrence_rule: original.recurrence_rule
-    })
-    const labels = await this.getLabels(id)
-    for (const label of labels) await this.addLabel(newId, label.label_id)
-    const subtasks = await this.findSubtasks(id, true)
-    for (const sub of subtasks) {
-      const subCopyId = crypto.randomUUID()
-      await this.create({
-        id: subCopyId, project_id: sub.project_id, owner_id: sub.owner_id,
-        title: sub.title, status_id: sub.status_id, description: sub.description,
-        priority: sub.priority, parent_id: newId, order_index: sub.order_index,
-        recurrence_rule: sub.recurrence_rule
-      })
-      const subLabels = await this.getLabels(sub.id)
-      for (const sl of subLabels) await this.addLabel(subCopyId, sl.label_id)
-    }
-    return task
+    await this.validateCopyTree(id)
+    return this.copyTree(id, newId, false)
   }
   async saveAsTemplate(id: string, newId: string) {
+    await this.validateCopyTree(id)
+    return this.copyTree(id, newId, true)
+  }
+  private async validateCopyTree(id: string, seen = new Set<string>()) {
+    if (seen.has(id)) throw new Error('Cannot copy a cyclic task hierarchy')
+    seen.add(id)
+    const original = await this.findById(id)
+    if (!original) return
+    for (const label of await this.getLabels(id)) await this.assertLabelAvailable(original.project_id, label.label_id)
+    for (const sub of await this.findSubtasks(id, true)) await this.validateCopyTree(sub.id, seen)
+  }
+  private async copyTree(id: string, newId: string, template: boolean, parentId?: string, seen = new Set<string>()) {
+    if (seen.has(id)) throw new Error('Cannot copy a cyclic task hierarchy')
     const original = await this.findById(id)
     if (!original) return undefined
-    const template = await this.create({
+    seen.add(id)
+    const task = await this.create({
       id: newId, project_id: original.project_id, owner_id: original.owner_id,
-      title: original.title, status_id: original.status_id,
-      description: original.description, priority: original.priority,
-      is_template: 1, order_index: 0, recurrence_rule: original.recurrence_rule
+      title: template ? original.title : `${original.title} (copy)`, status_id: original.status_id,
+      description: original.description, priority: original.priority, assigned_to: original.assigned_to,
+      reference_url: original.reference_url,
+      due_date: template ? null : original.due_date, parent_id: parentId ?? (template ? null : original.parent_id),
+      completed_date: template ? null : original.completed_date,
+      is_template: template ? 1 : original.is_template ?? 0,
+      is_in_my_day: template ? 0 : original.is_in_my_day,
+      order_index: parentId ? original.order_index : original.order_index + 1,
+      recurrence_rule: original.recurrence_rule
     })
     const labels = await this.getLabels(id)
     for (const label of labels) await this.addLabel(newId, label.label_id)
-    const subtasks = await this.findSubtasks(id, true)
-    for (const sub of subtasks) {
-      const subTemplateId = crypto.randomUUID()
-      await this.create({
-        id: subTemplateId, project_id: sub.project_id, owner_id: sub.owner_id,
-        title: sub.title, status_id: sub.status_id, description: sub.description,
-        priority: sub.priority, parent_id: newId, is_template: 1,
-        order_index: sub.order_index, recurrence_rule: sub.recurrence_rule
-      })
-      const subLabels = await this.getLabels(sub.id)
-      for (const sl of subLabels) await this.addLabel(subTemplateId, sl.label_id)
+    for (const sub of await this.findSubtasks(id, true)) {
+      await this.copyTree(sub.id, crypto.randomUUID(), template, newId, seen)
     }
-    return template
+    return task
   }
   async reorder(taskIds: string[]) {
     const projectIds = await this.scope.idArray()
     for (let i = 0; i < taskIds.length; i++) {
-      await this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() })
-        .eq('id', taskIds[i]).in('project_id', projectIds)
+      const { data } = await requireSuccess(this.client.from('tasks').update({ order_index: i, updated_at: new Date().toISOString() })
+        .eq('id', taskIds[i]).in('project_id', projectIds).is('deleted_at', null).select('id').maybeSingle())
+      if (!data) throw new Error(`Reorder failed: task ${taskIds[i]} is unavailable or access was revoked`)
     }
   }
   async addLabel(taskId: string, labelId: string) {
-    // task_labels has no project_id, so it cannot be filtered directly; gate on
-    // the task being one the caller can access and the label being their own.
-    await this.assertTaskAccessible(taskId)
-    await this.assertLabelOwned(labelId)
+    const task = await this.findById(taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+    await this.assertLabelAvailable(task.project_id, labelId)
     // Throws on a silently-dropped upsert (RLS reject / FK violation) — see labelMutations.ts.
     await upsertTaskLabel(this.client, taskId, labelId)
     await this.refreshLabelNames(taskId)
@@ -389,22 +384,31 @@ export class TaskRepo {
   }
   async getLabels(taskId: string) {
     if (!(await this.findById(taskId))) return []
-    const { data } = await this.client.from('task_labels').select('task_id, label_id').is('deleted_at', null).eq('task_id', taskId)
+    const { data } = await readAll(() => this.client.from('task_labels').select('task_id, label_id').is('deleted_at', null).eq('task_id', taskId), ["task_id","label_id"], [])
     return data ?? []
   }
   /** Throw unless `taskId` belongs to a project the caller is a member of. */
   private async assertTaskAccessible(taskId: string) {
     if (!(await this.findById(taskId))) throw new Error(`Task not found: ${taskId}`)
   }
-  /** Throw unless `labelId` is a label owned by the caller (user_labels.user_id). */
-  private async assertLabelOwned(labelId: string) {
-    const { data } = await this.client.from('user_labels').select('id')
-      .eq('id', labelId).eq('user_id', this.userId).maybeSingle()
-    if (!data) throw new Error(`Label not found: ${labelId}`)
+  /** Own active labels and labels explicitly attached to this member project are usable. */
+  private async assertLabelAvailable(projectId: string, labelId: string) {
+    const { data } = await requireSuccess(this.client.from('user_labels').select('id')
+      .eq('id', labelId).eq('user_id', this.userId).is('deleted_at', null).maybeSingle())
+    if (data) return
+    const { data: link } = await requireSuccess(this.client.from('project_labels').select('label_id')
+      .eq('project_id', projectId).eq('label_id', labelId).is('deleted_at', null).maybeSingle())
+    if (link) {
+      const { data: active } = await requireSuccess(this.client.from('user_labels').select('id')
+        .eq('id', labelId).is('deleted_at', null).maybeSingle())
+      if (active) return
+    }
+    throw new Error(`Label not found: ${labelId}`)
   }
   async search(filters: Record<string, unknown>) {
     // Base scope: only tasks in the caller's member projects are ever searchable.
     const projectIds = await this.scope.idArray()
+    const build = () => {
     let query = this.client.from('tasks').select('*').is('deleted_at', null).eq('is_template', 0).in('project_id', projectIds)
     if (filters.is_archived !== undefined) query = query.eq('is_archived', filters.is_archived as number)
     else query = query.eq('is_archived', 0)
@@ -419,18 +423,20 @@ export class TaskRepo {
     if (excludeStatusIds?.length) for (const sid of excludeStatusIds) query = query.neq('status_id', sid)
     const excludePriorities = filters.exclude_priorities as number[] | undefined
     if (excludePriorities?.length) for (const p of excludePriorities) query = query.neq('priority', p)
-    const { data } = await query.order('order_index')
+    return query
+    }
+    const { data } = await readAll(build, ['id'], [{ column: 'order_index' }])
     let results = data ?? []
     const labelId = filters.label_id as string | undefined
     const labelIds = labelId ? [labelId] : undefined
     if (labelIds?.length) {
-      const { data: tlData } = await this.client.from('task_labels').select('task_id').is('deleted_at', null).in('label_id', labelIds)
+      const { data: tlData } = await readAll(() => this.client.from('task_labels').select('task_id, label_id').is('deleted_at', null).in('label_id', labelIds), ["task_id","label_id"], [])
       const matchingIds = new Set((tlData ?? []).map((tl: { task_id: string }) => tl.task_id))
       results = results.filter((t: { id: string }) => matchingIds.has(t.id))
     }
     const excludeLabelIds = filters.exclude_label_ids as string[] | undefined
     if (excludeLabelIds?.length) {
-      const { data: tlData } = await this.client.from('task_labels').select('task_id').is('deleted_at', null).in('label_id', excludeLabelIds)
+      const { data: tlData } = await readAll(() => this.client.from('task_labels').select('task_id, label_id').is('deleted_at', null).in('label_id', excludeLabelIds), ["task_id","label_id"], [])
       const excludeIds = new Set((tlData ?? []).map((tl: { task_id: string }) => tl.task_id))
       results = results.filter((t: { id: string }) => !excludeIds.has(t.id))
     }
@@ -440,7 +446,7 @@ export class TaskRepo {
     const subtasks = await this.findSubtasks(parentId)
     if (subtasks.length === 0) return { total: 0, done: 0 }
     const statusIds = [...new Set(subtasks.map((s: { status_id: string }) => s.status_id))]
-    const { data: statuses } = await this.client.from('statuses').select('id, is_done').in('id', statusIds)
+    const { data: statuses } = await readAll(() => this.client.from('statuses').select('id, is_done').in('id', statusIds), ["id"], [])
     const doneStatusIds = new Set((statuses ?? []).filter((s: { is_done: number }) => s.is_done === 1).map((s: { id: string }) => s.id))
     const done = subtasks.filter((s: { status_id: string }) => doneStatusIds.has(s.status_id)).length
     return { total: subtasks.length, done }
@@ -465,15 +471,15 @@ export class TaskRepo {
     return { id: nextId, dueDate: nextDate }
   }
   private async refreshLabelNames(taskId: string) {
-    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').is('deleted_at', null).eq('task_id', taskId)
+    const { data: taskLabels } = await readAll(() => this.client.from('task_labels').select('label_id, task_id, label_id').is('deleted_at', null).eq('task_id', taskId), ["task_id","label_id"], [])
     if (!taskLabels || taskLabels.length === 0) {
-      await this.client.from('tasks').update({ label_names: null }).eq('id', taskId)
+      await requireSuccess(this.client.from('tasks').update({ label_names: null }).eq('id', taskId))
       return
     }
     const labelIds = taskLabels.map((tl: { label_id: string }) => tl.label_id)
-    const { data: labels } = await this.client.from('user_labels').select('name, color').in('id', labelIds)
+    const { data: labels } = await readAll(() => this.client.from('user_labels').select('name, color, id').in('id', labelIds), ["id"], [])
     const labelNames = (labels ?? []).map((l: { name: string; color: string }) => ({ name: l.name, color: l.color }))
-    await this.client.from('tasks').update({ label_names: JSON.stringify(labelNames) }).eq('id', taskId)
+    await requireSuccess(this.client.from('tasks').update({ label_names: JSON.stringify(labelNames) }).eq('id', taskId))
   }
 }
 
@@ -486,27 +492,27 @@ class ProjectRepo {
   async list() {
     const ids = await this.scope.idArray()
     if (ids.length === 0) return []
-    const { data } = await this.client.from('projects').select('*').in('id', ids).order('created_at')
+    const { data } = await readAll(() => this.client.from('projects').select('*').in('id', ids), ["id"], [{"column":"created_at","ascending":true}])
     return data ?? []
   }
   async findById(id: string) {
     // A project is visible only to its members.
     if (!(await this.scope.isMember(id))) return undefined
-    const { data } = await this.client.from('projects').select('*').eq('id', id).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('projects').select('*').eq('id', id).maybeSingle())
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
-    const { error } = await this.client.rpc('share_project', {
+    const { error } = await requireSuccess(this.client.rpc('share_project', {
       p_id: input.id, p_name: input.name,
       p_description: input.description ?? null,
       p_color: input.color ?? '#888888', p_icon: input.icon ?? 'folder',
       p_owner_id: input.owner_id ?? this.userId
-    })
+    }))
     if (error) throw new Error(`Failed to create project: ${error.message}`)
     const updates: Record<string, unknown> = {}
     if (input.is_default !== undefined) updates.is_default = input.is_default
     if (input.sidebar_order !== undefined) updates.sidebar_order = input.sidebar_order
-    if (Object.keys(updates).length > 0) await this.client.from('projects').update(updates).eq('id', input.id)
+    if (Object.keys(updates).length > 0) await requireSuccess(this.client.from('projects').update(updates).eq('id', input.id))
     const project = await this.findById(input.id as string)
     if (!project) throw new Error('Project created but not found')
     return project
@@ -518,8 +524,8 @@ class ProjectRepo {
     for (const k of ['name', 'description', 'color', 'icon', 'sidebar_order', 'is_default', 'is_shared']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('projects').update(updates)
-      .eq('id', id).in('id', await this.scope.idArray()).select().maybeSingle()
+    const { data, error } = await requireSuccess(this.client.from('projects').update(updates)
+      .eq('id', id).in('id', await this.scope.idArray()).select().maybeSingle())
     if (error || !data) return undefined
     return data
   }
@@ -528,10 +534,10 @@ class ProjectRepo {
     // is not a member of — this is the most destructive path in the whole API.
     const project = await this.findById(id)
     if (!project || project.owner_id !== this.userId) throw new Error('Only the project owner can delete this project')
-    await this.client.from('tasks').delete().eq('project_id', id)
-    await this.client.from('statuses').delete().eq('project_id', id)
-    await this.client.from('project_members').delete().eq('project_id', id)
-    const { error } = await this.client.from('projects').delete().eq('id', id)
+    await requireSuccess(this.client.from('tasks').delete().eq('project_id', id))
+    await requireSuccess(this.client.from('statuses').delete().eq('project_id', id))
+    await requireSuccess(this.client.from('project_members').delete().eq('project_id', id))
+    const { error } = await requireSuccess(this.client.from('projects').delete().eq('id', id))
     return !error
   }
 }
@@ -539,30 +545,30 @@ class ProjectRepo {
 export class StatusRepo {
   constructor(private client: SupabaseClient, private scope: ProjectScope, private userId: string) {}
   async assertOwner(projectId: string) {
-    const { data, error } = await this.client.from('projects').select('id')
-      .eq('id', projectId).eq('owner_id', this.userId).is('deleted_at', null).maybeSingle()
+    const { data, error } = await requireSuccess(this.client.from('projects').select('id')
+      .eq('id', projectId).eq('owner_id', this.userId).is('deleted_at', null).maybeSingle())
     if (error) throw new Error(error.message)
     if (!data) throw new Error('Only the project owner can manage statuses')
   }
   async findByProjectId(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return []
-    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).order('order_index')
+    const { data } = await readAll(() => this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId), ["id"], [{"column":"order_index","ascending":true}])
     return data ?? []
   }
   async findById(id: string) {
     const projectIds = await this.scope.idArray()
-    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null)
-      .eq('id', id).in('project_id', projectIds).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('statuses').select('*').is('deleted_at', null)
+      .eq('id', id).in('project_id', projectIds).maybeSingle())
     return data ?? undefined
   }
   async findDefault(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return undefined
-    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_default', 1).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_default', 1).maybeSingle())
     return data ?? undefined
   }
   async findDone(projectId: string) {
     if (!(await this.scope.isMember(projectId))) return undefined
-    const { data } = await this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_done', 1).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('statuses').select('*').is('deleted_at', null).eq('project_id', projectId).eq('is_done', 1).maybeSingle())
     return data ?? undefined
   }
   private async mutate(projectId: string, action: string, input: Record<string, unknown>) {
@@ -599,8 +605,8 @@ class LabelRepo {
   ) {}
   async findById(id: string) {
     // user_labels are user-owned; only the caller's own labels are visible.
-    const { data } = await this.client.from('user_labels').select('*')
-      .eq('id', id).eq('user_id', this.userId).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('user_labels').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle())
     return data ?? undefined
   }
   async findByProjectId(projectId: string) {
@@ -612,17 +618,17 @@ class LabelRepo {
   async findByTaskId(taskId: string) {
     // Only resolve labels for a task the caller can access.
     const projectIds = await this.scope.idArray()
-    const { data: task } = await this.client.from('tasks').select('id')
-      .eq('id', taskId).in('project_id', projectIds).maybeSingle()
+    const { data: task } = await requireSuccess(this.client.from('tasks').select('id')
+      .eq('id', taskId).in('project_id', projectIds).maybeSingle())
     if (!task) return []
-    const { data: taskLabels } = await this.client.from('task_labels').select('label_id').is('deleted_at', null).eq('task_id', taskId)
+    const { data: taskLabels } = await readAll(() => this.client.from('task_labels').select('label_id, task_id, label_id').is('deleted_at', null).eq('task_id', taskId), ["task_id","label_id"], [])
     if (!taskLabels || taskLabels.length === 0) return []
     const labelIds = taskLabels.map((tl: { label_id: string }) => tl.label_id)
-    const { data } = await this.client.from('user_labels').select('*').in('id', labelIds)
+    const { data } = await readAll(() => this.client.from('user_labels').select('*').in('id', labelIds), ["id"], [])
     return data ?? []
   }
   async findByName(userId: string, name: string) {
-    const { data } = await this.client.from('user_labels').select('*').eq('user_id', userId).ilike('name', name).limit(1).single()
+    const { data } = await requireSuccess(this.client.from('user_labels').select('*').eq('user_id', userId).ilike('name', name).limit(1).maybeSingle())
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -636,7 +642,7 @@ class LabelRepo {
       id: input.id, user_id: this.userId, name: input.name,
       color: input.color ?? '#888888', order_index: 0, created_at: now, updated_at: now
     }
-    const { data, error } = await this.client.from('user_labels').insert(record).select().single()
+    const { data, error } = await requireSuccess(this.client.from('user_labels').insert(record).select().single())
     if (error) throw new Error(`Failed to create label: ${error.message}`)
     if (input.project_id) await this.addToProject(input.project_id as string, input.id as string)
     return data
@@ -663,7 +669,7 @@ class ActivityLogRepo {
       new_value: input.new_value ?? null, project_id: input.project_id ?? null,
       created_at: now
     }
-    const { data, error } = await this.client.from('activity_log').insert(record).select().single()
+    const { data, error } = await requireSuccess(this.client.from('activity_log').insert(record).select().single())
     if (error) throw new Error(`Failed to create activity log: ${error.message}`)
     return data
   }
@@ -672,15 +678,15 @@ class ActivityLogRepo {
 class SettingsRepo {
   constructor(private client: SupabaseClient) {}
   async get(userId: string, key: string) {
-    const { data } = await this.client.from('user_settings').select('value').eq('user_id', userId).eq('key', key).single()
+    const { data } = await requireSuccess(this.client.from('user_settings').select('value').eq('user_id', userId).eq('key', key).maybeSingle())
     return data?.value ?? null
   }
   async set(userId: string, key: string, value: string | null) {
     const id = `${userId}:${key}`
-    const { error } = await this.client.from('user_settings').upsert(
+    const { error } = await requireSuccess(this.client.from('user_settings').upsert(
       { id, user_id: userId, key, value, updated_at: new Date().toISOString() },
       { onConflict: 'id' }
-    )
+    ))
     if (error) throw new Error(`Failed to set setting: ${error.message}`)
   }
 }
@@ -688,13 +694,13 @@ class SettingsRepo {
 class SavedViewRepo {
   constructor(private client: SupabaseClient, private userId: string) {}
   async findByUserId(userId: string) {
-    const { data } = await this.client.from('user_saved_views').select('*').eq('user_id', userId).order('sidebar_order')
+    const { data } = await readAll(() => this.client.from('user_saved_views').select('*').eq('user_id', userId), ["id"], [{"column":"sidebar_order","ascending":true}])
     return data ?? []
   }
   async findById(id: string) {
     // Saved views are user-owned.
-    const { data } = await this.client.from('user_saved_views').select('*')
-      .eq('id', id).eq('user_id', this.userId).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('user_saved_views').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle())
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -705,13 +711,13 @@ class SavedViewRepo {
       sidebar_order: input.sidebar_order ?? 0, filter_config: input.filter_config,
       created_at: now, updated_at: now
     }
-    const { data, error } = await this.client.from('user_saved_views').insert(record).select().single()
+    const { data, error } = await requireSuccess(this.client.from('user_saved_views').insert(record).select().single())
     if (error) throw new Error(`Failed to create saved view: ${error.message}`)
     return data
   }
   async delete(id: string) {
-    const { data, error } = await this.client.from('user_saved_views').delete()
-      .eq('id', id).eq('user_id', this.userId).select('id')
+    const { data, error } = await requireSuccess(this.client.from('user_saved_views').delete()
+      .eq('id', id).eq('user_id', this.userId).select('id'))
     return !error && Array.isArray(data) && data.length > 0
   }
 }
@@ -723,13 +729,13 @@ class ProjectAreaRepo {
     private scope: ProjectScope
   ) {}
   async findByUserId(userId: string) {
-    const { data } = await this.client.from('user_project_areas').select('*').eq('user_id', userId).order('sidebar_order')
+    const { data } = await readAll(() => this.client.from('user_project_areas').select('*').eq('user_id', userId), ["id"], [{"column":"sidebar_order","ascending":true}])
     return data ?? []
   }
   async findById(id: string) {
     // Project areas are user-owned.
-    const { data } = await this.client.from('user_project_areas').select('*')
-      .eq('id', id).eq('user_id', this.userId).maybeSingle()
+    const { data } = await requireSuccess(this.client.from('user_project_areas').select('*')
+      .eq('id', id).eq('user_id', this.userId).maybeSingle())
     return data ?? undefined
   }
   async create(input: Record<string, unknown>) {
@@ -740,7 +746,7 @@ class ProjectAreaRepo {
       sidebar_order: input.sidebar_order ?? 0, is_collapsed: 0,
       created_at: now, updated_at: now
     }
-    const { data, error } = await this.client.from('user_project_areas').insert(record).select().single()
+    const { data, error } = await requireSuccess(this.client.from('user_project_areas').insert(record).select().single())
     if (error) throw new Error(`Failed to create project area: ${error.message}`)
     return data
   }
@@ -749,8 +755,8 @@ class ProjectAreaRepo {
     for (const k of ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed']) {
       if (input[k] !== undefined) updates[k] = input[k]
     }
-    const { data, error } = await this.client.from('user_project_areas').update(updates)
-      .eq('id', id).eq('user_id', this.userId).select().maybeSingle()
+    const { data, error } = await requireSuccess(this.client.from('user_project_areas').update(updates)
+      .eq('id', id).eq('user_id', this.userId).select().maybeSingle())
     if (error || !data) return null
     return data
   }
@@ -759,9 +765,9 @@ class ProjectAreaRepo {
     // caller's member projects so it can't touch other users' projects.
     if (!(await this.findById(id))) return false
     const memberIds = await this.scope.idArray()
-    await this.client.from('projects').update({ area_id: null }).eq('area_id', id).in('id', memberIds)
-    const { error } = await this.client.from('user_project_areas').delete()
-      .eq('id', id).eq('user_id', this.userId)
+    await requireSuccess(this.client.from('projects').update({ area_id: null }).eq('area_id', id).in('id', memberIds))
+    const { error } = await requireSuccess(this.client.from('user_project_areas').delete()
+      .eq('id', id).eq('user_id', this.userId))
     return !error
   }
   async assignProject(projectId: string, areaId: string | null) {
@@ -769,8 +775,8 @@ class ProjectAreaRepo {
     // one they own.
     if (!(await this.scope.isMember(projectId))) throw new Error(`Project not found: ${projectId}`)
     if (areaId !== null && !(await this.findById(areaId))) throw new Error(`Area not found: ${areaId}`)
-    await this.client.from('projects').update({ area_id: areaId })
-      .eq('id', projectId).in('id', await this.scope.idArray())
+    await requireSuccess(this.client.from('projects').update({ area_id: areaId })
+      .eq('id', projectId).in('id', await this.scope.idArray()))
   }
 }
 
@@ -1298,6 +1304,8 @@ export function createHandlers(repos: Repos, userId: string) {
       return { reordered: true, count: ids.length, ...(warning ? { warning } : {}) }
     },
     async set_whats_new(args) {
+      const admins = (Deno.env.get('TODOOZY_RELEASE_ADMIN_IDS') ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+      if (!admins.includes(userId)) throw new Error('Only a configured release administrator can publish release notes')
       const content = requireStr(args, 'content')
       const version = optStr(args, 'version') ?? 'v0.0.0'
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!
@@ -1400,17 +1408,19 @@ async function authenticateRequest(
 
   const { data: keyData } = await adminClient
     .from('api_keys')
-    .select('user_id')
+    .select('user_id, last_used_at')
     .eq('key_hash', keyHash)
     .single()
 
   if (!keyData) return null
 
-  // Track usage (fire and forget)
-  adminClient
+  // Authenticate every request; coalesce nonessential bookkeeping across isolates.
+  const cutoff = new Date(Date.now() - 5 * 60_000).toISOString()
+  if (!keyData.last_used_at || Date.parse(keyData.last_used_at) < Date.parse(cutoff)) adminClient
     .from('api_keys')
     .update({ last_used_at: new Date().toISOString() })
     .eq('key_hash', keyHash)
+    .or(`last_used_at.is.null,last_used_at.lt.${cutoff}`)
     .then(() => {})
 
   return { userId: keyData.user_id, client: adminClient, apiKey }

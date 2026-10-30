@@ -18,14 +18,17 @@ function view(id: string, filterConfig: string): SavedView {
 }
 
 describe('useSavedViewStore — scheduleRecount', () => {
-  let countMatching: ReturnType<typeof vi.fn>
+  let countMatching: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<number>>>
 
   beforeEach(() => {
     vi.useFakeTimers()
     countMatching = vi.fn().mockResolvedValue(7)
     vi.stubGlobal('window', {
       ...globalThis.window,
-      api: { savedViews: { countMatching } }
+      api: { savedViews: { countMatching }, sync: {
+        captureContext: async () => ({ generation: 1, userId: null }),
+        invokeContext: async (_context: unknown, _channel: string, args: unknown[]) => countMatching(...args)
+      } }
     })
   })
 

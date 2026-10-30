@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { migrations } from './database/migrations'
+import { trustedRendererUrl } from './navigation-security'
 import { createRepositories } from './repositories'
 import type { TodoozyAPI } from '../preload/index.d'
 
@@ -25,7 +26,7 @@ import { captureSyncProducer } from '../renderer/src/services/syncContext'
 
 let databases: DatabaseSync[]
 let repositories: ReturnType<typeof createRepositories>[]
-const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({}, ...args)
+const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 beforeEach(async () => {
   databases = [new DatabaseSync(':memory:'), new DatabaseSync(':memory:')]
   repositories = databases.map((db) => {

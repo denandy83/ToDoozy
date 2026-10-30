@@ -1,3 +1,4 @@
+import { localDateKey } from '../../../../shared/localDate'
 import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Repeat } from 'lucide-react'
@@ -99,7 +100,7 @@ export function CalendarView(): React.JSX.Element {
   const taskLabels = useTaskStore((s) => s.taskLabels)
 
   // Get all tasks that have a due_date OR are in My Day (not archived/template)
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const todayStr = useMemo(() => localDateKey(), [])
   const allCalendarTasks = useMemo(() => {
     return Object.values(allTasks).filter(
       (t) => (t.due_date || t.is_in_my_day === 1) && t.is_archived === 0 && t.is_template === 0 && t.parent_id === null

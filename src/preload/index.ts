@@ -1,8 +1,16 @@
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { isTrustedAppUrl } from '../shared/trustedAppUrl'
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { TodoozyAPI, UpdateStatus } from './index.d'
 
 const api: TodoozyAPI = {
+  diagnostics: {
+    append: (summary) => ipcRenderer.invoke('diagnostics:append', summary),
+    recent: () => ipcRenderer.invoke('diagnostics:recent'),
+    hostRecent: () => ipcRenderer.invoke('diagnostics:hostRecent')
+  },
   tasks: {
     findById: (id) => ipcRenderer.invoke('tasks:findById', id),
     findByProjectId: (projectId) => ipcRenderer.invoke('tasks:findByProjectId', projectId),
@@ -189,6 +197,7 @@ const api: TodoozyAPI = {
   },
 
   attachments: {
+    restore: (id) => ipcRenderer.invoke('attachments:restore', id),
     findByTaskId: (taskId) => ipcRenderer.invoke('attachments:findByTaskId', taskId),
     createFromFile: (taskId, filePath) => ipcRenderer.invoke('attachments:createFromFile', taskId, filePath),
     open: (id) => ipcRenderer.invoke('attachments:open', id),
@@ -456,14 +465,16 @@ const api: TodoozyAPI = {
   }
 }
 
-if (process.contextIsolated) {
+const trustedUrl = process.env.ELECTRON_RENDERER_URL ?? pathToFileURL(join(__dirname, '../renderer/index.html')).href
+const trustedDocument = typeof location !== 'undefined' && isTrustedAppUrl(location.href, trustedUrl) && process.isMainFrame !== false
+if (trustedDocument && process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error('Failed to expose API via contextBridge:', error)
   }
-} else {
+} else if (trustedDocument) {
   ;(globalThis as Record<string, unknown>).electron = electronAPI
   ;(globalThis as Record<string, unknown>).api = api
 }

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { TodoozyAPI } from '../../../preload/index.d'
 import { useAuthStore } from '../shared/stores/authStore'
 import { requireSession } from './sessionRecovery'
+import { supabaseRequestMetrics } from '../../../shared/supabaseTelemetry'
 
 export interface SyncContext {
   api: TodoozyAPI
@@ -55,6 +56,7 @@ export function captureSyncProducer(): SyncProducer {
     const config = await window.api.auth.getSupabaseConfig()
     await assertDatabase()
     return createClient(config.url, config.anonKey, {
+      global: { fetch: supabaseRequestMetrics.wrap(globalThis.fetch, config.url) },
       accessToken: async () => { await assertDatabase(); return session.access_token },
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     })

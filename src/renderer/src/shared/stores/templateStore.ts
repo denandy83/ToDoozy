@@ -1,3 +1,5 @@
+import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { hydrationContext } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type {
@@ -32,15 +34,18 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
     error: null,
 
     async hydrateProjectTemplates(userId: string): Promise<void> {
+      const { api, isCurrent } = hydrationContext()
       set({ loading: true, error: null })
       try {
-        const templates = await window.api.projectTemplates.findAll(userId)
+        const templates = await api.projectTemplates.findAll(userId)
+        if (!await isCurrent()) return
         const map: Record<string, ProjectTemplate> = {}
         for (const t of templates) {
           map[t.id] = t
         }
         set({ projectTemplates: map, loading: false })
       } catch (err) {
+        if (!await isCurrent()) return
         const message = err instanceof Error ? err.message : 'Failed to load project templates'
         set({ error: message, loading: false })
       }
@@ -49,15 +54,18 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
     async createProjectTemplate(
       input: CreateProjectTemplateInput
     ): Promise<ProjectTemplate> {
+      const origin = captureSyncProducer()
       try {
-        const template = await window.api.projectTemplates.create(input)
+        const template = await origin.api.projectTemplates.create(input)
+        await requireProducerCurrent(origin)
         set((state) => ({
           projectTemplates: { ...state.projectTemplates, [template.id]: template }
         }))
         const { pushProjectTemplate } = await import('../../services/PersonalSyncService')
-        void pushProjectTemplate(template)
+        void pushProjectTemplate(template, origin)
         return template
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message =
           err instanceof Error ? err.message : 'Failed to create project template'
         set({ error: message })
@@ -69,17 +77,20 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
       id: string,
       input: UpdateProjectTemplateInput
     ): Promise<ProjectTemplate | null> {
+      const origin = captureSyncProducer()
       try {
-        const template = await window.api.projectTemplates.update(id, input)
+        const template = await origin.api.projectTemplates.update(id, input)
+        await requireProducerCurrent(origin)
         if (template) {
           set((state) => ({
             projectTemplates: { ...state.projectTemplates, [template.id]: template }
           }))
           const { pushProjectTemplate } = await import('../../services/PersonalSyncService')
-          void pushProjectTemplate(template)
+          void pushProjectTemplate(template, origin)
         }
         return template
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message =
           err instanceof Error ? err.message : 'Failed to update project template'
         set({ error: message })
@@ -88,8 +99,10 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
     },
 
     async deleteProjectTemplate(id: string): Promise<boolean> {
+      const origin = captureSyncProducer()
       try {
-        const result = await window.api.projectTemplates.delete(id)
+        const result = await origin.api.projectTemplates.delete(id)
+        await requireProducerCurrent(origin)
         if (result) {
           set((state) => {
             const { [id]: _, ...remaining } = state.projectTemplates
@@ -98,10 +111,11 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
           const { deleteProjectTemplateFromSupabase } = await import(
             '../../services/PersonalSyncService'
           )
-          void deleteProjectTemplateFromSupabase(id)
+          void deleteProjectTemplateFromSupabase(id, origin)
         }
         return result
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message =
           err instanceof Error ? err.message : 'Failed to delete project template'
         set({ error: message })

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { Plus, X, FileText, FileImage, FileArchive, FileAudio, FileVideo, File, FileCode } from 'lucide-react'
 import { useAttachmentStore, useAttachmentsByTaskId } from '../../shared/stores'
 import { useAttachFiles } from '../../shared/hooks/useAttachFiles'
+import { hydrationContext } from '../../shared/stores/hydrationContext'
 import { useToast } from '../../shared/components/Toast'
 import type { Attachment } from '../../../../shared/types'
 
@@ -25,7 +26,8 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
 
   const handleRemove = useCallback(
     async (attachment: Attachment) => {
-      await removeAttachment(attachment.id)
+      const origin = hydrationContext()
+      if (!await removeAttachment(attachment.id)) return
       addToast({
         message: `Removed ${attachment.filename}`,
         actions: [
@@ -33,7 +35,14 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
             label: 'Undo',
             variant: 'accent',
             onClick: async () => {
-              addToast({ message: 'Cannot undo attachment removal', variant: 'danger' })
+              try {
+                const restored = await origin.api.attachments.restore(attachment.id)
+                if (!await origin.isCurrent()) return
+                if (!restored) throw new Error('Attachment is no longer available')
+                addAttachment(restored)
+              } catch {
+                if (await origin.isCurrent()) addToast({ message: 'Could not restore attachment', variant: 'danger' })
+              }
             }
           }
         ]

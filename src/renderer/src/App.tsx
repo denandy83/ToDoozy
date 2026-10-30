@@ -15,12 +15,14 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
-import { initPowerListener } from './services/powerState'
+import { initPowerListener, isSuspended } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 import { flushAll as flushBatchedTaskEdits } from './services/TaskBatchSyncManager'
 import { useToast } from './shared/components/Toast'
+import { startDiagnostics } from './services/diagnostics'
 
 function App(): React.JSX.Element {
+  useEffect(startDiagnostics, [])
   const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
@@ -203,8 +205,11 @@ function App(): React.JSX.Element {
     realtimeEffectRunCount.current += 1
     logEvent('info', 'realtime', `effect run #${realtimeEffectRunCount.current}`, `user=${userId.slice(0, 8)} online=${navigator.onLine}`)
 
-    const doPull = async (): Promise<void> => {
-      if (!navigator.onLine) return
+    let disposed = false
+    let pullInFlight: Promise<void> | null = null
+    let pullPending = false
+    const runPull = async (): Promise<void> => {
+      if (disposed || !navigator.onLine || isSuspended() || useAuthStore.getState().currentUser?.id !== userId) return
       const { pullNewTasks, pullProjectMetadata, resetRefreshGate, cacheProjectNames } = await import('./services/PersonalSyncService')
       resetRefreshGate()
 
@@ -216,20 +221,33 @@ function App(): React.JSX.Element {
       const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
       let anyChanged = false
       for (const project of personalProjects) {
-        const metaChanged = await pullProjectMetadata(project.id).catch(() => false)
-        if (metaChanged) anyChanged = true
+        if (disposed || isSuspended() || useAuthStore.getState().currentUser?.id !== userId) return
+        if (project.is_archived === 1) {
+          if (await pullProjectMetadata(project.id).catch(()=>false)) anyChanged=true
+          if ((await window.api.projects.findById(project.id))?.is_archived !== 0) continue
+        }
         const pulled = await pullNewTasks(project.id).catch(() => 0)
         if (pulled > 0) anyChanged = true
       }
+      if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
+      void useProjectStore.getState().hydrateProjects(userId)
       if (anyChanged) {
         const pid = currentProjectRef.current
-        useProjectStore.getState().hydrateProjects(userId)
         if (pid) {
           useTaskStore.getState().hydrateAllForProject(pid, userId)
         }
       }
     }
-    doPull()
+    const doPull = (): Promise<void> => {
+      if (disposed || !navigator.onLine || isSuspended()) return Promise.resolve()
+      if (pullInFlight) { pullPending = true; return pullInFlight }
+      pullInFlight = (async () => {
+        do { pullPending = false; await runPull() } while (pullPending && !disposed && navigator.onLine && !isSuspended())
+      })().catch((error) => logEvent('error', 'sync', 'Background catch-up failed', String(error)))
+        .finally(() => { pullInFlight = null })
+      return pullInFlight
+    }
+    void doPull()
 
     // Adaptive polling: no polling when Realtime is connected, 120s fallback when disconnected
     let pollInterval: ReturnType<typeof setInterval> | null = null
@@ -255,7 +273,7 @@ function App(): React.JSX.Element {
         }
       }
     })
-    startPolling()
+    if (!prevRealtimeConnected) startPolling()
 
     // Debounced flush for Realtime events across all subscribed projects.
     // pendingLabelProjectIds tracks projects whose task_labels changed via
@@ -267,10 +285,10 @@ function App(): React.JSX.Element {
     let pullInProgress = false
 
     const flushRealtime = async (): Promise<void> => {
-      if (pullInProgress) return
+      if (disposed || pullInProgress || isSuspended()) return
       pullInProgress = true
       try {
-        const { pullNewTasks } = await import('./services/PersonalSyncService')
+        const { pullNewTasks, pullProjectMetadata } = await import('./services/PersonalSyncService')
         const projects = [...pendingProjectIds]
         pendingProjectIds.clear()
         const labelPids = new Set(pendingLabelProjectIds)
@@ -281,12 +299,18 @@ function App(): React.JSX.Element {
         const personalIds = projects.filter((pid) => projectMap[pid]?.is_shared !== 1)
         let anyChanged = false
         for (const pid of personalIds) {
+          if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
+          if ((await window.api.projects.findById(pid))?.is_archived === 1) {
+            await pullProjectMetadata(pid).catch(()=>false)
+            if ((await window.api.projects.findById(pid))?.is_archived === 1) continue
+          }
           const pulled = await pullNewTasks(pid).catch(() => 0)
           if (pulled > 0) anyChanged = true
         }
+        if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
+        void useProjectStore.getState().hydrateProjects(userId)
         const pid = currentProjectRef.current
         if (anyChanged) {
-          useProjectStore.getState().hydrateProjects(userId)
           if (pid) {
             useLabelStore.getState().hydrateLabels(pid)
             useTaskStore.getState().hydrateAllForProject(pid, userId)
@@ -306,6 +330,7 @@ function App(): React.JSX.Element {
     }
 
     const scheduleFlush = (): void => {
+      if (disposed) return
       if (realtimeTimer) clearTimeout(realtimeTimer)
       realtimeTimer = setTimeout(flushRealtime, 500)
     }
@@ -314,6 +339,7 @@ function App(): React.JSX.Element {
     // user channel when it discovers a brand-new personal project mid-session.
     const makePersonalOnChange = (projectId: string) =>
       (event: string, data: Record<string, unknown>): void => {
+        if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
         if (event === 'activity') {
           // Row already applied locally (PersonalSyncService) — just refresh
           // the Detail panel's activity list if it's showing this task.
@@ -335,11 +361,13 @@ function App(): React.JSX.Element {
       // get their own subscriptions via SyncService.subscribeToProject (started in syncShared).
       const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
       for (const project of personalProjects) {
+        if (disposed) return
         await subscribeToPersonalProject(project.id, makePersonalOnChange(project.id))
       }
       // Per-user channel: cross-device labels/saved views/areas + new-project
       // discovery (story #91). Same offline/recovery lifecycle as above.
       const { subscribeToUserChannel } = await import('./services/UserChannelService')
+      if (disposed) return
       await subscribeToUserChannel(userId, {
         subscribePersonalProject: (pid) =>
           subscribeToPersonalProject(pid, makePersonalOnChange(pid))
@@ -348,6 +376,7 @@ function App(): React.JSX.Element {
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
 
     return () => {
+      disposed = true
       logEvent('info', 'realtime', `effect cleanup #${realtimeEffectRunCount.current}`, 'tearing down realtime + polling')
       stopPolling()
       unsubRealtimeState()

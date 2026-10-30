@@ -173,7 +173,9 @@ export class ProjectRepository {
       const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) >= Date.parse(existing.archive_updated_at))
       if (archiveNewer && !remote.deleted_at) {
         this.db.prepare(`UPDATE tasks SET is_archived=?, archive_updated_at=? WHERE project_id=? AND deleted_at IS NULL
-          AND (archive_updated_at IS NULL OR julianday(archive_updated_at) <= julianday(?))`).run(remote.is_archived, remote.archive_updated_at!, remote.id, remote.archive_updated_at!)
+          AND (archive_updated_at IS NULL OR julianday(archive_updated_at) <= julianday(?))
+          AND (is_archived IS NOT ? OR archive_updated_at IS NULL OR julianday(archive_updated_at) IS NOT julianday(?))`)
+          .run(remote.is_archived, remote.archive_updated_at!, remote.id, remote.archive_updated_at!, remote.is_archived, remote.archive_updated_at!)
       }
       if (!metadataNewer && (!archiveNewer || (Date.parse(remote.archive_updated_at!) === Date.parse(existing?.archive_updated_at ?? '') && remote.is_archived === existing?.is_archived))) return existing!
       const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote

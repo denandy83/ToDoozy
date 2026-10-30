@@ -1,3 +1,4 @@
+import { localDateKey, calendarDateKey } from '../../../../shared/localDate'
 import { sortSubtasksForDisplay } from '../../shared/utils/sortTasks'
 import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import { useToast } from '../../shared/components/Toast'
@@ -117,14 +118,14 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
 
   // Hydrate task labels for all projects that have my-day tasks
   const myDayProjectIds = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0]
+    const today = localDateKey()
     const ids = new Set<string>()
     for (const t of Object.values(allTasks)) {
       if (
         t.is_archived === 0 &&
         t.is_template === 0 &&
         t.parent_id === null &&
-        (t.is_in_my_day === 1 || (t.due_date && t.due_date.startsWith(today)))
+        (t.is_in_my_day === 1 || (t.due_date && calendarDateKey(t.due_date) === today))
       ) {
         ids.add(t.project_id)
       }
@@ -147,7 +148,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   // Also include archived tasks completed today so My Day shows the full day's work
   // Done-status tasks from previous days are hidden (not archived, just not shown)
   const myDayTasks = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0]
+    const today = localDateKey()
     const doneStatusIds = new Set(
       Object.values(allStatuses).filter(s => s.is_done === 1).map(s => s.id)
     )
@@ -155,11 +156,11 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       if (t.is_template !== 0 || t.parent_id !== null) return false
       if (t.is_archived === 1) {
         // Archived tasks: only show if completed today
-        return t.completed_date != null && t.completed_date.startsWith(today)
+        return t.completed_date != null && calendarDateKey(t.completed_date) === today
       }
       if (t.is_in_my_day !== 1) return false
       // Non-archived My Day tasks in done status: only show if completed today
-      if (doneStatusIds.has(t.status_id) && t.completed_date && !t.completed_date.startsWith(today)) {
+      if (doneStatusIds.has(t.status_id) && t.completed_date && calendarDateKey(t.completed_date) !== today) {
         return false
       }
       return true

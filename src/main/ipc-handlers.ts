@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { ipcMain, safeStorage, BrowserWindow, dialog, shell } from 'electron'
-import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync, mkdtempSync } from 'fs'
 import keytar from 'keytar'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
@@ -20,14 +20,33 @@ import {
   type SessionStoreDeps
 } from './auth/sessionStore'
 import { validateExternalUrl } from './shell-url'
+import { assertTrustedSender } from './navigation-security'
+import { DatabaseSync } from 'node:sqlite'
+import { DiagnosticsJournal } from './services/DiagnosticsJournal'
+import { chmodSync } from 'node:fs'
+import { sanitizeHostMetrics } from '../shared/hostMetrics'
+
+let diagnosticsJournal: DiagnosticsJournal | null = null
+function getDiagnosticsJournal(): DiagnosticsJournal {
+  if (!diagnosticsJournal) {
+    const path = join(app.getPath('userData'), 'diagnostics.db')
+    const db = new DatabaseSync(path)
+    chmodSync(path, 0o600)
+    diagnosticsJournal = new DiagnosticsJournal(db)
+  }
+  return diagnosticsJournal
+}
 
 let repos: Repositories | null = null
 let databaseGeneration = 0
 let databaseUserId: string | null = null
 const databaseHandlers = new Map<string, Parameters<typeof ipcMain.handle>[1]>()
 function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {
-  if (channel === 'activityLog:create' || channel === 'activityLog:applyRemote' || /^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync|syncMeta):/.test(channel)) databaseHandlers.set(channel, listener)
-  ipcMain.handle(channel, listener)
+  if (channel === 'activityLog:create' || channel === 'activityLog:applyRemote' || /^(tasks|statuses|projects|labels|users|settings|themes|savedViews|projectAreas|projectTemplates|sync|syncMeta|notifications|attachments|stats):/.test(channel)) databaseHandlers.set(channel, listener)
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedSender(event)
+    return listener(event, ...args)
+  })
 }
 
 function getRepos(): Repositories {
@@ -91,21 +110,21 @@ function clearEncryptedSession(): void {
 
 
 function registerAuthHandlers(): void {
-  ipcMain.handle('auth:storeSession', (_e, sessionJson: string) => {
+  handle('auth:storeSession', (_e, sessionJson: string) => {
     storeEncryptedSession(sessionJson)
   })
 
-  ipcMain.handle('auth:getSession', () => {
+  handle('auth:getSession', () => {
     return getEncryptedSession()
   })
 
-  ipcMain.handle('auth:clearSession', () => {
+  handle('auth:clearSession', () => {
     databaseGeneration++
     databaseUserId = null
     clearEncryptedSession()
   })
 
-  ipcMain.handle('auth:saveEmail', (_e, email: string) => {
+  handle('auth:saveEmail', (_e, email: string) => {
     try {
       writeFileSync(getSavedEmailPath(), JSON.stringify({ email }), 'utf-8')
     } catch (err) {
@@ -113,7 +132,7 @@ function registerAuthHandlers(): void {
     }
   })
 
-  ipcMain.handle('auth:getSavedEmail', () => {
+  handle('auth:getSavedEmail', () => {
     const path = getSavedEmailPath()
     if (!existsSync(path)) return null
     try {
@@ -125,7 +144,7 @@ function registerAuthHandlers(): void {
     }
   })
 
-  ipcMain.handle('auth:savePassword', async (_e, email: string, password: string) => {
+  handle('auth:savePassword', async (_e, email: string, password: string) => {
     try {
       await keytar.setPassword(KEYTAR_SERVICE, email, password)
     } catch (err) {
@@ -133,7 +152,7 @@ function registerAuthHandlers(): void {
     }
   })
 
-  ipcMain.handle('auth:getSavedPassword', async (_e, email: string) => {
+  handle('auth:getSavedPassword', async (_e, email: string) => {
     try {
       return await keytar.getPassword(KEYTAR_SERVICE, email)
     } catch {
@@ -141,7 +160,7 @@ function registerAuthHandlers(): void {
     }
   })
 
-  ipcMain.handle('auth:clearCredentials', async () => {
+  handle('auth:clearCredentials', async () => {
     const path = getSavedEmailPath()
     let savedEmail: string | null = null
     if (existsSync(path)) {
@@ -162,7 +181,7 @@ function registerAuthHandlers(): void {
     }
   })
 
-  ipcMain.handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
+  handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
     databaseGeneration++
     databaseUserId = userId
     switchDatabase(userId, email)
@@ -170,14 +189,14 @@ function registerAuthHandlers(): void {
     repos = null
   })
 
-  ipcMain.handle('auth:getSupabaseConfig', () => {
+  handle('auth:getSupabaseConfig', () => {
     return {
       url: process.env.SUPABASE_URL ?? '',
       anonKey: process.env.SUPABASE_ANON_KEY ?? ''
     }
   })
 
-  ipcMain.handle('auth:openOAuthWindow', async (_e, url: string) => {
+  handle('auth:openOAuthWindow', async (_e, url: string) => {
     return new Promise<string | null>((resolve) => {
       const authWindow = new BrowserWindow({
         width: 500,
@@ -234,8 +253,19 @@ function registerAuthHandlers(): void {
 }
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle('sync:captureContext', () => ({ generation: databaseGeneration, userId: databaseUserId }))
-  ipcMain.handle('sync:invokeContext', (event, context, channel: string, args: unknown[]) => {
+  handle('diagnostics:append', (_event, summary: unknown) => getDiagnosticsJournal().append(summary, app.getVersion()))
+  handle('diagnostics:recent', () => getDiagnosticsJournal().recent())
+  handle('diagnostics:hostRecent', () => {
+    const path = join(app.getPath('userData'),'host-metrics','metrics.sqlite')
+    if (!existsSync(path)) return []
+    const db = new DatabaseSync(path,{readOnly:true})
+    try {
+      return (db.prepare('SELECT summary FROM samples WHERE observed_at >= ? ORDER BY id DESC LIMIT 100').all(new Date(Date.now()-7*86400_000).toISOString()) as Array<{summary:string}>)
+        .reverse().flatMap(({summary})=>{try{return [sanitizeHostMetrics(JSON.parse(summary))]}catch{return []}})
+    } finally { db.close() }
+  })
+  handle('sync:captureContext', () => ({ generation: databaseGeneration, userId: databaseUserId }))
+  handle('sync:invokeContext', (event, context, channel: string, args: unknown[]) => {
     if (context.generation !== databaseGeneration || context.userId !== databaseUserId) throw new Error('Sync database changed')
     const listener = databaseHandlers.get(channel)
     if (!listener) throw new Error('Unsupported sync database operation')
@@ -681,15 +711,15 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Activity Log ───────────────────────────────────────────────────
-  ipcMain.handle('activityLog:findById', (_e, id: string) => {
+  handle('activityLog:findById', (_e, id: string) => {
     return getRepos().activityLog.findById(id) ?? null
   })
 
-  ipcMain.handle('activityLog:findByTaskId', (_e, taskId: string) => {
+  handle('activityLog:findByTaskId', (_e, taskId: string) => {
     return getRepos().activityLog.findByTaskId(taskId)
   })
 
-  ipcMain.handle('activityLog:findByUserId', (_e, userId: string) => {
+  handle('activityLog:findByUserId', (_e, userId: string) => {
     return getRepos().activityLog.findByUserId(userId)
   })
 
@@ -707,11 +737,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('activityLog:deleteByTaskId', (_e, taskId: string) => {
+  handle('activityLog:deleteByTaskId', (_e, taskId: string) => {
     return getRepos().activityLog.deleteByTaskId(taskId)
   })
 
-  ipcMain.handle('activityLog:getRecent', (_e, userId: string, limit: number) => {
+  handle('activityLog:getRecent', (_e, userId: string, limit: number) => {
     return getRepos().activityLog.getRecent(userId, limit)
   })
 
@@ -894,11 +924,11 @@ export function registerIpcHandlers(): void {
   )
 
   // ── Quick Add ─────────────────────────────────────────────────────
-  ipcMain.handle('quickadd:hide', () => {
+  handle('quickadd:hide', () => {
     hideQuickAddWindow()
   })
 
-  ipcMain.handle('quickadd:notifyTaskCreated', (event) => {
+  handle('quickadd:notifyTaskCreated', (event) => {
     // Broadcast tasks-changed to all windows except the sender
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed() && win.webContents !== event.sender) {
@@ -907,7 +937,7 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle(
+  handle(
     'quickadd:updateShortcut',
     (_e, accelerator: string): { success: boolean; error?: string; reservedBy?: string } => {
       // Check for reserved macOS shortcuts
@@ -930,7 +960,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     'app-toggle:updateShortcut',
     (_e, accelerator: string): { success: boolean; error?: string; reservedBy?: string } => {
       const reservedBy = getReservedShortcutName(accelerator)
@@ -951,31 +981,31 @@ export function registerIpcHandlers(): void {
   )
 
   // ── Tray ──────────────────────────────────────────────────────────
-  ipcMain.handle('tray:setUserId', (_e, userId: string) => {
+  handle('tray:setUserId', (_e, userId: string) => {
     setTrayUserId(userId)
   })
 
-  ipcMain.handle('tray:refresh', () => {
+  handle('tray:refresh', () => {
     refreshTray()
   })
 
   // ── Timer ──────────────────────────────────────────────────────────
-  ipcMain.handle('timer:updateTimer', (_e, state: TimerTrayState) => {
+  handle('timer:updateTimer', (_e, state: TimerTrayState) => {
     setTimerState(state)
   })
 
-  ipcMain.handle('timer:clearTimer', () => {
+  handle('timer:clearTimer', () => {
     clearTimerState()
   })
 
-  ipcMain.handle('timer:minimizeToTray', () => {
+  handle('timer:minimizeToTray', () => {
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.hide()
     }
   })
 
-  ipcMain.handle('timer:navigateToTask', (_e, taskId: string) => {
+  handle('timer:navigateToTask', (_e, taskId: string) => {
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.show()
@@ -985,11 +1015,11 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Attachments ─────────────────────────────────────────────────────
-  ipcMain.handle('attachments:findByTaskId', (_e, taskId: string) => {
+  handle('attachments:findByTaskId', (_e, taskId: string) => {
     return getRepos().attachments.findByTaskId(taskId)
   })
 
-  ipcMain.handle('attachments:createFromFile', (_e, taskId: string, filePath: string) => {
+  handle('attachments:createFromFile', (_e, taskId: string, filePath: string) => {
     const fileData = readFileSync(filePath)
     const stat = statSync(filePath)
     const filename = basename(filePath)
@@ -1004,21 +1034,25 @@ export function registerIpcHandlers(): void {
     })
   })
 
-  ipcMain.handle('attachments:open', async (_e, id: string) => {
+  handle('attachments:open', async (_e, id: string) => {
     const data = getRepos().attachments.getFileData(id)
     if (!data) return
-    const tmpPath = join(app.getPath('temp'), data.filename)
-    writeFileSync(tmpPath, data.file_data)
+    const directory = mkdtempSync(join(app.getPath('temp'), 'todoozy-attachment-'))
+    const name = basename(data.filename)
+    const tmpPath = join(directory, name && name !== '.' && name !== '..' ? name : 'attachment')
+    writeFileSync(tmpPath, data.file_data, { mode: 0o600 })
     await shell.openPath(tmpPath)
   })
 
-  ipcMain.handle('attachments:delete', (_e, id: string) => {
+  handle('attachments:restore', (_e, id: string) => getRepos().attachments.restore(id))
+
+  handle('attachments:delete', (_e, id: string) => {
     return getRepos().attachments.delete(id)
   })
 
   // ── Shell ────────────────────────────────────────────────────────────
 
-  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+  handle('shell:openExternal', async (_e, url: string) => {
     // Enforce a scheme allowlist in the MAIN process — never trust the renderer.
     const validation = validateExternalUrl(url)
     if (!validation.ok) {
@@ -1029,7 +1063,7 @@ export function registerIpcHandlers(): void {
     return { ok: true as const }
   })
 
-  ipcMain.handle('shell:openReference', async (_e, url: string) => {
+  handle('shell:openReference', async (_e, url: string) => {
     try {
       if (new URL(url).protocol === 'file:') {
         const path = fileURLToPath(url) // rejects remote hosts and encoded separators
@@ -1048,19 +1082,19 @@ export function registerIpcHandlers(): void {
 
   // ── Launch at Login ─────────────────────────────────────────────────
 
-  ipcMain.handle('app:getLoginItemSettings', () => {
+  handle('app:getLoginItemSettings', () => {
     return app.getLoginItemSettings()
   })
 
-  ipcMain.handle('app:setLoginItemSettings', (_e, openAtLogin: boolean) => {
+  handle('app:setLoginItemSettings', (_e, openAtLogin: boolean) => {
     app.setLoginItemSettings({ openAtLogin })
   })
 
-  ipcMain.handle('app:getDatabasePath', () => {
+  handle('app:getDatabasePath', () => {
     return getDatabasePath()
   })
 
-  ipcMain.handle('app:getChangelog', async () => {
+  handle('app:getChangelog', async () => {
     // Always sync from Supabase first to get the latest release notes
     try {
       const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
@@ -1075,38 +1109,38 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Notifications ──────────────────────────────────────────────────
-  ipcMain.handle('notifications:findAll', (_e, limit?: number) => {
+  handle('notifications:findAll', (_e, limit?: number) => {
     return getRepos().notifications.findAll(limit)
   })
 
-  ipcMain.handle('notifications:findUnread', () => {
+  handle('notifications:findUnread', () => {
     return getRepos().notifications.findUnread()
   })
 
-  ipcMain.handle('notifications:getUnreadCount', () => {
+  handle('notifications:getUnreadCount', () => {
     return getRepos().notifications.getUnreadCount()
   })
 
-  ipcMain.handle(
+  handle(
     'notifications:create',
     (_e, input: Parameters<Repositories['notifications']['create']>[0]) => {
       return getRepos().notifications.create(input)
     }
   )
 
-  ipcMain.handle('notifications:markAsRead', (_e, id: string) => {
+  handle('notifications:markAsRead', (_e, id: string) => {
     return getRepos().notifications.markAsRead(id)
   })
 
-  ipcMain.handle('notifications:markAllAsRead', () => {
+  handle('notifications:markAllAsRead', () => {
     return getRepos().notifications.markAllAsRead()
   })
 
-  ipcMain.handle('notifications:deleteNotification', (_e, id: string) => {
+  handle('notifications:deleteNotification', (_e, id: string) => {
     return getRepos().notifications.delete(id)
   })
 
-  ipcMain.handle('notifications:deleteAll', () => {
+  handle('notifications:deleteAll', () => {
     return getRepos().notifications.deleteAll()
   })
 
@@ -1184,7 +1218,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('syncMeta:clearAll', (_e, userId: string) => {
+  handle('syncMeta:clearAll', (_e, userId: string) => {
     return getRepos().syncMeta.clearAll(userId)
   })
 
@@ -1243,47 +1277,47 @@ export function registerIpcHandlers(): void {
   )
 
   // ── Stats ────────────────────────────────────────────────────────
-  ipcMain.handle('stats:completions', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+  handle('stats:completions', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
     return getRepos().tasks.getCompletionStats(userId, projectIds, startDate, endDate)
   })
 
-  ipcMain.handle('stats:streaks', (_e, userId: string) => {
+  handle('stats:streaks', (_e, userId: string) => {
     return getRepos().tasks.getStreakStats(userId)
   })
 
-  ipcMain.handle('stats:focus', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+  handle('stats:focus', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
     return getRepos().activityLog.getFocusStats(userId, projectIds?.[0] ?? null, startDate, endDate)
   })
 
-  ipcMain.handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {
+  handle('stats:heatmap', (_e, userId: string, startDate: string, endDate: string) => {
     return getRepos().activityLog.getActivityHeatmap(userId, startDate, endDate)
   })
 
-  ipcMain.handle('stats:focusTaskList', (_e, userId: string, startDate: string, endDate: string, projectIds: string[] | null) => {
+  handle('stats:focusTaskList', (_e, userId: string, startDate: string, endDate: string, projectIds: string[] | null) => {
     return getRepos().activityLog.getFocusTaskList(userId, startDate, endDate, projectIds)
   })
 
-  ipcMain.handle('stats:taskList', (_e, userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string) => {
+  handle('stats:taskList', (_e, userId: string, filter: string, projectIds: string[] | null, startDate?: string, endDate?: string) => {
     return getRepos().tasks.getStatsTaskList(userId, filter as 'completed_today' | 'completed_week' | 'completed_range' | 'open' | 'overdue', projectIds, startDate, endDate)
   })
 
-  ipcMain.handle('stats:summary', (_e, userId: string, projectIds: string[] | null) => {
+  handle('stats:summary', (_e, userId: string, projectIds: string[] | null) => {
     return getRepos().tasks.getTaskSummaryStats(userId, projectIds)
   })
 
-  ipcMain.handle('stats:priorityBreakdown', (_e, userId: string, projectIds: string[] | null) => {
+  handle('stats:priorityBreakdown', (_e, userId: string, projectIds: string[] | null) => {
     return getRepos().tasks.getPriorityBreakdown(userId, projectIds)
   })
 
-  ipcMain.handle('stats:completionsByDayOfWeek', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
+  handle('stats:completionsByDayOfWeek', (_e, userId: string, projectIds: string[] | null, startDate: string, endDate: string) => {
     return getRepos().tasks.getCompletionsByDayOfWeek(userId, projectIds, startDate, endDate)
   })
 
-  ipcMain.handle('stats:projectBreakdown', (_e, userId: string) => {
+  handle('stats:projectBreakdown', (_e, userId: string) => {
     return getRepos().tasks.getProjectBreakdown(userId)
   })
 
-  ipcMain.handle('stats:cookieBalance', (_e, userId: string, startDate: string, endDate: string) => {
+  handle('stats:cookieBalance', (_e, userId: string, startDate: string, endDate: string) => {
     return getRepos().activityLog.getCookieStats(userId, startDate, endDate)
   })
 
@@ -1339,7 +1373,7 @@ export function registerIpcHandlers(): void {
     return getRepos().savedViews.applyRemote(remote)
   })
 
-  ipcMain.handle('releaseNotes:sync', async () => {
+  handle('releaseNotes:sync', async () => {
     try {
       const { syncReleaseNotes } = await import('./services/ReleaseNotesService')
       return await syncReleaseNotes()
@@ -1349,12 +1383,12 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('releaseNotes:fetchVersion', async (_e, version: string) => {
+  handle('releaseNotes:fetchVersion', async (_e, version: string) => {
     const { fetchVersionNotes } = await import('./services/ReleaseNotesService')
     return fetchVersionNotes(version)
   })
 
-  ipcMain.handle('fs:showOpenDialog', async (_e, options?: { filters?: Array<{ name: string; extensions: string[] }>; title?: string; multiSelections?: boolean }) => {
+  handle('fs:showOpenDialog', async (_e, options?: { filters?: Array<{ name: string; extensions: string[] }>; title?: string; multiSelections?: boolean }) => {
     const win = getMainWindow()
     if (!win) return { canceled: true, filePaths: [] }
     const multi = options?.multiSelections ?? true
@@ -1366,7 +1400,7 @@ export function registerIpcHandlers(): void {
     return result
   })
 
-  ipcMain.handle('fs:showSaveDialog', async (_e, options: { defaultPath?: string; contents: string }) => {
+  handle('fs:showSaveDialog', async (_e, options: { defaultPath?: string; contents: string }) => {
     const win = getMainWindow()
     if (!win) return { canceled: true }
     const result = await dialog.showSaveDialog(win, {
@@ -1384,7 +1418,7 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('fs:readFile', async (_e, filePath: string) => {
+  handle('fs:readFile', async (_e, filePath: string) => {
     try {
       const contents = readFileSync(filePath, 'utf8')
       return { ok: true, contents }

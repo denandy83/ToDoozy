@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import { useSettingsStore } from './settingsStore'
+import { localDateKey } from '../../../../shared/localDate'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ interface TimerActions {
   startFlowtimeBreak(): void
   startCookieBreak(): void
   backToWork(): void
-  tick(): void
+  tick(elapsedSeconds?: number): void
 }
 
 export interface StartTimerParams {
@@ -103,6 +104,8 @@ export type TimerStore = TimerState & TimerActions
 
 let tickInterval: ReturnType<typeof setInterval> | null = null
 let cachedUserId: string | null = null
+let lastTickAt = 0
+let catchupDepth = 0
 
 function clearTickInterval(): void {
   if (tickInterval) {
@@ -113,8 +116,13 @@ function clearTickInterval(): void {
 
 function startTickInterval(): void {
   clearTickInterval()
+  lastTickAt = Date.now()
   tickInterval = setInterval(() => {
-    useTimerStore.getState().tick()
+    const now = Date.now()
+    const elapsed = Math.max(0, Math.floor((now-lastTickAt)/1000))
+    if (!elapsed) return
+    lastTickAt += elapsed*1000
+    useTimerStore.getState().tick(elapsed)
   }, 1000)
 }
 
@@ -129,7 +137,7 @@ function getTodayKey(): string {
   if (now.getHours() < resetHour) {
     adjusted.setDate(adjusted.getDate() - 1)
   }
-  return adjusted.toISOString().slice(0, 10)
+  return localDateKey(adjusted)
 }
 
 // ── Store ──────────────────────────────────────────────────────────────
@@ -383,16 +391,17 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
     syncTrayTimer(get())
   },
 
-  tick(): void {
+  tick(elapsed = 1): void {
+    if (!Number.isFinite(elapsed) || elapsed <= 0) return
     const state = get()
     if (!state.isRunning || state.isPaused) return
 
     if (state.isCookieBreak && state.phase === 'work') {
       // Cookie flowtime: count UP elapsed, accumulate cookie pool
       const earnRate = state.cookieMinutesPerHour / 60 // seconds earned per second worked
-      const newElapsed = state.elapsedSeconds + 1
-      const newEarned = state.cookieEarnedThisSession + earnRate
-      const newPool = state.cookiePoolSeconds + earnRate
+      const newElapsed = state.elapsedSeconds + elapsed
+      const newEarned = state.cookieEarnedThisSession + earnRate*elapsed
+      const newPool = state.cookiePoolSeconds + earnRate*elapsed
       set({
         elapsedSeconds: newElapsed,
         cookieEarnedThisSession: newEarned,
@@ -400,7 +409,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       })
     } else if (state.isCookieBreakPhase && state.phase === 'break') {
       // Cookie break: decrement pool (can go negative)
-      const newPool = state.cookiePoolSeconds - 1
+      const newPool = state.cookiePoolSeconds - elapsed
       set({ cookiePoolSeconds: newPool })
       // Play sound + notification when crossing zero
       if (state.cookiePoolSeconds > 0 && newPool <= 0) {
@@ -411,12 +420,19 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       }
     } else if (state.isFlowtime && state.phase === 'work') {
       // Flowtime without cookie: count UP
-      set({ elapsedSeconds: state.elapsedSeconds + 1 })
+      set({ elapsedSeconds: state.elapsedSeconds + elapsed })
     } else {
       // Normal: count DOWN
-      const next = state.remainingSeconds - 1
+      const next = state.remainingSeconds - elapsed
       if (next <= 0) {
         completePhase(get, set)
+        const overshoot = -next
+        if (overshoot > 0 && get().isRunning && !get().isPaused) {
+          // Bound malformed zero-duration/perpetual loops after a long absence.
+          if (catchupDepth >= 100) { get().pause(); return }
+          catchupDepth++
+          try { get().tick(overshoot) } finally { catchupDepth-- }
+        }
         return
       }
       set({ remainingSeconds: next })
@@ -614,4 +630,14 @@ export function formatTimeRemaining(seconds: number): string {
   const s = abs % 60
   const prefix = seconds < 0 ? '-' : ''
   return `${prefix}${m}:${s.toString().padStart(2, '0')}`
+}
+
+/** Drop private task context without writing an old-account focus session. */
+export function resetTimerForAccount(): void {
+  clearTickInterval()
+  cachedUserId = null
+  useTimerStore.setState(useTimerStore.getInitialState(), true)
+  if (typeof window !== 'undefined') {
+    try { void Promise.resolve(window.api?.timer?.clearTimer()).catch(()=>{}) } catch { /* bridge may be closing */ }
+  }
 }

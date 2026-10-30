@@ -126,6 +126,9 @@ export function SavedViewListView(): React.JSX.Element {
       if (config.projectIds) {
         for (const id of config.projectIds) store.toggleProjectFilter(id)
       }
+      if (config.assigneeIds) {
+        for (const id of config.assigneeIds) store.toggleAssigneeFilter(id)
+      }
       // Exclusion filters
       if (config.excludeLabelIds) {
         for (const id of config.excludeLabelIds) store.toggleExcludeLabelFilter(id)
@@ -241,6 +244,8 @@ export function SavedViewListView(): React.JSX.Element {
   const dueDatePreset = useLabelStore((s) => s.dueDatePreset)
   const dueDateRange = useLabelStore((s) => s.dueDateRange)
   const keywordFilter = useLabelStore((s) => s.keyword)
+  const assigneeFilters = useLabelStore((s) => s.assigneeFilters)
+  const excludeAssigneeFilters = useLabelStore((s) => s.excludeAssigneeFilters)
 
   // Tasks matching every active filter EXCEPT the inline label-include toggles.
   // The label-chip row (labelsInView) is derived from this set, NOT from
@@ -258,6 +263,8 @@ export function SavedViewListView(): React.JSX.Element {
       if (hasPriorityFilters && !priorityFilters.has(task.priority)) return false
       if (hasStatusFilters && !statusFilters.has(task.status_id)) return false
       if (hasProjectFilters && !projectFilters.has(task.project_id)) return false
+      if (assigneeFilters.size && !assigneeFilters.has(task.assigned_to ?? '')) return false
+      if (excludeAssigneeFilters.has(task.assigned_to ?? '')) return false
       // Exclusion filters
       if (hasExcludeLabelFilters && [...excludeLabelFilters].some((fid) => labelNames.has(fid))) return false
       if (hasExcludePriorityFilters && excludePriorityFilters.has(task.priority)) return false
@@ -270,7 +277,7 @@ export function SavedViewListView(): React.JSX.Element {
       }
       return true
     })
-  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter])
+  }, [allTasks, allStatusesRecord, taskLabels, hasAnyFilter, hasPriorityFilters, priorityFilters, hasStatusFilters, statusFilters, hasProjectFilters, projectFilters, hasExcludeLabelFilters, excludeLabelFilters, hasExcludePriorityFilters, excludePriorityFilters, hasExcludeStatusFilters, excludeStatusFilters, hasExcludeProjectFilters, excludeProjectFilters, dueDatePreset, dueDateRange, keywordFilter, assigneeFilters, excludeAssigneeFilters])
 
   const matchingTasks = useMemo(() => {
     const filtered = !hasActiveFilters ? baseTasks : baseTasks.filter((task) => {

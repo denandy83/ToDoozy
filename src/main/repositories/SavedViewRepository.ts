@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { SavedView, CreateSavedViewInput, UpdateSavedViewInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
+import { localDateKey } from '../../shared/localDate'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'filter_config', 'project_id'] as const
 
@@ -240,6 +241,31 @@ export class SavedViewRepository {
       }
 
       const keyword = config.keyword as string | undefined
+      for (const [key, operator] of [['assigneeIds','IN'],['excludeAssigneeIds','NOT IN']] as const) {
+        const ids = config[key] as string[] | undefined
+        if (ids?.length) {
+          conditions.push(`COALESCE(t.assigned_to,'') ${operator} (${ids.map(()=>'?').join(',')})`)
+          params.push(...ids)
+        }
+      }
+      const date = "(CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END)"
+      const today = new Date()
+      if (config.dueDatePreset === 'no_date') conditions.push('t.due_date IS NULL')
+      else if (config.dueDatePreset === 'today' || config.dueDatePreset === 'overdue') {
+        conditions.push(`${date} ${config.dueDatePreset==='today'?'=':'<'} ?`)
+        params.push(localDateKey(today))
+      } else if (config.dueDatePreset === 'this_week') {
+        const end = new Date(today); end.setDate(end.getDate()+7-end.getDay())
+        conditions.push(`${date} BETWEEN ? AND ?`); params.push(localDateKey(today),localDateKey(end))
+      } else if (config.dueDateRange) {
+        const range = config.dueDateRange as { mode: string; fromDate?: string; toDate?: string; fromOffset?: number; toOffset?: number }
+        const from = new Date(today);from.setDate(from.getDate()+(range.fromOffset??0))
+        const to = new Date(today);to.setDate(to.getDate()+(range.toOffset??0))
+        const start = range.mode==='absolute'?range.fromDate:localDateKey(from)
+        const end = range.mode==='absolute'?range.toDate:range.toOffset===undefined?undefined:localDateKey(to)
+        if (start) { conditions.push(`${date} >= ?`);params.push(start) }
+        if (end) { conditions.push(`${date} <= ?`);params.push(end) }
+      }
       if (keyword) {
         conditions.push('(t.title LIKE ? OR t.description LIKE ?)')
         const kw = `%${keyword}%`

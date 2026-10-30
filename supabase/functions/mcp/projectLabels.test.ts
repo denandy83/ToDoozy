@@ -14,7 +14,9 @@ function makeFilterBuilder(result: PostgrestRowsResult): {
   eq: ReturnType<typeof vi.fn>
   is: ReturnType<typeof vi.fn>
   inFn: ReturnType<typeof vi.fn>
+  fresh(): ProjectLabelFilterBuilder
 } {
+  let advanced=false
   const eq = vi.fn(() => builder)
   const is = vi.fn(() => builder)
   const inFn = vi.fn(() => builder)
@@ -22,10 +24,13 @@ function makeFilterBuilder(result: PostgrestRowsResult): {
     eq,
     is,
     in: inFn,
+    order: () => builder,
+    limit: () => builder,
+    or: () => { advanced=true;return builder },
     then: (onfulfilled?: (value: PostgrestRowsResult) => unknown) =>
-      Promise.resolve(result).then(onfulfilled)
+      Promise.resolve(advanced && !result.error ? {data:[],error:null} : result).then(onfulfilled)
   } as unknown as ProjectLabelFilterBuilder
-  return { builder, eq, is, inFn }
+  return { builder, eq, is, inFn, fresh: () => { advanced=false;return builder } }
 }
 
 function makeClient(opts: {
@@ -44,7 +49,7 @@ function makeClient(opts: {
   const labels = makeFilterBuilder(opts.labelsResult ?? { data: [], error: null })
   const from = vi.fn((table: string) => ({
     upsert,
-    select: vi.fn(() => (table === 'project_labels' ? junction.builder : labels.builder))
+    select: vi.fn(() => (table === 'project_labels' ? junction.fresh() : labels.fresh()))
   }))
   return { client: { from } as unknown as ProjectLabelClient, from, upsert, junction, labels }
 }

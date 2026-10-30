@@ -9,7 +9,7 @@ import type { SupabaseClient, Session } from '@supabase/supabase-js'
 // a plain in-memory Zustand store and safe under node.
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 
 import { chunkArray, fullPull, fullUpload, initSync, pushSetting, pushTheme } from './PersonalSyncService'
 import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'

@@ -1,3 +1,4 @@
+import { hydrationContext } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { Notification, CreateNotificationInput } from '../../../../shared/types'
@@ -26,15 +27,19 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
     panelOpen: false,
 
     hydrate: async () => {
+      const { api, isCurrent } = hydrationContext()
       const [notifications, unreadCount] = await Promise.all([
-        window.api.notifications.findAll(50),
-        window.api.notifications.getUnreadCount()
+        api.notifications.findAll(50),
+        api.notifications.getUnreadCount()
       ])
+      if (!await isCurrent()) return
       set({ notifications, unreadCount })
     },
 
     createNotification: async (input) => {
-      const notification = await window.api.notifications.create(input)
+      const { api, isCurrent } = hydrationContext()
+      const notification = await api.notifications.create(input)
+      if (!await isCurrent()) return notification
       set((state) => ({
         notifications: [notification, ...state.notifications].slice(0, 50),
         unreadCount: state.unreadCount + 1
@@ -43,7 +48,9 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
     },
 
     markAsRead: async (id) => {
-      await window.api.notifications.markAsRead(id)
+      const { api, isCurrent } = hydrationContext()
+      await api.notifications.markAsRead(id)
+      if (!await isCurrent()) return
       set((state) => ({
         notifications: state.notifications.map((n) =>
           n.id === id ? { ...n, read: 1 } : n
@@ -53,7 +60,9 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
     },
 
     markAllAsRead: async () => {
-      await window.api.notifications.markAllAsRead()
+      const { api, isCurrent } = hydrationContext()
+      await api.notifications.markAllAsRead()
+      if (!await isCurrent()) return
       set((state) => ({
         notifications: state.notifications.map((n) => ({ ...n, read: 1 })),
         unreadCount: 0
@@ -61,7 +70,9 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
     },
 
     deleteNotification: async (id) => {
-      await window.api.notifications.deleteNotification(id)
+      const { api, isCurrent } = hydrationContext()
+      await api.notifications.deleteNotification(id)
+      if (!await isCurrent()) return
       set((state) => {
         const removed = state.notifications.find((n) => n.id === id)
         return {
@@ -72,7 +83,9 @@ export const useNotificationStore = createWithEqualityFn<NotificationState & Not
     },
 
     deleteAllNotifications: async () => {
-      await window.api.notifications.deleteAll()
+      const { api, isCurrent } = hydrationContext()
+      await api.notifications.deleteAll()
+      if (!await isCurrent()) return
       set({ notifications: [], unreadCount: 0 })
     },
 

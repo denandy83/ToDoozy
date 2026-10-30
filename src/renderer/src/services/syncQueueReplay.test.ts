@@ -7,7 +7,7 @@ const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null 
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { pinned.token = options.accessToken; return pinned.client }) }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
 import { processSyncQueue, setOnlineStatus } from './SyncService'
