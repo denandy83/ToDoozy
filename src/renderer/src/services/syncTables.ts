@@ -434,10 +434,10 @@ async function consolidateLocalLabel(
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .ilike('name', name.replace(/[\\%_]/g, '\\$&'))
+      .filter('name', 'imatch', `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
       .limit(1)
       .maybeSingle()
-    if (lookupErr || !remote) return false
+    if (lookupErr || !remote || typeof remote.name !== 'string' || remote.name.toLowerCase() !== name.toLowerCase()) return false
     if ((remote.id as string) === localId) return false
     // If the canonical remote is tombstoned, revive it before remapping —
     // otherwise our local junctions would point at a deleted row.

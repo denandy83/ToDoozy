@@ -358,10 +358,10 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .ilike('name', localLabel.name.replace(/[\\%_]/g, '\\$&'))
+      .filter('name', 'imatch', `^${localLabel.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
       .limit(1)
       .maybeSingle()
-    if (!remote || (remote.id as string) === localLabel.id) return false
+    if (!remote || typeof remote.name !== 'string' || remote.name.toLowerCase() !== localLabel.name.toLowerCase() || (remote.id as string) === localLabel.id) return false
     if (remote.deleted_at) {
       const { error: reviveError } = await supabase
         .from('user_labels')

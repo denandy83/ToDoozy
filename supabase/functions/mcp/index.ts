@@ -628,8 +628,8 @@ class LabelRepo {
     return data ?? []
   }
   async findByName(userId: string, name: string) {
-    const { data } = await requireSuccess(this.client.from('user_labels').select('*').eq('user_id', userId).ilike('name', name).limit(1).maybeSingle())
-    return data ?? undefined
+    const { data } = await requireSuccess(this.client.from('user_labels').select('*').eq('user_id', userId).filter('name', 'imatch', `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`).limit(1).maybeSingle())
+    return typeof data?.name === 'string' && data.name.toLowerCase() === name.toLowerCase() ? data : undefined
   }
   async create(input: Record<string, unknown>) {
     // Reject a foreign target project before writing anything, so a crafted
