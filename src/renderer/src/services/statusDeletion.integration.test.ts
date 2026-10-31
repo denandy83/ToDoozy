@@ -30,6 +30,14 @@ vi.mock('../../../main/index', () => ({ registerQuickAddShortcut: vi.fn(), regis
 vi.mock('../../../main/tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
 vi.mock('../shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from '../../../main/ipc-handlers'
+import { getMainWindow } from '../../../main/index'
+let nativeContext: { generation: number; userId: string | null } | null
+const contextListeners = new Set<() => void>()
+function updateNativeContext(context: NonNullable<typeof nativeContext>): void {
+  if (nativeContext && context.generation <= nativeContext.generation) return
+  nativeContext = context
+  for (const listener of contextListeners) listener()
+}
 const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 let beforeRpc: (() => Promise<void>) | null, afterRpc: (() => Promise<void>) | null, failTaskWrites: boolean, failRecovery: boolean, failRecoveryResponse: boolean
 let beforeLabelWrite: (()=>Promise<void>) | null
@@ -52,6 +60,11 @@ const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12,'0')}
 const owner=id(1), project=id(2), open=id(3), source=id(4), done=id(5), task=id(6)
 let local: DatabaseSync, remote: PGlite, repos: ReturnType<typeof createRepositories>, fail: boolean, rpcCalls: number
 beforeEach(async () => {
+  nativeContext = null
+  contextListeners.clear()
+  vi.mocked(getMainWindow).mockReturnValue({ webContents: { send: (channel: string, context: NonNullable<typeof nativeContext>) => {
+    if (channel === 'sync:context-changed') updateNativeContext(context)
+  } } } as never)
   local = new DatabaseSync(':memory:'); local.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)')
   for (const migrate of migrations) migrate(local)
   repos=createRepositories(local)
@@ -89,7 +102,16 @@ beforeEach(async () => {
   ipc.database=local; ipc.handlers.clear(); registerIpcHandlers()
   await invoke('auth:switchDatabase',owner)
   ipc.handlers.set('auth:getSupabaseConfig',async () => ({url:'https://example.invalid',anonKey:'synthetic'}))
-  const api=new Proxy({}, {get: (_,namespace:string) => new Proxy({}, {get: (_,method:string) => (...args:unknown[]) => invoke(`${namespace}:${method}`,...args)})})
+  const api=new Proxy({}, {get: (_,namespace:string) => new Proxy({}, {get: (_,method:string) => {
+    if(namespace==='sync' && method==='currentContext')return ()=>nativeContext ? JSON.stringify([nativeContext.userId,nativeContext.generation]) : null
+    if(namespace==='sync' && method==='onContextChanged')return (listener:()=>void)=>{contextListeners.add(listener);return ()=>{contextListeners.delete(listener)}}
+    if(namespace==='sync' && method==='captureContext')return async()=>{
+      const context=await invoke('sync:captureContext') as NonNullable<typeof nativeContext>
+      updateNativeContext(context)
+      return context
+    }
+    return (...args:unknown[])=>invoke(`${namespace}:${method}`,...args)
+  }})})
   vi.stubGlobal('window',{api:api as TodoozyAPI})
   vi.stubGlobal('navigator',{onLine:true})
   useTaskStore.setState({tasks:{[task]:repos.tasks.findById(task)!},taskLabels:{},showDetailPanel:false})

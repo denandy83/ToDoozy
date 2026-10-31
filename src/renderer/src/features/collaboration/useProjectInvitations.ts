@@ -189,7 +189,10 @@ export function useProjectInvitations(): {
           + ': ' + (err instanceof Error ? err.message : 'Please try again') }
       }))
     } finally {
-      if (await scopeIsCurrent(session)) updateOwned(session, (next) => ({
+      await scopeIsCurrent(session)
+      // An unavailable IPC probe cannot leave a current dialog permanently busy.
+      // Ownership still fences this local UI cleanup; retries validate the origin.
+      updateOwned(session, (next) => ({
         ...next, busyToken: next.busyToken === token ? null : next.busyToken
       }))
     }

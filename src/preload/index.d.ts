@@ -355,6 +355,7 @@ export interface NotificationsAPI {
 }
 
 export interface SyncAPI {
+  /** Synchronous JSON [userId, generation] key; null until a native scope is known. */
   currentContext(): string | null
   onContextChanged(listener: () => void): () => void
   captureContext(): Promise<{ generation: number; userId: string | null }>

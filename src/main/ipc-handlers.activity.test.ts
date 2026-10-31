@@ -27,8 +27,21 @@ import { captureSyncProducer } from '../renderer/src/services/syncContext'
 
 let databases: DatabaseSync[]
 let repositories: ReturnType<typeof createRepositories>[]
+let nativeContext: { generation: number; userId: string | null } | null
+const contextListeners = new Set<() => void>()
+function updateNativeContext(context: NonNullable<typeof nativeContext>): void {
+  if (nativeContext && context.generation <= nativeContext.generation) return
+  nativeContext = context
+  for (const listener of contextListeners) listener()
+}
+function contextAnnouncement(channel: string, context: NonNullable<typeof nativeContext>): void {
+  if (channel === 'sync:context-changed') updateNativeContext(context)
+}
 const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 beforeEach(async () => {
+  nativeContext = null
+  contextListeners.clear()
+  vi.mocked(getMainWindow).mockReturnValue({ webContents: { send: contextAnnouncement } } as never)
   databases = [new DatabaseSync(':memory:'), new DatabaseSync(':memory:')]
   repositories = databases.map((db) => {
     db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
@@ -45,7 +58,16 @@ beforeEach(async () => {
   harness.handlers.clear()
   registerIpcHandlers()
   await invoke('auth:switchDatabase', 'a')
-  const api = new Proxy({}, { get: (_, namespace: string) => new Proxy({}, { get: (_, method: string) => (...args: unknown[]) => invoke(`${namespace}:${method}`, ...args) }) })
+  const api = new Proxy({}, { get: (_, namespace: string) => new Proxy({}, { get: (_, method: string) => {
+    if (namespace === 'sync' && method === 'currentContext') return () => nativeContext ? JSON.stringify([nativeContext.userId, nativeContext.generation]) : null
+    if (namespace === 'sync' && method === 'onContextChanged') return (listener: () => void) => { contextListeners.add(listener); return () => { contextListeners.delete(listener) } }
+    if (namespace === 'sync' && method === 'captureContext') return async () => {
+      const context = await invoke('sync:captureContext') as NonNullable<typeof nativeContext>
+      updateNativeContext(context)
+      return context
+    }
+    return (...args: unknown[]) => invoke(`${namespace}:${method}`, ...args)
+  } }) })
   vi.stubGlobal('window', { api: api as TodoozyAPI })
   useAuthStore.setState({ currentUser: { id: 'a' } as never })
   useTaskStore.setState({ tasks: {}, taskLabels: {}, showDetailPanel: false })
@@ -105,7 +127,7 @@ it('project label removal preserves chips and associations cached for another pr
 })
 
 it.each(['a','b'])('announces the current native scope on a switch to %s before guarded reads',async userId=>{
-  const send=vi.fn()
+  const send=vi.fn(contextAnnouncement)
   vi.mocked(getMainWindow).mockReturnValue({webContents:{send}} as never)
   try {
     const old=await invoke('sync:captureContext') as {generation:number;userId:string}

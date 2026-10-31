@@ -24,11 +24,22 @@ export interface SyncProducer {
 
 export function captureSyncProducer(active: () => boolean = () => true): SyncProducer {
   const userId = useAuthStore.getState().currentUser?.id
-  const database = window.api.sync.captureContext()
+  const readDatabaseScope = (): string | null => {
+    const sync = window.api.sync
+    const value = typeof sync.currentContext === 'function' ? sync.currentContext() : null
+    return typeof value === 'string' ? value : null
+  }
+  let databaseScope = readDatabaseScope()
+  const database = window.api.sync.captureContext().then(context => {
+    // The preload signal is monotonic even if an older IPC reply arrives later.
+    if (typeof window.api.sync.currentContext === 'function') databaseScope ??= JSON.stringify([context.userId, context.generation])
+    return context
+  })
   void database.catch(() => {})
   const assertCurrent = (): void => {
     if (!active()) throw new Error('Sync paused')
     if (!userId || useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed or signed out')
+    if (databaseScope !== null && readDatabaseScope() !== databaseScope) throw new Error('Sync database changed')
   }
   const assertDatabase = async (): Promise<void> => {
     assertCurrent()

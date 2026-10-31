@@ -708,7 +708,10 @@ export const selectIsTokenPermanentlyDead = (state: AuthState): boolean => state
 
 // Includes direct auth restoration and account switches, not only UI logout.
 useAuthStore.subscribe((state, previous) => {
-  if (state.currentUser?.id !== previous.currentUser?.id || (previous.databaseScope !== null && state.databaseScope !== previous.databaseScope)) resetAccountStores()
+  if (state.currentUser?.id !== previous.currentUser?.id || (previous.databaseScope !== null && state.databaseScope !== previous.databaseScope)) {
+    resetAccountStores()
+    if (state.isOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) useSyncStore.getState().setStatus('offline')
+  }
 })
 
 let scopeApi: typeof window.api | undefined

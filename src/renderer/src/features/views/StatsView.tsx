@@ -1,8 +1,10 @@
 import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
 import { hydrationContext } from '../../shared/stores/hydrationContext'
+import { captureProjectProducer } from '../../services/syncContext'
+import { projectScopeRevision, subscribeProjectScope } from '../../shared/stores/projectScope'
 import { localDateKey, localDayBounds, calendarDateKey } from '../../../../shared/localDate'
 import { MotionPresence } from '../../shared/motion/MotionPresence'
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -41,7 +43,8 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export function StatsView(): React.JSX.Element {
   const scope = useDatabaseScope()
   const userId = useAuthStore(state => state.currentUser?.id)
-  return <ScopedStatsView key={JSON.stringify([scope, userId])} />
+  const projectRevision = useSyncExternalStore(subscribeProjectScope, projectScopeRevision)
+  return <ScopedStatsView key={JSON.stringify([scope, userId, projectRevision])} />
 }
 
 function ScopedStatsView(): React.JSX.Element {
@@ -66,6 +69,16 @@ function ScopedStatsView(): React.JSX.Element {
   const [drillDown, setDrillDown] = useState<{ filter: StatsFilter; label: string } | null>(null)
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
+  const [drillError, setDrillError] = useState<string | null>(null)
+  const drillRequest = useRef(0)
+  useEffect(() => () => { drillRequest.current += 1 }, [])
+  const closeDrillDown = useCallback(() => {
+    drillRequest.current += 1
+    setDrillDown(null)
+    setDrillLoading(false)
+    setDrillTasks([])
+    setDrillError(null)
+  }, [])
 
   const { startDate, endDate } = useMemo(() => {
     const end = new Date()
@@ -210,26 +223,32 @@ function ScopedStatsView(): React.JSX.Element {
 
   const openDrillDown = useCallback(async (filter: StatsFilter, label: string) => {
     if (!userId) return
-    const origin = hydrationContext()
+    const request = ++drillRequest.current
     const projectIds = projectFilter ? [projectFilter] : null
     setDrillDown({ filter, label })
     setDrillLoading(true)
+    setDrillTasks([])
+    setDrillError(null)
     try {
+      const origin = hydrationContext()
+      const current = async (): Promise<boolean> => request === drillRequest.current && await origin.isCurrent() && request === drillRequest.current
       if (filter === 'focus_today' || filter === 'focus_week') {
         const bounds = localDayBounds(new Date((filter === 'focus_today' ? todayStr : weekStart) + 'T12:00:00'),new Date(todayStr + 'T12:00:00'))
         const focusStart = bounds.start, focusEnd = bounds.end
         const tasks = await origin.api.stats.focusTaskList(userId, focusStart, focusEnd, projectIds)
-        if (await origin.isCurrent()) setDrillTasks(tasks)
+        if (await current()) setDrillTasks(tasks)
       } else {
         const tasks = await origin.api.stats.taskList(
           userId, filter === 'completed_week' ? 'completed_range' : filter, projectIds,
           filter === 'completed_week' ? localDayBounds(new Date(weekStart + 'T12:00:00')).start : filter === 'completed_range' ? startDate : undefined,
           filter === 'completed_week' ? localDayBounds(new Date()).end : filter === 'completed_range' ? endDate : undefined
         )
-        if (await origin.isCurrent()) setDrillTasks(tasks)
+        if (await current()) setDrillTasks(tasks)
       }
+    } catch {
+      if (request === drillRequest.current) setDrillError('Could not load these tasks. Please try again.')
     } finally {
-      if (await origin.isCurrent()) setDrillLoading(false)
+      if (request === drillRequest.current) setDrillLoading(false)
     }
   }, [userId, projectFilter, startDate, endDate, todayStr, weekStart])
 
@@ -370,9 +389,16 @@ function ScopedStatsView(): React.JSX.Element {
       </div>
 
       {/* Drill-down modal */}
-      <Modal open={drillDown !== null} onClose={() => setDrillDown(null)} title={drillDown?.label} size="large">
+      <Modal open={drillDown !== null} onClose={closeDrillDown} title={drillDown?.label} size="large">
         {drillLoading ? (
           <div className="flex h-32 items-center justify-center text-[11px] text-muted">Loading...</div>
+        ) : drillError ? (
+          <div className="space-y-3 py-8 text-center text-[11px]">
+            <p role="alert" className="text-danger">{drillError}</p>
+            <button className="rounded border border-border px-3 py-1 text-foreground" onClick={() => {
+              if (drillDown) void openDrillDown(drillDown.filter, drillDown.label)
+            }}>Retry</button>
+          </div>
         ) : drillTasks.length === 0 ? (
           <div className="flex h-32 items-center justify-center text-[11px] text-muted">No tasks</div>
         ) : (
@@ -380,12 +406,25 @@ function ScopedStatsView(): React.JSX.Element {
             <div className="space-y-0.5">
               {drillTasks.map((task) => (
                 <StatsTaskRow key={task.id} task={task} onNavigate={(taskId, projectId) => {
-                  setDrillDown(null)
+                  const origin = captureProjectProducer(projectId)
+                  const later = (action: () => void, milliseconds: number): void => {
+                    setTimeout(() => {
+                      void (async () => {
+                        if (!await origin.isCurrent()) return
+                        origin.assertCurrent()
+                        action()
+                      })().catch(async () => {
+                        if (await origin.isCurrent()) console.error('Could not open the statistics task')
+                      })
+                    }, milliseconds)
+                  }
+                  closeDrillDown()
+                  origin.assertCurrent()
                   useViewStore.getState().setSelectedProject(projectId)
                   // Wait for project hydration, then select task
-                  setTimeout(() => {
+                  later(() => {
                     useTaskStore.getState().selectTask(taskId, { openPanel: true })
-                    setTimeout(() => {
+                    later(() => {
                       // Re-select after any hydration-triggered clearSelection
                       useTaskStore.getState().selectTask(taskId, { openPanel: true })
                       document.querySelector(`[data-task-id="${taskId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })

@@ -1,15 +1,15 @@
 import { membershipSnapshot } from '../../services/membershipSnapshot'
 import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
-import { captureProjectProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 /**
  * Members section for project settings — shows member list, invite button,
  * remove/leave/unshare actions.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { UserPlus, LogOut, Unlink, Trash2, Check } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
-import type { Project } from '../../../../shared/types'
+import type { Project, ProjectMember } from '../../../../shared/types'
 import { getAvatarColor, getAvatarInitials, AVATAR_PALETTE } from '../../../../shared/avatarUtils'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
@@ -57,9 +57,13 @@ export function MemberSettings(props: MemberSettingsProps): React.JSX.Element {
 function ScopedMemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const [memberState, setMemberState] = useState<{ ownerId: string | undefined; projectId: string; rows: MemberDisplay[] }>({ ownerId: currentUser?.id, projectId: project.id, rows: [] })
-  const members = memberState.ownerId === currentUser?.id && memberState.projectId === project.id ? memberState.rows : []
-  const [loading, setLoading] = useState(true)
+  const authoritativeMembers = useProjectStore(s => s.members[project.id])
+  const [memberState, setMemberState] = useState<{ ownerId: string | undefined; projectId: string; snapshot: ProjectMember[] | undefined; rows: MemberDisplay[] }>({ ownerId: currentUser?.id, projectId: project.id, snapshot: authoritativeMembers, rows: [] })
+  const currentRows = memberState.ownerId === currentUser?.id && memberState.projectId === project.id && memberState.snapshot === authoritativeMembers
+  const members = currentRows ? memberState.rows : []
+  const [isLoading, setLoading] = useState(true)
+  const loading = isLoading || !currentRows
+  const loadSequence = useRef(0)
   const [copiedLink, setCopiedLink] = useState(false)
   const [confirmUnshare, setConfirmUnshare] = useState(false)
   const [emailInviteValue, setEmailInviteValue] = useState('')
@@ -91,34 +95,43 @@ function ScopedMemberSettings({ project, onToast }: MemberSettingsProps): React.
   const isShared = project.is_shared === 1
 
   const loadMembers = useCallback(async () => {
+    const request = ++loadSequence.current
     if (!isShared) {
       setLoading(false)
       return
     }
-    const origin = await membershipSnapshot()(project.id, captureProjectProducer(project.id))
-    if (currentUser?.id !== origin.userId) return
+    const producer = captureProjectProducer(project.id)
+    let origin: SyncProducer | undefined
+    setLoading(true)
     try {
+      origin = await membershipSnapshot({ readOnly: true })(project.id, producer)
+      if (currentUser?.id !== producer.userId) return
       const data = await getSharedProjectMembers(project.id, origin)
       // Enrich with local display overrides
       const localMembers = await origin.api.projects.getMembers(project.id)
       await requireProducerCurrent(origin)
+      if (request !== loadSequence.current) return
       const localMap = new Map(localMembers.map((lm) => [lm.user_id, lm]))
-      setMemberState({ ownerId: origin.userId, projectId: project.id, rows: data.map((m) => ({
+      setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: data.map((m) => ({
         ...m,
         joined_at: m.joined_at,
         display_color: localMap.get(m.user_id)?.display_color ?? null,
         display_initials: localMap.get(m.user_id)?.display_initials ?? null
       })) })
     } catch (err) {
-      if (await origin.isCurrent()) console.error('Failed to load members:', err)
+      if (origin && request === loadSequence.current && await origin.isCurrent()) {
+        setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: [] })
+        console.error('Failed to load members:', err)
+      }
     } finally {
-      if (await origin.isCurrent()) setLoading(false)
+      if (request === loadSequence.current) setLoading(false)
     }
   }, [project.id, isShared, currentUser?.id])
 
   useEffect(() => {
-    loadMembers()
-  }, [loadMembers])
+    void loadMembers()
+    return () => { loadSequence.current += 1 }
+  }, [loadMembers, authoritativeMembers])
 
   const handleGenerateInvite = async (): Promise<void> => {
     if (!currentUser) return
@@ -286,7 +299,7 @@ function ScopedMemberSettings({ project, onToast }: MemberSettingsProps): React.
       await requireProducerCurrent(origin)
       await updateProject(project.id, { is_shared: 0 })
       await requireProducerCurrent(origin)
-      setMemberState({ ownerId: origin.userId, projectId: project.id, rows: [] })
+      setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: [] })
       setConfirmUnshare(false)
       onToast('Project unshared. All members have been notified.')
     } catch (err) {

@@ -143,11 +143,14 @@ beforeEach(() => {
   apiCap = 1000
   rows = {}; pageCounts = {}; failedTable = null; rejectedStatus = null
   const client = makeClient()
+  const nativeContext = { userId: 'u', generation: sequence }
   const api = new Proxy({}, {
     get: (_, ns: keyof typeof repo) => new Proxy({}, {
-      get: (_, method: string) => async (...args: unknown[]) => {
+      get: (_, method: string) => {
+        if (String(ns) === 'sync' && method === 'currentContext') return () => JSON.stringify([nativeContext.userId, nativeContext.generation])
+        return async (...args: unknown[]) => {
         if (String(ns) === 'sync') {
-          if (method === 'captureContext') return {userId:'u',generation:sequence}
+          if (method === 'captureContext') return nativeContext
           if (method === 'invokeContext') {const [,channel,values]=args;const [namespace,operation]=String(channel).split(':');return (api as Record<string,Record<string,(...args:unknown[])=>unknown>>)[namespace][operation](...values as unknown[])}
           if (method === 'getQueue') return repo.syncQueue.findAll()
           if (method === 'count') return repo.syncQueue.count()
@@ -155,6 +158,7 @@ beforeEach(() => {
         }
         const target = repo[ns] as unknown as Record<string, (...args: unknown[]) => unknown>
         return target[ns === 'tasks' && method === 'applyRemote' ? 'applyRemoteTask' : method](...args)
+        }
       }
     })
   })

@@ -9,7 +9,7 @@ import { hydrationContext } from '../../shared/stores/hydrationContext'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import { useTaskStore } from '../../shared/stores'
 import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
-import type { Project, User } from '../../../../shared/types'
+import type { Project, ProjectMember, User } from '../../../../shared/types'
 
 export interface SharedProjectMember {
   user_id: string
@@ -40,6 +40,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
     const session: Session = { scope, ownerId: userId, projectId: project.id, active: true }
     sessionRef.current = session
     const producer = captureProjectProducer(project.id)
+    let publishingMembers: ProjectMember[] | null = null
     const current = async (origin: SyncContext): Promise<boolean> => await origin.isCurrent() && window.api.sync.currentContext() === scope && session.active && sessionRef.current === session
     const assert = (origin: SyncContext): void => {
       origin.assertCurrent()
@@ -78,8 +79,13 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
         }
         await origin.api.projects.updateMember(project.id, member.user_id, { display_color: member.display_color, display_initials: member.display_initials })
       }
+      const nativeMembers = await origin.api.projects.getMembers(project.id)
       if (!await current(origin)) return
       assert(origin)
+      publishingMembers = nativeMembers
+      try {
+        useProjectStore.setState(previous => ({ members: { ...previous.members, [project.id]: nativeMembers } }))
+      } finally { publishingMembers = null }
       setState(previous => previous.session === session ? { ...previous, members } : previous)
       invalidateMemberDisplay(project.id, origin)
       } catch (error) { if (await current(origin)) throw error }
@@ -117,7 +123,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
     })
     const parentContext = syncContextFromProducer(producer)
     const offMembers = useProjectStore.subscribe((next, previous) => {
-      if (next.members[project.id] !== previous.members[project.id]) void parentContext.then(loadMembers).catch(async error => { if (await producer.isCurrent()) logEvent('error', 'sync', 'Member refresh failed', String(error)) })
+      if (next.members[project.id] !== previous.members[project.id] && next.members[project.id] !== publishingMembers) void parentContext.then(loadMembers).catch(async error => { if (await producer.isCurrent()) logEvent('error', 'sync', 'Member refresh failed', String(error)) })
     })
     void (async () => {
       const parent = await parentContext

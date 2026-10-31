@@ -138,7 +138,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     active++;maxConcurrent=Math.max(maxConcurrent,active);
     const table=parsed.pathname.split('/').pop(),method=options.method??'GET',start=performance.now();
     try {
-      if(beforeRequest){const callback=beforeRequest;beforeRequest=null;await callback()}
+      if(beforeRequest){const callback=beforeRequest;beforeRequest=null;await callback({url:String(url),table,method})}
       if(latency)await new Promise(resolve=>setTimeout(resolve,latency));
       if(inspectAuthorization)authorizations.push(new Headers(options.headers).get('authorization'));
       const body=options.body?JSON.parse(options.body):null;
