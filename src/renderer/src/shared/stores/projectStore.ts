@@ -1,4 +1,5 @@
 import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { useAuthStore } from './authStore'
 import { hydrationContext } from './hydrationContext'
 import { evictProjectData } from './projectCache'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -42,11 +43,13 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   error: null,
 
   async hydrateProjects(userId: string, origin?: SyncProducer): Promise<void> {
-    if (origin && origin.userId !== userId) throw new Error('Sync account changed')
-    const { api, isCurrent } = origin ?? hydrationContext()
+    if (useAuthStore.getState().currentUser?.id !== userId || (origin && origin.userId !== userId)) return
+    const { api, isCurrent, assertCurrent } = origin ?? hydrationContext()
     const initialIds = Object.keys(get().projects)
-    set({ loading: true, error: null })
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const projects = await api.projects.getProjectsForUser(userId)
       const projectMap: Record<string, Project> = {}
       for (const project of projects) {
@@ -54,6 +57,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       }
       // Auto-select default project if none selected
       if (!await isCurrent()) return
+      assertCurrent()
       for (const id of initialIds) if (!projectMap[id]) evictProjectData(id)
       const currentId = get().currentProjectId
       if (!currentId || !projectMap[currentId]) {
@@ -74,9 +78,11 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         } catch { /* ignore */ }
       }
       if (!await isCurrent()) return
+      assertCurrent()
       set({ members: membersMap })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       set({ error: message, loading: false })
     }

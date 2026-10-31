@@ -1409,7 +1409,7 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
     const supabase = context.client
     const { data: remote, error } = await supabase
       .from('projects')
-      .select('name, color, icon, description, updated_at, is_archived, archive_updated_at, deleted_at')
+      .select('name, color, icon, description, owner_id, updated_at, is_archived, archive_updated_at, deleted_at')
       .eq('id', projectId)
       .maybeSingle()
 
@@ -1423,8 +1423,12 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
     if (!local) return false
 
     if (Date.parse(remote.updated_at) > Date.parse(local.updated_at) || (remote.archive_updated_at && Date.parse(remote.archive_updated_at) >= Date.parse(local.archive_updated_at ?? '1970-01-01'))) {
-      await api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
-      return true
+      const applied = await api.projects.applyRemote({ ...local, ...remote, is_archived: remote.is_archived ?? 0 })
+      return Date.parse(applied.updated_at) !== Date.parse(local.updated_at)
+        || applied.name !== local.name || applied.color !== local.color || applied.icon !== local.icon
+        || applied.description !== local.description || applied.owner_id !== local.owner_id
+        || applied.deleted_at !== local.deleted_at || applied.is_archived !== local.is_archived
+        || Date.parse(applied.archive_updated_at ?? '1970-01-01') !== Date.parse(local.archive_updated_at ?? '1970-01-01')
     }
     return false
   } catch (err) {
@@ -2531,6 +2535,7 @@ export async function syncTaskLabel(taskId: string): Promise<void> {
 // ── Realtime Subscriptions for All Projects ──────────────────────────
 
 interface PersonalChannelState {
+  context: Promise<SyncContext>
   archived?: boolean
   channel: RealtimeChannel | null
   onChange: (event: string, data: Record<string, unknown>) => void
@@ -2595,11 +2600,13 @@ async function applyRemoteActivityRow(
 }
 
 async function createPersonalChannel(projectId: string, state: PersonalChannelState): Promise<void> {
+  const context = await state.context
   const supabase = await getSupabase()
-  const context = await captureSyncContext(() => navigator.onLine && !isSuspended())
+  if (!await context.isCurrent() || state.cancelled) return
   const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  if (!await context.isCurrent() || state.cancelled) return
+  context.assertCurrent()
   state.archived = archived
-  if (state.cancelled || !await context.isCurrent()) return
   const channel = supabase
     .channel(`personal:${projectId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
@@ -2714,6 +2721,7 @@ function schedulePersonalReconnect(projectId: string): void {
     }
     try {
       const supabase = await getSupabase()
+      if (!await (await state.context).isCurrent() || state.cancelled) return
       if (state.channel) {
         // If supabase-js auto-rejoined the channel under us, tearing it down here would
         // trigger a clean phx_close → CLOSED → another reconnect → infinite 2s loop.
@@ -2722,14 +2730,14 @@ function schedulePersonalReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           state.attempt = 0
           useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
-          void captureSyncContext(() => !state.cancelled).then((context) => requestProjectRefresh(context, [projectId])).catch(() => {})
+          void state.context.then((context) => { if (!state.cancelled) return requestProjectRefresh(context, [projectId]); return undefined }).catch(() => {})
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
           return
         }
         await supabase.removeChannel(state.channel)
       }
     } catch { /* channel may already be dead */ }
-    await createPersonalChannel(projectId, state)
+    try { await createPersonalChannel(projectId, state) } catch (error) { if (!state.cancelled) throw error }
   }, delay)
 }
 
@@ -2831,31 +2839,18 @@ export async function subscribeToPersonalProject(
   onChange: (event: string, data: Record<string, unknown>) => void,
   context?: SyncContext
 ): Promise<void> {
-  context ??= await captureSyncContext()
-  if (!await context.isCurrent()) return
-  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
   const existing = personalChannelStates.get(projectId)
-  if (existing?.archived === archived) return
-  if (existing) await unsubscribePersonalProject(projectId)
-  if (!await context.isCurrent()) return
-  const subscribingUserId = useAuthStore.getState().currentUser?.id
-  if (personalChannelStates.has(projectId)) return
-  // Don't pile up zombie channels when running in offline-fallback mode —
-  // an unauthenticated channel still joins the WebSocket, but Postgres-side
-  // RLS filters every event so we'd be sitting on a dead listener that
-  // confuses the sync state. Once the session is recovered (30s timer or the
-  // SessionBanner's manual retry), authStore flips isOffline to false, which
-  // re-runs App.tsx's realtime effect and re-subscribes with live handlers
-  // (the personalChannelStates guard above makes repeat calls no-ops).
-  if (!(await requireSession())) {
-    logEvent('warn', 'sync', 'subscribeToPersonalProject skipped — no session', `project=${projectId}`)
-    return
+  if (existing) {
+    context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
+    const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+    const sameScope = (await existing.context).scope === context.scope
+    if (!await context.isCurrent() || existing.cancelled) return
+    context.assertCurrent()
+    if (existing.archived === archived && sameScope) return
   }
-
-  // Another setup/discovery caller may have won while session lookup awaited.
-  if (personalChannelStates.has(projectId) || subscribingUserId !== useAuthStore.getState().currentUser?.id) return
-
+  const removal = existing ? unsubscribePersonalProject(projectId) : Promise.resolve()
   const state: PersonalChannelState = {
+    context: context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended()),
     channel: null,
     onChange,
     cancelled: false,
@@ -2864,7 +2859,13 @@ export async function subscribeToPersonalProject(
   }
   personalChannelStates.set(projectId, state)
   useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
-  await createPersonalChannel(projectId, state)
+  try {
+    await Promise.all([removal, state.context])
+    await createPersonalChannel(projectId, state)
+  } catch (error) {
+    if (personalChannelStates.get(projectId) === state) await unsubscribePersonalProject(projectId)
+    throw error
+  }
 }
 
 /**

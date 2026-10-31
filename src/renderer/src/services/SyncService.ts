@@ -25,6 +25,7 @@ import { isSuspended } from './powerState'
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
 interface SharedChannelState {
+  context: Promise<SyncContext>
   archived?: boolean
   channel: RealtimeChannel | null
   cancelled: boolean
@@ -58,10 +59,12 @@ export function setRealtimeCallback(cb: RealtimeCallback): void {
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
-  const context = await captureSyncContext(() => navigator.onLine && !isSuspended())
+  const context = await state.context
   const supabase = await getSupabase()
-  if (state.cancelled || !await context.isCurrent()) return
+  if (!await context.isCurrent() || state.cancelled) return
   const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  if (!await context.isCurrent() || state.cancelled) return
+  context.assertCurrent()
   state.archived = archived
   const channel = supabase
     .channel(`project:${projectId}`)
@@ -203,6 +206,7 @@ function scheduleSharedReconnect(projectId: string): void {
     }
     try {
       const supabase = await getSupabase()
+      if (!await (await state.context).isCurrent() || state.cancelled) return
       if (state.channel) {
         // If supabase-js auto-rejoined the channel under us, tearing it down here would
         // trigger a clean phx_close → CLOSED → another reconnect → infinite 2s loop.
@@ -211,7 +215,7 @@ function scheduleSharedReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           useSyncStore.getState().setChannelHealth(`shared:${projectId}`, true)
           state.attempt = 0
-          void captureSyncContext(() => !state.cancelled).then((context) => requestProjectRefresh(context, [projectId])).catch(() => {})
+          void state.context.then((context) => { if (!state.cancelled) return requestProjectRefresh(context, [projectId]); return undefined }).catch(() => {})
           const currentStatus = useSyncStore.getState().status
           if (currentStatus === 'offline') useSyncStore.getState().setStatus('synced')
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, reconnPName)
@@ -220,7 +224,7 @@ function scheduleSharedReconnect(projectId: string): void {
         await supabase.removeChannel(state.channel)
       }
     } catch { /* channel may already be dead */ }
-    await createSharedChannel(projectId, state)
+    try { await createSharedChannel(projectId, state) } catch (error) { if (!state.cancelled) throw error }
   }, delay)
 }
 
@@ -269,15 +273,18 @@ export async function forceReconnectAllShared(): Promise<void> {
  * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
  */
 export async function subscribeToProject(projectId: string, context?: SyncContext): Promise<void> {
-  context ??= await captureSyncContext()
-  if (!await context.isCurrent()) return
-  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
   const existing = channels.get(projectId)
-  if (existing?.archived === archived) return
-  if (existing) await unsubscribeFromProject(projectId)
-  if (!await context.isCurrent() || channels.has(projectId)) return
-
+  if (existing) {
+    context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
+    const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+    const sameScope = (await existing.context).scope === context.scope
+    if (!await context.isCurrent() || existing.cancelled) return
+    context.assertCurrent()
+    if (existing.archived === archived && sameScope) return
+  }
+  const removal = existing ? unsubscribeFromProject(projectId) : Promise.resolve()
   const state: SharedChannelState = {
+    context: context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended()),
     channel: null,
     cancelled: false,
     attempt: 0,
@@ -285,7 +292,13 @@ export async function subscribeToProject(projectId: string, context?: SyncContex
   }
   channels.set(projectId, state)
   useSyncStore.getState().setChannelHealth(`shared:${projectId}`, false)
-  await createSharedChannel(projectId, state)
+  try {
+    await Promise.all([removal, state.context])
+    await createSharedChannel(projectId, state)
+  } catch (error) {
+    if (channels.get(projectId) === state) await unsubscribeFromProject(projectId)
+    throw error
+  }
 }
 
 export async function reconcileSharedSubscriptions(projects: Project[], context: SyncContext, subscribeMissing: boolean, projectIds?: Set<string>): Promise<void> {

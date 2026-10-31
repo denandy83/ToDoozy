@@ -16,6 +16,7 @@ interface Harness {
   nativeCalls: unknown[]
   setAccount(user: string): void
   setSession(token: string, user?: string): void
+  producer(): import('../src/renderer/src/services/syncContext').SyncProducer
   context(): Promise<import('../src/renderer/src/services/syncContext').SyncContext>
   beforeRequest(callback: () => Promise<void>): void
   untilIdle(): Promise<void>
@@ -179,4 +180,27 @@ it('evicts detached peer label caches while preserving own labels and references
   await h.stores.useProjectStore.getState().deleteProject('p1')
   expect(Object.keys(h.stores.useLabelStore.getState().labels).sort()).toEqual(['own', 'peer-retained'])
   expect(h.repo.labels.findById('peer-only')).toBeDefined()
+})
+
+it.each(['account','database'].flatMap(change => [false,true].map(fail => ({change,fail}))))('does not publish or invoke native hydration for an already stale $change origin (failure=$fail)', async ({change,fail}) => {
+  const h = await make()
+  const producer = h.producer()
+  h.setAccount(change === 'account' ? 'other' : 'u')
+  const before = { projects: { p1: h.repo.projects.findById('p1')! }, members: { p1: [] }, currentProjectId:'p1', loading:false, error:'Current error' }
+  h.stores.useProjectStore.setState(before)
+  const calls = h.nativeCalls.length
+  h.repo.projects.getProjectsForUser = () => { throw Error(fail ? 'Old private failure' : 'Unexpected native work') }
+  await expect(h.stores.useProjectStore.getState().hydrateProjects('u',producer)).resolves.toBeUndefined()
+  expect(h.nativeCalls).toHaveLength(calls)
+  for (const [key,value] of Object.entries(before)) expect(h.stores.useProjectStore.getState()[key as keyof typeof before]).toEqual(value)
+})
+
+it('ignores a delayed default hydration request for another account', async () => {
+  const h = await make()
+  h.setAccount('other')
+  h.stores.useProjectStore.setState({loading:false,error:'Current error'})
+  const before = h.stores.useProjectStore.getState(), calls = h.nativeCalls.length
+  await h.stores.useProjectStore.getState().hydrateProjects('u')
+  expect(h.stores.useProjectStore.getState()).toBe(before)
+  expect(h.nativeCalls).toHaveLength(calls)
 })

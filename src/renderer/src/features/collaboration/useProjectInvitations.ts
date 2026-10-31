@@ -124,9 +124,11 @@ export function useProjectInvitations(): {
         present(items.map((item) => ({ token: item.token, projectName: item.projectName, ownerName: item.ownerEmail, expired: false })))
       }).catch(warn)
       void subscribeToInvites(owner.email, async ({ token }) => {
-        const result = await validateInviteToken(token, origin)
-        if (!await scopeIsCurrent(session) || !result?.valid) return
-        present([{ token, projectName: result.projectName, ownerName: result.ownerName, expired: false }])
+        try {
+          const result = await validateInviteToken(token, origin)
+          if (!await scopeIsCurrent(session) || !result?.valid) return
+          present([{ token, projectName: result.projectName, ownerName: result.ownerName, expired: false }])
+        } catch { await warn() }
       }, origin).then((stop) => {
         if (!session.isActive()) stop()
         else unsubscribe = stop

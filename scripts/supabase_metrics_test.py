@@ -80,15 +80,15 @@ class MetricsTests(unittest.TestCase):
             'node_filesystem_size_bytes{device="/dev/disk01",mountpoint="/other-disk"} 1024']))
         self.assertEqual(summarize(metrics)['disks']['disk0']['mountpoints'], ['/data'])
 
-    def test_nonfinite_interval_cannot_start_a_tight_scrape_loop(self):
-        for interval in ['nan','inf','-inf']:
+    def test_alternate_interval_is_not_accepted(self):
+        for interval in ['30','120','nan','inf','-inf']:
             with self.subTest(interval=interval), tempfile.TemporaryDirectory() as directory:
                 arguments=['supabase_metrics.py','--project-ref','a'*20,'--output-dir',directory,'--samples','2','--interval='+interval]
                 with patch('sys.argv',arguments), patch('supabase_metrics.load_key',return_value='sb_secret_SYNTHETIC'), patch('supabase_metrics.scrape',return_value=parse_metrics(raw())) as fetch, patch('supabase_metrics.time.sleep'), redirect_stderr(io.StringIO()):
                     with self.assertRaises(SystemExit): main()
                     fetch.assert_not_called()
 
-    def test_store_survives_reopen_and_prunes_age_even_at_slower_sampling(self):
+    def test_store_survives_reopen_and_prunes_age_after_gaps(self):
         with tempfile.TemporaryDirectory() as directory:
             now=datetime.datetime.now(datetime.timezone.utc)
             sample={'observed_at':now.isoformat(),'scrape_ok':True,'metrics':{'disks':{}}}
@@ -123,8 +123,9 @@ class MetricsTests(unittest.TestCase):
             stamps=[(base+datetime.timedelta(seconds=n)).isoformat() for n in [0,60,120]]
             arguments=['supabase_metrics.py','--project-ref','a'*20,'--output-dir',directory,'--samples','3']
             output=io.StringIO()
-            with patch('sys.argv',arguments), patch('supabase_metrics.load_key',return_value='sb_secret_SYNTHETIC'), patch('supabase_metrics.scrape',side_effect=[parse_metrics(raw()),ValueError('sb_secret_DO_NOT_EXPORT private-body'),parse_metrics(raw(220))]), patch('supabase_metrics.utc_now',side_effect=stamps), patch('supabase_metrics.time.monotonic',side_effect=[0,1,2,60,62,120,121]), patch('supabase_metrics.time.sleep'), redirect_stdout(output), redirect_stderr(output):
+            with patch('sys.argv',arguments), patch('supabase_metrics.load_key',return_value='sb_secret_SYNTHETIC'), patch('supabase_metrics.scrape',side_effect=[parse_metrics(raw()),ValueError('sb_secret_DO_NOT_EXPORT private-body'),parse_metrics(raw(220))]), patch('supabase_metrics.utc_now',side_effect=stamps), patch('supabase_metrics.time.monotonic',side_effect=[0,1,2,60,62,120,121]), patch('supabase_metrics.time.sleep') as sleep, redirect_stdout(output), redirect_stderr(output):
                 main()
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [58, 58])
             store=Store(directory)
             try:
                 entries=[json.loads(row[0]) for row in store.db.execute('SELECT summary FROM samples ORDER BY id')]

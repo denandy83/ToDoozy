@@ -1,5 +1,5 @@
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext } from './syncContext'
+import { captureSyncContext, type SyncContext } from './syncContext'
 /**
  * UserChannelService — one Realtime channel per signed-in user covering the
  * user-scoped tables that were previously polling/reconcile-only:
@@ -32,11 +32,11 @@ import { useSavedViewStore } from '../shared/stores/savedViewStore'
 import { useProjectAreaStore } from '../shared/stores/projectAreaStore'
 import { useProjectStore } from '../shared/stores/projectStore'
 import { SYNC_TABLES } from './syncTables'
-import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
 import { requestSyncCatchUp } from './PersonalSyncService'
 
 interface UserChannelState {
+  context: Promise<SyncContext>
   userId: string
   channel: RealtimeChannel | null
   cancelled: boolean
@@ -101,9 +101,10 @@ async function handleUserTableChange(
 }
 
 async function createUserChannel(state: UserChannelState): Promise<void> {
-  const context = await captureSyncContext(() => !state.cancelled && navigator.onLine && !isSuspended())
-  if (state.cancelled || useAuthStore.getState().currentUser?.id !== state.userId) return
+  const context = await state.context
   const supabase = await getSupabase()
+  if (!await context.isCurrent() || state.cancelled || useAuthStore.getState().currentUser?.id !== state.userId) return
+  context.assertCurrent()
   const { userId } = state
   const channel = supabase
     .channel(`user:${userId}`)
@@ -199,6 +200,7 @@ function scheduleUserChannelReconnect(): void {
     }
     try {
       const supabase = await getSupabase()
+      if (!await (await state.context).isCurrent() || state.cancelled) return
       if (state.channel) {
         // Same auto-rejoin guard as the project channels: tearing down a
         // channel supabase-js already rejoined triggers a CLOSED → reconnect
@@ -206,14 +208,14 @@ function scheduleUserChannelReconnect(): void {
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
           state.attempt = 0
-          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
+          void state.context.then((context) => { if (!state.cancelled) return requestSyncCatchUp(context); return undefined }).catch(() => {})
           logEvent('info', 'realtime', 'User-channel reconnect skipped — channel auto-rejoined')
           return
         }
         await supabase.removeChannel(state.channel)
       }
     } catch { /* channel may already be dead */ }
-    await createUserChannel(state)
+    try { await createUserChannel(state) } catch (error) { if (!state.cancelled) throw error }
   }, delay)
 }
 
@@ -232,7 +234,13 @@ export async function forceReconnectUserChannel(): Promise<void> {
   if (!state || state.cancelled) return
   const context = await captureSyncContext()
   await requestSyncCatchUp(context)
-  if (state.cancelled || !await context.isCurrent()) return
+  const origin = await state.context
+  if (!await context.isCurrent() || state.cancelled) return
+  context.assertCurrent()
+  if (origin.scope !== context.scope) {
+    await subscribeToUserChannel(state.userId)
+    return
+  }
   state.attempt = 0
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)
@@ -256,22 +264,17 @@ export async function forceReconnectUserChannel(): Promise<void> {
 export async function subscribeToUserChannel(
   userId: string,
 ): Promise<void> {
-  if (userChannelState && !userChannelState.cancelled) {
-    if (userChannelState.userId === userId) return
-    await unsubscribeUserChannel()
-  }
-  if (!(await requireSession())) {
-    logEvent('warn', 'sync', 'subscribeToUserChannel skipped — no session', `user=${userId.slice(0, 8)}`)
-    return
-  }
-  // Session lookup can race setup and cross-device discovery. Reserve only once.
   if (useAuthStore.getState().currentUser?.id !== userId) return
-  if (userChannelState && !userChannelState.cancelled) {
-    if (userChannelState.userId === userId) return
-    await unsubscribeUserChannel()
-    if (userChannelState && !userChannelState.cancelled) return
+  const existing = userChannelState
+  if (existing?.userId === userId && !existing.cancelled) {
+    const context = await existing.context
+    const current = await context.isCurrent()
+    if (existing.cancelled || userChannelState !== existing || useAuthStore.getState().currentUser?.id !== userId) return
+    if (current) return
   }
+  const removal = userChannelState ? unsubscribeUserChannel() : Promise.resolve()
   const state: UserChannelState = {
+    context: captureSyncContext(() => navigator.onLine && !isSuspended()),
     userId,
     channel: null,
     cancelled: false,
@@ -280,7 +283,13 @@ export async function subscribeToUserChannel(
   }
   userChannelState = state
   useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
-  await createUserChannel(state)
+  try {
+    await Promise.all([removal, state.context])
+    await createUserChannel(state)
+  } catch (error) {
+    if (userChannelState === state) await unsubscribeUserChannel()
+    throw error
+  }
 }
 
 /** Tear down the per-user channel (logout / realtime effect cleanup). */

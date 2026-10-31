@@ -1,7 +1,7 @@
 import type { TodoozyAPI } from '../../../../preload/index.d'
 import { useAuthStore } from './authStore'
 
-export function hydrationContext(): { api: TodoozyAPI; isCurrent(): Promise<boolean> } {
+export function hydrationContext(): { api: TodoozyAPI; isCurrent(): Promise<boolean>; assertCurrent(): void } {
   const user = useAuthStore.getState().currentUser
   const origin = window.api.sync.captureContext()
   const sameUser = (): boolean => useAuthStore.getState().currentUser === user
@@ -21,5 +21,6 @@ export function hydrationContext(): { api: TodoozyAPI; isCurrent(): Promise<bool
     return sameUser() && current.generation === database.generation && current.userId === database.userId
       && database.userId === (user?.id ?? null)
   }
-  return { api, isCurrent }
+  const assertCurrent = (): void => { if (!sameUser()) throw new Error('Hydration account changed') }
+  return { api, isCurrent, assertCurrent }
 }

@@ -15,18 +15,21 @@ const settle = () => new Promise(setImmediate);
 function textOf(file, ref) {
   return ref ? cp.execFileSync('git', ['show', `${ref}:${file}`], { cwd: source, encoding: 'utf8' }) : fs.readFileSync(path.join(source, file), 'utf8');
 }
-async function compilation(ref) {
+async function compilation(ref, invitations = false) {
   const app = ts.createSourceFile('App.tsx', textOf('src/renderer/src/App.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let effect, startupEffect, localBootstrapEffect, localChangeEffect;
+  let effect, startupEffect, localBootstrapEffect, localChangeEffect, invitationCall, invitationView;
   function walk(node) {
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('realtimeEffectRunCount.current += 1')) effect = node.arguments[0].getText(app);
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[1]?.getText(app).includes('startupUserId')) startupEffect = node.arguments[0].getText(app);
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.tray.setUserId')) localBootstrapEffect = node.arguments[0].getText(app);
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.onTasksChanged')) localChangeEffect = node.arguments[0].getText(app);
+    if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && node.initializer.expression.getText(app) === 'useProjectInvitations') invitationCall = node.getText(app);
+    if (ts.isJsxExpression(node) && node.expression && node.expression.getText(app).includes('<InviteDialog')) invitationView = node.getText(app);
     ts.forEachChild(node, walk);
   }
   walk(app);
   if (!effect || !startupEffect || !localBootstrapEffect || !localChangeEffect) throw Error('App sync effect unavailable');
+  if (invitations && (!invitationCall || !invitationView)) throw Error('App invitation wiring unavailable');
   const entry = `
     import { DatabaseSync } from 'node:sqlite';
     import { migrations } from '../../main/database/migrations';
@@ -49,6 +52,9 @@ async function compilation(ref) {
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent } from './shared/stores/logStore';
+    ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
+    import { InviteDialog } from './features/collaboration/InviteDialog';
+    function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
     const db=new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys=ON;CREATE TABLE schema_version(version INTEGER PRIMARY KEY)');
     for(const migrate of migrations)migrate(db);
@@ -62,9 +68,9 @@ async function compilation(ref) {
     const {hydrateProjectTemplates}=useTemplateStore.getState();
     function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={personal,shared,user,refresh,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useSyncStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
-  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
+  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
       build.onResolve({filter:/^@supabase\/supabase-js$/},()=>({path:'sdk',namespace:'fixture'}));
       build.onResolve({filter:/^\./},args=>{
@@ -106,8 +112,8 @@ function expression(row,value) {
   if(value.startsWith('and('))return split(value.slice(4,-1)).every(x=>expression(row,x));
   const dot=value.indexOf('.');return predicate(row,value.slice(0,dot),value.slice(dot+1));
 }
-async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false}={}) {
-  const authorizations=[];let session=null,beforeSession=null,localChange=null;
+async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false,invitations=false}={}) {
+  const authorizations=[];let session=null,beforeSession=null,localChange=null,inviteReceived=null;
   const requests=[],channels=[],logs=[],fixtureErrors=[],intervals=new Map(),timers=new Map();
   const remote={projects:[],project_members:[],tasks:[],statuses:[],user_labels:[],user_settings:[],user_themes:[],user_saved_views:[],user_project_areas:[],project_templates:[],project_labels:[],task_labels:[],activity_log:[]};
   let nextId=1,active=0,maxConcurrent=0,suspended=false,disposed=false,generation=1,beforeRequest=null;
@@ -158,7 +164,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     const channel={topic,state:'joining',closed:false,bindings:[],on(_kind,filter,callback){this.bindings.push({filter,callback});return this},subscribe(callback){this.status=status=>{if(status==='SUBSCRIBED')this.state='joined';callback(status)};channels.push(this);if(connected)queueMicrotask(()=>{if(!this.closed)this.status('SUBSCRIBED')});return this},emit(table,eventType='UPDATE',row={}){for(const binding of this.bindings)if(binding.filter.table===table)binding.callback({eventType,new:row,old:row})}};
     return channel;
   },removeChannel:async(channel)=>{channel.closed=true;channel.state='closed';return 'ok'}};
-  const code=await compilation(ref);
+  const code=await compilation(ref,invitations);
   const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
     setInterval:(fn,ms)=>{const id=nextId++;intervals.set(id,{fn,ms});return id},clearInterval:id=>intervals.delete(id),setTimeout:(fn,ms)=>{const id=nextId++;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id)};
   runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>(await runtime.client.auth.getSession()).data.session;runtime.isSuspended=()=>suspended;
@@ -166,8 +172,8 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   vm.runInContext(code,sandbox);
   const fixture=sandbox.fixture,{repo,stores}=fixture;
   const nativeCalls=[];
-  const api=new Proxy({}, {get:(_,namespace)=>namespace==='onTasksChanged'?callback=>{localChange=callback;return ()=>{localChange=null}}:new Proxy({}, {get:(_,method)=>async(...args)=>{
-    if(namespace!=='sync')nativeCalls.push({namespace,method,args});
+  const api=new Proxy({}, {get:(_,namespace)=>namespace==='onInviteReceived'?callback=>{inviteReceived=callback;return ()=>{if(inviteReceived===callback)inviteReceived=null}}:namespace==='onTasksChanged'?callback=>{localChange=callback;return ()=>{localChange=null}}:new Proxy({}, {get:(_,method)=>async(...args)=>{
+    if(namespace!=='sync')nativeCalls.push({namespace,method,args,generation,userId:stores.useAuthStore.getState().currentUser?.id});
     if(namespace==='app'&&method==='getChangelog')return '# Synthetic changelog';
     if(namespace==='releaseNotes'&&method==='sync')return {ok:true,count:0,cached:true};
     if(namespace==='auth'&&method==='getSupabaseConfig')return Promise.resolve({url:'http://127.0.0.1:9999',anonKey:'synthetic-public-key'});
@@ -201,7 +207,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   await stores.useProjectStore.getState().hydrateProjects('u');
   const untilIdle=async()=>{let quiet=0,last=-1;for(let i=0;i<2000;i++){await settle();if(!active&&requests.length===last)quiet++;else quiet=0;last=requests.length;if(quiet>=10)return;if(latency)await new Promise(resolve=>setTimeout(resolve,latency))}throw Error('Fixture did not settle')};
   return {sandbox,services:fixture,repo,stores,projects,remote,requests,nativeCalls,authorizations,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
-    run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),runLocalBootstrap:()=>fixture.runLocalBootstrap(),runLocalChanges:()=>fixture.runLocalChanges(),emitLocalChange:()=>localChange?.(),setSession:(token,userId='u')=>{session={user:{id:userId},access_token:token}},beforeSession:callback=>{beforeSession=callback},untilIdle,context:()=>fixture.captureSyncContext(),producer:()=>fixture.captureSyncProducer(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
+    emitInvite:token=>inviteReceived?.(token),run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),runLocalBootstrap:()=>fixture.runLocalBootstrap(),runLocalChanges:()=>fixture.runLocalChanges(),emitLocalChange:()=>localChange?.(),setSession:(token,userId='u')=>{session={user:{id:userId},access_token:token}},beforeSession:callback=>{beforeSession=callback},untilIdle,context:()=>fixture.captureSyncContext(),producer:()=>fixture.captureSyncProducer(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},replaceDatabase:()=>{generation++},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
     changeConnected:value=>stores.useSyncStore.getState().setRealtimeConnected(value),beforeRequest:callback=>{beforeRequest=callback},
     runStartupTimers:async()=>{const jobs=[...timers].filter(([,job])=>job.ms===2000);for(const [id,{fn}] of jobs){timers.delete(id);await fn()}await untilIdle()},
     runIntervals:async()=>{for(const {fn}of [...intervals.values()])await fn();await untilIdle()},runTimers:async()=>{const jobs=[...timers.values()];timers.clear();for(const {fn}of jobs)await fn();await untilIdle()},

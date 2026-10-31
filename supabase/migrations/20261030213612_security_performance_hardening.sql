@@ -80,6 +80,12 @@ GRANT EXECUTE ON FUNCTION public.accept_invite(uuid) TO authenticated;
 
 -- A recipient may consume only their own targeted invitation. Public links are
 -- dismissed locally: declining one must not revoke it for other recipients.
+ALTER TABLE public.project_invites
+  DROP CONSTRAINT IF EXISTS shared_project_invites_status_check,
+  DROP CONSTRAINT IF EXISTS project_invites_status_check;
+ALTER TABLE public.project_invites ADD CONSTRAINT project_invites_status_check
+  CHECK (status IN ('pending','accepted','expired','declined'));
+
 CREATE OR REPLACE FUNCTION public.decline_invite(invite_token uuid)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE invitation public.project_invites%ROWTYPE; caller uuid := auth.uid(); caller_email text;

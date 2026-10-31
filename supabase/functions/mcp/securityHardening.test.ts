@@ -13,7 +13,7 @@ beforeEach(async () => {
     CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,raw_user_meta_data jsonb DEFAULT '{}',email_confirmed_at timestamptz DEFAULT now());
     CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid NOT NULL,name text,description text,color text,icon text,created_at timestamptz,updated_at timestamptz);
     CREATE TABLE project_members(project_id uuid,user_id uuid,role text,joined_at timestamptz,invited_by uuid,display_color text,display_initials text,PRIMARY KEY(project_id,user_id));
-    CREATE TABLE project_invites(token uuid PRIMARY KEY,project_id uuid,target_email text,status text,expires_at timestamptz,accepted_by uuid);
+    CREATE TABLE project_invites(token uuid PRIMARY KEY,project_id uuid,target_email text,status text NOT NULL DEFAULT 'pending' CONSTRAINT shared_project_invites_status_check CHECK(status IN ('pending','accepted','expired')),expires_at timestamptz NOT NULL,accepted_by uuid);
     CREATE TABLE tasks(id uuid PRIMARY KEY,status_id uuid);
     CREATE TABLE user_settings(id uuid PRIMARY KEY,user_id uuid,value text);
     ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
@@ -260,7 +260,7 @@ it('dismisses reusable public links without revoking them and rejects unavailabl
   expect((await db.query('SELECT status FROM project_invites WHERE token=$1',[id(62)])).rows).toEqual([{status:'pending'}])
   await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(63)]))).rejects.toThrow(/unavailable or expired/)
   await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(999)]))).rejects.toThrow(/unavailable/)
-  await db.query("UPDATE project_invites SET status='revoked' WHERE token=$1",[id(63)])
+  await db.query("UPDATE project_invites SET status='accepted',expires_at=now()+interval '1 day' WHERE token=$1",[id(63)])
   await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(63)]))).rejects.toThrow(/unavailable/)
 },15000)
 
@@ -275,12 +275,35 @@ it('cannot accept a declined invitation or decline an accepted invitation', asyn
   expect((await db.query('SELECT status,accepted_by FROM project_invites WHERE token=$1',[id(65)])).rows).toEqual([{status:'declined',accepted_by:null}])
 },15000)
 
-it.each(['status','expires_at'])('fails closed for an invitation with missing %s', async column => {
+it.each(['status','expires_at'])('fails closed for synthetic nullable %s outside the real schema', async column => {
   await db.query("INSERT INTO project_invites VALUES($1,$2,'alice@example.invalid','pending',now()+interval '1 day',NULL)",[id(66),id(10)])
-  await db.exec('UPDATE project_invites SET ' + column + '=NULL')
+  await db.exec('ALTER TABLE project_invites ALTER COLUMN ' + column + ' DROP NOT NULL; UPDATE project_invites SET ' + column + '=NULL')
   await harden()
   for (const operation of ['accept_invite','decline_invite']) {
     await expect(as('authenticated',id(1),()=>db.query('SELECT ' + operation + '($1)',[id(66)]))).rejects.toThrow(/unavailable/)
   }
   expect((await db.query('SELECT user_id FROM project_members WHERE user_id=$1',[id(1)])).rows).toEqual([])
+},15000)
+
+
+it.each(['shared_project_invites_status_check','project_invites_status_check'])('upgrades the original three-state %s without changing rows or unrelated constraints', async name => {
+  if (name !== 'shared_project_invites_status_check') await db.exec('ALTER TABLE project_invites RENAME CONSTRAINT shared_project_invites_status_check TO ' + name)
+  await db.query("INSERT INTO project_invites VALUES($1,$3,'alice@example.invalid','pending',now()+interval '1 day',NULL),($2,$3,NULL,'expired',now()-interval '1 day',NULL)",[id(70),id(71),id(10)])
+  await db.exec("ALTER TABLE project_invites ADD CONSTRAINT retain_target_check CHECK(target_email IS NULL OR length(target_email)>0)")
+  const before = (await db.query('SELECT * FROM project_invites ORDER BY token')).rows
+  await expect(db.query("UPDATE project_invites SET status='declined' WHERE token=$1",[id(70)])).rejects.toThrow(/check constraint/)
+  await harden()
+  expect((await db.query('SELECT * FROM project_invites ORDER BY token')).rows).toEqual(before)
+  expect((await as('authenticated',id(1),()=>db.query('SELECT decline_invite($1) AS result',[id(70)]))).rows).toEqual([{result:'declined'}])
+  await expect(db.query("UPDATE project_invites SET status='revoked' WHERE token=$1",[id(70)])).rejects.toThrow(/check constraint/)
+  await expect(db.query("UPDATE project_invites SET target_email='' WHERE token=$1",[id(70)])).rejects.toThrow(/retain_target_check/)
+},15000)
+
+it.each(['shared_project_invites_status_check','project_invites_status_check'])('preserves existing four-state rows under %s', async name => {
+  await db.exec("ALTER TABLE project_invites DROP CONSTRAINT shared_project_invites_status_check; ALTER TABLE project_invites ADD CONSTRAINT " + name + " CHECK(status IN ('pending','accepted','expired','declined'))")
+  for (const [index,status] of ['pending','accepted','expired','declined'].entries()) await db.query("INSERT INTO project_invites VALUES($1,$2,$3,$4,now()+interval '1 day',NULL)",[id(80+index),id(10),'alice@example.invalid',status])
+  const before = (await db.query('SELECT * FROM project_invites ORDER BY token')).rows
+  await harden()
+  expect((await db.query('SELECT * FROM project_invites ORDER BY token')).rows).toEqual(before)
+  await expect(db.exec("UPDATE project_invites SET status='other'")).rejects.toThrow(/check constraint/)
 },15000)

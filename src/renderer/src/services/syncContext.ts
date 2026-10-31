@@ -91,4 +91,5 @@ export async function syncContextFromProducer(origin: SyncProducer): Promise<Syn
 
 export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {
   if (!await origin.isCurrent()) throw new Error('Sync account or database changed')
+  origin.assertCurrent()
 }

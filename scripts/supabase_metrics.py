@@ -188,11 +188,10 @@ def main():
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--env-file')
     parser.add_argument('--keychain-service')
-    parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--samples', type=int, default=0, help='0=continuous; use2+ to obtain counter rates')
     args = parser.parse_args()
-    if not math.isfinite(args.interval) or args.interval < 60 or args.samples < 0:
-        parser.error('Interval must be at least60 seconds and sample count nonnegative')
+    if args.samples < 0:
+        parser.error('Sample count must be nonnegative')
     # Validate credentials before creating any output/history.
     secret = load_key(args.env_file, args.keychain_service, args.project_ref)
     directory = Path(args.output_dir)
@@ -221,7 +220,7 @@ def main():
                 store.write(sample)
                 count += 1
                 if args.samples == 0 or count < args.samples:
-                    time.sleep(max(0, args.interval - (time.monotonic() - start)))
+                    time.sleep(max(0, 60 - (time.monotonic() - start)))
         finally:
             store.close()
 
