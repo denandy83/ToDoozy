@@ -144,12 +144,12 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ### File Attachments (iCloud Drive)
 - Attach files via toolbar paperclip button (enabled when iCloud is configured)
-- Files stored locally at `~/.todoozy/attachments/<task-id>/` + synced to `~/Library/Mobile Documents/...`
+- File bytes are stored in the local SQLite attachment table; see [AttachmentRepository](src/main/repositories/AttachmentRepository.ts).
 - Attachment cards below description: file type icon + truncated filename
-- Hover X to remove; click to open in default macOS app
+- Removal, opening and Undo: see [File Attachments](HELP.md#file-attachments).
 - Limits: 10 MB per file, 10 attachments per task; duplicate filename suffix
 - Requires iCloud Drive toggle in Settings > iCloud
-- Task deletion cascades to file cleanup
+- Local byte retention and task-deletion cleanup follow [PurgeService](src/main/services/PurgeService.ts).
 - **Status:** Complete (2026-03-22)
 
 ### Smart Recurrence Picker
@@ -434,21 +434,21 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ### Supabase Full Sync Engine
 - Write-through sync hooks on all Zustand stores (tasks, labels, projects, settings, themes, saved views, project areas) push every local write to Supabase in background
 - **Generic two-way reconcile** (`reconcileTable`): diffs all eight syncable tables, pushes local-only rows, pulls remote-only rows, applies last-writer-wins per row. Replaces eight bespoke per-table pull functions.
-- **Soft-delete everywhere:** All deletes set `deleted_at`; reads filter tombstones; Realtime UPDATE events propagate soft-deletes cross-device. 30-day purge via `pg_cron` + local boot sweep.
+- **Soft-delete everywhere:** Deletes set `deleted_at`; reads filter tombstones; Realtime UPDATE events propagate soft-deletes cross-device. See [PurgeService](src/main/services/PurgeService.ts) for local retention rules.
 - **Per-(user, scope, table) high-water mark** (`sync_meta` table): idle reconcile skips table scans when neither side has new data since the stored high-water mark. Project-scoped tables use `project_id` as scope.
 - **Resurrect protection:** A locally tombstoned row stays tombstoned even when a newer remote update arrives — prevents zombie rows after Realtime gaps.
 - Sync status indicator shows connection state (synced, syncing, offline, error)
 - Offline detection with automatic queue-and-flush: changes made offline are queued and pushed when connectivity returns
-- **Force Full Sync** button in Settings > General triggers a complete Supabase re-sync on demand
+- Full refresh and archived-project behavior: see [Recovery and diagnostics](HELP.md#recovery-and-diagnostics).
 - Project metadata (name, color, icon, is_default, sidebar_order, area_id) syncs cross-device
 - **Project templates sync**: templates created on one device propagate to all devices
 - **project_labels junction table on Supabase**: label↔project associations sync as individual rows (add/remove propagates immediately, with LWW on tombstones)
 - `syncProjectDown` and `discoverRemoteMemberships` skip gracefully when offline
 - **Auto-reconnect Realtime channels** with exponential backoff on drop (sleep/wake, network switch)
-- **Power-aware reconnect + give-up banner** (v1.7.0): `powerMonitor` suspend/resume IPC pauses reconnect timers during macOS sleep (no more Power Nap dark-wake noise); backoff `[5s, 15s, 30s, 60s]` capped at 4 attempts, then an amber "Connection lost — Retry now" banner; anomaly detector ignores channel-error log lines
+- **Power-aware reconnect + give-up banner** (v1.7.0): `powerMonitor` suspend/resume IPC pauses reconnect timers during macOS sleep (no more Power Nap dark-wake noise); channel-specific backoff limits lead to an amber "Connection lost — Retry now" banner; anomaly detector ignores channel-error log lines. Retry schedules are defined in [PersonalSyncService](src/renderer/src/services/PersonalSyncService.ts) and [SyncService](src/renderer/src/services/SyncService.ts).
 - **Cross-user label dedup & tombstone correctness** (v1.7.0): `project_labels` tombstones with name-aware removal across same-name labels owned by different members, `project_labels` Realtime subscription on shared channels, reconcile reads the junction table (not legacy JSON), FK-safe push ordering (`user_labels` before `project_labels`)
 - **setAuth deduplication**: token refresh fans out only once regardless of open channel count
-- In-app connection log for Realtime events (Settings)
+- In-app connection events and traffic summaries: see [Recovery and diagnostics](HELP.md#recovery-and-diagnostics).
 - **Status:** Complete (updated v1.7.0)
 
 ---

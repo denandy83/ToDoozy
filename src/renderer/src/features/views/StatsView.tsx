@@ -60,8 +60,6 @@ export function StatsView(): React.JSX.Element {
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
 
-  const projectIds = projectFilter ? [projectFilter] : null
-
   const { startDate, endDate } = useMemo(() => {
     const end = new Date()
     const start = new Date()
@@ -90,6 +88,7 @@ export function StatsView(): React.JSX.Element {
     let disposed = false
     const origin = hydrationContext()
     const load = async (): Promise<void> => {
+      const projectIds = projectFilter ? [projectFilter] : null
       const [comp, focus, heat, str, sum, prio, dow, proj] = await Promise.all([
         origin.api.stats.completions(userId, projectIds, startDate, endDate),
         origin.api.stats.focus(userId, projectIds, startDate, endDate),
@@ -205,6 +204,7 @@ export function StatsView(): React.JSX.Element {
   const openDrillDown = useCallback(async (filter: StatsFilter, label: string) => {
     if (!userId) return
     const origin = hydrationContext()
+    const projectIds = projectFilter ? [projectFilter] : null
     setDrillDown({ filter, label })
     setDrillLoading(true)
     try {

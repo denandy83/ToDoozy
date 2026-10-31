@@ -25,14 +25,15 @@ function toIsoDate(d: Date): string {
   return localDateKey(d)
 }
 
-/**
- * Check if a task's due_date matches the active due date filter (preset or custom range).
- * Returns true if no filter is active, or if the task matches the filter.
- */
+/** Overdue uses the local calendar day, not the timestamp's UTC date. */
 export function isDueDateOverdue(dueDate: string | null): boolean {
   return !!dueDate && calendarDateKey(dueDate) < localDateKey()
 }
 
+/**
+ * Check if a task's due_date matches the active due date filter (preset or custom range).
+ * Returns true if no filter is active, or if the task matches the filter.
+ */
 export function matchesDueDateFilter(
   dueDate: string | null,
   dueDatePreset: string | null,

@@ -156,7 +156,7 @@ export function TaskRow({
     } else if (!readOnly) {
       setIsEditing(true)
     }
-  }, [onOpenDetail, task.id, readOnly])
+  }, [onOpenDetail, task.id, readOnly, setIsEditing])
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {

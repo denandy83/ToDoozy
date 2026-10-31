@@ -1755,19 +1755,10 @@ export async function pullNewTasks(projectId: string, context?: SyncContext, met
 }
 
 /**
- * Reconcile local SQLite vs Supabase by ID-set diff.
- *
- * This is the safety net for silent push failures: every personal-project task
- * and every user_label is checked; missing-in-remote is pushed, missing-in-local
- * is pulled. Triggered on app startup and on reconnect, and exposed as a manual
- * "Reconcile" button so a user with a "ghost" task can fix it without restarting.
- *
- * Returns { pushed, pulled } counts. Silent on success; if more than 10 items
- * needed reconciling, a notification is fired so the user notices.
- *
- * Concurrent callers share the same in-flight promise. A 30s cooldown skips
- * back-to-back runs (e.g. startup-reconcile racing a transient-offline-flap
- * reconcile triggered by the same boot's WS hiccup).
+ * Full recovery and project events share one scheduler. Requests arriving
+ * after a sweep begins need a follow-up so that a late change is not lost.
+ * The per-account/database cooldown applies only to explicit reconciliation;
+ * background recovery must not skip missed events because of that cooldown.
  */
 let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
 type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: Promise<SyncContext | null>; scope?: string; projectIds: Set<string> | null; taskIds: Map<string, Set<string>> }

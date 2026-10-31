@@ -1,5 +1,5 @@
 import { localDateKey } from '../../../../shared/localDate'
-/** Add local calendar days, preserving an existing timestamp's time portion. */
+/** Add local calendar days, preserving an existing timestamp's local clock time. */
 export function addDaysPreservingTime(baseDueDate: string | null | undefined, days: number): string {
   const target = new Date()
   target.setDate(target.getDate() + days)

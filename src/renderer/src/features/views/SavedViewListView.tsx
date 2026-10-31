@@ -298,10 +298,12 @@ export function SavedViewListView(): React.JSX.Element {
   // store so the inline label palette stays put while the user toggles label
   // chips and only changes when the view is re-saved. Handles both current
   // configs (name keys) and legacy configs that stored label UUIDs.
+  const savedViewId = currentView?.id
+  const savedViewConfig = currentView?.filter_config
   const savedLabelFilter = useMemo<{ keys: string[]; logic: 'any' | 'all' }>(() => {
-    if (!currentView) return { keys: [], logic: 'all' }
+    if (savedViewId === undefined || savedViewConfig === undefined) return { keys: [], logic: 'all' }
     try {
-      const cfg = JSON.parse(currentView.filter_config) as FilterConfig
+      const cfg = JSON.parse(savedViewConfig) as FilterConfig
       const keys = (cfg.labelIds ?? []).map((idOrKey) => {
         const byId = rawAllLabels.find((l) => l.id === idOrKey)
         return (byId ? byId.name : idOrKey).toLowerCase()
@@ -310,7 +312,7 @@ export function SavedViewListView(): React.JSX.Element {
     } catch {
       return { keys: [], logic: 'all' }
     }
-  }, [currentView?.id, currentView?.filter_config, rawAllLabels])
+  }, [savedViewId, savedViewConfig, rawAllLabels])
 
   // Labels present on the tasks the saved view actually contains — baseTasks
   // narrowed by the view's SAVED label-include filter — rendered as the inline

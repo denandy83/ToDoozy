@@ -19,7 +19,7 @@ Do not equate a local benchmark with production disk I/O.
 | TIMER-01 | Interval updates subtract elapsed time, including delayed callbacks and automatic phase transitions. |
 | MCP-01–04 | Stable complete pagination, query failures propagate, rejected/zero-row reorders fail, and release-note writes require a server administrator allowlist. |
 | BOT-01–03 | Explicit service-role membership/owner scope, active-row filters, pagination, bounded recent queries and useful partial creation errors when label writes fail. |
-| FILE-01–02 | Unique private attachment-open paths and recoverable removal with byte-preserving Undo. Deleted local attachments are purged after 30 days. |
+| FILE-01–02 | Unique private attachment-open paths and recoverable removal with byte-preserving Undo; local byte retention follows [PurgeService](../src/main/services/PurgeService.ts). |
 | DEP-01 | Updated bot qs override/lockfile; production dependency audits checked separately. |
 
 MCP multi-request copies/reorders can still be partly applied if a later network
@@ -55,9 +55,8 @@ The fixture records request counts, declared synthetic response bytes, concurren
 source hashes and timings with a fixed 1 ms request delay. It measures neither
 physical cloud disk I/O nor production throughput.
 
-Earlier saved observations (80 → 60 initial requests, 80 → 0 healthy fallback
-requests, and 320 → 180 requests after three flaps) used the previous project-only
-fixture. They do not describe the expanded membership/user catch-up workload.
+Earlier saved observations used the previous project-only fixture. They do not
+describe the expanded membership/user catch-up workload.
 Regenerate paired results with this fixture before reporting new request savings.
 The event scenario delivers the same remote task update through its real channel
 among 20 projects and records HTTP bytes/counts plus local and remote writes.
@@ -71,13 +70,16 @@ for a new context, and closed channel metadata callbacks cannot recreate channel
 loaded before project enumeration; missing local-owner memberships do not discard
 pending local data. Personal and shared channels rebind after archive/restore
 metadata changes. Routine archived reconciliation reads metadata only; explicit
-reconciliation retains tasks, statuses, activity and label coverage.
+reconciliation retains tasks, statuses, activity and label coverage. See
+[Recovery and diagnostics](../HELP.md#recovery-and-diagnostics) for the controls.
 
 Local PGlite/Postgres query timings and cloud `pg_stat_io`/WAL snapshots are
 separate evidence. The latter are cumulative database counters, not host disk or
 swap throughput. A production host before/after comparison requires real Metrics
 API samples, comparable workload, and the deployed candidate. Never infer disk
 budget balance from request counts, cache hits, IOPS or disk busy time.
+Live host before/after I/O remains unmeasured; authenticated collection and
+comparable baseline/candidate deployment windows are still required.
 
 ## Persistent diagnostics
 
@@ -91,6 +93,9 @@ counted in that interval.
 `diagnostics.db` under Electron's userData stores at most 10,080 aggregates for
 seven days, with file mode 0600. Recent history is restored into the Logs view.
 This is local aggregate history; it does not upload logs or write to Supabase.
+History belongs to the OS user profile and is shared across app sign-ins; it is
+not partitioned by Supabase account. Clearing the visible Logs list does not
+delete the retained journal, whose recent entries return on restart.
 
 ### Host I/O collector setup
 

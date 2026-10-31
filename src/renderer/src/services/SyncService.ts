@@ -905,8 +905,10 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
 }
 
 /**
- * Discover shared projects the user is a member of in Supabase
- * but doesn't have locally. Returns project IDs to sync down.
+ * Reconcile memberships only after every remote page succeeds. Missing remote
+ * access evicts renderer state/subscriptions but preserves native recovery data;
+ * local owners retain pending projects without a remote membership yet.
+ * Returns newly discovered project IDs to sync down.
  */
 export async function discoverRemoteMemberships(userId: string, context?: SyncContext, scopedProject?: Project): Promise<string[]> {
   if (!navigator.onLine || isSuspended()) return []

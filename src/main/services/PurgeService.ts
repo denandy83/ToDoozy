@@ -1,17 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 /**
- * 30-day tombstone retention. Soft-deleted rows linger so other devices can
- * propagate the tombstone via reconcile; once a row has been tombstoned for 30
- * days, every honest peer has had a chance to see it and we can hard-DELETE.
+ * Local tombstones are eligible for cleanup after 30 days, but age never
+ * overrides queued intent. Retain queued rows, their foreign-key prerequisites
+ * and ancestors, and dependencies of active/recent syncable rows. Local-only
+ * attachment tombstones retain their original bytes through this window.
  *
- * Counterpart server-side cron: `public.purge_tombstones()` (see
- * supabase/migrations/20260425_purge_tombstones.sql) runs daily at 03:00 UTC.
+ * This local sweep is independent of server-side cleanup; age does not prove
+ * that every peer has received a tombstone.
  *
- * Tables purged here are exactly the syncable tables that carry a `deleted_at`
- * column. Junction tables (`task_labels`, `project_labels`) have no
- * `deleted_at` and are managed via key-set diff in the sync layer — they are
- * not purged here.
+ * This list includes local-only attachments. Local junction tables
+ * (`task_labels`, `project_labels`) have no `deleted_at`; parent cascades and
+ * sync key-set differences manage their removal instead.
  */
 const PURGEABLE_TABLES = [
   'tasks',
@@ -37,9 +37,7 @@ export interface PurgeStats {
 }
 
 /**
- * Hard-DELETE rows whose `deleted_at` is older than 30 days.
- * Safe to run on every boot — it's idempotent and a no-op when the DB is
- * already clean.
+ * Apply the retention invariant above; safe to call on every boot.
  */
 export function purgeOldTombstones(db: DatabaseSync): PurgeStats {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)

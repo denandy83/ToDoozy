@@ -1,7 +1,6 @@
 import { localDateKey, calendarDateKey } from '../../../../shared/localDate'
 import { sortSubtasksForDisplay } from '../../shared/utils/sortTasks'
 import { useCallback, useMemo, useRef, useEffect, useState } from 'react'
-import { useToast } from '../../shared/components/Toast'
 import { useCopyTasks } from '../../shared/hooks/useCopyTasks'
 import { useTaskStore } from '../../shared/stores'
 import { useStatusStore } from '../../shared/stores'
@@ -67,7 +66,6 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   const allTasks = useTaskStore((s) => s.tasks)
   const taskLabels = useTaskStore((s) => s.taskLabels)
   const allStatuses = useStatusStore((s) => s.statuses)
-  const { addToast } = useToast()
   const layoutMode = useViewStore(selectLayoutMode)
   const newTaskPosition = useSetting('new_task_position') ?? 'top'
   const addInputRef = useRef<AddTaskInputHandle>(null)
@@ -84,12 +82,13 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
   }, [allProjects, myDayDefaultProjectSetting])
   const [addTaskProjectId, setAddTaskProjectId] = useState<string>('')
   const [hiddenProjectIds, setHiddenProjectIds] = useState<Set<string>>(new Set())
+  const defaultProjectId = defaultProject?.id
 
   useEffect(() => {
-    if (defaultProject) {
-      setAddTaskProjectId(defaultProject.id)
+    if (defaultProjectId !== undefined) {
+      setAddTaskProjectId(defaultProjectId)
     }
-  }, [defaultProject?.id])
+  }, [defaultProjectId])
 
   const addTaskProject = allProjects.find((p) => p.id === addTaskProjectId) ?? defaultProject
 
@@ -601,7 +600,7 @@ export function MyDayView({ dropIndicator }: MyDayViewProps): React.JSX.Element 
       }
       await handleStatusChange(taskId, newStatusId)
     },
-    [allTasks, allStatuses, handleStatusChange, addToast]
+    [allTasks, allStatuses, handleStatusChange]
   )
 
 
