@@ -13,17 +13,18 @@ import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
  */
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabase } from '../lib/supabase'
-import type { Task, Status, Label, SyncOperation } from '../../../shared/types'
+import type { Task, Status, Label, SyncOperation, ProjectMember, Project } from '../../../shared/types'
 import { useSyncStore } from '../shared/stores/syncStore'
 import { logEvent } from '../shared/stores/logStore'
 import { placeholderEmail, isPlaceholderEmail } from '../../../shared/placeholderUser'
-import { pushLabel, getCachedProjectName, requestSyncCatchUp } from './PersonalSyncService'
+import { pushLabel, getCachedProjectName, requestSyncCatchUp, requestProjectRefresh } from './PersonalSyncService'
 import { SYNC_TABLES } from './syncTables'
 import { isSuspended } from './powerState'
 
 type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
 
 interface SharedChannelState {
+  archived?: boolean
   channel: RealtimeChannel | null
   cancelled: boolean
   attempt: number
@@ -56,27 +57,29 @@ export function setRealtimeCallback(cb: RealtimeCallback): void {
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
-  const context = await captureSyncContext()
+  const context = await captureSyncContext(() => navigator.onLine && !isSuspended())
   const supabase = await getSupabase()
-  context.assertCurrent()
+  if (state.cancelled || !await context.isCurrent()) return
+  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  state.archived = archived
   const channel = supabase
     .channel(`project:${projectId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
-      try { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) } catch { return }
+      try { if (state.cancelled) return; context.assertCurrent(); void requestSyncCatchUp(context).catch(() => {}) } catch { return }
     })
-    .on(
+  if (!archived) channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
       (payload) => {
-        try { context.assertCurrent() } catch { return }
+        try { if (state.cancelled) return; context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
+          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
             .catch((error) => logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)))
         } else {
-          scheduleRemoteProjectRefresh(projectId, typeof data.id === 'string' ? data.id : undefined)
+          scheduleRemoteProjectRefresh(projectId, context)
         }
         onChangeCallback?.('task', payload.eventType, data)
       }
@@ -85,14 +88,14 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'statuses', filter: `project_id=eq.${projectId}` },
       (payload) => {
-        try { context.assertCurrent() } catch { return }
+        try { if (state.cancelled) return; context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void context.api.statuses.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId) })
+          void context.api.statuses.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
             .catch((error) => logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)))
-        } else scheduleRemoteProjectRefresh(projectId)
+        } else scheduleRemoteProjectRefresh(projectId, context)
         onChangeCallback?.('status', payload.eventType, data)
       }
     )
@@ -100,7 +103,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_members', filter: `project_id=eq.${projectId}` },
       (payload) => {
-        try { context.assertCurrent() } catch { return }
+        try { if (state.cancelled) return; context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
@@ -111,6 +114,8 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'activity_log', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        try { if (state.cancelled) return; context.assertCurrent() } catch { return }
+        scheduleRemoteProjectRefresh(projectId, context)
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )
@@ -118,15 +123,15 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_labels', filter: `project_id=eq.${projectId}` },
       (payload) => {
-        try { context.assertCurrent() } catch { return }
+        try { if (state.cancelled) return; context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
-        scheduleRemoteProjectRefresh(projectId)
+        scheduleRemoteProjectRefresh(projectId, context)
         onChangeCallback?.('project_label', payload.eventType, data)
       }
     )
-    .subscribe((status, err) => {
+  channel.subscribe((status, err) => {
       if (state.cancelled) return
       // Instrumentation: capture channel internal state + server error payload to diagnose loop
       const ch = channel as unknown as { state?: string; subTopic?: string; joinedOnce?: boolean }
@@ -136,7 +141,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
         : '(no err)'
       if (status === 'SUBSCRIBED') {
-        void requestSyncCatchUp(context).catch(() => {})
+        void requestProjectRefresh(context, [projectId]).catch(() => {})
         useSyncStore.getState().setChannelHealth(`shared:${projectId}`, true)
         state.attempt = 0
         useSyncStore.getState().setConnectionLost(false)
@@ -204,7 +209,7 @@ function scheduleSharedReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           useSyncStore.getState().setChannelHealth(`shared:${projectId}`, true)
           state.attempt = 0
-          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
+          void captureSyncContext(() => !state.cancelled).then((context) => requestProjectRefresh(context, [projectId])).catch(() => {})
           const currentStatus = useSyncStore.getState().status
           if (currentStatus === 'offline') useSyncStore.getState().setStatus('synced')
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, reconnPName)
@@ -261,8 +266,14 @@ export async function forceReconnectAllShared(): Promise<void> {
  * Subscribe to Realtime changes for a shared project.
  * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
  */
-export async function subscribeToProject(projectId: string): Promise<void> {
-  if (channels.has(projectId)) return
+export async function subscribeToProject(projectId: string, context?: SyncContext): Promise<void> {
+  context ??= await captureSyncContext()
+  if (!await context.isCurrent()) return
+  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  const existing = channels.get(projectId)
+  if (existing?.archived === archived) return
+  if (existing) await unsubscribeFromProject(projectId)
+  if (!await context.isCurrent() || channels.has(projectId)) return
 
   const state: SharedChannelState = {
     channel: null,
@@ -273,6 +284,15 @@ export async function subscribeToProject(projectId: string): Promise<void> {
   channels.set(projectId, state)
   useSyncStore.getState().setChannelHealth(`shared:${projectId}`, false)
   await createSharedChannel(projectId, state)
+}
+
+export async function reconcileSharedSubscriptions(projects: Project[], context: SyncContext, subscribeMissing: boolean): Promise<void> {
+  const shared = new Set(projects.filter((project) => project.is_shared === 1).map((project) => project.id))
+  for (const id of channels.keys()) if (!shared.has(id)) await unsubscribeFromProject(id)
+  for (const id of shared) {
+    if (!await context.isCurrent()) return
+    if (subscribeMissing || channels.has(id)) await subscribeToProject(id, context)
+  }
 }
 
 /**
@@ -886,67 +906,75 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
  * Discover shared projects the user is a member of in Supabase
  * but doesn't have locally. Returns project IDs to sync down.
  */
-export async function discoverRemoteMemberships(userId: string): Promise<string[]> {
-  if (!navigator.onLine) return []
-  const context = await captureSyncContext()
-  if (useAuthStore.getState().currentUser?.id !== userId) return []
-  const { api, client: supabase } = context
-
-  const { data: memberships, error } = await supabase
-    .from('project_members')
-    .select('project_id')
-    .eq('user_id', userId)
-
-  if (error || !memberships) return []
-
-  const idsToSync: string[] = []
-  const projectIds = memberships.map((m) => m.project_id)
-
-  // Get member counts for all projects to detect truly shared ones.
-  // Batched: a single .in() query across all candidate project ids (was N+1 —
-  // one count query per project). Group and count client-side. RLS visibility
-  // is identical to the old per-project count query, so per-project counts match.
-  let memberCounts = new Map<string, number>()
-  if (projectIds.length > 0) {
-    const { data: allMembers } = await supabase
-      .from('project_members')
-      .select('project_id')
-      .in('project_id', projectIds)
-    memberCounts = countMembersByProject(allMembers ?? [])
+export async function discoverRemoteMemberships(userId: string, context?: SyncContext): Promise<string[]> {
+  if (!navigator.onLine || isSuspended()) return []
+  context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
+  if (!await context.isCurrent() || useAuthStore.getState().currentUser?.id !== userId) return []
+  const { api, client } = context
+  const { data: memberships, error } = await readAll(() => client.from('project_members').select('*').eq('user_id', userId), ['project_id', 'user_id'])
+  if (error) throw new Error(error.message)
+  const ids = memberships.map((member) => member.project_id as string)
+  const { data: projects, error: projectError } = await readAllIn(ids, (batch) => client.from('projects').select('*').in('id', batch))
+  if (projectError) throw new Error(projectError.message)
+  const { data: members, error: memberError } = await readAllIn(ids, (batch) => client.from('project_members').select('*').in('project_id', batch), ['project_id','user_id'])
+  if (memberError) throw new Error(memberError.message)
+  const counts = countMembersByProject(members as Array<{ project_id: string }>)
+  const accessible = new Set(projects.filter((project) => !project.deleted_at).map((project) => project.id as string))
+  const missing: string[] = []
+  for (const project of projects) {
+    if (project.deleted_at) continue
+    const local = await api.projects.findById(project.id)
+    if (!local) missing.push(project.id)
+    const owner = await api.users.findById(project.owner_id)
+    if (!owner) await api.users.create({ id: project.owner_id, email: placeholderEmail(project.owner_id), display_name: null, avatar_url: null })
+    await api.projects.applyRemote({ ...local, ...project })
+    const isShared = project.owner_id !== userId || (counts.get(project.id) ?? 0) > 1 ? 1 : 0
+    if ((await api.projects.findById(project.id))?.is_shared !== isShared) await api.projects.update(project.id, { is_shared: isShared })
+    await syncMembersDown(project.id, context, members.filter((member) => member.project_id === project.id) as ProjectMember[])
   }
-
-  for (const m of memberships) {
-    const local = await api.projects.findById(m.project_id)
-    if (!local) {
-      // Project doesn't exist locally — sync it down
-      idsToSync.push(m.project_id)
-    } else if (local.is_shared !== 1 && (memberCounts.get(m.project_id) ?? 0) > 1) {
-      // Project exists locally but isn't marked shared — just mark it and sync members
-      // Do NOT call syncProjectDown which would delete/overwrite local tasks
-      await api.projects.update(m.project_id, { is_shared: 1 })
-      logEvent('warn', 'sync', `Repaired mis-flagged shared project "${local.name}"`, `project=${m.project_id} members=${memberCounts.get(m.project_id)}`)
-      await syncMembersDown(m.project_id, context)
+  for (const local of await api.projects.getProjectsForUser(userId)) {
+    if (accessible.has(local.id) || local.owner_id === userId) continue
+    await unsubscribeFromProject(local.id)
+    const { unsubscribePersonalProject } = await import('./PersonalSyncService')
+    await unsubscribePersonalProject(local.id)
+    await api.projects.removeMember(local.id, userId)
+    if (!await context.isCurrent()) return missing
+    const [{ useViewStore }, { useProjectStore }, { useTaskStore }, { useStatusStore }] = await Promise.all([
+      import('../shared/stores/viewStore'), import('../shared/stores/projectStore'), import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
+    ])
+    if (!await context.isCurrent()) return missing
+    if (useViewStore.getState().selectedProjectId === local.id) {
+      useViewStore.getState().setView('my-day')
+      useViewStore.setState({ selectedProjectId: null })
     }
+    if (useProjectStore.getState().currentProjectId === local.id) useProjectStore.getState().setCurrentProject(null)
+    useProjectStore.setState((state) => ({
+      projects: Object.fromEntries(Object.entries(state.projects).filter(([id]) => id !== local.id)),
+      members: Object.fromEntries(Object.entries(state.members).filter(([id]) => id !== local.id))
+    }))
+    useStatusStore.setState((state) => ({ statuses: Object.fromEntries(Object.entries(state.statuses).filter(([,status]) => status.project_id !== local.id)) }))
+    useTaskStore.setState((state) => {
+      const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([,task]) => task.project_id !== local.id))
+      return { tasks, taskLabels: Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => tasks[id])), selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false }
+    })
   }
-  // Deduplicate
-  return [...new Set(idsToSync)]
+  return missing
 }
 
 /**
  * Sync only project members from Supabase (without overwriting tasks/statuses).
  * Used when a local project is discovered to be shared.
  */
-async function syncMembersDown(projectId: string, context: SyncContext): Promise<void> {
+async function syncMembersDown(projectId: string, context: SyncContext, snapshot?: ProjectMember[]): Promise<void> {
   const { api, client: supabase } = context
-  const { data: members } = await supabase
-    .from('project_members')
-    .select('*')
-    .eq('project_id', projectId)
-
-  if (!members) return
+  const result = snapshot ? { data: snapshot, error: null } : await readAll(() => supabase.from('project_members').select('*').eq('project_id', projectId), ['project_id','user_id'])
+  if (result.error) throw new Error(result.error.message)
+  const members = result.data as ProjectMember[]
 
   const localMembers = await api.projects.getMembers(projectId)
   const localMemberIds = new Set(localMembers.map((m) => m.user_id))
+  const remoteIds = new Set(members.map((m) => m.user_id))
+  for (const member of localMembers) if (!remoteIds.has(member.user_id)) await api.projects.removeMember(projectId, member.user_id)
 
   // Batch-fetch profiles for any members whose local row is missing or stale.
   const memberIdsNeedingProfile: string[] = []
@@ -1268,6 +1296,8 @@ export async function syncProjectDown(projectId: string, userId: string, context
   if (members) {
     const localMembers = await api.projects.getMembers(projectId)
     const localMemberIds = new Set(localMembers.map((m) => m.user_id))
+  const remoteIds = new Set(members.map((m) => m.user_id))
+  for (const member of localMembers) if (!remoteIds.has(member.user_id)) await api.projects.removeMember(projectId, member.user_id)
 
     // Batch-fetch all member profiles (N+1 → 1 query) for any local users that
     // are missing or still have a placeholder email.

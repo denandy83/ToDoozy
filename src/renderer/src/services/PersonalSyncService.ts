@@ -1613,11 +1613,11 @@ function pullWatermark(rows: Array<{ updated_at?: string }>): string | null {
   return dates.length ? new Date(Math.max(...dates) - 1).toISOString() : null
 }
 
-export async function pullNewTasks(projectId: string, context?: SyncContext): Promise<number> {
+export async function pullNewTasks(projectId: string, context?: SyncContext, metadataLoaded = false, allTaskLabels = false): Promise<number> {
   try {
     context ??= await captureSyncContext()
     const api = context.api
-    await pullProjectMetadata(projectId, context)
+    if (!metadataLoaded) await pullProjectMetadata(projectId, context)
     // Ensure statuses exist locally before inserting tasks (FK constraint)
     await pullStatuses(projectId, context)
 
@@ -1734,7 +1734,8 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
     }
 
     // Also handles task label events whose task updated_at did not advance.
-    if (touchedTaskIds.length) await pullTaskLabelsForTasks(touchedTaskIds, undefined, context)
+    const labelTaskIds = allTaskLabels ? (await api.tasks.findByProjectId(projectId)).filter((task) => !task.deleted_at).map((task) => task.id) : touchedTaskIds
+    if (labelTaskIds.length) await pullTaskLabelsForTasks(labelTaskIds, undefined, context)
 
     const pName = projectNameCache.get(projectId) ?? projectId
     if (pulled > 0) {
@@ -1770,16 +1771,35 @@ export async function pullNewTasks(projectId: string, context?: SyncContext): Pr
  * reconcile triggered by the same boot's WS hiccup).
  */
 let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
-let pendingReconcile: { userId: string; background: boolean; context: Promise<SyncContext | null> } | null = null
+type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: Promise<SyncContext | null>; scope?: string; projectIds: Set<string> | null }
+let pendingReconcile: ReconcileRequest | null = null
 let lastReconcileAt = 0
 let lastReconcileScope = ''
 const RECONCILE_COOLDOWN_MS = 30_000
-export function reconcile(userId: string, background = false): Promise<{ pushed: number; pulled: number }> {
+export function reconcile(userId: string, background = false, initialize = false, origin?: SyncContext): Promise<{ pushed: number; pulled: number }> {
   if (!navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || useAuthStore.getState().currentUser?.id !== userId) {
     return Promise.resolve({ pushed: 0, pulled: 0 })
   }
-  const context = captureSyncContext(() => navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline).catch(() => null)
-  pendingReconcile = { userId, background: background && (pendingReconcile?.background ?? true), context }
+  const context = origin ? Promise.resolve(origin) : captureSyncContext(() => navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline).catch(() => null)
+  return context.then((resolved) => resolved
+    ? enqueueReconcile({ userId, background, initialize, context: Promise.resolve(resolved), scope: resolved.scope, projectIds: null })
+    : { pushed: 0, pulled: 0 })
+}
+
+function absorbCoveredRequests(request: ReconcileRequest, scope: string): void {
+  const pending = pendingReconcile
+  if (pending?.scope === scope && pending.background && (!pending.initialize || request.initialize)) pendingReconcile = null
+}
+
+/** One owner serializes full recovery and project-scoped event pulls. */
+function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; pulled: number }> {
+  const pending = pendingReconcile
+  if (pending && pending.userId === request.userId && pending.scope === request.scope) {
+    request.background = request.background && pending.background
+    request.initialize = request.initialize || pending.initialize
+    request.projectIds = request.projectIds && pending.projectIds ? new Set([...pending.projectIds, ...request.projectIds]) : null
+  }
+  pendingReconcile = request
   if (reconcileInFlight) return reconcileInFlight
   reconcileInFlight = (async () => {
     let result = { pushed: 0, pulled: 0 }
@@ -1790,11 +1810,24 @@ export function reconcile(userId: string, background = false): Promise<{ pushed:
         const origin = await request.context
         if (!origin || !await origin.isCurrent()) continue
         if (!request.background && origin.scope === lastReconcileScope && Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS) continue
-        const next = await reconcileImpl(request.userId, origin, request.background)
-        result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
-        if (!request.background && await origin.isCurrent()) {
-          lastReconcileAt = Date.now()
-          lastReconcileScope = origin.scope
+        try {
+          if (request.initialize) await initSync(request.userId, origin)
+          // Join/event requests received during initialization precede every
+          // read in this full sweep. Absorb that covered work; requests arriving
+          // after the sweep starts still require a queued follow-up.
+          if (!request.projectIds && await origin.isCurrent()) absorbCoveredRequests(request, origin.scope)
+          const next = request.projectIds
+            ? await refreshRemoteProjects(request.userId, origin, request.projectIds)
+            : await reconcileImpl(request.userId, origin, request.background)
+          result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
+          if (!request.background && await origin.isCurrent()) {
+            lastReconcileAt = Date.now()
+            lastReconcileScope = origin.scope
+          }
+        } catch (error) {
+          // A canceled account/database job must not abandon the next account's
+          // already queued work. Report current failures and keep one owner.
+          await handlePullError(origin, 'reconcile', error)
         }
       }
       return result
@@ -1803,20 +1836,52 @@ export function reconcile(userId: string, background = false): Promise<{ pushed:
   return reconcileInFlight
 }
 
-export async function requestSyncCatchUp(context: SyncContext): Promise<void> {
+export async function requestSyncCatchUp(context: SyncContext, initialize = false): Promise<void> {
   const userId = useAuthStore.getState().currentUser?.id
   if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
-  await reconcile(userId, true)
+  const scoped = await captureSyncContext(() => {
+    context.assertCurrent()
+    return navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline
+  })
+  if (!await context.isCurrent()) return
+  await reconcile(userId, true, initialize, scoped)
+}
+
+/** Realtime task/status/label activity must never sweep unrelated projects. */
+export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>): Promise<void> {
+  const userId = useAuthStore.getState().currentUser?.id
+  if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
+  await enqueueReconcile({ userId, background: true, initialize: false, context: Promise.resolve(context), scope: context.scope, projectIds: new Set(projectIds) })
+}
+
+async function refreshRemoteProjects(userId: string, context: SyncContext, projectIds: Set<string>): Promise<{ pushed: number; pulled: number }> {
+  let pulled = 0
+  const { refreshProjectLabels } = await import('./remoteProjectRefresh')
+  for (const projectId of projectIds) {
+    if (!navigator.onLine || isSuspended() || !await context.isCurrent()) break
+    const metadataChanged = await pullProjectMetadata(projectId, context)
+    if (metadataChanged) await reconcileProjectSubscriptions(context, true)
+    const project = await context.api.projects.findById(projectId)
+    if (!project || project.deleted_at || project.is_archived === 1) continue
+    pulled += await pullNewTasks(projectId, context, true, true)
+    pulled += await pullActivityLogForProject(projectId, userId, context)
+    await refreshProjectLabels(projectId, context)
+  }
+  await hydrateReconciledStores(userId, context)
+  return { pushed: 0, pulled }
 }
 
 async function hydrateReconciledStores(userId: string, context: SyncContext): Promise<void> {
   if (!navigator.onLine || isSuspended() || !await context.isCurrent()) return
-  const [{ useProjectStore }, { useTaskStore }, { useLabelStore }, { useSavedViewStore }, { useProjectAreaStore }, { useSettingsStore }, { useTemplateStore }] = await Promise.all([
+  const [{ useProjectStore }, { useTaskStore }, { useLabelStore }, { useSavedViewStore }, { useProjectAreaStore }, { useSettingsStore }, { useTemplateStore }, { useStatusStore }] = await Promise.all([
     import('../shared/stores/projectStore'), import('../shared/stores/taskStore'), import('../shared/stores/labelStore'),
-    import('../shared/stores/savedViewStore'), import('../shared/stores/projectAreaStore'), import('../shared/stores/settingsStore'), import('../shared/stores/templateStore')
+    import('../shared/stores/savedViewStore'), import('../shared/stores/projectAreaStore'), import('../shared/stores/settingsStore'), import('../shared/stores/templateStore'), import('../shared/stores/statusStore')
   ])
   if (!await context.isCurrent() || isSuspended() || !navigator.onLine) return
+  const projects = await context.api.projects.getProjectsForUser(userId)
+  if (!await context.isCurrent()) return
   await Promise.all([
+    ...projects.filter((project) => project.is_archived !== 1).map((project) => useStatusStore.getState().hydrateStatuses(project.id)),
     useProjectStore.getState().hydrateProjects(userId), useTaskStore.getState().hydrateAllForUser(userId),
     useLabelStore.getState().hydrateAllLabels(), useSavedViewStore.getState().hydrate(userId),
     useProjectAreaStore.getState().hydrate(userId), useSettingsStore.getState().hydrateSettings(),
@@ -1871,6 +1936,9 @@ async function reconcileImpl(userId: string, context: SyncContext, background: b
       }
     }
 
+    const { discoverRemoteMemberships } = await import('./SyncService')
+    await discoverRemoteMemberships(userId, context)
+
     // 1. Owner-scoped: projects (need to land before tasks/statuses so the FK is satisfied).
     await runTable('projects', userId)
 
@@ -1880,12 +1948,8 @@ async function reconcileImpl(userId: string, context: SyncContext, background: b
 
     // 2. Project-scoped: per personal project, statuses then tasks.
     const allProjects = await api.projects.getProjectsForUser(userId)
-    if (background) {
-      for (const project of allProjects.filter((p) => p.is_archived === 1)) await pullProjectMetadata(project.id, context)
-    }
-    const monitoredProjects = background
-      ? (await api.projects.getProjectsForUser(userId)).filter((p) => p.is_archived !== 1)
-      : allProjects
+    await reconcileProjectSubscriptions(context, background)
+    const monitoredProjects = background ? allProjects.filter((p) => p.is_archived !== 1) : allProjects
     const personalProjects = monitoredProjects.filter((p) => p.owner_id === userId && p.is_shared !== 1)
 
     // activity_log is pull-only (no descriptor — see syncTables.ts): an
@@ -1914,7 +1978,7 @@ async function reconcileImpl(userId: string, context: SyncContext, background: b
 
     for (const project of monitoredProjects.filter((p) => p.is_shared === 1)) {
       if (pendingStatusProjects.has(project.id)) continue
-      await pullNewTasks(project.id, context)
+      await pullNewTasks(project.id, context, true)
       await pullActivity(project.id)
     }
     await processSyncQueue(context)
@@ -2098,7 +2162,7 @@ async function reconcileImpl(userId: string, context: SyncContext, background: b
         const chunkSize = 500
 
         // ── project_labels (shared) ───────────────────────────────────────
-        const localSharedPl = await api.labels.getProjectLabelsForSharedProjects()
+        const localSharedPl = (await api.labels.getProjectLabelsForSharedProjects()).filter((link) => sharedProjectIds.includes(link.project_id))
         const localSharedPlByKey = new Map(
           localSharedPl.map((p) => [plPairKey(p.project_id, p.label_id), p])
         )
@@ -2378,9 +2442,10 @@ export async function purgeLeakedApiKeySetting(userId: string): Promise<void> {
  * upload/pull, so a failed run leaves it falsy here and this path retries.
  */
 let initSyncInFlight: Promise<void> | null = null
-export async function initSync(userId: string): Promise<void> {
-  const context = await captureSyncContext()
-  const api = context.api
+export async function initSync(userId: string, context?: SyncContext): Promise<void> {
+  context ??= await captureSyncContext()
+  const origin = context
+  const api = origin.api
   if (useAuthStore.getState().currentUser?.id !== userId) return
   if (initSyncInFlight) return initSyncInFlight
   initSyncInFlight = (async () => {
@@ -2397,13 +2462,13 @@ export async function initSync(userId: string): Promise<void> {
 
       if (hasLocalData) {
         console.log('[PersonalSync] Local data found, uploading to Supabase')
-        await fullUpload(userId, context)
+        await fullUpload(userId, origin)
       } else {
         console.log('[PersonalSync] No local data, pulling from Supabase')
-        await fullPull(userId, context)
+        await fullPull(userId, origin)
       }
     } else {
-      if (await context.isCurrent()) syncStore.setLastSynced()
+      if (await origin.isCurrent()) syncStore.setLastSynced()
     }
   })()
   try {
@@ -2424,6 +2489,7 @@ export async function syncTaskLabel(taskId: string): Promise<void> {
 // ── Realtime Subscriptions for All Projects ──────────────────────────
 
 interface PersonalChannelState {
+  archived?: boolean
   channel: RealtimeChannel | null
   onChange: (event: string, data: Record<string, unknown>) => void
   cancelled: boolean
@@ -2453,7 +2519,8 @@ function getReconnectDelay(attempt: number): number {
  */
 async function applyRemoteActivityRow(
   row: Record<string, unknown>,
-  onApplied: () => void
+  onApplied: () => void,
+  context: SyncContext
 ): Promise<void> {
   const id = row.id as string | undefined
   const taskId = row.task_id as string | undefined
@@ -2467,7 +2534,7 @@ async function applyRemoteActivityRow(
     new_value: (row.new_value as string | null) ?? null,
     created_at: (row.created_at as string) ?? new Date().toISOString()
   }
-  const first = await window.api.activityLog
+  const first = await context.api.activityLog
     .applyRemote(input)
     .catch(() => 'missing-task' as const)
   if (first === 'applied') {
@@ -2476,7 +2543,7 @@ async function applyRemoteActivityRow(
   }
   if (first !== 'missing-task') return // duplicate — this device already has it
   setTimeout(() => {
-    void window.api.activityLog
+    void context.api.activityLog
       .applyRemote(input)
       .then((second) => {
         if (second === 'applied') onApplied()
@@ -2487,24 +2554,16 @@ async function applyRemoteActivityRow(
 
 async function createPersonalChannel(projectId: string, state: PersonalChannelState): Promise<void> {
   const supabase = await getSupabase()
-  const context = await captureSyncContext()
+  const context = await captureSyncContext(() => navigator.onLine && !isSuspended())
   const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  state.archived = archived
   if (state.cancelled || !await context.isCurrent()) return
   const channel = supabase
     .channel(`personal:${projectId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
-      void (async () => {
-        if (state.cancelled || !await context.isCurrent()) return
-        await pullProjectMetadata(projectId, context)
-        if (!await context.isCurrent() || state.cancelled) return
-        const nowArchived = (await context.api.projects.findById(projectId))?.is_archived === 1
-        if (nowArchived !== archived) {
-          await unsubscribePersonalProject(projectId)
-          if (!await context.isCurrent()) return
-          await subscribeToPersonalProject(projectId, state.onChange)
-        }
-        state.onChange('project', { project_id: projectId })
-      })().catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
+      if (state.cancelled) return
+      try { context.assertCurrent() } catch { return }
+      void requestSyncCatchUp(context).catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
     })
   // Archived projects retain only restore/metadata discovery, not task activity.
   if (!archived) channel
@@ -2512,22 +2571,11 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        if (state.cancelled) return
+        try { context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
-        // Targeted task_labels pull (story #91): a remote label assign/remove
-        // only rewrites tasks.label_names (updated_at unchanged), so the
-        // debounced pullNewTasks never treats the task as dirty. Fetch the
-        // junction rows for this one task; fire a dedicated onChange when
-        // something landed so the flush rehydrates the chips.
-        if (payload.eventType !== 'DELETE' && typeof data.id === 'string') {
-          const taskId = data.id
-          void pullTaskLabelsForTask(taskId).then((added) => {
-            if (added > 0 && !state.cancelled) {
-              state.onChange('task_labels', { task_id: taskId, project_id: projectId })
-            }
-          })
-        }
         state.onChange(payload.eventType, data)
       }
     )
@@ -2535,10 +2583,12 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'activity_log', filter: `project_id=eq.${projectId}` },
       (payload) => {
+        if (state.cancelled) return
+        try { context.assertCurrent() } catch { return }
         const row = payload.new as Record<string, unknown>
         void applyRemoteActivityRow(row, () => {
           if (!state.cancelled) state.onChange('activity', row)
-        })
+        }, context)
       }
     )
   channel.subscribe((status, err) => {
@@ -2554,7 +2604,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         : '(no err)'
       if (status === 'SUBSCRIBED') {
         state.attempt = 0
-        void requestSyncCatchUp(context).catch(() => {})
+        void requestProjectRefresh(context, [projectId]).catch(() => {})
         useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
         useSyncStore.getState().setConnectionLost(false)
         logEvent('info', 'realtime', `Subscribed to personal project`, `${pName} topic=${subTopic} chState=${chState}`)
@@ -2614,7 +2664,7 @@ function schedulePersonalReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           state.attempt = 0
           useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
-          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
+          void captureSyncContext(() => !state.cancelled).then((context) => requestProjectRefresh(context, [projectId])).catch(() => {})
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
           return
         }
@@ -2683,6 +2733,32 @@ export async function forceReconnectAllPersonal(): Promise<void> {
   ])
 }
 
+async function reconcileProjectSubscriptions(context: SyncContext, subscribeMissing: boolean): Promise<void> {
+  const userId = useAuthStore.getState().currentUser?.id
+  if (!userId || !await context.isCurrent()) return
+  const { reconcileSharedSubscriptions } = await import('./SyncService')
+  const { hasActiveUserChannel } = await import('./UserChannelService')
+  subscribeMissing = subscribeMissing && hasActiveUserChannel(userId)
+  const projects = await context.api.projects.getProjectsForUser(userId)
+  const personal = new Set(projects.filter((project) => project.is_shared !== 1).map((project) => project.id))
+  for (const id of personalChannelStates.keys()) if (!personal.has(id)) await unsubscribePersonalProject(id)
+  await reconcileSharedSubscriptions(projects, context, subscribeMissing)
+  for (const project of projects) {
+    if (!await context.isCurrent()) return
+    if (project.is_shared !== 1 && (subscribeMissing || personalChannelStates.has(project.id))) {
+      const onChange = personalChannelStates.get(project.id)?.onChange ?? ((event: string, data: Record<string, unknown>) => {
+        void requestProjectRefresh(context, [project.id]).then(async () => {
+          if (event === 'activity' && typeof data.task_id === 'string' && await context.isCurrent()) {
+            const { useTaskStore } = await import('../shared/stores/taskStore')
+            if (await context.isCurrent()) useTaskStore.getState().bumpActivityRefresh(data.task_id)
+          }
+        }).catch(() => {})
+      })
+      await subscribeToPersonalProject(project.id, onChange, context)
+    }
+  }
+}
+
 /**
  * Subscribe to Realtime changes for a personal (non-shared) project.
  * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
@@ -2690,8 +2766,16 @@ export async function forceReconnectAllPersonal(): Promise<void> {
  */
 export async function subscribeToPersonalProject(
   projectId: string,
-  onChange: (event: string, data: Record<string, unknown>) => void
+  onChange: (event: string, data: Record<string, unknown>) => void,
+  context?: SyncContext
 ): Promise<void> {
+  context ??= await captureSyncContext()
+  if (!await context.isCurrent()) return
+  const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
+  const existing = personalChannelStates.get(projectId)
+  if (existing?.archived === archived) return
+  if (existing) await unsubscribePersonalProject(projectId)
+  if (!await context.isCurrent()) return
   const subscribingUserId = useAuthStore.getState().currentUser?.id
   if (personalChannelStates.has(projectId)) return
   // Don't pile up zombie channels when running in offline-fallback mode —

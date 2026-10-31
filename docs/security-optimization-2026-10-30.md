@@ -11,7 +11,7 @@ Do not equate a local benchmark with production disk I/O.
 | --- | --- |
 | NAV-01 | Trusted-document preload and IPC checks, navigation/redirect/popup guards, sanitized timer descriptions. |
 | DB-01–06 | Owner-bound sharing; confirmed-email invitation lookup/acceptance and recipient notification reads; scoped invitation policies and profile reads; explicit named API grants. Ordinary members can update appearance columns only, preventing role escalation. |
-| TASK-01–05 | Recursive copies preserve references and completion; native copies roll back on failure. Parent validation rejects cycles and cross-project graphs. Native and remote deletions tombstone the subtree; prospective SQL triggers protect remote writes and ancestor-first restores. |
+| TASK-01–05 | Recursive copies preserve references and completion; native copies roll back on failure. Parent validation rejects cycles and cross-project graphs. Native and remote deletions tombstone the subtree; duplicate/template/recurrence copies publish all descendants and labels in ancestor order; prospective SQL triggers protect remote writes and ancestor-first restores. |
 | VIEW-01–02 | Saved-view counts apply due-date and assignee filters; the renderer applies included/excluded assignees. |
 | DATE-01–03 | Monthly day/ordinal recurrence, local calendar date keys, local-day UTC boundaries, and local statistics grouping. |
 | SYNC-01 | Queued tombstones, FK prerequisites and cascade ancestors survive age-based cleanup until acknowledgment. |
@@ -42,22 +42,36 @@ Run the paired sync benchmark against the last merged source:
 node scripts/benchmark-sync.cjs --baseline dea910d34d3a47de01e6398e4145377ae964d548 --output /private/path/sync-comparison.json
 ```
 
-This executes actual sync effects and SDK calls against a synthetic transport,
-using seven paired runs and a fixed 1 ms request delay. It records source hashes,
-request counts, scheduling and timings. The baseline needs that Git object;
-ordinary CI tests use portable fixtures and do not require repository history.
+The benchmark bundles the real App Realtime effect, sync services and repositories
+at each Git revision. It uses isolated in-memory SQLite and the actual Supabase SDK
+with an in-memory synthetic fetch transport; channel bindings/status callbacks are
+simulated. Authentication, power state and external transport are controlled inputs.
+Catch-up, membership reconciliation, project reads and store hydrations execute
+without stubbing reconciliation. Both real App effects execute at each revision, including the separate historical
+shared/init/reconcile startup path. Only its intentional two-second timer wait is
+advanced; no catch-up implementation is stubbed. Release-note IPC traffic is
+outside the Supabase transport boundary.
+The fixture records request counts, declared synthetic response bytes, concurrency,
+source hashes and timings with a fixed 1 ms request delay. It measures neither
+physical cloud disk I/O nor production throughput.
 
-Observed request counts for 20 unchanged projects: 80 → 60; healthy fallback
-timer traffic: 80 → 0; three reconnect flaps: 320 → 180; maximum concurrent
-catch-up pulls: 3 → 1. Four archived projects reduce the initial 80 requests to
-52. Background archived pulls read project metadata; explicit pulls retain full
-reconciliation. These counts cover the initial and health-driven project sweep;
-the transport fixture stubs channel-triggered reconciliation and does not measure
-resume/rejoin reconciliation traffic. Resume/rejoin now explicitly requests the
-serialized reconciliation for personal, shared and user-scoped data, independently
-of aggregate health. Routine catch-up keeps archived projects metadata-only;
-explicit reconciliation includes their tasks, statuses, activity and labels.
-See the dated report for the original paired timings and index measurements.
+Earlier saved observations (80 → 60 initial requests, 80 → 0 healthy fallback
+requests, and 320 → 180 requests after three flaps) used the previous project-only
+fixture. They do not describe the expanded membership/user catch-up workload.
+Regenerate paired results with this fixture before reporting new request savings.
+The event scenario delivers the same remote task update through its real channel
+among 20 projects and records HTTP bytes/counts plus local and remote writes.
+No production workload or host metric collection is performed by the benchmark.
+
+Automatic startup, resume, channel rejoin, health recovery and debounced project
+refreshes share one serialized/coalesced scheduler. Routine events pull only their
+affected projects; account-wide recovery retains authoritative membership and
+user-table coverage. Canceled account/database jobs cannot abandon pending work
+for a new context, and closed channel metadata callbacks cannot recreate channels. Authoritative memberships are
+loaded before project enumeration; missing local-owner memberships do not discard
+pending local data. Personal and shared channels rebind after archive/restore
+metadata changes. Routine archived reconciliation reads metadata only; explicit
+reconciliation retains tasks, statuses, activity and label coverage.
 
 Local PGlite/Postgres query timings and cloud `pg_stat_io`/WAL snapshots are
 separate evidence. The latter are cumulative database counters, not host disk or

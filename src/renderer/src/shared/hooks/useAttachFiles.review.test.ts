@@ -10,12 +10,12 @@ vi.mock('../components/Toast',()=>({useToast:()=>({addToast:vi.fn()})}))
 let root: Root
 let attach: () => Promise<void>
 let generation: number
-let create: ReturnType<typeof vi.fn>
+let create: ReturnType<typeof vi.fn<(...args:unknown[])=>Promise<unknown>>>
 let dialog: ReturnType<typeof vi.fn>
 beforeEach(async()=>{
   generation=1
   useAuthStore.setState({currentUser:{id:'a'} as never})
-  create=vi.fn(async(task_id:string,path:string)=>({id:path,task_id}))
+  create=vi.fn(async(...[task_id,path]:unknown[])=>({id:path,task_id}))
   dialog=vi.fn().mockResolvedValue({canceled:false,filePaths:['one','two']})
   Object.assign(window,{api:{fs:{showOpenDialog:dialog},attachments:{createFromFile:create},sync:{
     captureContext:async()=>({generation,userId:useAuthStore.getState().currentUser?.id}),

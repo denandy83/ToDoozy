@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { formatTimeRemaining, DEFAULT_TIMER_PRESETS } from './timerStore'
+import { localDateKey } from '../../../../shared/localDate'
 
 describe('formatTimeRemaining', () => {
   it('formats 0 seconds as 0:00', () => {
@@ -354,7 +355,7 @@ describe('useTimerStore', () => {
     useTimerStore.setState({
       sessionsCompleted: 3,
       totalFocusSecondsToday: 4500,
-      statsDate: new Date().toISOString().slice(0, 10)
+      statsDate: localDateKey()
     })
 
     useTimerStore.getState().startTimer({
@@ -404,7 +405,7 @@ describe('useTimerStore', () => {
     const state = useTimerStore.getState()
     expect(state.sessionsCompleted).toBe(0)
     expect(state.totalFocusSecondsToday).toBe(0)
-    expect(state.statsDate).toBe(new Date().toISOString().slice(0, 10))
+    expect(state.statsDate).toBe(localDateKey())
 
     useTimerStore.getState().stop()
   })

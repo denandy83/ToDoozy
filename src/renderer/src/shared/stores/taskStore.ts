@@ -113,6 +113,31 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
   }, producer)
 }
 
+async function publishCreatedSubtree(root: Task, origin: SyncProducer): Promise<void> {
+  const children = new Map<string, Task[]>()
+  for (const task of await origin.api.tasks.findAllByProject(root.project_id)) {
+    if (task.parent_id) children.set(task.parent_id, [...(children.get(task.parent_id) ?? []), task])
+  }
+  const tasks = [root]
+  const seen = new Set([root.id])
+  const labels: Record<string, Label[]> = {}
+  for (const task of tasks) {
+    labels[task.id] = await origin.api.labels.findByTaskId(task.id)
+    for (const child of children.get(task.id) ?? []) {
+      if (!seen.has(child.id)) { seen.add(child.id); tasks.push(child) }
+    }
+  }
+  await requireProducerCurrent(origin)
+  useTaskStore.setState((state) => ({
+    tasks: { ...state.tasks, ...Object.fromEntries(tasks.map((task) => [task.id, task])) },
+    taskLabels: { ...state.taskLabels, ...labels }
+  }))
+  for (const task of tasks) {
+    await requireProducerCurrent(origin)
+    await syncIfShared(task, 'INSERT', origin)
+  }
+}
+
 /**
  * Ops that must reach Supabase immediately even while the task is open in
  * the Detail panel: archive/unarchive, completion, and My Day membership —
@@ -470,30 +495,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             try {
               const result = await api.tasks.completeRecurring(task.id)
               if (result) {
-                // Load the new task into the store
                 const newTask = await api.tasks.findById(result.id)
                 if (newTask) {
+                  await publishCreatedSubtree(newTask, origin)
                   await requireProducerCurrent(origin)
-                  set((state) => ({
-                    tasks: { ...state.tasks, [newTask.id]: newTask },
-                    lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id }
-                  }))
-                  // Also load subtasks of the new task
-                  const subtasks = await api.tasks.findSubtasks(result.id)
-                  if (subtasks.length > 0) {
-                    await requireProducerCurrent(origin)
-                    set((state) => {
-                      const updated = { ...state.tasks }
-                      for (const st of subtasks) updated[st.id] = st
-                      return { tasks: updated }
-                    })
-                  }
-                  // Load labels for the new task
-                  const labels = await api.labels.findByTaskId(result.id)
-                  await requireProducerCurrent(origin)
-                  set((state) => ({
-                    taskLabels: { ...state.taskLabels, [result.id]: labels }
-                  }))
+                  set({ lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id } })
                 }
               }
             } catch (err) {
@@ -616,32 +622,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       const task = await api.tasks.duplicate(id, newId)
       if (task) {
-        // Re-hydrate all tasks for the project since subtasks were also created
-        const allTasks = await api.tasks.findByProjectId(task.project_id)
-        const taskMap: Record<string, Task> = {}
-        for (const t of allTasks) {
-          taskMap[t.id] = t
-        }
-        await requireProducerCurrent(origin)
-        set((state) => ({ tasks: { ...state.tasks, ...taskMap } }))
-
-        // Also hydrate labels for the new task and its subtasks
-        const newTaskLabels = await api.labels.findByTaskId(task.id)
-        const subtasks = await api.tasks.findSubtasks(task.id)
-        const labelUpdates: Record<string, import('../../../../shared/types').Label[]> = {
-          [task.id]: newTaskLabels
-        }
-        for (const st of subtasks) {
-          labelUpdates[st.id] = await api.labels.findByTaskId(st.id)
-        }
-        await requireProducerCurrent(origin)
-        set((state) => ({ taskLabels: { ...state.taskLabels, ...labelUpdates } }))
-
-        // Sync duplicated task + subtasks to Supabase
-        syncIfShared(task, 'INSERT', origin)
-        for (const st of subtasks) {
-          syncIfShared(st, 'INSERT', origin)
-        }
+        await publishCreatedSubtree(task, origin)
         scheduleSavedViewRecount(origin)
       }
       return task
@@ -659,19 +640,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       const template = await api.tasks.saveAsTemplate(id, newId)
       if (template) {
-        // Re-hydrate templates globally
-        const allTemplates = await api.tasks.findAllTemplates(origin.userId ?? '')
-        await requireProducerCurrent(origin)
-        set((state) => {
-          const updated = { ...state.tasks }
-          for (const t of allTemplates) {
-            updated[t.id] = t
-          }
-          return { tasks: updated }
-        })
-
-        // Sync template to Supabase
-        syncIfShared(template, 'INSERT', origin)
+        await publishCreatedSubtree(template, origin)
       }
       return template
     } catch (err) {

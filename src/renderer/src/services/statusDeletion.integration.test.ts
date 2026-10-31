@@ -65,6 +65,7 @@ beforeEach(async () => {
   await remote.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role; CREATE SCHEMA auth;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT null::uuid$$;
     CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz,name text DEFAULT 'Shared',color text,icon text,description text,is_archived integer DEFAULT 0,updated_at timestamptz DEFAULT now());
+    CREATE TABLE project_members(project_id uuid,user_id uuid,role text,display_color text,display_initials text);
     CREATE TABLE statuses(id uuid PRIMARY KEY,project_id uuid,name text,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz DEFAULT '2000-01-01',deleted_at timestamptz,owner_id uuid,assigned_to uuid,title text DEFAULT 'Occupied',description text,priority integer,due_date text,parent_id uuid,order_index float,is_in_my_day integer,is_template integer,is_archived integer DEFAULT 0,recurrence_rule text,reference_url text,my_day_dismissed_date text,created_at timestamptz,label_names text);
     CREATE TABLE task_labels(task_id uuid,label_id uuid,deleted_at timestamptz,PRIMARY KEY(task_id,label_id));
@@ -75,6 +76,7 @@ beforeEach(async () => {
     await remote.exec(readFileSync(new URL(`../../../../supabase/migrations/${file}`,import.meta.url),'utf8'))
   }
   await remote.query('INSERT INTO projects(id,owner_id,deleted_at) VALUES($1,$2,NULL)',[project,owner])
+  await remote.query("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')",[project,owner])
   for (const status of repos.statuses.findByProjectId(project)) {
     const keys=Object.keys(status)
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
@@ -1009,12 +1011,12 @@ it('propagates a native subtree deletion through queued root replay and remote t
   expect(await processSyncQueue()).toBe(1)
   expect((await remote.query('SELECT id FROM tasks WHERE deleted_at IS NULL')).rows).toEqual([])
   for(const key of [task,child,grandchild]) {
-    const row=(await remote.query('SELECT * FROM tasks WHERE id=$1',[key])).rows[0]
+    const row=(await remote.query<{deleted_at:string;updated_at:string}>('SELECT * FROM tasks WHERE id=$1',[key])).rows[0]
     repos.tasks.applyRemoteTask({...repos.tasks.findById(key)!,deleted_at:String(row.deleted_at),updated_at:String(row.updated_at)})
     expect(repos.tasks.findById(key)?.deleted_at).toBeTruthy()
   }
   await expect(remote.query('UPDATE tasks SET deleted_at=NULL WHERE id=$1',[grandchild])).rejects.toThrow(/active task/)
-  for(const key of [task,child,grandchild])await remote.query('UPDATE tasks SET deleted_at=NULL WHERE id=$1',[key])
+  for(const key of [task,child,grandchild])await remote.query("UPDATE tasks SET deleted_at=NULL,updated_at=greatest(clock_timestamp(),updated_at+interval '1 millisecond') WHERE id=$1",[key]).catch(error=>{throw new Error(`Restore ${key}: ${error}`)})
   await remote.query('UPDATE tasks SET title=$1 WHERE id=$2',['Ordinary restored edit',grandchild])
-  expect((await remote.query('SELECT title FROM tasks WHERE id=$1',[grandchild])).rows[0].title).toBe('Ordinary restored edit')
+  expect((await remote.query<{title:string}>('SELECT title FROM tasks WHERE id=$1',[grandchild])).rows[0].title).toBe('Ordinary restored edit')
 },15000)

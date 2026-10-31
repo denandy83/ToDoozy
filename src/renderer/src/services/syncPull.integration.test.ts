@@ -466,11 +466,12 @@ it.each([0,1])('keeps clock-ahead family removal through public reconciliation a
 })
 
 it('reconciles shared and user data on resume even when every channel rejoined while suspended',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
   repo.projects.update(projectId,{is_shared:1})
   rows.projects=[{...repo.projects.findById(projectId)}]
   rows.statuses=[{...repo.statuses.findById('open')}]
   await subscribeToProject(projectId)
-  await subscribeToUserChannel('u',{subscribePersonalProject:async()=>{}})
+  await subscribeToUserChannel('u')
   vi.mocked(isSuspended).mockReturnValue(true)
   for(const channel of channels)channel.status('SUBSCRIBED')
   await Promise.resolve();await Promise.resolve()
@@ -486,6 +487,7 @@ it('reconciles shared and user data on resume even when every channel rejoined w
 })
 
 it('retries personal catch-up on an already joined channel and coalesces concurrent sweeps',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
   rows.projects=[{...repo.projects.findById(projectId)}]
   rows.statuses=[{...repo.statuses.findById('open')}]
   await subscribeToPersonalProject(projectId,()=>{})
@@ -505,6 +507,7 @@ it('retries personal catch-up on an already joined channel and coalesces concurr
 })
 
 it('keeps routine archived catch-up metadata-only and preserves explicit full reconciliation',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
   repo.projects.update(projectId,{is_archived:1})
   rows.projects=[{...repo.projects.findById(projectId)}]
   rows.statuses=[{...repo.statuses.findById('open')}]

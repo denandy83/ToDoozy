@@ -227,7 +227,7 @@ it.each(['settings','themes','config'])('discards late %s hydration after accoun
 
 it.each([
   {namespace:'settings',method:'set',run:()=>useSettingsStore.getState().setSetting('theme_id','a-theme')},
-  {namespace:'settings',method:'setMultiple',run:()=>useSettingsStore.getState().setMultipleSettings([{key:'theme_id',value:'a-theme'}])},
+  {namespace:'settings',method:'setMultiple',run:()=>useSettingsStore.getState().setMultipleSettings([{user_id:'a',key:'theme_id',value:'a-theme',updated_at:'2026-10-30T00:00:00.000Z',deleted_at:null}])},
   {namespace:'settings',method:'delete',run:()=>useSettingsStore.getState().deleteSetting('theme_id')},
   {namespace:'themes',method:'create',run:()=>useSettingsStore.getState().createTheme({id:'shared',name:'Private A',mode:'dark',config:'{}'})},
   {namespace:'themes',method:'update',run:()=>useSettingsStore.getState().updateTheme('shared',{name:'Private A'})},
@@ -264,7 +264,7 @@ it('preserves current-account settings/theme mutation and refresh behavior',asyn
   })
   const store=useSettingsStore.getState();store.setUserId('a')
   await store.setSetting('theme_id','custom')
-  await store.setMultipleSettings([{key:'ordinary',value:'normal'}])
+  await store.setMultipleSettings([{user_id:'a',key:'ordinary',value:'normal',updated_at:'2026-10-30T00:00:00.000Z',deleted_at:null}])
   await store.createTheme({id:'custom',name:'Custom',mode:'dark',config:'{}'})
   await store.updateTheme('custom',{name:'Updated'})
   await store.hydrateSettings();await store.hydrateThemes()

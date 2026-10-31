@@ -105,7 +105,6 @@ export type TimerStore = TimerState & TimerActions
 let tickInterval: ReturnType<typeof setInterval> | null = null
 let cachedUserId: string | null = null
 let lastTickAt = 0
-let catchupDepth = 0
 
 function clearTickInterval(): void {
   if (tickInterval) {
@@ -422,20 +421,21 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
       // Flowtime without cookie: count UP
       set({ elapsedSeconds: state.elapsedSeconds + elapsed })
     } else {
-      // Normal: count DOWN
-      const next = state.remainingSeconds - elapsed
-      if (next <= 0) {
-        completePhase(get, set)
-        const overshoot = -next
-        if (overshoot > 0 && get().isRunning && !get().isPaused) {
-          // Bound malformed zero-duration/perpetual loops after a long absence.
-          if (catchupDepth >= 100) { get().pause(); return }
-          catchupDepth++
-          try { get().tick(overshoot) } finally { catchupDepth-- }
+      while (elapsed > 0 && get().isRunning && !get().isPaused) {
+        const remaining = get().remainingSeconds
+        if (!Number.isFinite(remaining)) { get().pause(); return }
+        if (remaining > elapsed) {
+          set({ remainingSeconds: remaining - elapsed })
+          break
         }
-        return
+        const consumed = Math.max(0, remaining)
+        elapsed -= consumed
+        completePhase(get, set)
+        if (consumed === 0 && get().remainingSeconds <= 0 && get().isRunning) {
+          get().pause()
+          return
+        }
       }
-      set({ remainingSeconds: next })
     }
     syncTrayTimer(get())
   }
