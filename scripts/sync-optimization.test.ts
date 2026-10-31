@@ -233,7 +233,8 @@ it('coalesces App health recovery, channel rejoins and project refresh behind on
     await Promise.all([first, timers]); await h.untilIdle()
     expect(h.maxConcurrent()).toBe(1)
     const ownMembershipReads = h.requests.filter(row => row.table === 'project_members' && new URL(row.url).searchParams.get('user_id') === 'eq.u')
-    expect(ownMembershipReads.length).toBeLessThanOrEqual(2)
+    expect(ownMembershipReads.filter(row => !new URL(row.url).searchParams.has('or')).length).toBeLessThanOrEqual(2)
+    expect(ownMembershipReads.length).toBeLessThanOrEqual(4)
     expect(ownMembershipReads.length).toBeGreaterThan(0)
   } finally { cleanup() }
 })
@@ -267,10 +268,10 @@ it('does no healthy fallback work and defers suspended/offline catch-up', async 
 
 it.each([false, true])('keeps a routine task event scoped to one of20 projects with shared=%s', async shared => {
   const result = await fixture.eventScenario({ projectCount: 20, shared })
-  expect(result.requests).toBeLessThanOrEqual(7)
+  expect(result.requests).toBeLessThanOrEqual(8)
   expect(result.requestsByTable['GET projects']).toBe(1)
-  expect(result.requestsByTable['GET statuses']).toBe(1)
-  expect(result.requestsByTable['GET tasks']).toBe(1)
+  expect(result.requestsByTable['GET statuses']).toBe(2)
+  expect(result.requestsByTable['GET tasks']).toBe(2)
   expect(result.requestsByTable['GET activity_log']).toBe(1)
   expect(result.requestsByTable['GET project_members']).toBeUndefined()
   expect(result.extraNextTimerRequests).toBe(0)

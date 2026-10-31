@@ -12,7 +12,7 @@ beforeEach(async () => {
     GRANT USAGE ON SCHEMA public,auth TO anon,authenticated,service_role;
     CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,raw_user_meta_data jsonb DEFAULT '{}',email_confirmed_at timestamptz DEFAULT now());
     CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid NOT NULL,name text,description text,color text,icon text,created_at timestamptz,updated_at timestamptz);
-    CREATE TABLE project_members(project_id uuid,user_id uuid,role text,joined_at timestamptz,display_color text,display_initials text,PRIMARY KEY(project_id,user_id));
+    CREATE TABLE project_members(project_id uuid,user_id uuid,role text,joined_at timestamptz,invited_by uuid,display_color text,display_initials text,PRIMARY KEY(project_id,user_id));
     CREATE TABLE project_invites(token uuid PRIMARY KEY,project_id uuid,target_email text,status text,expires_at timestamptz,accepted_by uuid);
     CREATE TABLE tasks(id uuid PRIMARY KEY,status_id uuid);
     CREATE TABLE user_settings(id uuid PRIMARY KEY,user_id uuid,value text);
@@ -145,12 +145,16 @@ it('does not let ordinary members promote themselves through display-settings up
   expect((await db.query('SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2',[id(10),id(1)])).rows[0].role).toBe('member')
   await as('authenticated',id(1),()=>db.query('UPDATE project_members SET display_color=$1,display_initials=$2 WHERE project_id=$3 AND user_id=$4', ['#123456','AC',id(10),id(1)]))
   expect((await db.query('SELECT display_color,display_initials FROM project_members WHERE project_id=$1 AND user_id=$2',[id(10),id(1)])).rows).toEqual([{display_color:'#123456',display_initials:'AC'}])
-  for (const column of ['role','project_id','user_id']) {
-    const value = column==='role' ? 'owner' : id(99)
+  for (const column of ['role','project_id','user_id','joined_at','invited_by']) {
+    const value = column==='role' ? 'owner' : column==='joined_at' ? '2099-01-01' : id(99)
     await expect(as('authenticated',id(1),()=>db.query(`UPDATE project_members SET ${column}=$1 WHERE project_id=$2 AND user_id=$3`,[value,id(10),id(1)]))).rejects.toThrow()
   }
-  await as('authenticated',id(1),()=>db.query('UPDATE project_members SET display_initials=$1 WHERE project_id=$2 AND user_id=$3',['FORGED',id(10),id(2)]))
-  expect((await db.query('SELECT display_initials FROM project_members WHERE project_id=$1 AND user_id=$2',[id(10),id(2)])).rows[0].display_initials).toBe(null)
+  await as('authenticated',id(1),()=>db.query('UPDATE project_members SET display_initials=$1 WHERE project_id=$2 AND user_id=$3',['PEER',id(10),id(2)]))
+  expect((await db.query('SELECT display_initials FROM project_members WHERE project_id=$1 AND user_id=$2',[id(10),id(2)])).rows[0].display_initials).toBe('PEER')
+  await db.query("INSERT INTO projects(id,owner_id,name) VALUES($1,$2,'Foreign')", [id(11),id(2)])
+  await db.query("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')", [id(11),id(2)])
+  expect((await as('authenticated',id(1),()=>db.query("UPDATE project_members SET display_color='#fff' WHERE project_id=$1 RETURNING user_id",[id(11)]))).rows).toEqual([])
+  expect((await as('authenticated',id(99),()=>db.query("UPDATE project_members SET display_initials='OUTSIDER' WHERE project_id=$1 RETURNING user_id",[id(10)]))).rows).toEqual([])
 },15000)
 
 it('rejects an ordinary member inserting an owner identity into another project', async () => {

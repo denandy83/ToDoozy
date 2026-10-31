@@ -130,12 +130,6 @@ DO $$ DECLARE t text; BEGIN
   END IF;
 END $$;
 
--- Membership identities/roles are not profile preferences. A member may edit
--- only their own per-project display columns, never promote themselves.
-DROP POLICY IF EXISTS "Members can update display settings" ON public.project_members;
-CREATE POLICY "Members update own display settings" ON public.project_members
-  FOR UPDATE TO authenticated USING (user_id=(SELECT auth.uid()))
-  WITH CHECK (user_id=(SELECT auth.uid()));
 REVOKE UPDATE ON public.project_members FROM PUBLIC,anon,authenticated;
 GRANT UPDATE(display_color,display_initials) ON public.project_members TO authenticated;
 

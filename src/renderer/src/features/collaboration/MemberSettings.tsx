@@ -1,3 +1,4 @@
+import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
 /**
  * Members section for project settings — shows member list, invite button,
  * remove/leave/unshare actions.
@@ -60,18 +61,19 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const handleSaveMemberDisplay = async (userId: string): Promise<void> => {
     const color = editColor || null
     const initials = editInitials.trim() || null
-    // Save locally
-    await window.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
-    // Sync to Supabase so all members see the change
-    if (project.is_shared === 1) {
-      await updateSharedMemberDisplay(project.id, userId, color, initials).catch((err) =>
-        console.warn('Failed to sync member display to Supabase:', err)
-      )
+    const origin = captureSyncProducer()
+    try {
+      if (project.is_shared === 1) await updateSharedMemberDisplay(project.id, userId, color, initials, origin)
+      await requireProducerCurrent(origin)
+      await origin.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
+      await requireProducerCurrent(origin)
+      setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
+      invalidateMemberDisplay(project.id)
+      setEditingMemberId(null)
+      onToast('Member appearance updated')
+    } catch {
+      if (await origin.isCurrent()) onToast('Failed to update member appearance')
     }
-    setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
-    invalidateMemberDisplay(project.id)
-    setEditingMemberId(null)
-    onToast('Member appearance updated')
   }
 
   const isOwner = project.owner_id === currentUser?.id

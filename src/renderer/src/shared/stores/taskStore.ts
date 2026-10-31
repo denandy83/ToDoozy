@@ -1,6 +1,7 @@
 import { withSyncProducer, captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { reportPushFailure } from '../../services/syncFeedback'
 import { hydrationContext } from './hydrationContext'
+import { evictProjectData } from './projectCache'
 import { useMemo, useRef } from 'react'
 import { sortSubtasksForDisplay } from '../utils/sortTasks'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -377,6 +378,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         Promise.all(allProjects.map((p) => api.labels.findTaskLabelsByProject(p.id)))
       ])
       if (!await isCurrent()) return
+      const activeIds = new Set(allProjects.map(project => project.id))
+      for (const id of new Set(Object.values(initial.tasks).map(task => task.project_id))) if (!activeIds.has(id)) evictProjectData(id)
       set((state) => mergeHydratedTasks(state, initial, new Set(allProjects.map((project) => project.id)), taskArrays, labelMappingArrays))
     } catch (err) {
       if (!await isCurrent()) return

@@ -81,6 +81,7 @@ function makeSupabase(records: UpsertRecord[] = [], tableRows: Record<string, un
       chain[method] = (): Record<string, unknown> => chain
     }
     chain.upsert = (payload: unknown): Record<string, unknown> => { records.push({table,payload}); result.data = Array.isArray(payload) ? payload : [payload]; return chain }
+    chain.or = () => { result.data = []; return chain }
     chain.single = (): Promise<QueryResult> => Promise.resolve(result)
     chain.maybeSingle = async () => ({ ...result, data: result.data[0] ?? null })
     chain.then = (resolve: (value: QueryResult) => unknown): unknown => resolve(result)
@@ -265,6 +266,7 @@ function makePullSupabase(
     ]) {
       chain[m] = (): Record<string, unknown> => chain
     }
+    chain.or = () => { result.data = []; return chain }
     chain.single = (): Promise<typeof result> => Promise.resolve(result)
     chain.maybeSingle = (): Promise<typeof result> => Promise.resolve(result)
     chain.then = (resolve: (v: typeof result) => unknown): unknown => resolve(result)

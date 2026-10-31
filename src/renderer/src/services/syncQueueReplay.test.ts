@@ -21,11 +21,11 @@ function clientMock(failure: string | null = null, rows: unknown[] = [{ id: 'p' 
   const writes: Array<{ table: string; operation: string; payload: unknown }> = []
   const filters: Array<unknown[]> = []
   const client = { from(table: string) {
-    let operation = 'select'
+    let operation = 'select', afterCursor = false
     const chain: Record<string, unknown> = {}
-    for (const method of ['select', 'eq', 'is', 'in', 'lte', 'order', 'limit', 'or']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); return chain }
+    for (const method of ['select', 'eq', 'is', 'in', 'lte', 'order', 'limit', 'or']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); if (method === 'or') afterCursor = true; return chain }
     for (const method of ['upsert', 'update', 'delete']) chain[method] = (payload: unknown) => { operation = method; writes.push({ table, operation, payload }); return chain }
-    chain.then = (resolve: (result: unknown) => unknown) => resolve({ data: rows, error: operation !== 'select' && failure ? { message: failure } : null })
+    chain.then = (resolve: (result: unknown) => unknown) => resolve({ data: afterCursor && operation === 'select' ? [] : rows, error: operation !== 'select' && failure ? { message: failure } : null })
     return chain
   } } as unknown as SupabaseClient
   pinned.client = client
@@ -173,17 +173,18 @@ describe('queue integration with isolated account databases', () => {
     remote = {}
     requests = 0
     const client = { from(table: string) {
-      let operation = 'select'
+      let operation = 'select', afterCursor = false
       let payload: unknown
       const chain: Record<string, unknown> = {}
       for (const method of ['select', 'eq', 'in', 'is', 'lte', 'order', 'limit', 'or']) chain[method] = () => chain
+      chain.or = () => { afterCursor = true; return chain }
       for (const method of ['upsert', 'update', 'delete']) chain[method] = (value: unknown) => { operation = method; payload = value; return chain }
       chain.then = (resolve: (result: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
         await pinned.token?.()
         requests++
         if (hold) { hold = false; started.resolve(); await pause.promise }
         if (operation !== 'select') remote[table] = structuredClone(payload)
-        return { data: table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : table === 'tasks' ? [{ id: 't' }] : [], error: null }
+        return { data: afterCursor && operation === 'select' ? [] : table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : table === 'tasks' ? [{ id: 't' }] : [], error: null }
       })().then(resolve, reject)
       return chain
     } } as unknown as SupabaseClient

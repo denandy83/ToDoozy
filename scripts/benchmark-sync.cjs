@@ -142,7 +142,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
         }
         return finish([]);
       }
-      if(method==='PATCH'){for(const row of selected)Object.assign(row,body);return finish([])}
+      if(method==='PATCH'){for(const row of selected)Object.assign(row,body);return finish((new Headers(options.headers).get('prefer')??'').includes('return=representation')?selected:[])}
       if(method==='DELETE'){remote[table]=rows.filter(row=>!selected.includes(row));return finish([])}
       const order=(parsed.searchParams.get('order')??'').split(',').filter(Boolean);
       let result=[...selected].sort((a,b)=>{for(const item of order){const [key,direction]=item.split('.');if(a[key]!==b[key])return (String(a[key])<String(b[key])?-1:1)*(direction==='desc'?-1:1)}return 0}).slice(0,Number(parsed.searchParams.get('limit')??1000));

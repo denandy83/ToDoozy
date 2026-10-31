@@ -852,7 +852,7 @@ export async function deleteStatusFromSupabase(statusId: string, producer?: Sync
  * and a tombstoned project means no member should still see it. Membership rows
  * have no separate sync identity.
  */
-export async function deleteProjectFromSupabase(projectId: string): Promise<void> {
+export async function deleteProjectFromSupabase(projectId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     const now = new Date().toISOString()
     if (!(await hasLiveSession(origin, 'deleteProject', `id=${projectId}`))) return
@@ -907,7 +907,7 @@ export async function deleteProjectFromSupabase(projectId: string): Promise<void
       logEvent('error', 'sync', `deleteProject threw: ${msg}`, `project=${projectId}`)
       if (await origin.isCurrent()) useSyncStore.getState().setError(msg)
     }
-  })
+  }, producer)
 }
 
 // ── Project Push ─────────────────────────────────────────────────────
@@ -979,13 +979,13 @@ export async function pushProject(project: {
   }, producer)
 }
 
-export async function pushProjectArchive(): Promise<void> {
+export async function pushProjectArchive(producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!await origin.client()) { await refreshProducerPending(origin); return }
     const { processSyncQueue } = await import('./SyncService')
     if (!await origin.isCurrent()) return
     await processSyncQueue({ api: origin.api, client: (await origin.client())!, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
-  })
+  }, producer)
 }
 
 // ── Full Upload (first-time sync) ────────────────────────────────────

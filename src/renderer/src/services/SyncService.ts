@@ -1,9 +1,10 @@
+import { evictProjectData } from '../shared/stores/projectCache'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext, captureSyncProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { captureSyncContext, captureSyncProducer, requireProducerCurrent, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -955,24 +956,14 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     await unsubscribePersonalProject(local.id)
     await api.projects.removeMember(local.id, userId)
     if (!await context.isCurrent()) return missing
-    const [{ useViewStore }, { useProjectStore }, { useTaskStore }, { useStatusStore }] = await Promise.all([
-      import('../shared/stores/viewStore'), import('../shared/stores/projectStore'), import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
-    ])
+    const { useProjectStore } = await import('../shared/stores/projectStore')
     if (!await context.isCurrent()) return missing
-    if (useViewStore.getState().selectedProjectId === local.id) {
-      useViewStore.getState().setView('my-day')
-      useViewStore.setState({ selectedProjectId: null })
-    }
+    evictProjectData(local.id)
     if (useProjectStore.getState().currentProjectId === local.id) useProjectStore.getState().setCurrentProject(null)
     useProjectStore.setState((state) => ({
       projects: Object.fromEntries(Object.entries(state.projects).filter(([id]) => id !== local.id)),
       members: Object.fromEntries(Object.entries(state.members).filter(([id]) => id !== local.id))
     }))
-    useStatusStore.setState((state) => ({ statuses: Object.fromEntries(Object.entries(state.statuses).filter(([,status]) => status.project_id !== local.id)) }))
-    useTaskStore.setState((state) => {
-      const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([,task]) => task.project_id !== local.id))
-      return { tasks, taskLabels: Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => tasks[id])), selectedTaskIds: new Set(), lastSelectedTaskId: null, showDetailPanel: false }
-    })
   }
   return missing
 }
@@ -1043,12 +1034,10 @@ async function syncMembersDown(projectId: string, context: SyncContext, snapshot
       )
     }
 
-    if (member.display_color || member.display_initials) {
-      await api.projects.updateMember(projectId, member.user_id, {
-        display_color: member.display_color ?? null,
-        display_initials: member.display_initials ?? null
-      })
-    }
+    await api.projects.updateMember(projectId, member.user_id, {
+      display_color: member.display_color ?? null,
+      display_initials: member.display_initials ?? null
+    })
   }
 }
 
@@ -1303,74 +1292,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
     }
   }
 
-  // Sync members locally — fetch real profiles from Supabase
-  const { data: members } = await supabase
-    .from('project_members')
-    .select('*')
-    .eq('project_id', projectId)
-
-  if (members) {
-    const localMembers = await api.projects.getMembers(projectId)
-    const localMemberIds = new Set(localMembers.map((m) => m.user_id))
-  const remoteIds = new Set(members.map((m) => m.user_id))
-  for (const member of localMembers) if (!remoteIds.has(member.user_id)) await api.projects.removeMember(projectId, member.user_id)
-
-    // Batch-fetch all member profiles (N+1 → 1 query) for any local users that
-    // are missing or still have a placeholder email.
-    const memberIdsNeedingProfile: string[] = []
-    const localUsersById = new Map<string, { id: string; email: string } | undefined>()
-    for (const member of members) {
-      const localUser = await api.users.findById(member.user_id)
-      localUsersById.set(member.user_id, localUser ? { id: localUser.id, email: localUser.email } : undefined)
-      if (!localUser || isPlaceholderEmail(localUser.email)) {
-        memberIdsNeedingProfile.push(member.user_id)
-      }
-    }
-    const memberProfilesById = new Map<string, { email: string; display_name: string | null; avatar_url: string | null }>()
-    if (memberIdsNeedingProfile.length > 0) {
-      const { data: profiles } = await supabase
-        .rpc('get_user_profiles', { p_user_ids: memberIdsNeedingProfile })
-      for (const p of profiles ?? []) {
-        memberProfilesById.set(p.id as string, {
-          email: (p.email as string | null) ?? '',
-          display_name: (p.display_name as string | null) ?? null,
-          avatar_url: (p.avatar_url as string | null) ?? null
-        })
-      }
-    }
-
-    for (const member of members) {
-      const localUser = localUsersById.get(member.user_id)
-      const profile = memberProfilesById.get(member.user_id)
-
-      if (!localUser) {
-        await api.users.create({
-          id: member.user_id,
-          email: profile?.email ?? placeholderEmail(member.user_id),
-          display_name: profile?.display_name ?? null,
-          avatar_url: profile?.avatar_url ?? null
-        }).catch(() => { /* already exists */ })
-      } else if (isPlaceholderEmail(localUser.email) && profile?.email) {
-        await api.users.update(member.user_id, {
-          email: profile.email,
-          display_name: profile.display_name,
-          avatar_url: profile.avatar_url
-        })
-      }
-
-      if (!localMemberIds.has(member.user_id)) {
-        await api.projects.addMember(projectId, member.user_id, member.role)
-      }
-
-      // Sync display customizations from Supabase
-      if (member.display_color || member.display_initials) {
-        await api.projects.updateMember(projectId, member.user_id, {
-          display_color: member.display_color ?? null,
-          display_initials: member.display_initials ?? null
-        })
-      }
-    }
-  }
+  await syncMembersDown(projectId, context)
 }
 
 /**
@@ -1381,16 +1303,20 @@ export async function updateSharedMemberDisplay(
   projectId: string,
   userId: string,
   displayColor: string | null,
-  displayInitials: string | null
+  displayInitials: string | null,
+  producer = captureSyncProducer()
 ): Promise<void> {
-  const supabase = await getSupabase()
-  const { error } = await supabase
+  const supabase = await producer.client()
+  if (!supabase) throw new Error('Sign in to update member appearance')
+  const { data, error } = await supabase
     .from('project_members')
     .update({ display_color: displayColor, display_initials: displayInitials })
     .eq('project_id', projectId)
     .eq('user_id', userId)
-
+    .select('project_id,user_id')
+  await requireProducerCurrent(producer)
   if (error) throw error
+  if (data?.length !== 1) throw new Error('Project member appearance was not updated')
 }
 
 /**

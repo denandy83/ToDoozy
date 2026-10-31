@@ -94,6 +94,7 @@ beforeEach(async () => {
   vi.stubGlobal('navigator',{onLine:true})
   useTaskStore.setState({tasks:{[task]:repos.tasks.findById(task)!},taskLabels:{},showDetailPanel:false})
   pinned.client={ from(table:string) {
+    let afterCursor = false
     let columns='*', values: Array<Record<string,unknown>> | null=null, patch: Record<string,unknown> | null=null, removing=false
     const filters: Array<[string,unknown,string]>=[]
     const execute=async () => {
@@ -140,14 +141,14 @@ beforeEach(async () => {
         const from=joined ? `${quote(table)} JOIN user_labels ul ON ul.id=project_labels.label_id` : quote(table)
         const result=JSON.parse(JSON.stringify((await remote.query(`SELECT ${projection} FROM ${from}${where?' WHERE '+where:''}`,params)).rows))
         if(table==='task_labels' && afterLabelSnapshot) {const hook=afterLabelSnapshot;afterLabelSnapshot=null;await hook()}
-        return {data:result,error:null}
+        return {data:afterCursor?[]:result,error:null}
       } catch(error) { return {data:null,error:{message:String(error)}} }
     }
     const chain={
       ilike(key:string,value:string) {filters.push([key,value,'ILIKE']);return chain},
       select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
       is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
-      order() {return chain},limit() {return chain},or() {return chain},
+      order() {return chain},limit() {return chain},or() {afterCursor=true;return chain},
       delete() {removing=true;return chain},
       update(value:Record<string,unknown>) {patch=value;if(table==='tasks') taskUpdates.push(value);return chain},
       upsert(value:Array<Record<string,unknown>> | Record<string,unknown>) {values=Array.isArray(value)?value:[value];return chain},
@@ -613,14 +614,14 @@ it.each([0,1].flatMap((shared)=>['single','bulk'].map((path)=>({shared,path}))))
   expect((await remote.query<{user_id:string}>('SELECT user_id FROM user_labels WHERE id=$1',[foreign])).rows[0].user_id).toBe(id(999))
   expect(repos.syncQueue.count()).toBe(0)
 },15000)
-it('batches 500 explicit additions using one palette read and three bounded writes',async()=>{
+it('batches 500 explicit additions using one complete palette snapshot and three bounded writes',async()=>{
   const labels=await seedSettledAssignments(),context=await captureSyncContext()
   const tasks=Array.from({length:500},(_,index)=>repos.tasks.create({id:id(2000+index),project_id:project,owner_id:owner,status_id:source,title:'Batch '+index}))
   await context.client.from('tasks').upsert(tasks)
   for(const row of tasks) repos.tasks.addLabel(row.id,labels[0])
   paletteReads=0;assignmentBatches=[]
   await syncTaskLabelChoices(context.client,tasks.map((row)=>row.id),context.api,context.scope)
-  expect(paletteReads).toBe(1)
+  expect(paletteReads).toBe(2)
   expect(assignmentBatches).toEqual([200,200,100])
   expect((await remote.query<{n:number}>('SELECT count(*)::int AS n FROM task_labels WHERE task_id=ANY($1)',[tasks.map((row)=>row.id)])).rows[0].n).toBe(500)
   expect(tasks.every((task)=>repos.tasks.getLabelState(task.id).every((row)=>!row.sync_pending))).toBe(true)

@@ -6,7 +6,7 @@ import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
 import { fullPull, reconcile, requestSyncCatchUp, forceReconnectAllPersonal, subscribeToPersonalProject, unsubscribeAllPersonal, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
-import { syncProjectDown, processSyncQueue, setOnlineStatus, subscribeToProject, forceReconnectAllShared, unsubscribeAll } from './SyncService'
+import { syncProjectDown, acceptInvite, processSyncQueue, setOnlineStatus, subscribeToProject, forceReconnectAllShared, unsubscribeAll } from './SyncService'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshSearchIndex } from './searchSync'
@@ -31,6 +31,7 @@ let rows: Record<string, Array<Record<string, unknown>>>
 let rejectedStatus: string | null
 let failedTable: string | null
 let pageCounts: Record<string, number>
+let apiCap: number
 let projectId: string
 let sequence = 0
 let channels: Array<{ state: string; status: (status:string) => void }>
@@ -66,7 +67,7 @@ function makeClient(): SupabaseClient {
     from(table: string) {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
-    let limit = 1000, columns = '*'
+    let limit = apiCap, columns = '*'
     let values: Array<Record<string, unknown>> | null = null
     let patch: Record<string, unknown> | null = null
     let remove = false
@@ -81,7 +82,7 @@ function makeClient(): SupabaseClient {
       in(key: string, values: unknown[]) { filters.push((row) => values.includes(row[key])); return chain },
       gt(key: string, value: string) { filters.push((row) => String(row[key]) > value); return chain },
       order(key: string) { order.push(key); return chain },
-      limit(value: number) { limit = Math.min(value, 1000); return chain },
+      limit(value: number) { limit = Math.min(value, apiCap); return chain },
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
       maybeSingle: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
@@ -115,7 +116,7 @@ function makeClient(): SupabaseClient {
       }
     }
     return chain
-  }, rpc: async () => ({ data: [], error: null }) } as unknown as SupabaseClient
+  }, rpc: async (name: string) => ({ data: name === 'accept_invite' ? projectId : [], error: null }) } as unknown as SupabaseClient
 }
 beforeEach(() => {
   vi.mocked(captureSyncContext).mockClear()
@@ -128,6 +129,7 @@ beforeEach(() => {
   repo.projects.create({ id: projectId, owner_id: 'u', name: 'Project' })
   repo.statuses.create({ id: 'open', project_id: projectId, name: 'Open' })
   channels=[];beforeQuery=null;vi.mocked(isSuspended).mockReturnValue(false)
+  apiCap = 1000
   rows = {}; pageCounts = {}; failedTable = null; rejectedStatus = null
   const client = makeClient()
   const api = new Proxy({}, {
@@ -160,8 +162,8 @@ it('persists every task and status beyond the API cap before advancing either wa
   expect(await pullNewTasks(projectId, context)).toBe(1101)
   expect(repo.tasks.findAllByProject(projectId)).toHaveLength(1101)
   expect(repo.statuses.findAllByProject(projectId)).toHaveLength(1102)
-  expect(pageCounts.tasks).toBe(3)
-  expect(pageCounts.statuses).toBe(3)
+  expect(pageCounts.tasks).toBe(4)
+  expect(pageCounts.statuses).toBe(4)
 })
 it('does not advance the status watermark when a later page fails', async () => {
   rows.statuses = Array.from({ length: 1001 }, (_, index) => ({ ...repo.statuses.findById('open'), id: `s${String(index).padStart(4, '0')}`, updated_at: '2026-01-01T00:00:00.000Z' }))
@@ -226,14 +228,14 @@ it('R4/review-1: reads every remote task before project-wide queued label cleanu
   rows.task_labels = rows.tasks.map((task) => ({ task_id: task.id, label_id: 'removed-label' }))
   await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: JSON.stringify({ projectId, labelId: 'removed-label' }) } as never, context)
   expect(rows.task_labels).toHaveLength(0)
-  expect(pageCounts.tasks).toBe(3)
+  expect(pageCounts.tasks).toBe(4)
 })
 it('R4/review-1: reconciles every remote junction for one queued task', async () => {
   repo.tasks.create({ id: 't', project_id: projectId, status_id: 'open', owner_id: 'u', title: 'Task' })
   rows.task_labels = Array.from({ length: 1101 }, (_, index) => ({ task_id: 't', label_id: `label-${String(index).padStart(4, '0')}` }))
   await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: '{"task_id":"t"}' } as never, context)
   expect(rows.task_labels).toHaveLength(0)
-  expect(pageCounts.task_labels).toBe(3)
+  expect(pageCounts.task_labels).toBe(4)
 })
 
 it.each([0, 1].flatMap((archived) => ['startup', 'search', 'full', 'incremental'].map((path) => ({ archived, path }))))(
@@ -433,7 +435,7 @@ it.each(['complete','second-page-failure'])('converges a 502-to-501 assignment s
   rows.task_labels=ids.slice(0,501).map((label_id)=>({task_id:task.id,label_id,deleted_at:null}))
   if(mode==='second-page-failure') failedTable='task_labels'
   await pullTaskLabelsForTasks([task.id],'u',context)
-  expect(pageCounts.task_labels).toBe(2)
+  expect(pageCounts.task_labels).toBe(mode === 'complete' ? 3 : 2)
   expect(repo.tasks.getLabels(task.id)).toHaveLength(mode==='complete'?501:502)
   expect(repo.labels.findByProjectId(projectId)).toHaveLength(502)
 })
@@ -503,7 +505,7 @@ it('retries personal catch-up on an already joined channel and coalesces concurr
   rows.tasks=[{id:'missed-personal',project_id:projectId,status_id:'open',owner_id:'u',title:'Missed personal task',created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
   finish();await Promise.all([first,...rest])
   expect(repo.tasks.findById('missed-personal')?.title).toBe('Missed personal task')
-  expect(pageCounts.tasks).toBeLessThanOrEqual(2)
+  expect(pageCounts.tasks).toBeLessThanOrEqual(4)
 })
 
 it('keeps routine archived catch-up metadata-only and preserves explicit full reconciliation',async()=>{
@@ -547,4 +549,26 @@ it.each(['existing', 'remote-only', 'mixed'])('reconciles ancestor order for %s 
   expect(result.failed).toBe(0)
   expect(repo.tasks.findAllByProject(projectId).map(task => task.id).sort()).toEqual(['child', 'grandchild', 'leaf', 'root'])
   for (const task of repo.tasks.findAllByProject(projectId)) expect(task.updated_at).toBe('2030-01-01T00:00:00.000Z')
+})
+
+it.each(['invite', 'force-sync'].flatMap(path => [false, true].map(failure => ({ path, failure }))))('loads complete capped memberships before pruning in $path failure=$failure', async ({ path, failure }) => {
+  apiCap = 2
+  for (const id of ['a0', 'a1', 'a2', 'a3', 'stale']) repo.users.create({ id, email: `${id}@example.invalid`, display_name: null, avatar_url: null })
+  repo.projects.applyRemote({ ...repo.projects.findById(projectId)!, owner_id: 'a0', is_shared: 1, updated_at: '2030-01-01T00:00:00Z' })
+  repo.projects.addMember(projectId, 'u', 'member')
+  repo.projects.addMember(projectId, 'stale', 'member')
+  rows.projects = [{ ...repo.projects.findById(projectId) }]
+  rows.project_members = ['a0', 'a1', 'a2', 'a3', 'u'].map(user_id => ({ project_id: projectId, user_id, role: user_id === 'a0' ? 'owner' : 'member', display_color: null, display_initials: null }))
+  if (failure) failedTable = 'project_members'
+  const before = repo.projects.getMembers(projectId)
+  const run = path === 'invite' ? acceptInvite('synthetic-token', 'u') : syncProjectDown(projectId, 'u', context)
+  if (failure) {
+    await expect(run).rejects.toThrow('page failed')
+    expect(repo.projects.getMembers(projectId)).toEqual(before)
+  } else {
+    await run
+    expect(repo.projects.getMembers(projectId).map(row => row.user_id).sort()).toEqual(['a0','a1','a2','a3','u'])
+    expect(pageCounts.project_members).toBe(4)
+    expect(repo.projects.getProjectsForUser('u').map(row => row.id)).toContain(projectId)
+  }
 })
