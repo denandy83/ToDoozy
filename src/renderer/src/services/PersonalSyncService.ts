@@ -358,7 +358,7 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .ilike('name', localLabel.name)
+      .ilike('name', localLabel.name.replace(/[\\%_]/g, '\\$&'))
       .limit(1)
       .maybeSingle()
     if (!remote || (remote.id as string) === localLabel.id) return false

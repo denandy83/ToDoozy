@@ -434,7 +434,7 @@ async function consolidateLocalLabel(
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .ilike('name', name)
+      .ilike('name', name.replace(/[\\%_]/g, '\\$&'))
       .limit(1)
       .maybeSingle()
     if (lookupErr || !remote) return false

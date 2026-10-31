@@ -55,6 +55,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     import * as shared from './services/SyncService';
     import * as user from './services/UserChannelService';
     import * as syncContexts from './services/syncContext';
+    import * as syncTables from './services/syncTables';
     import { captureSyncContext, captureSyncProducer${hasNativeScope ? ', syncContextFromProducer' : ''} } from './services/syncContext';
     import { isSuspended } from './services/powerState';
     import { useAuthStore${hasNativeScope ? ', observeDatabaseScope' : ''} } from './shared/stores/authStore';
@@ -94,7 +95,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     function runLocalBootstrap(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
     function NativeBootstrap(){const databaseScope=${hasNativeScope ? 'useDatabaseScope()' : 'window.api.sync.currentContext()'},currentUser=useAuthStore(state=>state.currentUser),userId=currentUser?.id??null,isAuthenticated=useAuthStore(state=>state.isAuthenticated),currentProjectId=useProjectStore(state=>state.currentProjectId);useEffect(${localBootstrapEffect},${localBootstrapDeps});useEffect(${projectEffect},${projectDeps});return null}
-    globalThis.fixture={${hasNativeScope ? 'observeDatabaseScope,useDatabaseScope,' : ''}NativeBootstrap,${sharedHook ? 'RemovalApp,RemovedFromProjectDialog,DeployProjectTemplateWizard,ToastContainer,MemberSettings,StatsView,useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}syncContexts,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${hasNativeScope ? 'observeDatabaseScope,useDatabaseScope,' : ''}NativeBootstrap,${sharedHook ? 'RemovalApp,RemovedFromProjectDialog,DeployProjectTemplateWizard,ToastContainer,MemberSettings,StatsView,useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}syncContexts,syncTables,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useAttachmentStore,useNotificationStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTemplateStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations || sharedHook ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
@@ -191,7 +192,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     return channel;
   },removeChannel:async(channel)=>{channel.closed=true;channel.state='closed';return 'ok'}};
   const code=await compilation(ref,invitations,sharedHook);
-  const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
+  const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,info:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
     setInterval:(fn,ms)=>{const id=nextId++;intervals.set(id,{fn,ms});return id},clearInterval:id=>intervals.delete(id),setTimeout:(fn,ms)=>{const id=nextId++;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id)};
   runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>(await runtime.client.auth.getSession()).data.session;runtime.isSuspended=()=>suspended;
   vm.createContext(sandbox);
