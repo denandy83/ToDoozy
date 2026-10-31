@@ -69,7 +69,7 @@ export async function replaySpecialEntry(client: SupabaseClient, entry: SyncQueu
       const actor = useAuthStore.getState().currentUser?.id
       if (label && actor && label.user_id === actor) {
         const { pushLabel } = await import('./PersonalSyncService')
-        const canonical = await pushLabel(label,actor,{ api,userId:actor,client:async()=>client,assertCurrent:()=>context?.assertCurrent(),isCurrent:context?.isCurrent ?? (async()=>true),scope:labelScope })
+        const canonical = await pushLabel(label,actor,{ api,apiFor:context?.apiFor,clientFor:context?.clientFor,userId:actor,client:async()=>client,assertCurrent:()=>context?.assertCurrent(),isCurrent:context?.isCurrent ?? (async()=>true),scope:labelScope })
         if (!canonical) throw new Error('Project label definition remains pending')
         if (canonical !== payload.labelId) return replaySpecialEntry(client,entry,context)
       }

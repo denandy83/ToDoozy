@@ -28,7 +28,7 @@ vi.mock('./syncContext', async(importOriginal) => {
     // the real producer/native fence when invitation acceptance supplies it.
     syncContextFromProducer: vi.fn(async (origin: import('./syncContext').SyncProducer) => {
       await actual.requireProducerCurrent(origin)
-      return { ...context, api: origin.api, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+      return { ...context, api: origin.api, apiFor: origin.apiFor ?? context.apiFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
     })
   }
 })
@@ -164,7 +164,17 @@ beforeEach(() => {
       }
     })
   })
-  context = { api: api as never, client, clientFor: makeClient, assertCurrent() { /* The fixture uses one fixed account and database. */ }, isCurrent: async () => true, scope: projectId }
+  const apiFor = (guard: () => void): typeof window.api => new Proxy(api, {
+    get: (target, namespace) => new Proxy(Reflect.get(target, namespace), {
+      get: (methods, method) => async (...args: unknown[]) => {
+        guard()
+        const result = await Reflect.apply(Reflect.get(methods, method), methods, args)
+        guard()
+        return result
+      }
+    })
+  }) as typeof window.api
+  context = { api: api as never, apiFor, client, clientFor: makeClient, assertCurrent() { /* The fixture uses one fixed account and database. */ }, isCurrent: async () => true, scope: projectId }
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })

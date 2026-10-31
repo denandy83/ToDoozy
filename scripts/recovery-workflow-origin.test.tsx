@@ -23,6 +23,8 @@ async function setup() {
   h.sandbox.requestAnimationFrame = (callback: () => void) => setImmediate(callback)
   h.sandbox.cancelAnimationFrame = clearImmediate
   h.sandbox.window.matchMedia = () => ({ matches: true })
+  h.sandbox.window.addEventListener = window.addEventListener.bind(window)
+  h.sandbox.window.removeEventListener = window.removeEventListener.bind(window)
   h.services.observeDatabaseScope()
   h.stores.useAuthStore.setState({ isOffline: true })
   h.repo.projects.update('p0', { name: 'PRIVATE PROJECT', description: 'PRIVATE DESCRIPTION' })
@@ -168,4 +170,111 @@ it.each(['member-first', 'discovery-first'].flatMap(order => ['account', 'databa
   expect(document.body.textContent).not.toContain('PRIVATE PROJECT')
   expect(document.body.textContent).not.toContain('Keep Copy')
   expect(f.h.fixtureErrors).toEqual([])
+})
+
+it.each(['Cancel', 'Escape', 'backdrop'])('completes persistent deployment after actual %s close', async route => {
+  const f = await setup(), closed = vi.fn(() => f.root.render(null)), pause = gate()
+  await mount(f, 'deploy', closed)
+  const original = f.h.repo.projects.create.bind(f.h.repo.projects)
+  let held = false, created = ''
+  f.h.repo.projects.create = async (input: { id: string }) => {
+    const row = original(input)
+    if (!held) { held = true; created = input.id; pause.enter(); await pause.wait }
+    return row
+  }
+  await click('Create Project'); await pause.entered
+  if (route === 'Cancel') await click('Cancel')
+  else if (route === 'Escape') await act(async () => { window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+  else await act(async () => { (document.querySelector('.ui-modal-backdrop') as HTMLElement).click() })
+  await idle(f.h)
+  expect(closed).toHaveBeenCalledOnce()
+  pause.release(); await idle(f.h)
+  expect(f.h.repo.projects.getMembers(created)).toHaveLength(1)
+  expect(f.h.repo.statuses.findByProjectId(created)).toHaveLength(1)
+  const tasks = f.h.repo.tasks.findAllByProject(created)
+  expect(tasks).toHaveLength(2)
+  expect(tasks.filter((task: { parent_id: string | null }) => task.parent_id)).toHaveLength(1)
+  expect(f.h.stores.useProjectStore.getState().projects[created]).toBeDefined()
+  expect(f.h.stores.useTaskStore.getState().tasks[tasks[0].id]).toBeDefined()
+  expect(f.h.remote.projects.some((row: { id: string }) => row.id === created)).toBe(true)
+  expect(f.h.stores.useViewStore.getState().selectedProjectId).toBeNull()
+  expect(document.body.textContent).not.toMatch(/created from template|Failed to create/)
+  expect(closed).toHaveBeenCalledOnce()
+  expect(f.h.fixtureErrors).toEqual([])
+})
+it.each(['save-new', 'save-existing'] as const)('completes native/cache/cloud %s after UI unmount', async action => {
+  const f = await setup(), closed = vi.fn(() => f.root.render(null)), pause = gate()
+  await mount(f, action, closed)
+  const method = action === 'save-new' ? 'create' : 'update'
+  const original = f.h.repo.projectTemplates[method].bind(f.h.repo.projectTemplates)
+  f.h.repo.projectTemplates[method] = async (...args: unknown[]) => { const value = original(...args); pause.enter(); await pause.wait; return value }
+  await click('Save Template'); await pause.entered
+  await click('Cancel'); await idle(f.h)
+  expect(closed).toHaveBeenCalledOnce()
+  pause.release(); await idle(f.h)
+  expect(f.h.stores.useTemplateStore.getState().projectTemplates.template.name).toBe('PRIVATE TEMPLATE')
+  expect(f.h.remote.project_templates.some((row: { id: string }) => row.id === 'template')).toBe(true)
+  expect(document.body.textContent).not.toMatch(/template saved|Failed to save/)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+it.each(['database', 'account'])('preserves persistent close origin after subsequent %s replacement', async change => {
+  const f = await setup(), closed = vi.fn(() => f.root.render(null)), pause = gate()
+  await mount(f, 'deploy', closed)
+  const original = f.h.repo.projects.create.bind(f.h.repo.projects)
+  f.h.repo.projects.create = async (input: unknown) => { const value = original(input); pause.enter(); await pause.wait; return value }
+  await click('Create Project'); await pause.entered
+  await click('Cancel'); await idle(f.h)
+  const current = replaceNative(f, change === 'account' ? 'other' : 'u')
+  if (change === 'account') f.h.setAccount('other'); else f.h.replaceDatabase()
+  const mark = f.h.nativeCalls.length
+  pause.release(); await idle(f.h)
+  expect(f.h.nativeCalls.slice(mark)).toEqual([])
+  expect(current.tasks.findById('current-task')?.title).toBe('PRIVATE B TASK')
+  expect(closed).toHaveBeenCalledOnce()
+  expect(f.h.fixtureErrors).toEqual([])
+})
+it.each(['Keep Copy', 'Delete', 'rapid duplicates'])('serializes removal decisions against concurrent %s', async second => {
+  const f = await setup(), closed = vi.fn(), pause = gate()
+  f.h.remote.project_members = f.h.remote.project_members.filter((m: { project_id: string; user_id: string }) => m.project_id !== 'p0' || m.user_id !== 'u')
+  await f.h.services.shared.discoverRemoteMemberships('u', await f.h.context())
+  f.h.repo.projects.create({ id: 'q', owner_id: 'u', name: 'VALID Q' })
+  const q = f.h.repo.projects.findById('q')
+  await mount(f, 'copy', closed)
+  const original = f.h.repo.projects.create.bind(f.h.repo.projects)
+  let created = 0
+  f.h.repo.projects.create = async (input: unknown) => { const value = original(input); created++; if (created === 1) { pause.enter(); await pause.wait } return value }
+  if (second === 'rapid duplicates') {
+    await act(async () => {
+      const copy = [...document.querySelectorAll('button')].find(button => button.textContent === 'Keep Copy')!
+      const remove = [...document.querySelectorAll('button')].find(button => button.textContent === 'Delete')!
+      copy.click(); copy.click(); remove.click()
+    })
+  } else { await click('Keep Copy'); await pause.entered; await click(second) }
+  await pause.entered
+  expect(created).toBe(1)
+  expect(f.h.repo.projects.findById('p0').deleted_at).toBeNull()
+  expect(closed).not.toHaveBeenCalled()
+  pause.release(); await idle(f.h)
+  const projects = f.h.repo.projects.getProjectsForUser('u').filter((p: { id: string }) => p.id !== 'q')
+  expect(projects).toHaveLength(1)
+  expect(f.h.repo.projects.getMembers(projects[0].id)).toHaveLength(1)
+  expect(f.h.repo.statuses.findByProjectId(projects[0].id)).toHaveLength(2)
+  const tasks = f.h.repo.tasks.findAllByProject(projects[0].id)
+  expect(tasks).toHaveLength(2)
+  const child = tasks.find((row: { parent_id: string | null }) => row.parent_id)
+  expect(f.h.repo.tasks.getLabels(child.id).map((row: { label_id: string }) => row.label_id)).toEqual(['label'])
+  expect(f.h.repo.projects.findById('q')).toEqual(q)
+  expect(closed).toHaveBeenCalledOnce()
+  expect(document.body.textContent).not.toContain('Project deleted.')
+  expect(f.h.fixtureErrors).toEqual([])
+})
+it('retains recovery source and releases decision busy state on a current copy failure', async () => {
+  const f = await setup(), closed = vi.fn()
+  await mount(f, 'copy', closed)
+  f.h.repo.statuses.create = () => { throw Error('CURRENT COPY FAILURE') }
+  await click('Keep Copy'); await idle(f.h)
+  expect(f.h.repo.projects.findById('p0').deleted_at).toBeNull()
+  expect(closed).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('Failed to keep project copy')
+  expect([...document.querySelectorAll('button')].filter(button => ['Keep Copy', 'Delete'].includes(button.textContent ?? '')).every(button => !button.disabled)).toBe(true)
 })

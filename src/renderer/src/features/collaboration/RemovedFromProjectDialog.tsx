@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
 import { hydrationContext } from '../../shared/stores/hydrationContext'
 import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
@@ -28,6 +28,8 @@ export function RemovedFromProjectDialog({
   const scope = useDatabaseScope()
   const initialScope = useRef(scope).current
   const active = useRef(true)
+  const busy = useRef(false)
+  const [working, setWorking] = useState(false)
   const removedRef = useRef(removedFromProject)
   removedRef.current = removedFromProject
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
@@ -55,8 +57,11 @@ export function RemovedFromProjectDialog({
         <div className="mt-4 flex gap-2">
           <button
             onClick={async () => {
-              if (scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
-              const origin = captureSyncProducer(() => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope)
+              if (busy.current || scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+              busy.current = true
+              setWorking(true)
+              const origin = captureSyncProducer()
+              const uiCurrent = (): boolean => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === currentUser.id
               const { api } = hydrationContext(origin)
               try {
                 await requireProducerCurrent(origin)
@@ -86,7 +91,7 @@ export function RemovedFromProjectDialog({
                   // Copy labels to new project
                   const oldLabels = await api.labels.findByProjectId(oldId)
                   for (const l of oldLabels) {
-                    await api.labels.addToProject(newId, l.id).catch(() => {})
+                    await api.labels.addToProject(newId, l.id)
                   }
                   // Copy tasks
                   const tasks = (await api.tasks.findAllByProject(oldId)).filter((task) => !task.is_archived && !task.is_template)
@@ -98,7 +103,7 @@ export function RemovedFromProjectDialog({
                     // Copy task labels
                     const taskLabels = await api.tasks.getLabels(t.id)
                     for (const tl of taskLabels) {
-                      await api.tasks.addLabel(nid, tl.label_id).catch(() => {})
+                      await api.tasks.addLabel(nid, tl.label_id)
                     }
                   }
                   for (const t of tasks) {
@@ -110,32 +115,45 @@ export function RemovedFromProjectDialog({
                 }
                 await useProjectStore.getState().hydrateProjects(currentUser.id, origin)
                 await requireProducerCurrent(origin)
+                if (!uiCurrent()) return
                 onClose()
                 addToast({ message: 'A local copy has been kept.' })
               } catch {
-                if (await origin.isCurrent()) addToast({ message: 'Failed to keep project copy', variant: 'danger' })
+                if (await origin.isCurrent() && uiCurrent()) addToast({ message: 'Failed to keep project copy', variant: 'danger' })
+              } finally {
+                busy.current = false
+                if (uiCurrent()) setWorking(false)
               }
             }}
+            disabled={working}
             className="flex-1 rounded-md border border-border px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6"
           >
             Keep Copy
           </button>
           <button
             onClick={async () => {
-              if (scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
-              const origin = captureSyncProducer(() => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope)
+              if (busy.current || scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+              busy.current = true
+              setWorking(true)
+              const origin = captureSyncProducer()
+              const uiCurrent = (): boolean => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === currentUser.id
               const { api } = hydrationContext(origin)
               try {
                 await requireProducerCurrent(origin)
                 await api.projects.delete(removedFromProject.id)
                 await useProjectStore.getState().hydrateProjects(currentUser.id, origin)
                 await requireProducerCurrent(origin)
+                if (!uiCurrent()) return
                 onClose()
                 addToast({ message: 'Project deleted.' })
               } catch {
-                if (await origin.isCurrent()) addToast({ message: 'Failed to delete project', variant: 'danger' })
+                if (await origin.isCurrent() && uiCurrent()) addToast({ message: 'Failed to delete project', variant: 'danger' })
+              } finally {
+                busy.current = false
+                if (uiCurrent()) setWorking(false)
               }
             }}
+            disabled={working}
             className="flex-1 rounded-md bg-danger px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/90"
           >
             Delete

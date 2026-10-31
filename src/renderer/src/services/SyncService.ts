@@ -627,6 +627,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
     const priority = ['projects', 'user_labels', 'statuses', 'project_labels', 'tasks']
     const ordered = [...groups.values()].sort((a, b) =>
       (priority.indexOf(a[0].table_name) + 1 || 99) - (priority.indexOf(b[0].table_name) + 1 || 99))
+    const projectContexts = new Map<string, SyncContext>()
     const work = ordered.map((entries) => {
       let entry = entries[entries.length - 1]
       const commands = entries.filter((item) => JSON.parse(item.payload).status_delete === true)
@@ -636,28 +637,47 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
       if (archive) entry = { ...entry, payload: JSON.stringify({ ...payload, archive_with_tasks: true }) }
       const special = entry.table_name === 'task_labels' || entry.table_name === 'project_labels' || archive || commands.length > 0
       const descriptor = Object.values(SYNC_TABLES).find((item) => item?.remoteName === entry.table_name)
-      const snapshot = async (): Promise<string> => {
+      let scoped: Promise<SyncContext> | undefined
+      let projectId = entry.table_name === 'projects' ? entry.row_id : String(payload.project_id ?? payload.projectId ?? '')
+      const lifetime = (): Promise<SyncContext> => scoped ??= (async () => {
+        if (!projectId) {
+          const row = descriptor?.scope === 'project' ? await descriptor.localGetById(entry.row_id, api) : null
+          const task = entry.table_name === 'task_labels' ? await api.tasks.findById(String(payload.task_id ?? entry.row_id)) : null
+          const rowProjectId = row && typeof row === 'object' && 'project_id' in row && typeof row.project_id === 'string' ? row.project_id : null
+          projectId = String(rowProjectId ?? task?.project_id ?? '')
+        }
         assertCurrent()
-        if (special) return specialEntryIntent(entry, context)
-        const row = descriptor ? await descriptor.localGetById(entry.row_id, api) : payload
-        return JSON.stringify({ row: row ?? null, labels: entry.table_name === 'tasks' && row ? (await api.tasks.getLabels(entry.row_id)).map((link) => link.label_id).sort() : [] })
+        if (!projectId) return context
+        let current = projectContexts.get(projectId)
+        if (!current) {
+          current = channelSyncContext(context, () => projectCurrent(projectId), projectId)
+          projectContexts.set(projectId, current)
+        }
+        return current
+      })()
+      const snapshot = async (): Promise<string> => {
+        const current = await lifetime()
+        current.assertCurrent()
+        if (special) return specialEntryIntent(entry, current)
+        const row = descriptor ? await descriptor.localGetById(entry.row_id, current.api) : payload
+        return JSON.stringify({ row: row ?? null, labels: entry.table_name === 'tasks' && row ? (await current.api.tasks.getLabels(entry.row_id)).map((link) => link.label_id).sort() : [] })
       }
       const eligible = async (): Promise<boolean> => {
-        const row = descriptor?.scope === 'project' ? await descriptor.localGetById(entry.row_id, api) : null
-        const rowProjectId = row && typeof row === 'object' && 'project_id' in row && typeof row.project_id === 'string' ? row.project_id : null
-        const task = entry.table_name === 'task_labels' && !payload.projectId ? await api.tasks.findById(String(payload.task_id ?? entry.row_id)) : null
-        const projectId = entry.table_name === 'projects' ? entry.row_id : String(rowProjectId ?? payload.project_id ?? payload.projectId ?? task?.project_id ?? '')
-        if (!projectId) return true
-        if (!projectCurrent(projectId)) return false
-        const project = await api.projects.findById(projectId)
-        const permitted = !project || project.owner_id === userId || (await api.projects.getMembers(projectId)).some(member => member.user_id === userId)
-        return permitted && projectCurrent(projectId)
+        const current = await lifetime()
+        if (!await current.isCurrent()) return false
+        if (!projectId) return descriptor?.scope !== 'project' && entry.table_name !== 'task_labels' && entry.table_name !== 'project_labels'
+        const project = await current.api.projects.findById(projectId)
+        const permitted = !project || project.owner_id === userId || (await current.api.projects.getMembers(projectId)).some(member => member.user_id === userId)
+        current.assertCurrent()
+        return permitted
       }
-      return { entry, entries, payload, special, descriptor, snapshot, eligible }
+      return { entry, entries, payload, special, descriptor, snapshot, eligible, lifetime, current: context }
     })
+    await Promise.all(work.map(async item => { item.current = await item.lifetime() }))
     type Work = typeof work[number]
     const complete = async (item: Work): Promise<void> => {
-      for (const entry of item.entries) { if (await api.sync.dequeue(entry.id)) processed++ }
+      const current = await item.lifetime()
+      for (const entry of item.entries) { if (await current.api.sync.dequeue(entry.id)) processed++ }
     }
     const blockedTasks = new Set<string>()
     const handled = new Set<Work>()
@@ -671,73 +691,115 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
           let pending = tableItems.slice(index, index + 200)
           try {
             while (pending.length && isOnline) {
-              let snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
-              const eligibility = await Promise.all(pending.map(candidate => candidate.eligible()))
-              pending = pending.filter((_, index) => eligibility[index])
-              snapshots = snapshots.filter((_, index) => eligibility[index])
-              const rows = snapshots.map((value) => JSON.parse(value).row)
-              if (item.entry.table_name === 'user_settings' || item.entry.table_name === 'user_themes') {
-                for (const row of rows.filter((row) => row && (item.entry.table_name === 'user_themes' || row.key === 'theme_id'))) await item.descriptor!.remoteUpsert(row, context)
-              }
-              const values = rows.filter(Boolean)
-                .filter((row) => item.entry.table_name !== 'user_settings' || row.key !== 'theme_id')
-                .filter(() => item.entry.table_name !== 'user_themes')
-                .map((row) => item.descriptor!.toRemote(row))
-              if (values.length) {
-                const { error } = await supabase.from(item.entry.table_name).upsert(values)
-                if (error) {
-                  if (item.entry.table_name !== 'user_labels') throw new Error(error.message)
-                  const producer: SyncProducer = {
-                    api, userId: useAuthStore.getState().currentUser?.id,
-                    client: async () => supabase, assertCurrent, isCurrent: context.isCurrent,
-                    scope: async () => context.scope
+              try {
+                const prepared = await Promise.all(pending.map(async candidate => {
+                  candidate.current = await candidate.lifetime()
+                  try {
+                    const snapshot = await candidate.snapshot()
+                    return await candidate.eligible() ? { candidate, snapshot } : null
+                  } catch (error) { if (await candidate.current.isCurrent()) throw error; return null }
+                }))
+                const live = prepared.filter((value): value is NonNullable<typeof value> => {
+                  if (!value) return false
+                  try { value.candidate.current.assertCurrent(); return true } catch { return false }
+                })
+                pending = live.map(value => value.candidate)
+                if (!pending.length) break
+                const snapshots = live.map(value => value.snapshot)
+                const batchItems = [...pending]
+                const batchClient = batchItems.every(candidate => candidate.current === context) ? supabase : context.clientFor!(() => {
+                  for (const candidate of batchItems) candidate.current.assertCurrent()
+                })
+                const rows = snapshots.map((value) => JSON.parse(value).row)
+                if (item.entry.table_name === 'user_settings' || item.entry.table_name === 'user_themes') {
+                  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+                    const row = rows[rowIndex]
+                    if (row && (item.entry.table_name === 'user_themes' || row.key === 'theme_id')) await item.descriptor!.remoteUpsert(row, pending[rowIndex].current)
                   }
-                  for (const row of values) {
-                    if (!await pushLabel(row as Label, producer.userId!, producer)) throw new Error(error.message)
+                }
+                const values = rows.filter(Boolean)
+                  .filter((row) => item.entry.table_name !== 'user_settings' || row.key !== 'theme_id')
+                  .filter(() => item.entry.table_name !== 'user_themes')
+                  .map((row) => item.descriptor!.toRemote(row))
+                if (values.length) {
+                  const { error } = await batchClient.from(item.entry.table_name).upsert(values)
+                  if (error) {
+                    if (item.entry.table_name !== 'user_labels') throw new Error(error.message)
+                    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+                      const row = rows[rowIndex]
+                      if (!row) continue
+                      const current = pending[rowIndex].current
+                      const producer: SyncProducer = {
+                        api: current.api, apiFor: current.apiFor, clientFor: current.clientFor, userId, client: async () => current.client,
+                        assertCurrent: current.assertCurrent, isCurrent: current.isCurrent, scope: async () => current.scope
+                      }
+                      if (!await pushLabel(row as Label, userId!, producer)) throw new Error(error.message)
+                    }
+                  }
+                  if (item.entry.table_name === 'tasks') {
+                    const labels = new Map<SyncContext, string[]>()
+                    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+                      const row = rows[rowIndex]
+                      if (row && !row.deleted_at) {
+                        const current = pending[rowIndex].current
+                        labels.set(current, [...(labels.get(current) ?? []), row.id])
+                      }
+                    }
+                    for (const [current, ids] of labels) {
+                      try { await syncTaskLabelChoices(current.client, ids, current.api, current.scope) }
+                      catch (error) { if (await current.isCurrent()) throw error }
+                    }
                   }
                 }
-                if (item.entry.table_name === 'tasks') await syncTaskLabelChoices(supabase, rows.filter((row) => row && !row.deleted_at).map((row) => row.id), api, context.scope)
+                const changed: Work[] = []
+                for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
+                  const candidate = pending[rowIndex]
+                  const current = candidate.current
+                  if (!await current.isCurrent()) continue
+                  if (!rows[rowIndex] && (candidate.entry.table_name === 'user_themes' || (candidate.entry.table_name === 'user_settings' && candidate.entry.row_id.endsWith(':theme_id')))) {
+                    await complete(candidate)
+                    continue
+                  }
+                  if (!rows[rowIndex]) {
+                    const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
+                    await replaySpecialEntry(current.client, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, current)
+                  }
+                  if (item.entry.table_name === 'user_labels' && rows[rowIndex] && !await item.descriptor!.localGetById(candidate.entry.row_id, current.api)) {
+                    await complete(candidate)
+                    continue
+                  }
+                  if (snapshots[rowIndex] !== await candidate.snapshot()) changed.push(candidate)
+                  else await complete(candidate)
+                }
+                pending = changed
+              } catch (error) {
+                const valid = pending.filter(candidate => { try { candidate.current.assertCurrent(); return true } catch { return false } })
+                if (valid.length === pending.length) throw error
+                pending = valid
               }
-              const changed: Work[] = []
-              for (let rowIndex = 0; rowIndex < pending.length; rowIndex++) {
-                const candidate = pending[rowIndex]
-                if (!rows[rowIndex] && (candidate.entry.table_name === 'user_themes' || (candidate.entry.table_name === 'user_settings' && candidate.entry.row_id.endsWith(':theme_id')))) {
-                  await complete(candidate)
-                  continue
-                }
-                if (!rows[rowIndex]) {
-                  const deletedAt = candidate.payload.deleted_at ?? candidate.entry.created_at
-                  await replaySpecialEntry(supabase, { ...candidate.entry, payload: JSON.stringify({ id: candidate.entry.row_id, deleted_at: deletedAt, updated_at: deletedAt }) }, context)
-                }
-                if (item.entry.table_name === 'user_labels' && rows[rowIndex] && !await item.descriptor!.localGetById(candidate.entry.row_id, api)) {
-                  await complete(candidate)
-                  continue
-                }
-                if (snapshots[rowIndex] !== await candidate.snapshot()) changed.push(candidate)
-                else await complete(candidate)
-              }
-              pending = changed
             }
           } catch (error) { assertCurrent(); failure = error instanceof Error ? error.message : String(error) }
         }
         continue
       }
       try {
+        item.current = await item.lifetime()
         while (isOnline) {
           const before = await item.snapshot()
           if (!await item.eligible()) break
           assertCurrent()
-          if (!await replaySpecialEntry(supabase, item.entry, context)) throw new Error('Unsupported queued operation')
+          if (!await replaySpecialEntry(item.current.client, item.entry, item.current)) throw new Error('Unsupported queued operation')
           if (before !== await item.snapshot()) continue
           await complete(item)
           break
         }
       } catch (error) {
-        assertCurrent()
+        if (!await item.current.isCurrent()) continue
+        item.current.assertCurrent()
         failure = error instanceof Error ? error.message : String(error)
         if (item.payload.status_delete === true) {
           const affected = Array.isArray(item.payload.tasks) ? item.payload.tasks as Array<{ id: string }>
-            : await api.tasks.findAllByProject(String(item.payload.project_id), { includeTombstones: true })
+            : await item.current.api.tasks.findAllByProject(String(item.payload.project_id), { includeTombstones: true })
           for (const task of affected) blockedTasks.add(task.id)
         }
       }

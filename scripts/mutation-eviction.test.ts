@@ -38,7 +38,7 @@ const cases=[
   {name:'task subtask',store:'useTaskStore',ns:'tasks',hold:'create',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().createSubtask('t',{id:'child',owner_id:'u',project_id:'p0',status_id:'s0',title:'PRIVATE CHILD'})},
   {name:'task attach label',store:'useTaskStore',ns:'tasks',hold:'addLabel',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().addLabel('t','unlinked')},
   {name:'task remove label',store:'useTaskStore',ns:'tasks',hold:'removeLabel',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().removeLabel('t','label')},
-  {name:'task reorder',store:'useTaskStore',ns:'tasks',hold:'reorder',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().reorderTasks(['t','q'])},
+  {name:'task reorder',store:'useTaskStore',ns:'tasks',hold:'update',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().reorderTasks(['t','q'])},
   {name:'bulk update',store:'useTaskStore',ns:'tasks',hold:'update',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().bulkUpdateTasks(['t','q'],{priority:3})},
   {name:'bulk delete',store:'useTaskStore',ns:'tasks',hold:'delete',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().bulkDeleteTasks(['t','q'])},
   {name:'bulk attach label',store:'useTaskStore',ns:'tasks',hold:'addLabel',run:(h:Awaited<ReturnType<typeof makeHarness>>)=>h.stores.useTaskStore.getState().bulkAddLabel(['t','q'],'unlinked')},
@@ -123,9 +123,9 @@ it('cancels a newly created project result after its own revocation without retu
 })
 
 it('captures an uncached reordered task project before mutation and preserves unrelated reorder work',async()=>{
-  const h=await setup(),pause=gate(),original=h.repo.tasks.reorder.bind(h.repo.tasks)
+  const h=await setup(),pause=gate(),original=h.repo.tasks.update.bind(h.repo.tasks)
   h.stores.useTaskStore.setState((state:{tasks:Record<string,unknown>})=>({tasks:Object.fromEntries(Object.entries(state.tasks).filter(([id])=>id!=='t'))}))
-  h.repo.tasks.reorder=async(ids:string[])=>{const value=original(ids);pause.enter();await pause.wait;return value}
+  h.repo.tasks.update=async(id:string,input:unknown)=>{const value=original(id,input);if(id==='t'){pause.enter();await pause.wait}return value}
   const reordered=h.stores.useTaskStore.getState().reorderTasks(['t','q'])
   await pause.entered;await revoke(h)
   const calls=h.nativeCalls.length

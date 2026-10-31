@@ -150,7 +150,7 @@ export function DeployProjectTemplateWizard({
   const handleCreate = useCallback(async () => {
     if (scope !== initialScope || creating || useAuthStore.getState().currentUser?.id !== currentUser.id) return
     const projectId = crypto.randomUUID()
-    const origin = captureProjectProducer(projectId, () => active.current && templateRef.current === template && window.api.sync.currentContext() === initialScope)
+    const origin = captureProjectProducer(projectId)
     const { api } = hydrationContext(origin, projectId)
     setCreating(true)
     try {
@@ -255,22 +255,23 @@ export function DeployProjectTemplateWizard({
       await useTaskStore.getState().hydrateAllForProject(project.id, origin)
 
       await requireProducerCurrent(origin)
+      if (!active.current || templateRef.current !== template) return
       // Navigate to new project
       useViewStore.getState().setSelectedProject(project.id)
       addToast({ message: `Project "${projectName}" created from template.` })
       onClose()
     } catch (err) {
-      if (!await origin.isCurrent()) return
+      if (!await origin.isCurrent() || !active.current || templateRef.current !== template) return
       console.error('Failed to deploy project template:', err)
       addToast({ message: 'Failed to create project', variant: 'danger' })
     } finally {
-      if (await origin.isCurrent()) setCreating(false)
+      if (await origin.isCurrent() && active.current && templateRef.current === template) setCreating(false)
     }
   }, [creating, projectName, projectColor, statuses, labels, tasks, deployDate, currentUser, createProject, addToast, onClose, scope, template, initialScope])
 
   const handleSaveTemplate = useCallback(async () => {
     if (scope !== initialScope || creating || useAuthStore.getState().currentUser?.id !== currentUser.id) return
-    const origin = captureSyncProducer(() => active.current && templateRef.current === template && window.api.sync.currentContext() === initialScope)
+    const origin = captureSyncProducer()
     setCreating(true)
     try {
       await requireProducerCurrent(origin)
@@ -292,14 +293,15 @@ export function DeployProjectTemplateWizard({
         }, origin)
       }
       await requireProducerCurrent(origin)
+      if (!active.current || templateRef.current !== template) return
       addToast({ message: 'Project template saved' })
       onClose()
     } catch (err) {
-      if (!await origin.isCurrent()) return
+      if (!await origin.isCurrent() || !active.current || templateRef.current !== template) return
       console.error('Failed to save project template:', err)
       addToast({ message: 'Failed to save template', variant: 'danger' })
     } finally {
-      if (await origin.isCurrent()) setCreating(false)
+      if (await origin.isCurrent() && active.current && templateRef.current === template) setCreating(false)
     }
   }, [creating, projectName, projectColor, statuses, labels, tasks, includeDueDateOffsets, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose, scope, initialScope])
 

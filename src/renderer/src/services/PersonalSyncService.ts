@@ -5,7 +5,7 @@ import { useAuthStore } from '../shared/stores/authStore'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
-import { channelSyncContext, captureSyncContext, captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
+import { channelSyncContext, captureSyncContext, captureSyncProducer, syncContextFromProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
  * and user-level data (settings, themes, saved views, areas, labels) to Supabase.
@@ -444,7 +444,7 @@ export async function pushProjectLabel(
       const supabase = (await origin.client())!
       if (!deletedAt && (await origin.api.sync.getQueue()).some((entry) => entry.table_name === 'project_labels' && JSON.parse(entry.payload).addition && JSON.parse(entry.payload).projectId === projectId && JSON.parse(entry.payload).labelId === labelId)) {
         const { processSyncQueue } = await import('./SyncService')
-        await processSyncQueue({api:origin.api,client:supabase,assertCurrent:origin.assertCurrent,isCurrent:origin.isCurrent,scope:await origin.scope()})
+        await processSyncQueue(await syncContextFromProducer(origin))
         return
       }
       await writeProjectLabelChoices(supabase,origin.api,[{project_id:projectId,label_id:labelId,created_at:current!.created_at,deleted_at:deletedAt}],origin.assertCurrent)
@@ -479,7 +479,7 @@ export async function pushRemoveLabelFromProject(projectId: string, labelId: str
     const client = await origin.client()
     if (!client) { await refreshProducerPending(origin); return }
     if (!await origin.isCurrent()) return
-    await processSyncQueue({ api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+    await processSyncQueue(await syncContextFromProducer(origin))
   }, producer)
 }
 
@@ -538,7 +538,7 @@ async function pushSettingImmediate(key: string, value: string, userId: string, 
     try {
       const supabase = (await origin.client())!
       if (selection) {
-        await descriptor.remoteUpsert(selection, { api: origin.api, client: supabase, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+        await descriptor.remoteUpsert(selection, await syncContextFromProducer(origin))
       } else {
         const { error } = await supabase.from('user_settings').upsert(payload)
         if (error) throw error
@@ -769,7 +769,7 @@ export async function pushTheme(theme: { id: string }, producer?: SyncProducer):
     if (!(await hasLiveSession(origin, 'pushTheme', `id=${local.id}`))) return
     try {
       const supabase = (await origin.client())!
-      await descriptor.remoteUpsert(local, { api: origin.api, client: supabase, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+      await descriptor.remoteUpsert(local, await syncContextFromProducer(origin))
       await markSynced(origin)
       logEvent('info', 'sync', `Pushed theme "${local.name}"`, `id=${local.id} mode=${local.mode}`)
     } catch (err) {
@@ -791,7 +791,7 @@ export async function deleteThemeFromSupabase(themeId: string, producer?: SyncPr
     if (!(await hasLiveSession(origin, 'deleteTheme', `id=${themeId}`))) return
     try {
       const client = (await origin.client())!
-      await descriptor.remoteUpsert(local, { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+      await descriptor.remoteUpsert(local, await syncContextFromProducer(origin))
       await markSynced(origin)
     } catch (error) {
       await reportPushFailure(origin, 'deleteTheme', error, 'user_themes', themeId, JSON.stringify(descriptor.toRemote(local)))
@@ -840,7 +840,7 @@ export async function deleteStatusFromSupabase(statusId: string, producer?: Sync
     const client = await origin.client()
     if (!client) { await refreshProducerPending(origin); return }
     if (!await origin.isCurrent()) return
-    await processSyncQueue({ api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+    await processSyncQueue(await syncContextFromProducer(origin))
   }, producer)
 }
 
@@ -985,7 +985,7 @@ export async function pushProjectArchive(producer?: SyncProducer): Promise<void>
     if (!await origin.client()) { await refreshProducerPending(origin); return }
     const { processSyncQueue } = await import('./SyncService')
     if (!await origin.isCurrent()) return
-    await processSyncQueue({ api: origin.api, client: (await origin.client())!, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
+    await processSyncQueue(await syncContextFromProducer(origin))
   }, producer)
 }
 

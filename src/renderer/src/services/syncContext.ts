@@ -8,6 +8,7 @@ import { supabaseRequestMetrics } from '../../../shared/supabaseTelemetry'
 
 export interface SyncContext {
   api: TodoozyAPI
+  apiFor?: (assertCurrent: () => void) => TodoozyAPI
   client: SupabaseClient
   assertCurrent(): void
   isCurrent(): Promise<boolean>
@@ -18,6 +19,7 @@ export interface SyncContext {
 
 export interface SyncProducer {
   api: TodoozyAPI
+  apiFor?: (assertCurrent: () => void) => TodoozyAPI
   client(): Promise<SupabaseClient | null>
   clientFor?: (assertCurrent: () => void) => SupabaseClient
   assertCurrent(): void
@@ -54,16 +56,29 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
   const isCurrent = async (): Promise<boolean> => {
     try { await assertDatabase(); return true } catch { return false }
   }
-  const api = new Proxy({} as TodoozyAPI, {
+  const apiFor = (guard: () => void): TodoozyAPI => new Proxy({} as TodoozyAPI, {
     get: (_, namespace: string) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
+        assertCurrent()
+        guard()
         const origin = await database
         assertCurrent()
+        guard()
         if (origin.userId !== userId) throw new Error('Sync database changed')
-        return window.api.sync.invokeContext(origin, `${namespace}:${method}`, args)
+        try {
+          const result = await window.api.sync.invokeContext(origin, `${namespace}:${method}`, args)
+          assertCurrent()
+          guard()
+          return result
+        } catch (error) {
+          assertCurrent()
+          guard()
+          throw error
+        }
       }
     })
   })
+  const api = apiFor(assertCurrent)
   let createScopedClient: ((guard: () => void) => SupabaseClient) | undefined
   const clientFor = (guard: () => void): SupabaseClient => {
     if (!createScopedClient) throw new Error('Sync client unavailable')
@@ -100,17 +115,17 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     return clientFor(assertCurrent)
   })()
   const scope = async (): Promise<string> => { const origin = await database; return `${origin.userId}:${origin.generation}` }
-  return { api, client, clientFor, assertCurrent, isCurrent, userId, scope }
+  return { api, apiFor, client, clientFor, assertCurrent, isCurrent, userId, scope }
 }
 
 export interface ProjectProducer extends SyncProducer {
   includeProject(projectId: string): void
 }
 
-export function captureProjectProducer(projectId?: string, active: () => boolean = () => true): ProjectProducer {
+export function captureProjectProducer(projectId?: string): ProjectProducer {
   const current = captureProjectScope()
   const projects = new Set(projectId ? [projectId] : [])
-  const origin = captureSyncProducer(() => active() && [...projects].every(current))
+  const origin = captureSyncProducer(() => [...projects].every(current))
   return {
     ...origin,
     isCurrent: async () => await origin.isCurrent() && (projects.size > 0 || current()),
@@ -139,7 +154,7 @@ export async function syncContextFromProducer(origin: SyncProducer): Promise<Syn
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   await requireProducerCurrent(origin)
-  return { api: origin.api, client, clientFor: origin.clientFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+  return { api: origin.api, apiFor: origin.apiFor, client, clientFor: origin.clientFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
 }
 
 export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {
@@ -152,8 +167,10 @@ export function channelSyncContext(parent: SyncContext, active: () => boolean, p
     parent.assertCurrent()
     if (!active()) throw new Error('Sync channel cancelled')
   }
+  if (!parent.apiFor) throw new Error('Sync native context unavailable')
   const origin = {
     ...parent,
+    api: parent.apiFor(assertCurrent),
     assertCurrent,
     isCurrent: async () => active() && await parent.isCurrent() && active()
   }

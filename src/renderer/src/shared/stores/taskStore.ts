@@ -646,11 +646,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       }))
       const current = origins.filter((_, index) => eligible[index])
       if (!current.length) return
-      await batch.api.tasks.reorder(current.map(({ id }) => id))
-      await requireProducerCurrent(batch)
-      await Promise.all(current.map(async ({ id, origin }) => {
+      await Promise.all(current.map(async ({ id, origin }, index) => {
         try {
-          await requireProducerCurrent(origin)
+          await origin.api.tasks.update(id, { order_index: index })
           const task = await origin.api.tasks.findById(id)
           if (!task) return
           origin.includeProject(task.project_id)
