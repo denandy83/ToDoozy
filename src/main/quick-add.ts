@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
+import { guardRendererNavigation } from './navigation-security'
 
 let quickAddWindow: BrowserWindow | null = null
 
@@ -24,6 +25,7 @@ function createQuickAddWindow(): BrowserWindow {
     }
   })
 
+  guardRendererNavigation(quickAddWindow.webContents)
   quickAddWindow.on('closed', () => {
     quickAddWindow = null
   })

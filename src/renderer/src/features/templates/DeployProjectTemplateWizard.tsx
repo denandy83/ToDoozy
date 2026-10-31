@@ -233,7 +233,7 @@ export function DeployProjectTemplateWizard({
       await useProjectStore.getState().hydrateProjects(currentUser.id)
       await useStatusStore.getState().hydrateStatuses(project.id)
       await useLabelStore.getState().hydrateLabels(project.id)
-      await useTaskStore.getState().hydrateAllForProject(project.id, currentUser.id)
+      await useTaskStore.getState().hydrateAllForProject(project.id)
 
       // Navigate to new project
       useViewStore.getState().setSelectedProject(project.id)

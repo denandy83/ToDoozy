@@ -1,3 +1,5 @@
+import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { hydrationContext } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { SavedView, CreateSavedViewInput } from '../../../../shared/types'
@@ -14,7 +16,7 @@ interface SavedViewState {
 
 interface SavedViewActions {
   hydrate(userId: string): Promise<void>
-  hydrateCounts(userId: string): Promise<void>
+  hydrateCounts(userId: string, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   /**
    * Debounced (1s) recount of every saved view's matching-task count. Wired to
    * task mutations / Realtime / WAL events so sidebar counts refresh when a task
@@ -41,21 +43,30 @@ let recountTimer: ReturnType<typeof setTimeout> | null = null
  * open saved view (which keeps its own count live from the rendered task list,
  * and may carry unsaved filter edits) isn't clobbered by the saved-config count.
  */
-async function recomputeCounts(userId: string, skipViewId: string | null): Promise<void> {
+async function recomputeCounts(userId: string, skipViewId: string | null, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+  const { api, isCurrent } = origin ?? hydrationContext()
   const { views, viewCounts } = useSavedViewStore.getState()
   const counts: Record<string, number> = {}
   for (const view of views) {
+    if (projectId) {
+      try {
+        const filter = JSON.parse(view.filter_config) as { projectIds?: string[]; excludeProjectIds?: string[] }
+        if ((filter.projectIds?.length && !filter.projectIds.includes(projectId)) || filter.excludeProjectIds?.includes(projectId)) continue
+      } catch { continue }
+    }
     if (view.id === skipViewId) {
-      if (viewCounts[view.id] !== undefined) counts[view.id] = viewCounts[view.id]
+      if (!projectId && viewCounts[view.id] !== undefined) counts[view.id] = viewCounts[view.id]
       continue
     }
     try {
-      counts[view.id] = await window.api.savedViews.countMatching(view.filter_config, userId)
+      counts[view.id] = await api.savedViews.countMatching(view.filter_config, userId)
     } catch {
+      if (!await isCurrent()) return
       counts[view.id] = 0
     }
   }
-  useSavedViewStore.setState({ viewCounts: counts })
+  if (!await isCurrent()) return
+  useSavedViewStore.setState((state) => ({ viewCounts: projectId ? { ...state.viewCounts, ...counts } : counts }))
 }
 
 export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => ({
@@ -65,23 +76,28 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   activeViewFilterConfig: null,
 
   async hydrate(userId: string): Promise<void> {
+    const { api, isCurrent } = hydrationContext()
     set({ loading: true })
     try {
-      const views = await window.api.savedViews.findByUserId(userId)
+      const views = await api.savedViews.findByUserId(userId)
+      if (!await isCurrent()) return
       set({ views, loading: false })
       // Hydrate counts in background
       useSavedViewStore.getState().hydrateCounts(userId)
     } catch {
+      if (!await isCurrent()) return
       set({ loading: false })
     }
   },
 
-  async hydrateCounts(userId: string): Promise<void> {
-    // Explicit recount of every view (app start, view-unmount cleanup, save).
-    await recomputeCounts(userId, null)
+  async hydrateCounts(userId: string, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const view = useViewStore.getState()
+    const skipId = projectId && view.currentView === 'saved-view' ? view.selectedSavedViewId : null
+    await recomputeCounts(userId, skipId, projectId, origin)
   },
 
   scheduleRecount(userId: string): void {
+    const origin = hydrationContext()
     if (recountTimer) clearTimeout(recountTimer)
     recountTimer = setTimeout(() => {
       recountTimer = null
@@ -91,11 +107,15 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
       // unmount cleanup re-runs hydrateCounts to settle on the saved value.
       const view = useViewStore.getState()
       const skipId = view.currentView === 'saved-view' ? view.selectedSavedViewId : null
-      void recomputeCounts(userId, skipId)
+      void origin.isCurrent().then(current => {
+        if (current) return recomputeCounts(userId, skipId)
+        return undefined
+      }).catch(() => {})
     }, 1000)
   },
 
   async createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView> {
+    const origin = captureSyncProducer()
     // Auto-assign next available color
     const existingColors = new Set(useSavedViewStore.getState().views.map((v) => v.color))
     let autoColor: string = LABEL_AUTO_COLORS[0]
@@ -115,39 +135,46 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
       project_id: projectId ?? null,
       sidebar_order: useSavedViewStore.getState().views.length
     }
-    const view = await window.api.savedViews.create(input)
+    const view = await origin.api.savedViews.create(input)
+    await requireProducerCurrent(origin)
     set((state) => ({ views: [...state.views, view] }))
     // Push to Supabase
     import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
-      pushSavedView(view).catch(() => {})
+      pushSavedView(view, origin).catch(() => {})
     })
     return view
   },
 
   async updateView(id: string, updates: { name?: string; color?: string; filter_config?: string }): Promise<void> {
-    const result = await window.api.savedViews.update(id, updates)
+    const origin = captureSyncProducer()
+    const result = await origin.api.savedViews.update(id, updates)
+    await requireProducerCurrent(origin)
     if (result) {
       set((state) => ({
         views: state.views.map((v) => (v.id === id ? result : v))
       }))
       // Push to Supabase
       import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
-        pushSavedView(result).catch(() => {})
+        pushSavedView(result, origin).catch(() => {})
       })
     }
   },
 
   async deleteView(id: string): Promise<void> {
-    await window.api.savedViews.delete(id)
+    const origin = captureSyncProducer()
+    await origin.api.savedViews.delete(id)
+    await requireProducerCurrent(origin)
     set((state) => ({ views: state.views.filter((v) => v.id !== id) }))
     // Delete from Supabase
     import('../../services/PersonalSyncService').then(({ deleteSavedViewFromSupabase }) => {
-      deleteSavedViewFromSupabase(id).catch(() => {})
+      deleteSavedViewFromSupabase(id, origin).catch(() => {})
     })
   },
 
   async reorderViews(viewIds: string[]): Promise<void> {
-    await window.api.savedViews.reorder(viewIds)
+    const origin = captureSyncProducer()
+    await origin.api.savedViews.reorder(viewIds)
+    await requireProducerCurrent(origin)
     set((state) => {
       const updated = viewIds
         .map((id, i) => {
@@ -158,7 +185,7 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
       // Push reordered views to Supabase
       import('../../services/PersonalSyncService').then(({ pushSavedView }) => {
         for (const view of updated) {
-          pushSavedView(view).catch(() => {})
+          pushSavedView(view, origin).catch(() => {})
         }
       })
       return { views: updated }

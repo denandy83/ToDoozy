@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { TodoozyAPI } from '../../../preload/index.d'
 import { useAuthStore } from '../shared/stores/authStore'
 import { requireSession } from './sessionRecovery'
+import { supabaseRequestMetrics } from '../../../shared/supabaseTelemetry'
 
 export interface SyncContext {
   api: TodoozyAPI
@@ -20,10 +21,11 @@ export interface SyncProducer {
   scope(): Promise<string>
 }
 
-export function captureSyncProducer(): SyncProducer {
+export function captureSyncProducer(active: () => boolean = () => true): SyncProducer {
   const userId = useAuthStore.getState().currentUser?.id
   const database = window.api.sync.captureContext()
   const assertCurrent = (): void => {
+    if (!active()) throw new Error('Sync paused')
     if (!userId || useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed or signed out')
   }
   const assertDatabase = async (): Promise<void> => {
@@ -55,7 +57,14 @@ export function captureSyncProducer(): SyncProducer {
     const config = await window.api.auth.getSupabaseConfig()
     await assertDatabase()
     return createClient(config.url, config.anonKey, {
-      accessToken: async () => { await assertDatabase(); return session.access_token },
+      global: { fetch: supabaseRequestMetrics.wrap(globalThis.fetch, config.url) },
+      accessToken: async () => {
+        await assertDatabase()
+        const current = await requireSession()
+        await assertDatabase()
+        if (!current || current.user.id !== userId) throw new Error('Sync session account changed or signed out')
+        return current.access_token
+      },
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     })
   })()
@@ -69,8 +78,8 @@ export async function withSyncProducer(operation: (origin: SyncProducer) => Prom
   }
 }
 
-export async function captureSyncContext(): Promise<SyncContext> {
-  const origin = captureSyncProducer()
+export async function captureSyncContext(active?: () => boolean): Promise<SyncContext> {
+  const origin = captureSyncProducer(active)
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }

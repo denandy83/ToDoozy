@@ -15,6 +15,7 @@ interface SyncState {
   errorMessage: string | null
   /** Whether Supabase Realtime is connected (used to toggle polling) */
   realtimeConnected: boolean
+  realtimeChannels: Record<string, boolean>
   /** True when reconnect attempts have given up after max retries — surfaces a banner so the user can manually retry. */
   connectionLost: boolean
   /** Unix ms timestamp of the next scheduled auto-reconnect attempt, or null when not scheduled. */
@@ -35,6 +36,7 @@ interface SyncActions {
   setFirstSyncProgress(progress: number): void
   setError(message: string | null): void
   setRealtimeConnected(connected: boolean): void
+  setChannelHealth(key: string, connected: boolean | null): void
   setConnectionLost(lost: boolean): void
   setNextReconnectAt(ts: number | null): void
   hydrate(): Promise<void>
@@ -53,6 +55,7 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     firstSyncProgress: 0,
     errorMessage: null,
     realtimeConnected: false,
+    realtimeChannels: {},
     connectionLost: false,
     nextReconnectAt: null,
 
@@ -70,6 +73,13 @@ export const useSyncStore = createWithEqualityFn<SyncStore>(
     setFirstSyncProgress: (progress) => set({ firstSyncProgress: progress }),
     setError: (message) => set({ errorMessage: message, status: message ? 'error' : 'synced' }),
     setRealtimeConnected: (connected) => set({ realtimeConnected: connected }),
+    setChannelHealth: (key, connected) => set((state) => {
+      const channels = { ...state.realtimeChannels }
+      if (connected === null) delete channels[key]
+      else channels[key] = connected
+      const states = Object.values(channels)
+      return { realtimeChannels: channels, realtimeConnected: states.length > 0 && states.every(Boolean) }
+    }),
     setConnectionLost: (lost) => set({ connectionLost: lost, ...(!lost && { nextReconnectAt: null }) }),
     setNextReconnectAt: (ts) => set({ nextReconnectAt: ts }),
 

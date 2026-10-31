@@ -1,6 +1,7 @@
 import { existsSync, writeFileSync, unlinkSync, readFileSync } from 'fs'
 import { join } from 'path'
 import TelegramBot from 'node-telegram-bot-api'
+import { PartialTaskCreationError } from './taskCreationError'
 import { startPollingWatchdog, logBotFailure } from './pollingWatchdog'
 
 process.on('unhandledRejection', (error) => { logBotFailure('Unhandled bot rejection', error); process.exit(1) })
@@ -182,6 +183,10 @@ bot.on('message', async (msg) => {
     await handleCreateTask(chatId, text)
   } catch (err) {
     logBotFailure('Error handling message', err)
+    if (err instanceof PartialTaskCreationError) {
+      await bot.sendMessage(chatId, err.message).catch((error) => logBotFailure('Partial-success reply failed', error))
+      return
+    }
     await bot.sendMessage(chatId, 'Unable to complete the request. Please try again.').catch((error) => logBotFailure('Error reply failed', error))
   }
 })

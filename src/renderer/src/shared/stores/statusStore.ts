@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -12,7 +12,7 @@ interface StatusState {
 }
 
 interface StatusActions {
-  hydrateStatuses(projectId: string): Promise<void>
+  hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   createStatus(input: CreateStatusInput): Promise<Status>
   updateStatus(id: string, input: UpdateStatusInput): Promise<Status | null>
   deleteStatus(id: string): Promise<boolean>
@@ -27,8 +27,8 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   loading: false,
   error: null,
 
-  async hydrateStatuses(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent } = origin ?? hydrationContext()
     set({ loading: true, error: null })
     try {
       const statuses = await api.statuses.findByProjectId(projectId)

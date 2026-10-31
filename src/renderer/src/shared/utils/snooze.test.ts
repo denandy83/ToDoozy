@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { addDaysPreservingTime, getLaterToday, getSnoozePresets } from './snooze'
 
+const originalTimezone = process.env.TZ
 describe('addDaysPreservingTime', () => {
   afterEach(() => {
     vi.useRealTimers()
+    if (originalTimezone === undefined) delete process.env.TZ
+    else process.env.TZ = originalTimezone
   })
 
   it('adds days to today and returns date-only when no base due date', () => {
@@ -38,12 +41,21 @@ describe('addDaysPreservingTime', () => {
     expect(result).toBe('2026-03-16T14:30:00.000Z')
   })
 
-  it('preserves time when adding multiple days', () => {
+  it.each([
+    {zone:'UTC',now:'2026-01-01T00:00:00.000Z',base:'2026-01-01T23:59:59.999Z',days:7,expected:'2026-01-08T23:59:59.999Z',target:[2026,0,8],clock:[23,59,59,999]},
+    {zone:'Europe/Brussels',now:'2026-01-01T00:00:00.000Z',base:'2026-01-01T23:59:59.999Z',days:7,expected:'2026-01-07T23:59:59.999Z',target:[2026,0,8],clock:[0,59,59,999]},
+    {zone:'Europe/Brussels',now:'2026-03-28T12:00:00.000Z',base:'2026-03-28T08:00:00.000Z',days:1,expected:'2026-03-29T07:00:00.000Z',target:[2026,2,29],clock:[9,0,0,0]},
+    {zone:'Europe/Brussels',now:'2026-10-24T12:00:00.000Z',base:'2026-10-24T07:00:00.000Z',days:1,expected:'2026-10-25T08:00:00.000Z',target:[2026,9,25],clock:[9,0,0,0]}
+  ])('preserves local clock on the requested local day in $zone from $now', ({zone,now,base,days,expected,target,clock}) => {
+    process.env.TZ = zone
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    vi.setSystemTime(new Date(now))
 
-    const result = addDaysPreservingTime('2026-01-01T23:59:59.999Z', 7)
-    expect(result).toBe('2026-01-08T23:59:59.999Z')
+    const result = addDaysPreservingTime(base, days)
+    expect(result).toBe(expected)
+    const local = new Date(result)
+    expect([local.getFullYear(),local.getMonth(),local.getDate()]).toEqual(target)
+    expect([local.getHours(),local.getMinutes(),local.getSeconds(),local.getMilliseconds()]).toEqual(clock)
   })
 
   it('handles zero days', () => {

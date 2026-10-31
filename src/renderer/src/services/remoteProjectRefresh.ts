@@ -1,9 +1,5 @@
 import { readAll, readAllIn } from './readAll'
 import { captureSyncContext, type SyncContext } from './syncContext'
-import { useProjectStore } from '../shared/stores/projectStore'
-import { useAuthStore } from '../shared/stores/authStore'
-import { useTaskStore } from '../shared/stores/taskStore'
-import { useStatusStore } from '../shared/stores/statusStore'
 import { useLabelStore } from '../shared/stores/labelStore'
 import { logEvent } from '../shared/stores/logStore'
 
@@ -27,55 +23,34 @@ export async function refreshProjectLabels(projectId: string, context?: SyncCont
     if (link.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(projectId, link.label_id)
   }
   context.assertCurrent()
-  await useLabelStore.getState().hydrateLabels(projectId)
-  context.assertCurrent()
-  await useTaskStore.getState().hydrateAllTaskLabels(projectId)
+  await useLabelStore.getState().hydrateLabels(projectId, context)
 }
 
-const timers = new Map<string, ReturnType<typeof setTimeout>>()
-const running = new Set<string>()
-const pending = new Set<string>()
-const touchedTasks = new Map<string, Set<string>>()
+let timer: ReturnType<typeof setTimeout> | null = null
+const pendingProjects = new Map<string, { projectId: string; context: SyncContext; taskIds: Set<string> }>()
 
-/** Every subscribed shared project updates SQLite + stores, including unopened ones. */
-export function scheduleRemoteProjectRefresh(projectId: string, taskId?: string): void {
-  if (taskId) {
-    const ids = touchedTasks.get(projectId) ?? new Set<string>()
-    ids.add(taskId)
-    touchedTasks.set(projectId, ids)
-  }
-  const origin = captureSyncContext().catch(() => null)
-  pending.add(projectId)
-  if (running.has(projectId)) return
-  clearTimeout(timers.get(projectId))
-  timers.set(projectId, setTimeout(async () => {
-    timers.delete(projectId)
-    pending.delete(projectId)
-    running.add(projectId)
-    const userId = useAuthStore.getState().currentUser?.id
+export function scheduleRemoteProjectRefresh(projectId: string, context: SyncContext, taskIds: Iterable<string> = []): void {
+  const key = `${context.scope}:${projectId}`
+  const pending = pendingProjects.get(key)
+  pendingProjects.set(key, { projectId, context, taskIds: new Set([...(pending?.taskIds ?? []), ...taskIds]) })
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(async () => {
+    timer = null
+    const pending = [...pendingProjects.values()]
+    pendingProjects.clear()
     try {
-      const context = await origin
-      if (!context) return
-      context.assertCurrent()
-      if (!userId) return
-      const { pullNewTasks, pullProjectMetadata, pullTaskLabelsForTasks } = await import('./PersonalSyncService')
-      await pullProjectMetadata(projectId, context)
-      await pullNewTasks(projectId, context)
-      await refreshProjectLabels(projectId, context)
-      const ids = [...(touchedTasks.get(projectId) ?? [])]
-      touchedTasks.delete(projectId)
-      if (ids.length) await pullTaskLabelsForTasks(ids, userId, context)
-      if (useAuthStore.getState().currentUser?.id !== userId) return
-      await useProjectStore.getState().hydrateProjects(userId)
-      context.assertCurrent()
-      await useStatusStore.getState().hydrateStatuses(projectId)
-      context.assertCurrent()
-      await useTaskStore.getState().hydrateAllForUser(userId)
+      const groups = new Map<string, { context: SyncContext; ids: string[]; taskIds: Map<string, Set<string>> }>()
+      for (const { projectId, context, taskIds } of pending) {
+        if (!await context.isCurrent()) continue
+        const group = groups.get(context.scope) ?? { context, ids: new Array<string>(), taskIds: new Map<string, Set<string>>() }
+        group.ids.push(projectId)
+        group.taskIds.set(projectId, taskIds)
+        groups.set(context.scope, group)
+      }
+      const { requestProjectRefresh } = await import('./PersonalSyncService')
+      for (const { context, ids, taskIds } of groups.values()) await requestProjectRefresh(context, ids, taskIds)
     } catch (error) {
       logEvent('error', 'sync', 'Remote project refresh failed', String(error))
-    } finally {
-      running.delete(projectId)
-      if (pending.has(projectId)) scheduleRemoteProjectRefresh(projectId)
     }
-  }, 250))
+  }, 250)
 }

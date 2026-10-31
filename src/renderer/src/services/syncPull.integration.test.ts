@@ -5,19 +5,24 @@ import { migrations } from '../../../main/database/migrations'
 import { createRepositories } from '../../../main/repositories'
 import { useAuthStore } from '../shared/stores/authStore'
 import { getSupabase } from '../lib/supabase'
-import { fullPull, reconcile, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
-import { syncProjectDown, processSyncQueue, setOnlineStatus } from './SyncService'
+import { fullPull, reconcile, requestSyncCatchUp, forceReconnectAllPersonal, subscribeToPersonalProject, unsubscribeAllPersonal, pullNewTasks, pullStatuses, pullTaskLabelsForTasks } from './PersonalSyncService'
+import { syncProjectDown, acceptInvite, processSyncQueue, setOnlineStatus, subscribeToProject, forceReconnectAllShared, unsubscribeAll } from './SyncService'
 import { reconcileTable, SYNC_TABLES } from './syncTables'
 import { replaySpecialEntry } from './syncQueueReplay'
 import { refreshSearchIndex } from './searchSync'
 import { refreshProjectLabels } from './remoteProjectRefresh'
-import type { SyncContext } from './syncContext'
+import { captureSyncContext, type SyncContext } from './syncContext'
+import { subscribeToUserChannel, forceReconnectUserChannel, unsubscribeUserChannel } from './UserChannelService'
+import { useSyncStore } from '../shared/stores/syncStore'
+import { isSuspended } from './powerState'
 
+vi.mock('./powerState',()=>({isSuspended:vi.fn(()=>false)}))
+vi.mock('./sessionRecovery',()=>({requireSession:vi.fn(async()=>({user:{id:'u'},access_token:'synthetic'}))}))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
-vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateLabels: async () => {} }) } }))
-vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))
+vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateAllLabels: async () => {}, hydrateLabels: async () => {} }) } }))
+vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {}, hydrateAllForProject: async () => {} }) } }))
 
 let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>
@@ -26,8 +31,11 @@ let rows: Record<string, Array<Record<string, unknown>>>
 let rejectedStatus: string | null
 let failedTable: string | null
 let pageCounts: Record<string, number>
+let apiCap: number
 let projectId: string
 let sequence = 0
+let channels: Array<{ state: string; status: (status:string) => void }>
+let beforeQuery: (() => Promise<void>) | null
 
 function parts(value: string): string[] {
   let depth = 0, quoted = false, start = 0
@@ -51,10 +59,15 @@ function matches(row: Record<string, unknown>, predicate: string): boolean {
   return operator === 'eq' ? row[key] === value : String(row[key]) > String(value)
 }
 function makeClient(): SupabaseClient {
-  return { from(table: string) {
+  return {
+    channel() {
+      const channel={state:'joined',status:(_status:string)=>{},on(){return channel},subscribe(callback:(status:string)=>void){channel.status=callback;channels.push(channel);return channel}}
+      return channel
+    }, removeChannel:async()=>{},
+    from(table: string) {
     const filters: Array<(row: Record<string, unknown>) => boolean> = []
     const order: string[] = []
-    let limit = 1000, columns = '*'
+    let limit = apiCap, columns = '*'
     let values: Array<Record<string, unknown>> | null = null
     let patch: Record<string, unknown> | null = null
     let remove = false
@@ -69,11 +82,12 @@ function makeClient(): SupabaseClient {
       in(key: string, values: unknown[]) { filters.push((row) => values.includes(row[key])); return chain },
       gt(key: string, value: string) { filters.push((row) => String(row[key]) > value); return chain },
       order(key: string) { order.push(key); return chain },
-      limit(value: number) { limit = Math.min(value, 1000); return chain },
+      limit(value: number) { limit = Math.min(value, apiCap); return chain },
       or(value: string) { filters.push((row) => parts(value).some((part) => matches(row, part))); return chain },
       maybeSingle: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
-      then(resolve: (value: unknown) => unknown) {
+      async then(resolve: (value: unknown) => unknown) {
+        if(beforeQuery){const callback=beforeQuery;beforeQuery=null;await callback()}
         if (values) {
           if (table === 'tasks' && rejectedStatus && values.some((row) => row.status_id === rejectedStatus)) return Promise.resolve(resolve({ data: null, error: { message: 'Status must be active and belong to the task project' } }))
           for (const value of values) {
@@ -102,9 +116,10 @@ function makeClient(): SupabaseClient {
       }
     }
     return chain
-  }, rpc: async () => ({ data: [], error: null }) } as unknown as SupabaseClient
+  }, rpc: async (name: string) => ({ data: name === 'accept_invite' ? projectId : [], error: null }) } as unknown as SupabaseClient
 }
 beforeEach(() => {
+  vi.mocked(captureSyncContext).mockClear()
   projectId = `project-${++sequence}`
   db = new DatabaseSync(':memory:')
   db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
@@ -113,12 +128,16 @@ beforeEach(() => {
   repo.users.create({ id: 'u', email: 'u@example.invalid', display_name: null, avatar_url: null })
   repo.projects.create({ id: projectId, owner_id: 'u', name: 'Project' })
   repo.statuses.create({ id: 'open', project_id: projectId, name: 'Open' })
+  channels=[];beforeQuery=null;vi.mocked(isSuspended).mockReturnValue(false)
+  apiCap = 1000
   rows = {}; pageCounts = {}; failedTable = null; rejectedStatus = null
   const client = makeClient()
   const api = new Proxy({}, {
     get: (_, ns: keyof typeof repo) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
         if (String(ns) === 'sync') {
+          if (method === 'captureContext') return {userId:'u',generation:sequence}
+          if (method === 'invokeContext') {const [,channel,values]=args;const [namespace,operation]=String(channel).split(':');return (api as Record<string,Record<string,(...args:unknown[])=>unknown>>)[namespace][operation](...values as unknown[])}
           if (method === 'getQueue') return repo.syncQueue.findAll()
           if (method === 'count') return repo.syncQueue.count()
           if (method === 'dequeue') return repo.syncQueue.dequeue(String(args[0]))
@@ -132,9 +151,9 @@ beforeEach(() => {
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })
-  useAuthStore.setState({ currentUser: { id: 'u' } as never })
+  useAuthStore.setState({ currentUser: { id: 'u' } as never, isOffline:false })
 })
-afterEach(() => { db.close(); vi.unstubAllGlobals() })
+afterEach(async () => { await unsubscribeAllPersonal();await unsubscribeAll();await unsubscribeUserChannel();db.close();vi.unstubAllGlobals() })
 
 it('persists every task and status beyond the API cap before advancing either watermark', async () => {
   const stamp = '2026-01-01T00:00:00.000Z'
@@ -143,8 +162,8 @@ it('persists every task and status beyond the API cap before advancing either wa
   expect(await pullNewTasks(projectId, context)).toBe(1101)
   expect(repo.tasks.findAllByProject(projectId)).toHaveLength(1101)
   expect(repo.statuses.findAllByProject(projectId)).toHaveLength(1102)
-  expect(pageCounts.tasks).toBe(3)
-  expect(pageCounts.statuses).toBe(3)
+  expect(pageCounts.tasks).toBe(4)
+  expect(pageCounts.statuses).toBe(4)
 })
 it('does not advance the status watermark when a later page fails', async () => {
   rows.statuses = Array.from({ length: 1001 }, (_, index) => ({ ...repo.statuses.findById('open'), id: `s${String(index).padStart(4, '0')}`, updated_at: '2026-01-01T00:00:00.000Z' }))
@@ -209,14 +228,14 @@ it('R4/review-1: reads every remote task before project-wide queued label cleanu
   rows.task_labels = rows.tasks.map((task) => ({ task_id: task.id, label_id: 'removed-label' }))
   await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: JSON.stringify({ projectId, labelId: 'removed-label' }) } as never, context)
   expect(rows.task_labels).toHaveLength(0)
-  expect(pageCounts.tasks).toBe(3)
+  expect(pageCounts.tasks).toBe(4)
 })
 it('R4/review-1: reconciles every remote junction for one queued task', async () => {
   repo.tasks.create({ id: 't', project_id: projectId, status_id: 'open', owner_id: 'u', title: 'Task' })
   rows.task_labels = Array.from({ length: 1101 }, (_, index) => ({ task_id: 't', label_id: `label-${String(index).padStart(4, '0')}` }))
   await replaySpecialEntry(context.client, { table_name: 'task_labels', payload: '{"task_id":"t"}' } as never, context)
   expect(rows.task_labels).toHaveLength(0)
-  expect(pageCounts.task_labels).toBe(3)
+  expect(pageCounts.task_labels).toBe(4)
 })
 
 it.each([0, 1].flatMap((archived) => ['startup', 'search', 'full', 'incremental'].map((path) => ({ archived, path }))))(
@@ -416,7 +435,7 @@ it.each(['complete','second-page-failure'])('converges a 502-to-501 assignment s
   rows.task_labels=ids.slice(0,501).map((label_id)=>({task_id:task.id,label_id,deleted_at:null}))
   if(mode==='second-page-failure') failedTable='task_labels'
   await pullTaskLabelsForTasks([task.id],'u',context)
-  expect(pageCounts.task_labels).toBe(2)
+  expect(pageCounts.task_labels).toBe(mode === 'complete' ? 3 : 2)
   expect(repo.tasks.getLabels(task.id)).toHaveLength(mode==='complete'?501:502)
   expect(repo.labels.findByProjectId(projectId)).toHaveLength(502)
 })
@@ -446,4 +465,110 @@ it.each([0,1])('keeps clock-ahead family removal through public reconciliation a
     expect(rows.task_labels).toEqual([{task_id:task.id,label_id:label.id,deleted_at:null}])
     expect(repo.labels.findByTaskId(task.id).map((row)=>row.id)).toEqual([label.id])
   } finally {vi.useRealTimers()}
+})
+
+it('reconciles shared and user data on resume even when every channel rejoined while suspended',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
+  repo.projects.update(projectId,{is_shared:1})
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  await subscribeToProject(projectId)
+  await subscribeToUserChannel('u')
+  vi.mocked(isSuspended).mockReturnValue(true)
+  for(const channel of channels)channel.status('SUBSCRIBED')
+  await Promise.resolve();await Promise.resolve()
+  expect(useSyncStore.getState().realtimeConnected).toBe(true)
+  rows.tasks=[{id:'missed-shared',project_id:projectId,status_id:'open',owner_id:'u',title:'Missed shared task',created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  rows.user_labels=[{id:'missed-label',user_id:'u',name:'Missed label',color:'#fff',order_index:0,created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  const channelCount=channels.length
+  vi.mocked(isSuspended).mockReturnValue(false)
+  await Promise.all([forceReconnectAllShared(),forceReconnectUserChannel()])
+  expect(channels).toHaveLength(channelCount)
+  expect(repo.tasks.findById('missed-shared')?.title).toBe('Missed shared task')
+  expect(repo.labels.findById('missed-label')?.name).toBe('Missed label')
+})
+
+it('retries personal catch-up on an already joined channel and coalesces concurrent sweeps',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  await subscribeToPersonalProject(projectId,()=>{})
+  vi.mocked(isSuspended).mockReturnValue(true)
+  channels[0].status('SUBSCRIBED')
+  vi.mocked(isSuspended).mockReturnValue(false)
+  let finish!:()=>void,entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  beforeQuery=()=>{entered();return new Promise(resolve=>{finish=resolve})}
+  const first=forceReconnectAllPersonal();await started
+  const rest=Array.from({length:5},()=>requestSyncCatchUp(context))
+  await Promise.resolve();await Promise.resolve()
+  rows.tasks=[{id:'missed-personal',project_id:projectId,status_id:'open',owner_id:'u',title:'Missed personal task',created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  finish();await Promise.all([first,...rest])
+  expect(repo.tasks.findById('missed-personal')?.title).toBe('Missed personal task')
+  expect(pageCounts.tasks).toBeLessThanOrEqual(4)
+})
+
+it('keeps routine archived catch-up metadata-only and preserves explicit full reconciliation',async()=>{
+  repo.projects.addMember(projectId,'u','owner')
+  repo.projects.update(projectId,{is_archived:1})
+  rows.projects=[{...repo.projects.findById(projectId)}]
+  rows.statuses=[{...repo.statuses.findById('open')}]
+  rows.tasks=[{id:'archived-missed',project_id:projectId,status_id:'open',owner_id:'u',title:'Archived task',is_archived:1,created_at:'2026-10-31T00:00:00Z',updated_at:'2026-10-31T00:00:00Z'}]
+  await requestSyncCatchUp(context)
+  expect(pageCounts.tasks??0).toBe(0);expect(pageCounts.statuses??0).toBe(0);expect(pageCounts.activity_log??0).toBe(0)
+  expect(repo.tasks.findById('archived-missed')).toBeUndefined()
+  await reconcile('u')
+  expect(repo.tasks.findById('archived-missed')?.title).toBe('Archived task')
+})
+
+it('does no catch-up while suspended, offline or from an expired account context',async()=>{
+  vi.mocked(isSuspended).mockReturnValue(true)
+  await requestSyncCatchUp(context)
+  vi.mocked(isSuspended).mockReturnValue(false)
+  vi.stubGlobal('navigator',{onLine:false});await requestSyncCatchUp(context)
+  vi.stubGlobal('navigator',{onLine:true})
+  context.isCurrent=async()=>false;await requestSyncCatchUp(context)
+  expect(pageCounts).toEqual({})
+  expect(vi.mocked(captureSyncContext)).not.toHaveBeenCalled()
+})
+
+it.each(['existing', 'remote-only', 'mixed'])('reconciles ancestor order for %s restored trees in a single pass', async mode => {
+  const base = repo.tasks.create({ id: 'root', owner_id: 'u', project_id: projectId, status_id: 'open', title: 'Root' })
+  const child = repo.tasks.create({ ...base, id: 'child', parent_id: 'root' })
+  const grandchild = repo.tasks.create({ ...base, id: 'grandchild', parent_id: 'child' })
+  const leaf = repo.tasks.create({ ...base, id: 'leaf', parent_id: 'grandchild' })
+  rows.tasks = [leaf, grandchild, child, base].map(task => ({ ...task, updated_at: '2030-01-01T00:00:00.000Z', deleted_at: null }))
+  repo.tasks.delete('child')
+  db.prepare("UPDATE tasks SET updated_at='2027-01-01T00:00:00Z' WHERE id != 'root'").run()
+  repo.tasks.delete('root')
+  db.prepare("UPDATE tasks SET updated_at='2028-01-01T00:00:00Z' WHERE id='root'").run()
+  if (mode !== 'existing') {
+    repo.tasks.hardDelete(mode === 'mixed' ? 'child' : 'root')
+  }
+  const result = await reconcileTable(SYNC_TABLES.tasks as Parameters<typeof reconcileTable>[0], projectId, 'u', context)
+  expect(result.failed).toBe(0)
+  expect(repo.tasks.findAllByProject(projectId).map(task => task.id).sort()).toEqual(['child', 'grandchild', 'leaf', 'root'])
+  for (const task of repo.tasks.findAllByProject(projectId)) expect(task.updated_at).toBe('2030-01-01T00:00:00.000Z')
+})
+
+it.each(['invite', 'force-sync'].flatMap(path => [false, true].map(failure => ({ path, failure }))))('loads complete capped memberships before pruning in $path failure=$failure', async ({ path, failure }) => {
+  apiCap = 2
+  for (const id of ['a0', 'a1', 'a2', 'a3', 'stale']) repo.users.create({ id, email: `${id}@example.invalid`, display_name: null, avatar_url: null })
+  repo.projects.applyRemote({ ...repo.projects.findById(projectId)!, owner_id: 'a0', is_shared: 1, updated_at: '2030-01-01T00:00:00Z' })
+  repo.projects.addMember(projectId, 'u', 'member')
+  repo.projects.addMember(projectId, 'stale', 'member')
+  rows.projects = [{ ...repo.projects.findById(projectId) }]
+  rows.project_members = ['a0', 'a1', 'a2', 'a3', 'u'].map(user_id => ({ project_id: projectId, user_id, role: user_id === 'a0' ? 'owner' : 'member', display_color: null, display_initials: null }))
+  if (failure) failedTable = 'project_members'
+  const before = repo.projects.getMembers(projectId)
+  const run = path === 'invite' ? acceptInvite('synthetic-token', 'u') : syncProjectDown(projectId, 'u', context)
+  if (failure) {
+    await expect(run).rejects.toThrow('page failed')
+    expect(repo.projects.getMembers(projectId)).toEqual(before)
+  } else {
+    await run
+    expect(repo.projects.getMembers(projectId).map(row => row.user_id).sort()).toEqual(['a0','a1','a2','a3','u'])
+    expect(pageCounts.project_members).toBe(4)
+    expect(repo.projects.getProjectsForUser('u').map(row => row.id)).toContain(projectId)
+  }
 })

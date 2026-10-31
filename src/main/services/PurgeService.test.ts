@@ -131,7 +131,8 @@ describe('PurgeService.purgeOldTombstones', () => {
         'themes',
         'settings',
         'saved_views',
-        'project_areas'
+        'project_areas',
+        'attachments'
       ].sort()
     )
   })

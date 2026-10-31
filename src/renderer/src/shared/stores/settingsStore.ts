@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import { hydrationContext } from './hydrationContext'
+import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import type {
   Setting,
   Theme,
@@ -58,8 +59,7 @@ export async function refreshSyncedTheme(userId: string, origin = hydrationConte
   })
 }
 
-async function mutateTheme<T>(userId: string, operation: () => Promise<T>): Promise<T> {
-  const origin = hydrationContext()
+async function mutateTheme<T>(userId: string, origin: SyncProducer, operation: () => Promise<T>): Promise<T> {
   ++themeRevision
   ++pendingThemeWrites
   try {
@@ -85,10 +85,12 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
   },
 
   async hydrateSettings(): Promise<void> {
+    const origin = hydrationContext()
+    const { userId } = get()
     set({ loading: true, error: null })
     try {
-      const { userId } = get()
-      const settings = await window.api.settings.getAll(userId)
+      const settings = await origin.api.settings.getAll(userId)
+      if (!await origin.isCurrent()) return
       const settingsMap: Record<string, string | null> = {}
       for (const setting of settings) {
         settingsMap[setting.key] = setting.value
@@ -97,6 +99,7 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
       const themeId = settingsMap['theme_id'] ?? null
       set({ settings: settingsMap, currentThemeId: themeId, loading: false })
     } catch (err) {
+      if (!await origin.isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load settings'
       set({ error: message, loading: false })
     }
@@ -107,10 +110,12 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
   },
 
   async setSetting(key: string, value: string | null): Promise<void> {
+    const origin = captureSyncProducer()
+    const { userId } = get()
     const save = async (): Promise<void> => {
       try {
-        const { userId } = get()
-        await window.api.settings.set(userId, key, value)
+        await origin.api.settings.set(userId, key, value)
+        await requireProducerCurrent(origin)
         set((state) => ({
           settings: { ...state.settings, [key]: value }
         }))
@@ -118,23 +123,26 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
         if (value !== null) {
           const uid = userId
           import('../../services/PersonalSyncService').then(({ pushSetting }) => {
-            pushSetting(key, value, uid)
+            pushSetting(key, value, uid, origin)
           })
         }
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to save setting'
         set({ error: message })
         throw err
       }
     }
-    return key === 'theme_id' ? mutateTheme(get().userId, save) : save()
+    return key === 'theme_id' ? mutateTheme(userId, origin, save) : save()
   },
 
   async setMultipleSettings(settings: Setting[]): Promise<void> {
+    const origin = captureSyncProducer()
+    const { userId } = get()
     const save = async (): Promise<void> => {
       try {
-        const { userId } = get()
-        await window.api.settings.setMultiple(userId, settings)
+        await origin.api.settings.setMultiple(userId, settings)
+        await requireProducerCurrent(origin)
         set((state) => {
           const updated = { ...state.settings }
           for (const setting of settings) {
@@ -147,24 +155,27 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
         import('../../services/PersonalSyncService').then(({ pushSetting }) => {
           for (const setting of settings) {
             if (setting.value !== null) {
-              pushSetting(setting.key, setting.value, uid)
+              pushSetting(setting.key, setting.value, uid, origin)
             }
           }
         })
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to save settings'
         set({ error: message })
         throw err
       }
     }
-    return settings.some((setting) => setting.key === 'theme_id') ? mutateTheme(get().userId, save) : save()
+    return settings.some((setting) => setting.key === 'theme_id') ? mutateTheme(userId, origin, save) : save()
   },
 
   async deleteSetting(key: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const { userId } = get()
     const remove = async (): Promise<boolean> => {
       try {
-        const { userId } = get()
-        const result = await window.api.settings.delete(userId, key)
+        const result = await origin.api.settings.delete(userId, key)
+        await requireProducerCurrent(origin)
         if (result) {
           set((state) => {
             const { [key]: _, ...remaining } = state.settings
@@ -173,47 +184,54 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
           // Delete from Supabase
           const uid = userId
           import('../../services/PersonalSyncService').then(({ deleteSettingFromSupabase }) => {
-            deleteSettingFromSupabase(key, uid).catch(() => {})
+            deleteSettingFromSupabase(key, uid, origin).catch(() => {})
           })
         }
         return result
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to delete setting'
         set({ error: message })
         throw err
       }
     }
-    return key === 'theme_id' ? mutateTheme(get().userId, remove) : remove()
+    return key === 'theme_id' ? mutateTheme(userId, origin, remove) : remove()
   },
 
   async hydrateThemes(): Promise<void> {
+    const origin = hydrationContext()
+    const { userId } = get()
     try {
-      const { userId } = get()
-      const themes = await window.api.themes.list(userId)
+      const themes = await origin.api.themes.list(userId)
+      if (!await origin.isCurrent()) return
       const themeMap: Record<string, Theme> = {}
       for (const theme of themes) {
         themeMap[theme.id] = theme
       }
       set({ themes: themeMap })
     } catch (err) {
+      if (!await origin.isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load themes'
       set({ error: message })
     }
   },
 
   async createTheme(input: CreateThemeInput): Promise<Theme> {
-    return mutateTheme(get().userId, async () => {
+    const origin = captureSyncProducer()
+    const { userId } = get()
+    return mutateTheme(userId, origin, async () => {
       try {
-        const { userId } = get()
-        const theme = await window.api.themes.create({ ...input, owner_id: userId })
+        const theme = await origin.api.themes.create({ ...input, owner_id: userId })
+        await requireProducerCurrent(origin)
         set((state) => ({
           themes: { ...state.themes, [theme.id]: theme }
         }))
         import('../../services/PersonalSyncService').then(({ pushTheme }) => {
-          pushTheme(theme).catch(() => {})
+          pushTheme(theme, origin).catch(() => {})
         })
         return theme
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to create theme'
         set({ error: message })
         throw err
@@ -222,20 +240,24 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
   },
 
   async updateTheme(id: string, input: UpdateThemeInput): Promise<Theme | null> {
-    return mutateTheme(get().userId, async () => {
+    const origin = captureSyncProducer()
+    const { userId } = get()
+    return mutateTheme(userId, origin, async () => {
       try {
-        const theme = await window.api.themes.update(id, input)
+        const theme = await origin.api.themes.update(id, input)
+        await requireProducerCurrent(origin)
         if (theme) {
           set((state) => ({
             themes: { ...state.themes, [theme.id]: theme }
           }))
           // Built-in edits stay local; uploading their IDs created duplicate presets.
           if (!theme.is_builtin) import('../../services/PersonalSyncService').then(({ pushTheme }) => {
-            pushTheme(theme).catch(() => {})
+            pushTheme(theme, origin).catch(() => {})
           })
         }
         return theme
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to update theme'
         set({ error: message })
         throw err
@@ -244,9 +266,12 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
   },
 
   async deleteTheme(id: string): Promise<boolean> {
-    return mutateTheme(get().userId, async () => {
+    const origin = captureSyncProducer()
+    const { userId } = get()
+    return mutateTheme(userId, origin, async () => {
       try {
-        const result = await window.api.themes.delete(id)
+        const result = await origin.api.themes.delete(id)
+        await requireProducerCurrent(origin)
         if (result) {
           set((state) => {
             const { [id]: _, ...remaining } = state.themes
@@ -254,11 +279,12 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
           })
           // Delete from Supabase
           import('../../services/PersonalSyncService').then(({ deleteThemeFromSupabase }) => {
-            deleteThemeFromSupabase(id).catch(() => {})
+            deleteThemeFromSupabase(id, origin).catch(() => {})
           })
         }
         return result
       } catch (err) {
+        if (!await origin.isCurrent()) throw err
         const message = err instanceof Error ? err.message : 'Failed to delete theme'
         set({ error: message })
         throw err
@@ -267,9 +293,12 @@ export const useSettingsStore = createWithEqualityFn<SettingsStore>((set, get) =
   },
 
   async getThemeConfig(id: string): Promise<ThemeConfig | null> {
+    const origin = hydrationContext()
     try {
-      return await window.api.themes.getConfig(id)
+      const config = await origin.api.themes.getConfig(id)
+      return await origin.isCurrent() ? config : null
     } catch (err) {
+      if (!await origin.isCurrent()) return null
       const message = err instanceof Error ? err.message : 'Failed to load theme config'
       set({ error: message })
       return null

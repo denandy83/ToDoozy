@@ -791,4 +791,8 @@ const migration_30: Migration = (db) => {
   }
 }
 
-export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28, migration_29, migration_30, repairBuiltinThemes]
+const attachmentUndo: Migration = (db) => {
+  db.exec('ALTER TABLE attachments ADD COLUMN deleted_at TEXT NULL')
+}
+
+export const migrations: Migration[] = [migration_1, migration_2, migration_3, migration_4, migration_5, migration_6, migration_7, migration_8, migration_9, migration_10, migration_11, migration_12, migration_13, migration_14, migration_15, migration_16, migration_17, migration_18, migration_19, migration_20, migration_21, migration_22, migration_23, migration_24, migration_25, migration_26, migration_27, migration_28, migration_29, migration_30, repairBuiltinThemes, attachmentUndo]

@@ -20,6 +20,7 @@
 // `npm:`/`Deno` imports) so the rules are unit-testable under vitest (Node),
 // the same pattern as labelMutations.ts / projectLabels.ts / requestContext.ts.
 
+import { readAll } from './query.ts'
 /** Resolved shape of a PostgREST select — only the channels we read. */
 export interface ScopeRowsResult {
   data: Array<Record<string, unknown>> | null
@@ -29,6 +30,9 @@ export interface ScopeRowsResult {
 /** A PostgREST filter builder: chainable via `.eq()` and awaitable to rows. */
 export interface ScopeFilterBuilder extends PromiseLike<ScopeRowsResult> {
   eq(column: string, value: string): ScopeFilterBuilder
+  order(column: string): ScopeFilterBuilder
+  limit(count: number): ScopeFilterBuilder
+  or(filter: string): ScopeFilterBuilder
 }
 
 /** Minimal `supabase.from('project_members')` surface needed to load membership. */
@@ -51,11 +55,12 @@ export async function loadMemberProjectIds(
   client: ScopeClient,
   userId: string
 ): Promise<Set<string>> {
-  const { data, error } = await client
+  let data: Array<Record<string, unknown>>
+  try { ({ data } = await readAll(() => client
     .from('project_members')
     .select('project_id')
-    .eq('user_id', userId)
-  if (error) throw new Error(`Failed to load project memberships: ${error.message}`)
+    .eq('user_id', userId), ['project_id'])) }
+  catch (error) { throw new Error(`Failed to load project memberships: ${error instanceof Error ? error.message : String(error)}`) }
   return new Set((data ?? []).map((row) => String(row.project_id)))
 }
 
@@ -92,6 +97,7 @@ export function filterAccessibleByProject<T extends { project_id?: string | null
  */
 export class ProjectScope {
   private cache: Set<string> | null = null
+  private loading: Promise<Set<string>> | null = null
 
   constructor(
     private readonly client: ScopeClient,
@@ -101,7 +107,8 @@ export class ProjectScope {
   /** The caller's member project IDs (cached after the first call). */
   async ids(): Promise<Set<string>> {
     if (this.cache === null) {
-      this.cache = await loadMemberProjectIds(this.client, this.userId)
+      this.loading ??= loadMemberProjectIds(this.client, this.userId)
+      try { this.cache = await this.loading } finally { this.loading = null }
     }
     return this.cache
   }

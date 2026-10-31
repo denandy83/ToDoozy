@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { migrations } from './database/migrations'
+import { trustedRendererUrl } from './navigation-security'
 import { createRepositories } from './repositories'
 import type { TodoozyAPI } from '../preload/index.d'
 
@@ -11,7 +12,7 @@ const harness = vi.hoisted(() => ({
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, fn: (...args: unknown[]) => unknown) => harness.handlers.set(channel, fn) }, safeStorage: {}, BrowserWindow: {}, dialog: {}, shell: {}, app: {} }))
 vi.mock('keytar', () => ({ default: {} }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
-vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), getDatabasePath: vi.fn() }))
+vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), clearDatabaseUserId: vi.fn(), getDatabasePath: vi.fn() }))
 vi.mock('./quick-add', () => ({ hideQuickAddWindow: vi.fn() }))
 vi.mock('./index', () => ({ registerQuickAddShortcut: vi.fn(), registerAppToggleShortcut: vi.fn(), getMainWindow: vi.fn() }))
 vi.mock('./tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
@@ -25,7 +26,7 @@ import { captureSyncProducer } from '../renderer/src/services/syncContext'
 
 let databases: DatabaseSync[]
 let repositories: ReturnType<typeof createRepositories>[]
-const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({}, ...args)
+const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 beforeEach(async () => {
   databases = [new DatabaseSync(':memory:'), new DatabaseSync(':memory:')]
   repositories = databases.map((db) => {

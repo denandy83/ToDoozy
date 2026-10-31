@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { app, shell, BrowserWindow, globalShortcut, ipcMain, powerMonitor } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, powerMonitor } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase, getDatabase, getDatabasePath } from './database'
 import { isLocalWrite, getLastLocalWriteAt } from './database/writeTracker'
@@ -13,6 +13,7 @@ import { startNotificationChecker, stopNotificationChecker } from './notificatio
 import { initUpdater, stopUpdater } from './updater'
 import { purgeOldTombstones } from './services/PurgeService'
 import { DEFAULT_QUICK_ADD_SHORTCUT, DEFAULT_APP_TOGGLE_SHORTCUT } from '../shared/shortcut-utils'
+import { guardRendererNavigation } from './navigation-security'
 
 // Override userData path if TODOOZY_USER_DATA is set — allows running multiple independent instances
 if (process.env.TODOOZY_USER_DATA) {
@@ -87,10 +88,7 @@ function createWindow(): void {
     mainWindow = null
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  guardRendererNavigation(mainWindow.webContents)
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])

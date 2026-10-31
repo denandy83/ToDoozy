@@ -88,7 +88,7 @@ This prevents expensive re-exploration across sessions and keeps investigation c
 - **No write-through on read paths.** Polling/pull functions must never call RPCs or upserts. Use SELECT to check for changes; only write when the user initiates a mutation.
 - **Compound indexes for incremental sync.** Any table queried with `WHERE project_id = ? AND updated_at > ?` must have a compound index on `(project_id, updated_at)`.
 - **Debounce high-frequency writes.** Settings, preferences, and non-critical metadata should be debounced (5s) before pushing to Supabase.
-- **Subscribe to active context only.** Personal projects: subscribe only to the active project's Realtime channel, not all projects. Shared projects: subscribe per-project as needed.
+- **Realtime channel coverage:** Follow the [sync scheduling contract](docs/security-optimization-2026-10-30.md#benchmarks).
 - **Batch sync queue flushes.** Group queued changes by table and batch-upsert, don't process one-by-one.
 - **Index all foreign keys.** Every FK in Supabase must have a covering index (Supabase performance advisor flags these).
 - **No duplicate Realtime channels.** Track subscribed channels in a Set; check before subscribing.
@@ -152,7 +152,7 @@ The "What's New" tab displays release notes sourced from the `release_notes` tab
 2. **Tab open**: The renderer re-runs the sync and re-reads the cache, so any release published since the last cold start appears without needing a restart.
 3. **Offline / Supabase unavailable**: The previously cached `whats_new` markdown is rendered as-is — no bundled fallback file exists.
 
-**Authoring releases**: write directly to the Supabase `release_notes` table (via the `set_whats_new` MCP tool, the `/buildit` pipeline, or the SQL editor). GitHub releases are unrelated to in-app What's New now — they're for distribution only.
+**Authoring releases**: write directly to the Supabase `release_notes` table (via `set_whats_new` with the [required remote authorization](docs/security-optimization-2026-10-30.md#deployment-and-verification), the `/buildit` pipeline, or the SQL editor). GitHub releases are unrelated to in-app What's New now — they're for distribution only.
 
 A notification dot appears on the tab when new content is available (compares the first `## v` header against the user's `whats_new_seen` setting). `whats_new_seen` is per-user (stored under the real user_id) and syncs across devices.
 

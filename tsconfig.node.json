@@ -26,6 +26,7 @@
     "src/shared/**/*.ts",
     "src/preload/**/*.ts",
     "src/preload/**/*.d.ts",
+    "src/renderer/src/shared/utils/snooze.ts",
     "electron.vite.config.ts",
     "scripts/supabase-build-config.ts"
   ]

@@ -15,7 +15,7 @@ import { pullProjectMetadata, pullNewTasks, pullStatuses, pullTaskLabelsForTask,
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { network.token = options.accessToken; return network.client }) }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 
 function deferred() {
@@ -79,8 +79,10 @@ beforeEach(() => {
   })
   network.client = { from(table: string) {
     let operation = 'select'
+    let afterCursor = false
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'eq', 'is', 'in', 'order', 'limit', 'or', 'lte']) chain[method] = () => chain
+    chain.or = () => { afterCursor = true; return chain }
     for (const method of ['update', 'upsert', 'delete']) chain[method] = () => { operation = method; return chain }
     chain.maybeSingle = async () => {
       await network.token!()
@@ -101,7 +103,7 @@ beforeEach(() => {
           : table === 'user_labels' ? [{ ...repos[0].labels.findById('l'), name: 'A secret label' }]
           : table === 'task_labels' ? [{ task_id: 't', label_id: 'l' }]
           : table === 'tasks' ? [repos[0].tasks.findById('t')] : []
-        return { data, error: null }
+        return { data: afterCursor ? [] : data, error: null }
       }
       return { data: [], error: null }
     })().then(resolve, reject)
@@ -191,7 +193,7 @@ const storeActions = [
   { name: 'create', channel: 'tasks:create', run: () => useTaskStore.getState().createTask({ id: 'new', project_id: 'p', owner_id: 'a', status_id: 's', title: 'A private new task' }) },
   { name: 'update', channel: 'tasks:update', run: () => useTaskStore.getState().updateTask('t', { title: 'A edit' }) },
   { name: 'status await', channel: 'statuses:findById', run: () => useTaskStore.getState().updateTask('t', { status_id: 's2' }) },
-  { name: 'archive hydration', channel: 'projects:getProjectsForUser', run: () => useTaskStore.getState().updateTask('t', { is_archived: 1 }) },
+  { name: 'archive hydration', channel: 'tasks:findAllByProject', run: () => useTaskStore.getState().updateTask('t', { is_archived: 1 }) },
   { name: 'delete', channel: 'tasks:delete', run: () => useTaskStore.getState().deleteTask('t') },
   { name: 'duplicate', channel: 'tasks:duplicate', run: () => useTaskStore.getState().duplicateTask('t', 'copy') },
   { name: 'template', channel: 'tasks:saveAsTemplate', run: () => useTaskStore.getState().saveTaskAsTemplate('t', 'template') },
@@ -265,9 +267,11 @@ it.each(['online', 'offline', 'failure'])('propagates shared task-label addition
   const calls: string[] = []
   let failAddition = mode === 'failure'
   network.client = { from(table: string) {
+    let afterCursor = false
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
-    chain.then = (resolve: (value: unknown) => unknown) => resolve({ data: [{ label_id: 'l' }], error: null })
+    chain.or = () => { afterCursor = true; return chain }
+    chain.then = (resolve: (value: unknown) => unknown) => resolve({ data: afterCursor ? [] : [{ label_id: 'l' }], error: null })
     chain.upsert = (rows: unknown) => {
       chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
         await network.token!()
@@ -314,8 +318,10 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
   network.client = { from(table: string) {
     let payload: unknown, operation = 'select'
     const filters: Array<(row: Record<string,unknown>)=>boolean> = []
+    let afterCursor = false
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'order', 'limit', 'or', 'ilike']) chain[method] = () => chain
+    chain.or = () => { afterCursor = true; return chain }
     chain.eq = (key: string, value: unknown) => { filters.push((row)=>row[key]===value); return chain }
     chain.is = (key: string, value: unknown) => { filters.push((row)=>(row[key]??null)===value); return chain }
     chain.in = (key: string, values: unknown[]) => { filters.push((row)=>values.includes(row[key])); return chain }
@@ -336,7 +342,7 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
           return table==='project_labels'?{project_id:parent,label_id,created_at:'2000-01-01T00:00:00.000Z',deleted_at:null}:{task_id:parent,label_id,deleted_at:null}
         })
       const selected=rows.filter((row)=>filters.every((filter)=>filter(row)))
-      if (operation === 'select') return { data: selected, error: null }
+      if (operation === 'select') return { data: afterCursor ? [] : selected, error: null }
       if (operation === 'delete') {
         if(table!=='task_labels') throw new Error('Unsupported fixture deletion')
         for(const row of selected) junction.delete(`${row.task_id}:${row.label_id}`)
@@ -402,14 +408,16 @@ it.each(['account', 'database'])('keeps actual reconcile descriptor operations i
   repos[1].users.create({ id: 'a', email: 'a-in-b@example.invalid', display_name: null, avatar_url: null })
   const row = repos[0].projects.findById('p')!
   network.client = { from() {
+    let afterCursor = false
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    chain.or = () => { afterCursor = true; return chain }
     chain.maybeSingle = async () => ({ data: { updated_at: row.updated_at }, error: null })
     chain.upsert = () => { writes++; return chain }
     chain.then = (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
       await network.token!()
       started.resolve(); await pause.promise
-      return { data: [row], error: null }
+      return { data: afterCursor ? [] : [row], error: null }
     })().then(resolve, reject)
     return chain
   } } as unknown as SupabaseClient
@@ -460,8 +468,10 @@ it.each(['online', 'offline', 'failure', 'readd', 'racing-readd', 'sibling-readd
   network.client = { from(table: string) {
     let operation = 'select', payload: unknown
     let taskIds: string[] = [], labelIds: string[] = []
+    let afterCursor = false
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'eq', 'is', 'order', 'limit', 'or']) chain[method] = () => chain
+    chain.or = () => { afterCursor = true; return chain }
     chain.in = (key: string, ids: string[]) => { if (key === 'task_id') taskIds = ids; else labelIds = ids; return chain }
     chain.upsert = (rows: unknown) => { payload = rows; operation = 'upsert'; return chain }
     chain.delete = () => { operation = 'delete'; return chain }
@@ -476,7 +486,7 @@ it.each(['online', 'offline', 'failure', 'readd', 'racing-readd', 'sibling-readd
       } else if (operation === 'delete') {
         for (const task of taskIds) for (const label of labelIds) pairs.delete(`${task}:${label}`)
       }
-      return { data: table === 'project_labels' ? [...palette].map(([label_id, deleted_at]) => ({ label_id, deleted_at, user_labels: { name: label_id === 'unrelated' ? 'Unrelated' : 'Private label' } })) : table === 'tasks' ? [{ id: 't' }, { id: 'remote' }] : [], error: null }
+      return { data: afterCursor && operation === 'select' ? [] : table === 'project_labels' ? [...palette].map(([label_id, deleted_at]) => ({ label_id, deleted_at, user_labels: { name: label_id === 'unrelated' ? 'Unrelated' : 'Private label' } })) : table === 'tasks' ? [{ id: 't' }, { id: 'remote' }] : [], error: null }
     })().then(resolve, reject)
     return chain
   } } as unknown as SupabaseClient

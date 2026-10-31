@@ -1,4 +1,6 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { TrafficSummary } from '../shared/supabaseTelemetry'
+import type { HostMetricsSample } from '../shared/hostMetrics'
 import type {
   Task,
   CreateTaskInput,
@@ -248,6 +250,7 @@ export interface ProjectTemplatesAPI {
 }
 
 export interface AttachmentsAPI {
+  restore(id: string): Promise<Attachment | undefined>
   findByTaskId(taskId: string): Promise<Attachment[]>
   createFromFile(taskId: string, filePath: string): Promise<Attachment>
   open(id: string): Promise<void>
@@ -505,6 +508,11 @@ export interface SavedViewsAPI {
 }
 
 export interface TodoozyAPI {
+  diagnostics: {
+    append(summary: TrafficSummary): Promise<void>
+    recent(): Promise<TrafficSummary[]>
+    hostRecent(): Promise<HostMetricsSample[]>
+  }
   tasks: TasksAPI
   labels: LabelsAPI
   projects: ProjectsAPI

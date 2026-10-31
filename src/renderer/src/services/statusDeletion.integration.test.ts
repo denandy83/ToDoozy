@@ -1,9 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
+import { trustedRendererUrl } from '../../../main/navigation-security'
 import { PGlite } from '@electric-sql/pglite'
 import { readFileSync } from 'node:fs'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { SupabaseClient, Session } from '@supabase/supabase-js'
 import { migrations } from '../../../main/database/migrations'
+import { purgeOldTombstones } from '../../../main/services/PurgeService'
 import { createRepositories } from '../../../main/repositories'
 import { useStatusStore } from '../shared/stores/statusStore'
 import { useAuthStore } from '../shared/stores/authStore'
@@ -28,7 +30,7 @@ vi.mock('../../../main/index', () => ({ registerQuickAddShortcut: vi.fn(), regis
 vi.mock('../../../main/tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
 vi.mock('../shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from '../../../main/ipc-handlers'
-const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(channel)!({}, ...args)
+const invoke = async (channel: string, ...args: unknown[]) => ipc.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 let beforeRpc: (() => Promise<void>) | null, afterRpc: (() => Promise<void>) | null, failTaskWrites: boolean, failRecovery: boolean, failRecoveryResponse: boolean
 let beforeLabelWrite: (()=>Promise<void>) | null
 let taskUpdates: Array<Record<string,unknown>>
@@ -44,7 +46,7 @@ let assignmentCompletions: string[]
 const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url,_key,options) => { pinned.token=options.accessToken; return pinned.client }) }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12,'0')}`
 const owner=id(1), project=id(2), open=id(3), source=id(4), done=id(5), task=id(6)
@@ -63,16 +65,18 @@ beforeEach(async () => {
   await remote.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role; CREATE SCHEMA auth;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT null::uuid$$;
     CREATE TABLE projects(id uuid PRIMARY KEY,owner_id uuid,deleted_at timestamptz,name text DEFAULT 'Shared',color text,icon text,description text,is_archived integer DEFAULT 0,updated_at timestamptz DEFAULT now());
+    CREATE TABLE project_members(project_id uuid,user_id uuid,role text,display_color text,display_initials text);
     CREATE TABLE statuses(id uuid PRIMARY KEY,project_id uuid,name text,color text,icon text,order_index integer,is_done integer,is_default integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE tasks(id uuid PRIMARY KEY,project_id uuid,status_id uuid REFERENCES statuses(id),completed_date text,updated_at timestamptz DEFAULT '2000-01-01',deleted_at timestamptz,owner_id uuid,assigned_to uuid,title text DEFAULT 'Occupied',description text,priority integer,due_date text,parent_id uuid,order_index float,is_in_my_day integer,is_template integer,is_archived integer DEFAULT 0,recurrence_rule text,reference_url text,my_day_dismissed_date text,created_at timestamptz,label_names text);
     CREATE TABLE task_labels(task_id uuid,label_id uuid,deleted_at timestamptz,PRIMARY KEY(task_id,label_id));
     CREATE TABLE user_labels(id uuid PRIMARY KEY,user_id uuid,name text,color text,order_index integer,created_at timestamptz,updated_at timestamptz,deleted_at timestamptz);
     CREATE TABLE project_labels(project_id uuid,label_id uuid,created_at timestamptz,deleted_at timestamptz,PRIMARY KEY(project_id,label_id));
     CREATE TABLE activity_log(id uuid,project_id uuid,created_at timestamptz);`)
-  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261030052303_project_archive_version.sql']) {
+  for (const file of ['20261026075322_atomic_status_management.sql','20261026094537_task_status_assignment_guard.sql','20261026105740_disable_legacy_status_consistency_guard.sql','20261030052303_project_archive_version.sql','20261030221433_task_hierarchy_guard.sql']) {
     await remote.exec(readFileSync(new URL(`../../../../supabase/migrations/${file}`,import.meta.url),'utf8'))
   }
   await remote.query('INSERT INTO projects(id,owner_id,deleted_at) VALUES($1,$2,NULL)',[project,owner])
+  await remote.query("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')",[project,owner])
   for (const status of repos.statuses.findByProjectId(project)) {
     const keys=Object.keys(status)
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
@@ -90,6 +94,7 @@ beforeEach(async () => {
   vi.stubGlobal('navigator',{onLine:true})
   useTaskStore.setState({tasks:{[task]:repos.tasks.findById(task)!},taskLabels:{},showDetailPanel:false})
   pinned.client={ from(table:string) {
+    let afterCursor = false
     let columns='*', values: Array<Record<string,unknown>> | null=null, patch: Record<string,unknown> | null=null, removing=false
     const filters: Array<[string,unknown,string]>=[]
     const execute=async () => {
@@ -136,14 +141,14 @@ beforeEach(async () => {
         const from=joined ? `${quote(table)} JOIN user_labels ul ON ul.id=project_labels.label_id` : quote(table)
         const result=JSON.parse(JSON.stringify((await remote.query(`SELECT ${projection} FROM ${from}${where?' WHERE '+where:''}`,params)).rows))
         if(table==='task_labels' && afterLabelSnapshot) {const hook=afterLabelSnapshot;afterLabelSnapshot=null;await hook()}
-        return {data:result,error:null}
+        return {data:afterCursor?[]:result,error:null}
       } catch(error) { return {data:null,error:{message:String(error)}} }
     }
     const chain={
       ilike(key:string,value:string) {filters.push([key,value,'ILIKE']);return chain},
       select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
       is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
-      order() {return chain},limit() {return chain},or() {return chain},
+      order() {return chain},limit() {return chain},or() {afterCursor=true;return chain},
       delete() {removing=true;return chain},
       update(value:Record<string,unknown>) {patch=value;if(table==='tasks') taskUpdates.push(value);return chain},
       upsert(value:Array<Record<string,unknown>> | Record<string,unknown>) {values=Array.isArray(value)?value:[value];return chain},
@@ -190,6 +195,26 @@ it('keeps default/done statuses and validates replacement before any local mutat
   expect(repos.syncQueue.count()).toBe(0)
   expect(repos.tasks.findById(task)?.status_id).toBe(source)
 })
+
+it('delivers an offline status deletion after the tombstone retention horizon exactly once',async()=>{
+  local.prepare('UPDATE statuses SET updated_at=? WHERE id=?').run('2020-01-01T00:00:00.000Z',source)
+  local.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run('2020-01-01T00:00:00.000Z',task)
+  await remote.query("UPDATE tasks SET updated_at='2020-01-01T00:00:00.000Z'")
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime('2020-01-02T00:00:00.000Z')
+  await useStatusStore.getState().reassignAndDelete(source,done)
+  expect(repos.syncQueue.count()).toBe(1)
+  vi.setSystemTime('2020-03-15T00:00:00.000Z')
+  purgeOldTombstones(local)
+  expect(repos.statuses.findById(source)).toBeDefined()
+  setOnlineStatus(true)
+  await processSyncQueue()
+  expect(repos.syncQueue.count()).toBe(0)
+  expect((await remote.query<{status_id:string}>('SELECT status_id FROM tasks WHERE id=$1',[task])).rows[0].status_id).toBe(done)
+  expect((await remote.query<{deleted_at:unknown}>('SELECT deleted_at FROM statuses WHERE id=$1',[source])).rows[0].deleted_at).not.toBeNull()
+  expect(rpcCalls).toBe(1)
+  await processSyncQueue()
+  expect(rpcCalls).toBe(1)
+},15000)
 
 it.each(['queued','eager','newer-cloud','denied','same-tick'])('preserves post-deletion full task intent through %s delivery',async (mode) => {
   const t1='2020-01-01T01:00:00.000Z',t10='2020-01-01T10:00:00.000Z',t11='2020-01-01T11:00:00.000Z'
@@ -589,14 +614,14 @@ it.each([0,1].flatMap((shared)=>['single','bulk'].map((path)=>({shared,path}))))
   expect((await remote.query<{user_id:string}>('SELECT user_id FROM user_labels WHERE id=$1',[foreign])).rows[0].user_id).toBe(id(999))
   expect(repos.syncQueue.count()).toBe(0)
 },15000)
-it('batches 500 explicit additions using one palette read and three bounded writes',async()=>{
+it('batches 500 explicit additions using one complete palette snapshot and three bounded writes',async()=>{
   const labels=await seedSettledAssignments(),context=await captureSyncContext()
   const tasks=Array.from({length:500},(_,index)=>repos.tasks.create({id:id(2000+index),project_id:project,owner_id:owner,status_id:source,title:'Batch '+index}))
   await context.client.from('tasks').upsert(tasks)
   for(const row of tasks) repos.tasks.addLabel(row.id,labels[0])
   paletteReads=0;assignmentBatches=[]
   await syncTaskLabelChoices(context.client,tasks.map((row)=>row.id),context.api,context.scope)
-  expect(paletteReads).toBe(1)
+  expect(paletteReads).toBe(2)
   expect(assignmentBatches).toEqual([200,200,100])
   expect((await remote.query<{n:number}>('SELECT count(*)::int AS n FROM task_labels WHERE task_id=ANY($1)',[tasks.map((row)=>row.id)])).rows[0].n).toBe(500)
   expect(tasks.every((task)=>repos.tasks.getLabelState(task.id).every((row)=>!row.sync_pending))).toBe(true)
@@ -972,4 +997,27 @@ it.each([0,1].flatMap((shared)=>['push','remap'].flatMap((caller)=>['Family','É
     for(const link of (await remote.query('SELECT * FROM project_labels WHERE project_id=$1',[project])).rows) fresh.labels.applyRemoteProjectLabel(JSON.parse(JSON.stringify(link)))
     expect(fresh.labels.findByProjectId(project).map((row)=>row.id)).toEqual([family.unrelated])
   } finally {observer.close()}
+},15000)
+
+it('propagates a native subtree deletion through queued root replay and remote tombstones',async()=>{
+  const child=id(1001),grandchild=id(1002)
+  for(const [key,parent] of [[child,task],[grandchild,child]]) {
+    repos.tasks.create({id:key,parent_id:parent,project_id:project,owner_id:owner,status_id:open,title:key})
+    await remote.query('INSERT INTO tasks(id,parent_id,project_id,status_id,owner_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)',[key,parent,project,open,owner,'2000-01-01T00:00:00Z'])
+  }
+  await invoke('tasks:delete',task)
+  for(const key of [task,child,grandchild])expect(repos.tasks.findById(key)?.deleted_at).toBeTruthy()
+  repos.syncQueue.enqueue('tasks',task,'DELETE',JSON.stringify({id:task}))
+  setOnlineStatus(true)
+  expect(await processSyncQueue()).toBe(1)
+  expect((await remote.query('SELECT id FROM tasks WHERE deleted_at IS NULL')).rows).toEqual([])
+  for(const key of [task,child,grandchild]) {
+    const row=(await remote.query<{deleted_at:string;updated_at:string}>('SELECT * FROM tasks WHERE id=$1',[key])).rows[0]
+    repos.tasks.applyRemoteTask({...repos.tasks.findById(key)!,deleted_at:String(row.deleted_at),updated_at:String(row.updated_at)})
+    expect(repos.tasks.findById(key)?.deleted_at).toBeTruthy()
+  }
+  await expect(remote.query('UPDATE tasks SET deleted_at=NULL WHERE id=$1',[grandchild])).rejects.toThrow(/active task/)
+  for(const key of [task,child,grandchild])await remote.query("UPDATE tasks SET deleted_at=NULL,updated_at=greatest(clock_timestamp(),updated_at+interval '1 millisecond') WHERE id=$1",[key]).catch(error=>{throw new Error(`Restore ${key}: ${error}`)})
+  await remote.query('UPDATE tasks SET title=$1 WHERE id=$2',['Ordinary restored edit',grandchild])
+  expect((await remote.query<{title:string}>('SELECT title FROM tasks WHERE id=$1',[grandchild])).rows[0].title).toBe('Ordinary restored edit')
 },15000)

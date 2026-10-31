@@ -11,7 +11,7 @@ import { processSyncQueue, setOnlineStatus, syncProjectDown } from './SyncServic
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { network.token = options.accessToken; return network.client }) }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>
@@ -174,7 +174,7 @@ it.each([0, 1])('pages and batches 1101 rows, preserving intent through a partia
   expect(remote.tasks.every((row) => row.is_archived === archived && row.updated_at === t5)).toBe(true)
   expect(batches).toHaveLength(8)
   expect(batches.every((batch) => batch.ids.length <= 200)).toBe(true)
-  expect(reads).toBe(6)
+  expect(reads).toBe(8)
 })
 it('rechecks a new action racing a queued write and ignores delayed older producer delivery', async () => {
   vi.setSystemTime(t10); action(0)

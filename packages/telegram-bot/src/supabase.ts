@@ -1,4 +1,5 @@
-import { logBotFailure } from './pollingWatchdog'
+import { readAll, requireSuccess } from './query'
+import { PartialTaskCreationError } from './taskCreationError'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -10,7 +11,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !TODOOZY_USER_ID) {
   throw new Error('Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY, TODOOZY_USER_ID')
 }
 
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } })
 export const userId = TODOOZY_USER_ID
 
 // ---- Types ----
@@ -54,450 +55,161 @@ export interface SupabaseLabel {
   color: string
 }
 
-// ---- Projects ----
-
+// Service-role requests must reimpose membership and owner scope explicitly.
+const PAGE_IDS = 200
+async function batches<T extends Record<string, unknown>>(ids: string[], query: (ids: string[]) => Parameters<typeof readAll<T>>[0], keys = ['id']): Promise<T[]> {
+  const rows: T[] = []
+  for (let i=0; i<ids.length; i+=PAGE_IDS) rows.push(...(await readAll(query(ids.slice(i,i+PAGE_IDS)),keys)).data)
+  return rows
+}
 export async function getProjects(): Promise<SupabaseProject[]> {
-  // Get projects where user is a member
-  const { data: memberships, error: memberErr } = await supabase
-    .from('project_members')
-    .select('project_id')
-    .eq('user_id', userId)
-
-  if (memberErr) throw memberErr
-  if (!memberships || memberships.length === 0) return []
-
-  const projectIds = memberships.map((m) => m.project_id)
-  const { data, error } = await supabase
-    .from('projects')
-    .select('id, name, owner_id')
-    .in('id', projectIds)
-
-  if (error) throw error
-  return data ?? []
+  const { data: members } = await readAll(() => supabase.from('project_members').select('project_id').eq('user_id',userId), ['project_id'])
+  return await batches(members.map(m=>m.project_id as string), ids => () => supabase.from('projects')
+    .select('id,name,owner_id').in('id',ids).is('deleted_at',null).eq('is_archived',0)) as unknown as SupabaseProject[]
 }
-
+async function assertProject(projectId: string): Promise<void> {
+  if (!(await getProjects()).some(p=>p.id===projectId)) throw new Error('Project is unavailable or access was revoked')
+}
 export async function findProjectByName(name: string): Promise<SupabaseProject | null> {
-  const projects = await getProjects()
-  const q = name.toLowerCase()
-
-  // Exact match first
-  const exact = projects.find((p) => p.name.toLowerCase() === q)
-  if (exact) return exact
-
-  // Prefix match
-  const prefix = projects.find((p) => p.name.toLowerCase().startsWith(q))
-  if (prefix) return prefix
-
-  // Substring match
-  const sub = projects.find((p) => p.name.toLowerCase().includes(q))
-  return sub ?? null
+  const rows=await getProjects(), q=name.toLowerCase()
+  return rows.find(p=>p.name.toLowerCase()===q) ?? rows.find(p=>p.name.toLowerCase().startsWith(q)) ?? rows.find(p=>p.name.toLowerCase().includes(q)) ?? null
 }
-
-// ---- Statuses ----
-
-export async function getDefaultStatus(projectId: string): Promise<SupabaseStatus | null> {
-  const { data, error } = await supabase
-    .from('statuses')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('is_default', 1)
-    .limit(1)
-    .single()
-
-  if (error) return null
+async function statusFor(projectId: string, flag: 'is_default'|'is_done'): Promise<SupabaseStatus|null> {
+  const { data }=await requireSuccess(supabase.from('statuses').select('*').eq('project_id',projectId).is('deleted_at',null).eq(flag,1).limit(1).maybeSingle())
   return data
 }
-
-export async function getDoneStatus(projectId: string): Promise<SupabaseStatus | null> {
-  const { data, error } = await supabase
-    .from('statuses')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('is_done', 1)
-    .limit(1)
-    .single()
-
-  if (error) return null
-  return data
+export async function getDefaultStatus(projectId: string): Promise<SupabaseStatus|null> { await assertProject(projectId); return statusFor(projectId,'is_default') }
+export async function getDoneStatus(projectId: string): Promise<SupabaseStatus|null> { await assertProject(projectId); return statusFor(projectId,'is_done') }
+export async function findStatusByName(projectId: string,name: string): Promise<SupabaseStatus|null> {
+  await assertProject(projectId)
+  const { data }=await readAll(()=>supabase.from('statuses').select('*').eq('project_id',projectId).is('deleted_at',null))
+  return data.find(s=>String(s.name).toLowerCase().startsWith(name.toLowerCase())) as unknown as SupabaseStatus ?? null
 }
-
-export async function findStatusByName(projectId: string, name: string): Promise<SupabaseStatus | null> {
-  const { data, error } = await supabase
-    .from('statuses')
-    .select('*')
-    .eq('project_id', projectId)
-
-  if (error || !data) return null
-  const q = name.toLowerCase()
-  return data.find((s) => s.name.toLowerCase().startsWith(q)) ?? null
-}
-
-// ---- Labels ----
-
 export async function getLabels(): Promise<SupabaseLabel[]> {
-  const { data, error } = await supabase
-    .from('user_labels')
-    .select('*')
-    .eq('user_id', userId)
-
-  if (error) throw error
-  return data ?? []
+  return (await readAll(()=>supabase.from('user_labels').select('*').eq('user_id',userId).is('deleted_at',null))).data as unknown as SupabaseLabel[]
 }
-
 export async function findOrCreateLabel(name: string): Promise<SupabaseLabel> {
-  const labels = await getLabels()
-  const q = name.toLowerCase()
-
-  // Find existing
-  const existing = labels.find((l) => l.name.toLowerCase() === q)
+  const labels=await getLabels(), q=name.toLowerCase()
+  const existing=labels.find(l=>l.name.toLowerCase()===q)
   if (existing) return existing
-
-  // Auto-create with next color
-  const LABEL_AUTO_COLORS = [
-    '#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899',
-    '#14b8a6', '#f97316', '#06b6d4', '#84cc16', '#6366f1', '#e11d48'
-  ]
-  const usedColors = new Set(labels.map((l) => l.color.toLowerCase()))
-  let color = LABEL_AUTO_COLORS[0]
-  for (const c of LABEL_AUTO_COLORS) {
-    if (!usedColors.has(c.toLowerCase())) {
-      color = c
-      break
-    }
-  }
-  if (usedColors.has(color.toLowerCase())) {
-    color = LABEL_AUTO_COLORS[labels.length % LABEL_AUTO_COLORS.length]
-  }
-
-  const id = uuidv4()
-  const now = new Date().toISOString()
-  const { data, error } = await supabase
-    .from('user_labels')
-    .insert({
-      id,
-      user_id: userId,
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      color,
-      created_at: now,
-      updated_at: now
-    })
-    .select()
-    .single()
-
-  if (error) throw error
+  const colors=['#ef4444','#f59e0b','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16','#6366f1','#e11d48']
+  const used=new Set(labels.map(l=>l.color.toLowerCase()))
+  const color=colors.find(c=>!used.has(c)) ?? colors[labels.length%colors.length]
+  const now=new Date().toISOString()
+  const { data }=await requireSuccess(supabase.from('user_labels').insert({id:uuidv4(),user_id:userId,name:name.charAt(0).toUpperCase()+name.slice(1),color,created_at:now,updated_at:now}).select().single())
   return data
 }
-
-// ---- Tasks ----
-
-export async function createTask(params: {
-  projectId: string
-  title: string
-  priority: number
-  dueDate: string | null
-  referenceUrl: string | null
-  statusId: string | null
-  labelIds: string[]
-  recurrenceRule?: string | null
-}): Promise<SupabaseTask> {
-  const { projectId, title, priority, dueDate, referenceUrl, statusId, labelIds, recurrenceRule } = params
-
-  // Get default status if none specified
-  let finalStatusId = statusId
-  if (!finalStatusId) {
-    const defaultStatus = await getDefaultStatus(projectId)
-    if (defaultStatus) finalStatusId = defaultStatus.id
+export async function createTask(params: {projectId:string;title:string;priority:number;dueDate:string|null;referenceUrl:string|null;statusId:string|null;labelIds:string[];recurrenceRule?:string|null}): Promise<SupabaseTask> {
+  await assertProject(params.projectId)
+  const selectedLabels=[...new Set(params.labelIds)]
+  if (selectedLabels.length) {
+    const labels=await getLabels()
+    if (selectedLabels.some(id=>!labels.some(l=>l.id===id))) throw new Error('A requested label is unavailable')
   }
-
-  // Check user's task position preference
-  const { data: posSetting } = await supabase
-    .from('user_settings')
-    .select('value')
-    .eq('user_id', userId)
-    .eq('key', 'new_task_position')
-    .single()
-  const position = posSetting?.value ?? 'top'
-
-  // Get order_index based on position preference
-  const { data: edgeRow } = await supabase
-    .from('tasks')
-    .select('order_index')
-    .eq('project_id', projectId)
-    .eq('status_id', finalStatusId ?? '')
-    .eq('is_archived', 0)
-    .order('order_index', { ascending: position === 'top' })
-    .limit(1)
-    .single()
-
-  const sortOrder = position === 'top'
-    ? (edgeRow?.order_index ?? 0) - 1
-    : (edgeRow?.order_index ?? 0) + 1
-
-  const id = uuidv4()
-  const now = new Date().toISOString()
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert({
-      id,
-      project_id: projectId,
-      owner_id: userId,
-      title,
-      status_id: finalStatusId,
-      priority,
-      due_date: dueDate,
-      reference_url: referenceUrl,
-      recurrence_rule: recurrenceRule ?? null,
-      is_in_my_day: 0,
-      is_archived: 0,
-      parent_id: null,
-      order_index: sortOrder,
-      created_at: now,
-      updated_at: now,
-      completed_date: null
-    })
-    .select()
-    .single()
-
-  if (error) throw error
-
-  // Assign labels
-  for (const labelId of labelIds) {
-    const { error: labelError } = await supabase.from('task_labels').insert({
-      task_id: id,
-      label_id: labelId
-    })
-    if (labelError) logBotFailure('Failed to assign label', labelError)
+  const status=params.statusId ?? (await statusFor(params.projectId,'is_default'))?.id
+  if (!status) throw new Error('No active default status')
+  const { data: activeStatus } = await requireSuccess(supabase.from('statuses').select('id,is_done')
+    .eq('id',status).eq('project_id',params.projectId).is('deleted_at',null).maybeSingle())
+  if (!activeStatus) throw new Error('Status must be active and belong to the selected project')
+  const { data: pos }=await requireSuccess(supabase.from('user_settings').select('value').eq('user_id',userId).eq('key','new_task_position').maybeSingle())
+  const top=pos?.value!=='bottom'
+  const { data: edge }=await requireSuccess(supabase.from('tasks').select('order_index').eq('project_id',params.projectId).eq('status_id',status).eq('is_archived',0).is('deleted_at',null).order('order_index',{ascending:top}).limit(1).maybeSingle())
+  const now=new Date().toISOString(), id=uuidv4()
+  const { data }=await requireSuccess(supabase.from('tasks').insert({id,project_id:params.projectId,owner_id:userId,title:params.title,status_id:status,priority:params.priority,due_date:params.dueDate,reference_url:params.referenceUrl,recurrence_rule:params.recurrenceRule??null,is_in_my_day:0,is_archived:0,is_template:0,parent_id:null,order_index:(edge?.order_index??0)+(top?-1:1),created_at:now,updated_at:now,completed_date:activeStatus.is_done ? now : null}).select().single())
+  if (selectedLabels.length) {
+    try { await requireSuccess(supabase.from('task_labels').insert(selectedLabels.map(label_id=>({task_id:id,label_id})))) }
+    catch { throw new PartialTaskCreationError(id) }
   }
-
   return data
 }
-
-export async function getProjectTasks(projectId: string): Promise<(SupabaseTask & { labels: SupabaseLabel[] })[]> {
-  const { data: tasks, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('is_archived', 0)
-    .order('order_index', { ascending: true })
-
-  if (error) throw error
-  if (!tasks) return []
-
-  // Filter out done tasks
-  const { data: statuses } = await supabase
-    .from('statuses')
-    .select('id, is_done')
-    .eq('project_id', projectId)
-
-  const doneStatusIds = new Set((statuses ?? []).filter((s) => s.is_done).map((s) => s.id))
-  const nonDoneTasks = tasks.filter((t) => !doneStatusIds.has(t.status_id))
-
-  // Get labels for tasks
-  const taskIds = nonDoneTasks.map((t) => t.id)
-  const { data: taskLabels } = await supabase
-    .from('task_labels')
-    .select('task_id, label_id')
-    .in('task_id', taskIds)
-
-  const allLabels = await getLabels()
-  const labelMap = new Map(allLabels.map((l) => [l.id, l]))
-
-  return nonDoneTasks.map((t) => {
-    const tLabels = (taskLabels ?? [])
-      .filter((tl) => tl.task_id === t.id)
-      .map((tl) => labelMap.get(tl.label_id))
-      .filter((l): l is SupabaseLabel => l !== undefined)
-    return { ...t, labels: tLabels }
-  })
+async function activeTasks(projectIds: string[], ownerOnly = false): Promise<SupabaseTask[]> {
+  return await batches(projectIds, ids=>()=>{
+    const query = supabase.from('tasks').select('*').in('project_id',ids).is('deleted_at',null).eq('is_archived',0).eq('is_template',0)
+    return ownerOnly ? query.eq('owner_id',userId) : query
+  }) as unknown as SupabaseTask[]
 }
-
+async function doneIds(projectIds: string[]): Promise<Set<string>> {
+  const rows=await batches(projectIds, ids=>()=>supabase.from('statuses').select('id,is_done').in('project_id',ids).is('deleted_at',null))
+  return new Set(rows.filter(s=>s.is_done===1||s.is_done===true).map(s=>s.id as string))
+}
+async function withLabels(tasks: SupabaseTask[]): Promise<(SupabaseTask & {labels:SupabaseLabel[]})[]> {
+  if (!tasks.length) return []
+  const [links, labels]=await Promise.all([
+    batches(tasks.map(t=>t.id), ids=>()=>supabase.from('task_labels').select('task_id,label_id').in('task_id',ids).is('deleted_at',null), ['task_id','label_id']), getLabels()
+  ])
+  const labelsById=new Map(labels.map(l=>[l.id,l])), byTask=new Map<string,SupabaseLabel[]>()
+  for (const row of links) {
+    const label=labelsById.get(row.label_id as string)
+    if (label) { const found=byTask.get(row.task_id as string)??[];found.push(label);byTask.set(row.task_id as string,found) }
+  }
+  return tasks.map(t=>({...t,labels:byTask.get(t.id)??[]}))
+}
+export async function getProjectTasks(projectId: string): Promise<(SupabaseTask & {labels:SupabaseLabel[]})[]> {
+  await assertProject(projectId)
+  const [tasks,done]=await Promise.all([activeTasks([projectId]),doneIds([projectId])])
+  return withLabels(tasks.filter(t=>!done.has(t.status_id)).sort((a,b)=>a.order_index-b.order_index))
+}
 export async function completeTask(taskId: string): Promise<boolean> {
-  // Get task to find project
-  const { data: task, error: taskErr } = await supabase
-    .from('tasks')
-    .select('project_id')
-    .eq('id', taskId)
-    .single()
-
-  if (taskErr || !task) return false
-
-  const doneStatus = await getDoneStatus(task.project_id)
-  if (!doneStatus) return false
-
-  const now = new Date().toISOString()
-  const { error } = await supabase
-    .from('tasks')
-    .update({
-      status_id: doneStatus.id,
-      completed_date: now,
-      updated_at: now
-    })
-    .eq('id', taskId)
-
-  return !error
+  const projects=await getProjects()
+  if (!projects.length) return false
+  const { data: task }=await requireSuccess(supabase.from('tasks').select('project_id').eq('id',taskId).in('project_id',projects.map(p=>p.id)).is('deleted_at',null).eq('is_archived',0).eq('is_template',0).maybeSingle())
+  if (!task) return false
+  const done=await statusFor(task.project_id,'is_done')
+  if (!done) return false
+  const now=new Date().toISOString()
+  const { data }=await requireSuccess(supabase.from('tasks').update({status_id:done.id,completed_date:now,updated_at:now}).eq('id',taskId).eq('project_id',task.project_id).select('id').maybeSingle())
+  return !!data
 }
-
-export async function getMyDayTasks(): Promise<(SupabaseTask & { project_name: string; labels: SupabaseLabel[] })[]> {
-  const today = new Date().toISOString().slice(0, 10)
-
-  // Get tasks pinned to My Day
-  const { data: pinned } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('is_in_my_day', 1)
-    .eq('is_archived', 0)
-
-  // Get tasks due today or overdue
-  const { data: dueTasks } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('is_archived', 0)
-    .not('due_date', 'is', null)
-    .lte('due_date', today + 'T23:59:59.999Z')
-
-  // Merge and deduplicate
-  const map = new Map<string, SupabaseTask>()
-  for (const t of [...(pinned ?? []), ...(dueTasks ?? [])]) {
-    map.set(t.id, t)
-  }
-  const allTasks = Array.from(map.values())
-
-  if (allTasks.length === 0) return []
-
-  // Get projects
-  const projectIds = [...new Set(allTasks.map((t) => t.project_id))]
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id, name')
-    .in('id', projectIds)
-
-  const projectMap = new Map((projects ?? []).map((p) => [p.id, p.name]))
-
-  // Filter out done tasks
-  const statusIds = [...new Set(allTasks.map((t) => t.status_id))]
-  const { data: statuses } = await supabase
-    .from('statuses')
-    .select('id, is_done')
-    .in('id', statusIds)
-
-  const doneStatusIds = new Set((statuses ?? []).filter((s) => s.is_done).map((s) => s.id))
-  const nonDoneTasks = allTasks.filter((t) => !doneStatusIds.has(t.status_id))
-
-  // Get labels
-  const taskIds = nonDoneTasks.map((t) => t.id)
-  const { data: taskLabels } = await supabase
-    .from('task_labels')
-    .select('task_id, label_id')
-    .in('task_id', taskIds)
-
-  const allLabels = await getLabels()
-  const labelMap = new Map(allLabels.map((l) => [l.id, l]))
-
-  return nonDoneTasks
-    .map((t) => {
-      const tLabels = (taskLabels ?? [])
-        .filter((tl) => tl.task_id === t.id)
-        .map((tl) => labelMap.get(tl.label_id))
-        .filter((l): l is SupabaseLabel => l !== undefined)
-      return {
-        ...t,
-        project_name: projectMap.get(t.project_id) ?? 'Unknown',
-        labels: tLabels
+function dayKey(value: string|Date,zone: string): string {
+  if (typeof value==='string' && !/[zZ+-]/.test(value.slice(10))) return value.slice(0,10)
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value))
+  const get=(type:string): string=>parts.find(p=>p.type===type)!.value
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+export async function getMyDayTasks(): Promise<(SupabaseTask & {project_name:string;labels:SupabaseLabel[]})[]> {
+  const projects=await getProjects()
+  if (!projects.length) return []
+  const zone=process.env.TODOOZY_TIME_ZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  const today=dayKey(new Date(),zone)
+  const [tasks,done]=await Promise.all([activeTasks(projects.map(p=>p.id), true),doneIds(projects.map(p=>p.id))])
+  const selected=tasks.filter(t=>(t as SupabaseTask & {owner_id:string}).owner_id===userId && !done.has(t.status_id) && (t.is_in_my_day===1 || (t.due_date!==null && dayKey(t.due_date,zone)<=today)))
+  const names=new Map(projects.map(p=>[p.id,p.name]))
+  return (await withLabels(selected)).map(t=>({...t,project_name:names.get(t.project_id)??'Unknown'})).sort((a,b)=>(a.due_date??'9999').localeCompare(b.due_date??'9999'))
+}
+async function recentTasks(limit: number, completed: boolean): Promise<(SupabaseTask & {project_name:string})[]> {
+  const count = Math.max(0, Math.min(1000, Math.floor(Number.isFinite(limit) ? limit : 10)))
+  if (!count) return []
+  const projects = await getProjects(), names = new Map(projects.map(p=>[p.id,p.name]))
+  const statuses = await batches(projects.map(p=>p.id), ids=>()=>supabase.from('statuses')
+    .select('id,is_done').in('project_id',ids).is('deleted_at',null).eq('is_done',completed ? 1 : 0))
+  const column = completed ? 'completed_date' : 'created_at'
+  const candidates: SupabaseTask[] = []
+  for (let p=0;p<projects.length;p+=PAGE_IDS) for (let s=0;s<statuses.length;s+=PAGE_IDS) {
+    let cursor: SupabaseTask | undefined
+    const chunk: SupabaseTask[] = []
+    while (chunk.length<count) {
+      let query = supabase.from('tasks').select('*').in('project_id',projects.slice(p,p+PAGE_IDS).map(x=>x.id))
+        .in('status_id',statuses.slice(s,s+PAGE_IDS).map(x=>x.id)).is('deleted_at',null).eq('is_archived',0).eq('is_template',0)
+      if (completed) query=query.not('completed_date','is',null)
+      if (cursor) {
+        const value=JSON.stringify(cursor[column]), id=JSON.stringify(cursor.id)
+        query=query.or(`${column}.lt.${value},and(${column}.eq.${value},id.lt.${id})`)
       }
-    })
-    .sort((a, b) => {
-      if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1
-      if (!b.due_date) return -1
-      return a.due_date.localeCompare(b.due_date)
-    })
+      const { data }=await requireSuccess(query.order(column,{ascending:false}).order('id',{ascending:false}).limit(Math.min(500,count-chunk.length)))
+      const page=(data??[]) as SupabaseTask[]
+      if (!page.length) break
+      const next=page.at(-1)!
+      if (cursor && next.id===cursor.id) throw new Error('Recent task pagination did not advance')
+      chunk.push(...page);cursor=next
+    }
+    candidates.push(...chunk)
+  }
+  return candidates.sort((a,b)=>(b[column]??'').localeCompare(a[column]??'') || b.id.localeCompare(a.id)).slice(0,count)
+    .map(t=>({...t,project_name:names.get(t.project_id)??'Unknown'}))
 }
-
-export async function getRecentTasks(limit: number = 10): Promise<(SupabaseTask & { project_name: string })[]> {
-  // Get non-done, non-archived tasks across all projects, ordered by most recent
-  const projects = await getProjects()
-  if (projects.length === 0) return []
-
-  const projectIds = projects.map((p) => p.id)
-  const projectMap = new Map(projects.map((p) => [p.id, p.name]))
-
-  const { data: tasks, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .in('project_id', projectIds)
-    .eq('is_archived', 0)
-    .order('created_at', { ascending: false })
-    .limit(limit * 2) // fetch extra to filter done
-
-  if (error) throw error
-  if (!tasks) return []
-
-  // Get statuses to filter done
-  const statusIds = [...new Set(tasks.map((t) => t.status_id))]
-  const { data: statuses } = await supabase
-    .from('statuses')
-    .select('id, is_done')
-    .in('id', statusIds)
-
-  const doneStatusIds = new Set((statuses ?? []).filter((s) => s.is_done).map((s) => s.id))
-
-  return tasks
-    .filter((t) => !doneStatusIds.has(t.status_id))
-    .slice(0, limit)
-    .map((t) => ({
-      ...t,
-      project_name: projectMap.get(t.project_id) ?? 'Unknown'
-    }))
-}
-
-export async function getRecentlyCompletedTasks(limit: number = 10): Promise<(SupabaseTask & { project_name: string })[]> {
-  const projects = await getProjects()
-  if (projects.length === 0) return []
-
-  const projectIds = projects.map((p) => p.id)
-  const projectMap = new Map(projects.map((p) => [p.id, p.name]))
-
-  // Get all done status IDs
-  const { data: doneStatuses } = await supabase
-    .from('statuses')
-    .select('id')
-    .in('project_id', projectIds)
-    .eq('is_done', 1)
-
-  const doneStatusIds = (doneStatuses ?? []).map((s) => s.id)
-  if (doneStatusIds.length === 0) return []
-
-  const { data: tasks, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .in('project_id', projectIds)
-    .in('status_id', doneStatusIds)
-    .eq('is_archived', 0)
-    .order('completed_date', { ascending: false })
-    .limit(limit)
-
-  if (error) throw error
-  if (!tasks) return []
-
-  return tasks.map((t) => ({
-    ...t,
-    project_name: projectMap.get(t.project_id) ?? 'Unknown'
-  }))
-}
-
-export async function fuzzyFindTask(query: string): Promise<(SupabaseTask & { project_name: string }) | null> {
-  const tasks = await getRecentTasks(50)
-  const q = query.toLowerCase()
-
-  // Exact match
-  const exact = tasks.find((t) => t.title.toLowerCase() === q)
-  if (exact) return exact
-
-  // Prefix
-  const prefix = tasks.find((t) => t.title.toLowerCase().startsWith(q))
-  if (prefix) return prefix
-
-  // Substring
-  const sub = tasks.find((t) => t.title.toLowerCase().includes(q))
-  return sub ?? null
+export async function getRecentTasks(limit=10): Promise<(SupabaseTask & {project_name:string})[]> { return recentTasks(limit,false) }
+export async function getRecentlyCompletedTasks(limit=10): Promise<(SupabaseTask & {project_name:string})[]> { return recentTasks(limit,true) }
+export async function fuzzyFindTask(query: string): Promise<(SupabaseTask & {project_name:string})|null> {
+  const tasks=await getRecentTasks(50), q=query.toLowerCase()
+  return tasks.find(t=>t.title.toLowerCase()===q) ?? tasks.find(t=>t.title.toLowerCase().startsWith(q)) ?? tasks.find(t=>t.title.toLowerCase().includes(q)) ?? null
 }

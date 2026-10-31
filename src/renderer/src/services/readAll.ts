@@ -23,7 +23,7 @@ export async function readAll<T extends Record<string, unknown>>(
     if (error) throw new Error(error.message)
     const page = data ?? []
     for (const row of page) rows.set(JSON.stringify(keys.filter((key) => key !== 'updated_at').map((key) => row[key])), row)
-    if (page.length < 500) return { data: [...rows.values()], error: null }
+    if (page.length === 0) return { data: [...rows.values()], error: null }
     cursor = page[page.length - 1]
   }
 }

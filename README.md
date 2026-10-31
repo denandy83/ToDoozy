@@ -81,6 +81,8 @@ Copy `.env.example` to `.env` and set the project's URL and public publishable k
 
 GitHub CI runs type checking, tests, lint and a production build on pull requests and main. Set the repository Actions variables `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same public client settings; no signing credentials are needed for these checks.
 
+See the [security and sync rollout guide](docs/security-optimization-2026-10-30.md) for backend activation, paired benchmarks, and the optional host metrics collector.
+
 ---
 
 ## Features

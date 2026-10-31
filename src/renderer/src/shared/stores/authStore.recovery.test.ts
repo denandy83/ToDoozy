@@ -27,7 +27,8 @@ vi.mock('../../services/SyncService', () => ({
   processSyncQueue: () => processSyncQueueMock()
 }))
 
-vi.mock('./logStore', () => ({
+vi.mock('./logStore', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./logStore')>(),
   logEvent: vi.fn()
 }))
 

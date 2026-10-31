@@ -1,6 +1,7 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 import { Mutex } from 'async-mutex'
 import { logEvent } from '../shared/stores/logStore'
+import { supabaseRequestMetrics } from '../../../shared/supabaseTelemetry'
 
 let supabaseClient: SupabaseClient | null = null
 let initPromise: Promise<SupabaseClient> | null = null
@@ -180,6 +181,7 @@ export async function getSupabase(): Promise<SupabaseClient> {
       throw new Error('Supabase configuration is missing. Check .env file.')
     }
     supabaseClient = createClient(config.url, config.anonKey, {
+      global: { fetch: supabaseRequestMetrics.wrap(globalThis.fetch, config.url) },
       auth: {
         autoRefreshToken: true,
         persistSession: false, // We handle persistence via safeStorage

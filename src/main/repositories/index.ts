@@ -33,12 +33,12 @@ export interface Repositories {
   projectAreas: ProjectAreaRepository
 }
 
-export function createRepositories(db: DatabaseSync): Repositories {
+export function createRepositories(db: DatabaseSync, userId: string | null = null): Repositories {
   return {
     users: new UserRepository(db),
     projects: new ProjectRepository(db),
     statuses: new StatusRepository(db),
-    tasks: new TaskRepository(db),
+    tasks: new TaskRepository(db, userId),
     labels: new LabelRepository(db),
     themes: new ThemeRepository(db),
     settings: new SettingsRepository(db),

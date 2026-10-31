@@ -1,3 +1,4 @@
+import { captureSyncContext } from './services/syncContext'
 import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
@@ -15,17 +16,19 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
 import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
-import { initPowerListener } from './services/powerState'
+import { initPowerListener, isSuspended } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 import { flushAll as flushBatchedTaskEdits } from './services/TaskBatchSyncManager'
 import { useToast } from './shared/components/Toast'
+import { startDiagnostics } from './services/diagnostics'
 
 function App(): React.JSX.Element {
+  useEffect(startDiagnostics, [])
   const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
   const { hydrateLabels } = useLabelStore()
-  const { hydrateAllForProject } = useTaskStore()
+  const { hydrateAllForProject, hydrateAllForUser } = useTaskStore()
   const { setUserId: setSettingsUserId, hydrateSettings, hydrateThemes } = useSettingsStore()
   const { hydrateProjectTemplates } = useTemplateStore()
   const { addToast } = useToast()
@@ -62,98 +65,18 @@ function App(): React.JSX.Element {
       hydrateSettings()
       hydrateThemes()
       hydrateProjects(currentUser.id)
+      hydrateAllForUser(currentUser.id)
       hydrateProjectTemplates(currentUser.id)
       window.api.tray.setUserId(currentUser.id)
     }
-  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
+  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateAllForUser, hydrateProjectTemplates])
 
-  // On startup, sync all shared projects from Supabase + discover missing ones.
-  // Keyed on the primitive userId — depending on the currentUser object would
-  // re-run the effect on every auth-store mutation (token refresh, profile
-  // update, etc.) and storm the upload pipeline with parallel initSync calls.
-  // Skipped in offline-fallback mode (no session — every Supabase call would
-  // fail); when the session recovers, isOffline flips false and the effect
-  // re-runs, syncing + subscribing the shared channels that were skipped.
   const startupUserId = currentUser?.id ?? null
   useEffect(() => {
     if (!isAuthenticated || !startupUserId || isOffline) return
-    const uid = startupUserId
-    const syncShared = async (): Promise<void> => {
-      try {
-        const { syncProjectDown: syncDown, subscribeToProject: subProject, discoverRemoteMemberships } = await import('./services/SyncService')
-
-        // Sync existing local shared projects + subscribe to Realtime for ALL projects
-        const projects = useProjectStore.getState().projects
-        for (const p of Object.values(projects)) {
-          if (p.is_shared === 1) {
-            const synced = await syncDown(p.id, uid).then(() => true).catch((err) => {
-              console.warn(`[Startup] Failed to sync shared project ${p.name}:`, err)
-              if (String(err).includes('not found')) {
-                window.api.projects.update(p.id, { is_shared: 0 })
-              }
-              return false
-            })
-            if (!synced) continue
-
-            // After sync, verify the project still has collaborators. If only the
-            // owner remains (everyone left or the project was never actually
-            // shared end-to-end), demote is_shared so we don't waste a Realtime
-            // subscription on a solo project.
-            const members = await window.api.projects.getMembers(p.id).catch(() => [])
-            const others = members.filter((m) => m.user_id !== p.owner_id)
-            if (others.length === 0) {
-              await window.api.projects.update(p.id, { is_shared: 0 }).catch(() => {})
-              console.log(`[Startup] Demoted "${p.name}" — no other members, treating as personal`)
-              continue
-            }
-          }
-          // Subscribe to Realtime for shared projects only
-          // (personal projects use the WAL polling + fullUpload/Pull flow)
-          if (p.is_shared === 1) subProject(p.id)
-        }
-
-        // Discover projects we're a member of in Supabase but don't have locally
-        // Skip if last check was less than 5 minutes ago. Stored under the
-        // empty-user_id slot so it stays device-local — this is a heartbeat
-        // for throttling, not data that needs to sync across devices.
-        const lastMemberCheck = await window.api.settings.get('', 'last_member_discovery')
-        const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString()
-        const shouldDiscover = !lastMemberCheck || lastMemberCheck < fiveMinAgo
-        const missingIds = shouldDiscover ? await discoverRemoteMemberships(uid) : []
-        if (shouldDiscover) {
-          await window.api.settings.set('', 'last_member_discovery', new Date().toISOString())
-        }
-        if (missingIds.length > 0) {
-          for (const pid of missingIds) {
-            await syncDown(pid, uid).catch((err) =>
-              console.warn(`[Startup] Failed to sync discovered project ${pid}:`, err)
-            )
-            subProject(pid)
-          }
-          // Rehydrate projects to show newly discovered ones — pulled via getState
-          // so the action isn't a dep that re-triggers this effect.
-          await useProjectStore.getState().hydrateProjects(uid)
-        }
-      } catch (err) {
-        console.error('[Startup] Failed to sync shared projects:', err)
-      }
-
-      // Always start online monitoring (even if sync fails)
-      const { initSync, startOnlineMonitoring } = await import('./services/PersonalSyncService')
+    const startBackground = async (): Promise<void> => {
+      const { startOnlineMonitoring } = await import('./services/PersonalSyncService')
       startOnlineMonitoring()
-
-      // Initialize personal sync (first-time upload or new-device pull)
-      try {
-        await initSync(uid)
-      } catch (err) {
-        console.error('[Startup] Failed to initialize personal sync:', err)
-      }
-
-      // Reconcile pass: detect and repair drift between local SQLite and Supabase.
-      // Fire-and-forget so startup isn't blocked on it.
-      void import('./services/PersonalSyncService').then(({ reconcile }) =>
-        reconcile(uid).then(() => useTaskStore.getState().hydrateAllForUser(uid)).catch((err) => console.error('[Startup] Reconcile failed:', err))
-      )
 
       // Warm the What's New cache so first visit doesn't depend on a live fetch.
       // loadCached() seeds the store from the bundled markdown (offline-safe);
@@ -162,7 +85,7 @@ function App(): React.JSX.Element {
       await useReleaseNotesStore.getState().loadCached()
       void useReleaseNotesStore.getState().sync()
     }
-    const timeout = setTimeout(syncShared, 2000)
+    const timeout = setTimeout(startBackground, 2000)
     return () => {
       clearTimeout(timeout)
       import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
@@ -180,12 +103,8 @@ function App(): React.JSX.Element {
     // shared-project task chips fall back to other users' colors when the
     // viewer hasn't tagged anything in the active project yet.
     useLabelStore.getState().hydrateAllLabels()
-    hydrateAllForProject(currentProjectId, currentUser.id)
+    hydrateAllForProject(currentProjectId)
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
-
-  // Ref so async pull callbacks always read the latest project without re-triggering the effect
-  const currentProjectRef = useRef(currentProjectId)
-  currentProjectRef.current = currentProjectId
 
   // Instrumentation only — effect-run counter to detect StrictMode double-mount + dep churn.
   const realtimeEffectRunCount = useRef(0)
@@ -203,33 +122,20 @@ function App(): React.JSX.Element {
     realtimeEffectRunCount.current += 1
     logEvent('info', 'realtime', `effect run #${realtimeEffectRunCount.current}`, `user=${userId.slice(0, 8)} online=${navigator.onLine}`)
 
+    let disposed = false
+    let needsInitialization = true
     const doPull = async (): Promise<void> => {
-      if (!navigator.onLine) return
-      const { pullNewTasks, pullProjectMetadata, resetRefreshGate, cacheProjectNames } = await import('./services/PersonalSyncService')
-      resetRefreshGate()
-
-      const allProjects = await window.api.projects.getProjectsForUser(userId)
-      cacheProjectNames(allProjects)
-      // Personal-pull is for personal projects only. Shared projects sync via
-      // SyncService Realtime — running pullNewTasks on them re-pushes archived
-      // rows back to remote (see PersonalSyncService.ts:1128).
-      const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
-      let anyChanged = false
-      for (const project of personalProjects) {
-        const metaChanged = await pullProjectMetadata(project.id).catch(() => false)
-        if (metaChanged) anyChanged = true
-        const pulled = await pullNewTasks(project.id).catch(() => 0)
-        if (pulled > 0) anyChanged = true
-      }
-      if (anyChanged) {
-        const pid = currentProjectRef.current
-        useProjectStore.getState().hydrateProjects(userId)
-        if (pid) {
-          useTaskStore.getState().hydrateAllForProject(pid, userId)
-        }
+      if (disposed || !navigator.onLine || isSuspended() || useAuthStore.getState().currentUser?.id !== userId) return
+      try {
+        const context = await captureSyncContext(() => !disposed && navigator.onLine && !isSuspended())
+        const { requestSyncCatchUp } = await import('./services/PersonalSyncService')
+        await requestSyncCatchUp(context, needsInitialization)
+        needsInitialization = false
+      } catch (error) {
+        if (!disposed) logEvent('error', 'sync', 'Background catch-up failed', String(error))
       }
     }
-    doPull()
+    void doPull()
 
     // Adaptive polling: no polling when Realtime is connected, 120s fallback when disconnected
     let pollInterval: ReturnType<typeof setInterval> | null = null
@@ -249,111 +155,30 @@ function App(): React.JSX.Element {
         prevRealtimeConnected = connected
         if (connected) {
           stopPolling()
-          doPull()
+          // Channel recovery schedules its own serialized catch-up.
         } else {
           startPolling()
         }
       }
     })
-    startPolling()
-
-    // Debounced flush for Realtime events across all subscribed projects.
-    // pendingLabelProjectIds tracks projects whose task_labels changed via
-    // the targeted pull (story #91) — those need a chip rehydrate even when
-    // pullNewTasks reports nothing (label assigns don't bump task updated_at).
-    const pendingProjectIds = new Set<string>()
-    const pendingLabelProjectIds = new Set<string>()
-    let realtimeTimer: ReturnType<typeof setTimeout> | null = null
-    let pullInProgress = false
-
-    const flushRealtime = async (): Promise<void> => {
-      if (pullInProgress) return
-      pullInProgress = true
-      try {
-        const { pullNewTasks } = await import('./services/PersonalSyncService')
-        const projects = [...pendingProjectIds]
-        pendingProjectIds.clear()
-        const labelPids = new Set(pendingLabelProjectIds)
-        pendingLabelProjectIds.clear()
-        // Defensive filter — shared projects sync via SyncService Realtime,
-        // not through pullNewTasks (which would re-push archived rows).
-        const projectMap = useProjectStore.getState().projects
-        const personalIds = projects.filter((pid) => projectMap[pid]?.is_shared !== 1)
-        let anyChanged = false
-        for (const pid of personalIds) {
-          const pulled = await pullNewTasks(pid).catch(() => 0)
-          if (pulled > 0) anyChanged = true
-        }
-        const pid = currentProjectRef.current
-        if (anyChanged) {
-          useProjectStore.getState().hydrateProjects(userId)
-          if (pid) {
-            useLabelStore.getState().hydrateLabels(pid)
-            useTaskStore.getState().hydrateAllForProject(pid, userId)
-            useTaskStore.getState().hydrateAllTaskLabels(pid)
-          }
-        } else if (pid && labelPids.has(pid)) {
-          useLabelStore.getState().hydrateLabels(pid)
-          useTaskStore.getState().hydrateAllTaskLabels(pid)
-        }
-        if (anyChanged || labelPids.size > 0) {
-          // Remote task/label arrivals can start/stop matching saved-view filters.
-          useSavedViewStore.getState().scheduleRecount(userId)
-        }
-      } finally {
-        pullInProgress = false
-      }
-    }
-
-    const scheduleFlush = (): void => {
-      if (realtimeTimer) clearTimeout(realtimeTimer)
-      realtimeTimer = setTimeout(flushRealtime, 500)
-    }
-
-    // Per-project Realtime handler for personal channels. Also used by the
-    // user channel when it discovers a brand-new personal project mid-session.
-    const makePersonalOnChange = (projectId: string) =>
-      (event: string, data: Record<string, unknown>): void => {
-        if (event === 'activity') {
-          // Row already applied locally (PersonalSyncService) — just refresh
-          // the Detail panel's activity list if it's showing this task.
-          const taskId = data?.task_id
-          if (typeof taskId === 'string') useTaskStore.getState().bumpActivityRefresh(taskId)
-          return
-        }
-        if (event === 'task_labels') pendingLabelProjectIds.add(projectId)
-        else pendingProjectIds.add(projectId)
-        scheduleFlush()
-      }
+    if (!prevRealtimeConnected) startPolling()
 
     const setupRealtime = async (): Promise<void> => {
-      if (!navigator.onLine) return
-      const { subscribeToPersonalProject, cacheProjectNames: cachePNames } = await import('./services/PersonalSyncService')
-      const allProjects = await window.api.projects.getProjectsForUser(userId)
-      cachePNames(allProjects)
-      // Personal Realtime channels are only for personal projects. Shared projects
-      // get their own subscriptions via SyncService.subscribeToProject (started in syncShared).
-      const personalProjects = allProjects.filter((p) => p.is_shared !== 1)
-      for (const project of personalProjects) {
-        await subscribeToPersonalProject(project.id, makePersonalOnChange(project.id))
-      }
-      // Per-user channel: cross-device labels/saved views/areas + new-project
-      // discovery (story #91). Same offline/recovery lifecycle as above.
+      if (!navigator.onLine || disposed) return
       const { subscribeToUserChannel } = await import('./services/UserChannelService')
-      await subscribeToUserChannel(userId, {
-        subscribePersonalProject: (pid) =>
-          subscribeToPersonalProject(pid, makePersonalOnChange(pid))
-      })
+      if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
+      await subscribeToUserChannel(userId)
     }
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
 
     return () => {
+      disposed = true
       logEvent('info', 'realtime', `effect cleanup #${realtimeEffectRunCount.current}`, 'tearing down realtime + polling')
       stopPolling()
       unsubRealtimeState()
-      if (realtimeTimer) clearTimeout(realtimeTimer)
       import('./services/PersonalSyncService').then(({ unsubscribeAllPersonal }) => unsubscribeAllPersonal())
       import('./services/UserChannelService').then(({ unsubscribeUserChannel }) => unsubscribeUserChannel())
+      import('./services/SyncService').then(({ unsubscribeAll }) => unsubscribeAll())
     }
   }, [userId, isOffline])
 
@@ -366,7 +191,7 @@ function App(): React.JSX.Element {
       hydrateProjects(currentUser.id)
       hydrateStatuses(currentProjectId)
       hydrateLabels(currentProjectId)
-      hydrateAllForProject(currentProjectId, currentUser.id)
+      hydrateAllForUser(currentUser.id)
       hydrateAllTaskLabels(currentProjectId)
       hydrateMyDay(currentUser.id)
       hydrateSettings()
@@ -374,7 +199,7 @@ function App(): React.JSX.Element {
       useSavedViewStore.getState().scheduleRecount(currentUser.id)
     })
     return unsub
-  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
+  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForUser, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
 
   // Re-run My Day auto-add on app resume (sleep/wake) and window refocus
   const currentView = useViewStore((s) => s.currentView)

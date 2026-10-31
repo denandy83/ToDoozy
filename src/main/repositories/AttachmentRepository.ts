@@ -32,14 +32,14 @@ export class AttachmentRepository {
   findByTaskId(taskId: string): Attachment[] {
     return this.db
       .prepare(
-        'SELECT id, task_id, filename, mime_type, size_bytes, created_at, updated_at FROM attachments WHERE task_id = ? ORDER BY created_at ASC'
+        'SELECT id, task_id, filename, mime_type, size_bytes, created_at, updated_at FROM attachments WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at ASC'
       )
       .all(taskId) as unknown as AttachmentRow[]
   }
 
   getFileData(id: string): AttachmentFileData | undefined {
     const row = this.db
-      .prepare('SELECT filename, mime_type, file_data FROM attachments WHERE id = ?')
+      .prepare('SELECT filename, mime_type, file_data FROM attachments WHERE id = ? AND deleted_at IS NULL')
       .get(id) as unknown as { filename: string; mime_type: string; file_data: Uint8Array } | undefined
     if (!row) return undefined
     return { filename: row.filename, mime_type: row.mime_type, file_data: Buffer.from(row.file_data) }
@@ -61,8 +61,14 @@ export class AttachmentRepository {
   }
 
   delete(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM attachments WHERE id = ?').run(id)
+    const now = new Date().toISOString()
+    const result = this.db.prepare('UPDATE attachments SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, now, id)
     return result.changes > 0
+  }
+
+  restore(id: string): Attachment | undefined {
+    this.db.prepare('UPDATE attachments SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL').run(new Date().toISOString(), id)
+    return this.db.prepare('SELECT id, task_id, filename, mime_type, size_bytes, created_at, updated_at FROM attachments WHERE id = ? AND deleted_at IS NULL').get(id) as unknown as Attachment | undefined
   }
 
   deleteByTaskId(taskId: string): number {

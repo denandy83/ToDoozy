@@ -31,26 +31,13 @@ import { useLabelStore } from '../shared/stores/labelStore'
 import { useSavedViewStore } from '../shared/stores/savedViewStore'
 import { useProjectAreaStore } from '../shared/stores/projectAreaStore'
 import { useProjectStore } from '../shared/stores/projectStore'
-import { useViewStore } from '../shared/stores/viewStore'
 import { SYNC_TABLES } from './syncTables'
 import { requireSession } from './sessionRecovery'
 import { isSuspended } from './powerState'
-import {
-  pullNewTasks,
-  unsubscribePersonalProject,
-  getCachedProjectName
-} from './PersonalSyncService'
-
-export interface UserChannelOptions {
-  /** Subscribe a newly discovered personal project to its Realtime channel
-   * with the caller's flush handler (the debounced-pull closure lives in
-   * App.tsx and can't be imported from here). */
-  subscribePersonalProject(projectId: string): Promise<void>
-}
+import { requestSyncCatchUp } from './PersonalSyncService'
 
 interface UserChannelState {
   userId: string
-  opts: UserChannelOptions
   channel: RealtimeChannel | null
   cancelled: boolean
   attempt: number
@@ -59,11 +46,13 @@ interface UserChannelState {
 
 let userChannelState: UserChannelState | null = null
 
+export function hasActiveUserChannel(userId: string): boolean {
+  return userChannelState?.userId === userId && !userChannelState.cancelled
+}
+
 const RECONNECT_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 900_000]
 const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length
 
-/** Guard against concurrent pulls of the same membership INSERT. */
-const membershipPullsInFlight = new Set<string>()
 
 type UserScopedRemoteTable = 'user_labels' | 'user_saved_views' | 'user_project_areas'
 
@@ -111,112 +100,9 @@ async function handleUserTableChange(
   }
 }
 
-/**
- * Membership INSERT — a project was created on another device/surface or
- * shared with this user. Pull it down and subscribe its Realtime channel.
- * The echo of this device's own pushProject (share_project upserts the
- * owner membership) is filtered by the local-existence check.
- */
-async function handleMembershipInsert(
-  row: Record<string, unknown>,
-  state: UserChannelState
-): Promise<void> {
-  const context = await captureSyncContext()
-  if (state.userId !== useAuthStore.getState().currentUser?.id) return
-  const { api, client: supabase } = context
-  const projectId = row.project_id as string | undefined
-  if (!projectId || membershipPullsInFlight.has(projectId)) return
-
-  const local = await api.projects.findById(projectId)
-  if (local) {
-    // Already known — role/membership metadata changed at most.
-    if (!await context.isCurrent()) return
-    await useProjectStore.getState().hydrateProjects(state.userId)
-    return
-  }
-
-  membershipPullsInFlight.add(projectId)
-  try {
-    const { count } = await supabase
-      .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('project_id', projectId)
-    const isShared = (count ?? 0) > 1
-
-    if (isShared) {
-      const { syncProjectDown, subscribeToProject } = await import('./SyncService')
-      await syncProjectDown(projectId, state.userId, context)
-      if (!await context.isCurrent()) return
-      await subscribeToProject(projectId)
-    } else {
-      const { data: project } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .is('deleted_at', null)
-        .maybeSingle()
-      if (!project) return
-      const projectsDesc = SYNC_TABLES.projects
-      if (!projectsDesc) return
-      await api.projects.applyRemote(project)
-      await api.projects
-        .addMember(projectId, state.userId, (row.role as string) ?? 'owner')
-        .catch(() => { /* membership row may already exist */ })
-      await pullNewTasks(projectId, context)
-      if (!await context.isCurrent()) return
-      await state.opts.subscribePersonalProject(projectId)
-    }
-
-    if (!await context.isCurrent()) return
-    await useProjectStore.getState().hydrateProjects(state.userId)
-    logEvent('info', 'realtime', `User channel: pulled new ${isShared ? 'shared' : 'personal'} project`, `project=${projectId}`)
-  } catch (err) {
-    logEvent('error', 'realtime', 'User channel: membership INSERT pull failed', `project=${projectId} err=${err instanceof Error ? err.message : String(err)}`)
-  } finally {
-    membershipPullsInFlight.delete(projectId)
-  }
-}
-
-/**
- * Membership DELETE — this user was removed from a shared project, or a
- * project was deleted from another device (deleteProjectFromSupabase
- * physically removes membership rows). Remove the local copy and tear down
- * its Realtime channel. The ACTIVE shared project is excluded: AppLayout's
- * realtime callback owns that case (it shows the "you were removed" dialog
- * and cleans up itself).
- */
-async function handleMembershipDelete(
-  row: Record<string, unknown>,
-  state: UserChannelState
-): Promise<void> {
-  const projectId = row.project_id as string | undefined
-  if (!projectId) return
-  // DELETE payloads carry the replica identity (the composite PK), so
-  // user_id is present — be defensive about foreign rows anyway.
-  if (typeof row.user_id === 'string' && row.user_id !== state.userId) return
-
-  const local = await window.api.projects.findById(projectId)
-  if (!local) return
-
-  const viewState = useViewStore.getState()
-  const isActive = viewState.selectedProjectId === projectId && viewState.currentView === 'project'
-  if (local.is_shared === 1 && isActive) return
-
-  if (isActive) viewState.setView('my-day')
-
-  if (local.is_shared === 1) {
-    const { unsubscribeFromProject } = await import('./SyncService')
-    await unsubscribeFromProject(projectId)
-  } else {
-    await unsubscribePersonalProject(projectId)
-  }
-  await window.api.projects.delete(projectId)
-  await useProjectStore.getState().hydrateProjects(state.userId)
-  const pName = getCachedProjectName(projectId) ?? projectId
-  logEvent('info', 'realtime', 'User channel: removed project after membership delete', `${pName} (${projectId})`)
-}
-
 async function createUserChannel(state: UserChannelState): Promise<void> {
+  const context = await captureSyncContext(() => !state.cancelled && navigator.onLine && !isSuspended())
+  if (state.cancelled || useAuthStore.getState().currentUser?.id !== state.userId) return
   const supabase = await getSupabase()
   const { userId } = state
   const channel = supabase
@@ -224,14 +110,9 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'project_members', filter: `user_id=eq.${userId}` },
-      (payload) => {
+      () => {
         if (state.cancelled) return
-        if (payload.eventType === 'INSERT') {
-          void handleMembershipInsert(payload.new as Record<string, unknown>, state)
-        } else if (payload.eventType === 'DELETE') {
-          void handleMembershipDelete(payload.old as Record<string, unknown>, state)
-        }
-        // UPDATE (role/display tweaks) — covered by per-project channels.
+        void requestSyncCatchUp(context).catch((error) => logEvent('error', 'sync', 'Membership refresh failed', String(error)))
       }
     )
     .on(
@@ -269,9 +150,12 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
         ? (err instanceof Error ? `${err.name}: ${err.message}` : (typeof err === 'string' ? err : JSON.stringify(err)))
         : '(no err)'
       if (status === 'SUBSCRIBED') {
+        void requestSyncCatchUp(context).catch(() => {})
+        useSyncStore.getState().setChannelHealth(`user:${userId}`, true)
         state.attempt = 0
         logEvent('info', 'realtime', 'Subscribed to user channel', `user=${userId.slice(0, 8)} chState=${chState}`)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
         logEvent(level, 'realtime', `Channel ${status} on user channel`, `user=${userId.slice(0, 8)} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
         scheduleUserChannelReconnect()
@@ -322,6 +206,7 @@ function scheduleUserChannelReconnect(): void {
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
           state.attempt = 0
+          void captureSyncContext().then(requestSyncCatchUp).catch(() => {})
           logEvent('info', 'realtime', 'User-channel reconnect skipped — channel auto-rejoined')
           return
         }
@@ -342,8 +227,12 @@ export function pauseUserChannelReconnect(): void {
 
 /** Reset the attempt counter and force a fresh subscribe (resume/online/manual retry). */
 export async function forceReconnectUserChannel(): Promise<void> {
+  if (!navigator.onLine || isSuspended()) return
   const state = userChannelState
   if (!state || state.cancelled) return
+  const context = await captureSyncContext()
+  await requestSyncCatchUp(context)
+  if (state.cancelled || !await context.isCurrent()) return
   state.attempt = 0
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)
@@ -366,7 +255,6 @@ export async function forceReconnectUserChannel(): Promise<void> {
  */
 export async function subscribeToUserChannel(
   userId: string,
-  opts: UserChannelOptions
 ): Promise<void> {
   if (userChannelState && !userChannelState.cancelled) {
     if (userChannelState.userId === userId) return
@@ -376,15 +264,22 @@ export async function subscribeToUserChannel(
     logEvent('warn', 'sync', 'subscribeToUserChannel skipped — no session', `user=${userId.slice(0, 8)}`)
     return
   }
+  // Session lookup can race setup and cross-device discovery. Reserve only once.
+  if (useAuthStore.getState().currentUser?.id !== userId) return
+  if (userChannelState && !userChannelState.cancelled) {
+    if (userChannelState.userId === userId) return
+    await unsubscribeUserChannel()
+    if (userChannelState && !userChannelState.cancelled) return
+  }
   const state: UserChannelState = {
     userId,
-    opts,
     channel: null,
     cancelled: false,
     attempt: 0,
     reconnectTimer: null
   }
   userChannelState = state
+  useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
   await createUserChannel(state)
 }
 
@@ -392,7 +287,9 @@ export async function subscribeToUserChannel(
 export async function unsubscribeUserChannel(): Promise<void> {
   const state = userChannelState
   if (!state) return
+  userChannelState = null
   state.cancelled = true
+  useSyncStore.getState().setChannelHealth(`user:${state.userId}`, null)
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer)
     state.reconnectTimer = null
@@ -401,5 +298,4 @@ export async function unsubscribeUserChannel(): Promise<void> {
     const supabase = await getSupabase()
     try { await supabase.removeChannel(state.channel) } catch { /* already dead */ }
   }
-  userChannelState = null
 }

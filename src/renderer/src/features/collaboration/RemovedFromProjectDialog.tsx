@@ -67,7 +67,7 @@ export function RemovedFromProjectDialog({
                   await window.api.labels.addToProject(newId, l.id).catch(() => {})
                 }
                 // Copy tasks
-                const tasks = await window.api.tasks.findByProjectId(oldId)
+                const tasks = (await window.api.tasks.findAllByProject(oldId)).filter((task) => !task.is_archived && !task.is_template)
                 const taskMap: Record<string, string> = {}
                 for (const t of tasks) {
                   const nid = crypto.randomUUID()

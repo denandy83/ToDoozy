@@ -9,7 +9,7 @@ import type { SupabaseClient, Session } from '@supabase/supabase-js'
 // a plain in-memory Zustand store and safe under node.
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(), safeRefresh: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 
 import { chunkArray, fullPull, fullUpload, initSync, pushSetting, pushTheme } from './PersonalSyncService'
 import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'
@@ -81,6 +81,7 @@ function makeSupabase(records: UpsertRecord[] = [], tableRows: Record<string, un
       chain[method] = (): Record<string, unknown> => chain
     }
     chain.upsert = (payload: unknown): Record<string, unknown> => { records.push({table,payload}); result.data = Array.isArray(payload) ? payload : [payload]; return chain }
+    chain.or = () => { result.data = []; return chain }
     chain.single = (): Promise<QueryResult> => Promise.resolve(result)
     chain.maybeSingle = async () => ({ ...result, data: result.data[0] ?? null })
     chain.then = (resolve: (value: QueryResult) => unknown): unknown => resolve(result)
@@ -265,6 +266,7 @@ function makePullSupabase(
     ]) {
       chain[m] = (): Record<string, unknown> => chain
     }
+    chain.or = () => { result.data = []; return chain }
     chain.single = (): Promise<typeof result> => Promise.resolve(result)
     chain.maybeSingle = (): Promise<typeof result> => Promise.resolve(result)
     chain.then = (resolve: (v: typeof result) => unknown): unknown => resolve(result)

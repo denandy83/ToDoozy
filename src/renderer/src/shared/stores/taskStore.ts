@@ -1,6 +1,7 @@
 import { withSyncProducer, captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { reportPushFailure } from '../../services/syncFeedback'
 import { hydrationContext } from './hydrationContext'
+import { evictProjectData } from './projectCache'
 import { useMemo, useRef } from 'react'
 import { sortSubtasksForDisplay } from '../utils/sortTasks'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -113,6 +114,31 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
   }, producer)
 }
 
+async function publishCreatedSubtree(root: Task, origin: SyncProducer): Promise<void> {
+  const children = new Map<string, Task[]>()
+  for (const task of await origin.api.tasks.findAllByProject(root.project_id)) {
+    if (task.parent_id) children.set(task.parent_id, [...(children.get(task.parent_id) ?? []), task])
+  }
+  const tasks = [root]
+  const seen = new Set([root.id])
+  const labels: Record<string, Label[]> = {}
+  for (const task of tasks) {
+    labels[task.id] = await origin.api.labels.findByTaskId(task.id)
+    for (const child of children.get(task.id) ?? []) {
+      if (!seen.has(child.id)) { seen.add(child.id); tasks.push(child) }
+    }
+  }
+  await requireProducerCurrent(origin)
+  useTaskStore.setState((state) => ({
+    tasks: { ...state.tasks, ...Object.fromEntries(tasks.map((task) => [task.id, task])) },
+    taskLabels: { ...state.taskLabels, ...labels }
+  }))
+  for (const task of tasks) {
+    await requireProducerCurrent(origin)
+    await syncIfShared(task, 'INSERT', origin)
+  }
+}
+
 /**
  * Ops that must reach Supabase immediately even while the task is open in
  * the Detail panel: archive/unarchive, completion, and My Day membership —
@@ -163,7 +189,7 @@ interface TaskActions {
   hydrateMyDay(userId: string): Promise<void>
   hydrateArchived(projectId: string): Promise<void>
   hydrateTemplates(projectId: string): Promise<void>
-  hydrateAllForProject(projectId: string, userId: string, producer?: SyncProducer): Promise<void>
+  hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   hydrateAllForUser(userId: string): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
@@ -200,6 +226,24 @@ interface TaskActions {
 }
 
 export type TaskStore = TaskState & TaskActions
+
+function mergeHydratedTasks(state: TaskStore, initial: TaskStore, projectIds: Set<string>, taskArrays: Task[][], labelMappingArrays: TaskLabelMapping[][]): Pick<TaskStore, 'tasks' | 'taskLabels'> {
+  const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
+  for (const rows of taskArrays) for (const task of rows) if (!task.deleted_at) tasks[task.id] = task
+  const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id ?? initial.tasks[id]?.project_id)))
+  const grouped: Record<string, Label[]> = {}
+  for (const mappings of labelMappingArrays) {
+    for (const { task_id, ...label } of mappings) {
+      if (tasks[task_id]) (grouped[task_id] ??= []).push(label)
+    }
+  }
+  Object.assign(taskLabels, grouped)
+  for (const [id, task] of Object.entries(state.tasks)) if (task !== initial.tasks[id]) tasks[id] = task
+  for (const id of Object.keys(initial.tasks)) if (!state.tasks[id]) delete tasks[id]
+  for (const [id, labels] of Object.entries(state.taskLabels)) if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
+  for (const id of Object.keys(initial.tasks)) if (projectIds.has(initial.tasks[id].project_id) && !tasks[id]) delete taskLabels[id]
+  return { tasks, taskLabels }
+}
 
 export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   tasks: {},
@@ -305,32 +349,20 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllForProject(_projectId: string, userId: string, producer?: SyncProducer): Promise<void> {
-    const { api, isCurrent } = producer ?? hydrationContext()
-    set({ loading: true, error: null })
+  async hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent } = origin ?? hydrationContext()
+    const initial = get()
     try {
-      // Load all projects' tasks for accurate sidebar counts
-      const allProjects = await api.projects.getProjectsForUser(userId)
-      const projectTaskPromises = allProjects.map((p) => api.tasks.findByProjectId(p.id))
-      const archivedPromises = allProjects.map((p) => api.tasks.findArchived(p.id))
-      const [myDay, templates, ...rest] = await Promise.all([
-        api.tasks.findMyDay(userId),
-        api.tasks.findAllTemplates(getUserId()),
-        ...projectTaskPromises,
-        ...archivedPromises
+      const [tasks, mappings] = await Promise.all([
+        api.tasks.findAllByProject(projectId, { includeTombstones: true }),
+        api.labels.findTaskLabelsByProject(projectId)
       ])
-      const taskMap: Record<string, Task> = {}
-      for (const tasks of rest) {
-        for (const task of tasks) taskMap[task.id] = task
-      }
-      for (const task of myDay) taskMap[task.id] = task
-      for (const task of templates) taskMap[task.id] = task
       if (!await isCurrent()) return
-      set({ tasks: taskMap, loading: false })
+      set((state) => mergeHydratedTasks(state, initial, new Set([projectId]), [tasks], [mappings]))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load tasks'
-      set({ error: message, loading: false })
+      const message = err instanceof Error ? err.message : 'Failed to load project tasks'
+      set({ error: message })
     }
   },
 
@@ -346,35 +378,9 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         Promise.all(allProjects.map((p) => api.labels.findTaskLabelsByProject(p.id)))
       ])
       if (!await isCurrent()) return
-      set((state) => {
-        const projectIds = new Set(allProjects.map((p) => p.id))
-        const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
-        for (const arr of taskArrays) {
-          for (const task of arr) if (!task.deleted_at) tasks[task.id] = task
-        }
-        const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id)))
-        for (const mappings of labelMappingArrays) {
-          const grouped: Record<string, Label[]> = {}
-          for (const m of mappings) {
-            const { task_id, ...label } = m
-            if (!grouped[task_id]) grouped[task_id] = []
-            grouped[task_id].push(label)
-          }
-          for (const [tid, labels] of Object.entries(grouped)) {
-            taskLabels[tid] = labels
-          }
-        }
-        for (const [id, task] of Object.entries(state.tasks)) {
-          if (task !== initial.tasks[id]) tasks[id] = task
-        }
-        for (const id of Object.keys(initial.tasks)) {
-          if (!state.tasks[id]) delete tasks[id]
-        }
-        for (const [id, labels] of Object.entries(state.taskLabels)) {
-          if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
-        }
-        return { tasks, taskLabels }
-      })
+      const activeIds = new Set(allProjects.map(project => project.id))
+      for (const id of new Set(Object.values(initial.tasks).map(task => task.project_id))) if (!activeIds.has(id)) evictProjectData(id)
+      set((state) => mergeHydratedTasks(state, initial, new Set(allProjects.map((project) => project.id)), taskArrays, labelMappingArrays))
     } catch (err) {
       if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
@@ -460,7 +466,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
         // Cascade archive/unarchive to subtasks in store
         if (input.is_archived !== undefined) {
-          await get().hydrateAllForProject(task.project_id, origin.userId ?? '', origin)
+          await get().hydrateAllForProject(task.project_id, origin)
         }
 
         // Check if a recurring task was moved to done status → create clone
@@ -470,30 +476,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             try {
               const result = await api.tasks.completeRecurring(task.id)
               if (result) {
-                // Load the new task into the store
                 const newTask = await api.tasks.findById(result.id)
                 if (newTask) {
+                  await publishCreatedSubtree(newTask, origin)
                   await requireProducerCurrent(origin)
-                  set((state) => ({
-                    tasks: { ...state.tasks, [newTask.id]: newTask },
-                    lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id }
-                  }))
-                  // Also load subtasks of the new task
-                  const subtasks = await api.tasks.findSubtasks(result.id)
-                  if (subtasks.length > 0) {
-                    await requireProducerCurrent(origin)
-                    set((state) => {
-                      const updated = { ...state.tasks }
-                      for (const st of subtasks) updated[st.id] = st
-                      return { tasks: updated }
-                    })
-                  }
-                  // Load labels for the new task
-                  const labels = await api.labels.findByTaskId(result.id)
-                  await requireProducerCurrent(origin)
-                  set((state) => ({
-                    taskLabels: { ...state.taskLabels, [result.id]: labels }
-                  }))
+                  set({ lastRecurringClone: { taskId: result.id, dueDate: result.dueDate, projectId: newTask.project_id } })
                 }
               }
             } catch (err) {
@@ -616,32 +603,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       const task = await api.tasks.duplicate(id, newId)
       if (task) {
-        // Re-hydrate all tasks for the project since subtasks were also created
-        const allTasks = await api.tasks.findByProjectId(task.project_id)
-        const taskMap: Record<string, Task> = {}
-        for (const t of allTasks) {
-          taskMap[t.id] = t
-        }
-        await requireProducerCurrent(origin)
-        set((state) => ({ tasks: { ...state.tasks, ...taskMap } }))
-
-        // Also hydrate labels for the new task and its subtasks
-        const newTaskLabels = await api.labels.findByTaskId(task.id)
-        const subtasks = await api.tasks.findSubtasks(task.id)
-        const labelUpdates: Record<string, import('../../../../shared/types').Label[]> = {
-          [task.id]: newTaskLabels
-        }
-        for (const st of subtasks) {
-          labelUpdates[st.id] = await api.labels.findByTaskId(st.id)
-        }
-        await requireProducerCurrent(origin)
-        set((state) => ({ taskLabels: { ...state.taskLabels, ...labelUpdates } }))
-
-        // Sync duplicated task + subtasks to Supabase
-        syncIfShared(task, 'INSERT', origin)
-        for (const st of subtasks) {
-          syncIfShared(st, 'INSERT', origin)
-        }
+        await publishCreatedSubtree(task, origin)
         scheduleSavedViewRecount(origin)
       }
       return task
@@ -659,19 +621,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     try {
       const template = await api.tasks.saveAsTemplate(id, newId)
       if (template) {
-        // Re-hydrate templates globally
-        const allTemplates = await api.tasks.findAllTemplates(origin.userId ?? '')
-        await requireProducerCurrent(origin)
-        set((state) => {
-          const updated = { ...state.tasks }
-          for (const t of allTemplates) {
-            updated[t.id] = t
-          }
-          return { tasks: updated }
-        })
-
-        // Sync template to Supabase
-        syncIfShared(template, 'INSERT', origin)
+        await publishCreatedSubtree(template, origin)
       }
       return template
     } catch (err) {

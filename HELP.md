@@ -403,7 +403,9 @@ When a snoozed task wakes up, it reappears in your task list and shows a notific
 
 Open project settings → **Share** to invite other users by email.
 
-Shared projects sync in real-time — all members see task changes, status updates, and member avatars instantly. Each member can customize their avatar color and initials in project settings.
+Email invitations must be accepted while signed in with the confirmed address they were sent to.
+
+Shared projects sync in real-time — all members see task changes, status updates, and member avatars instantly. Project members can customize member avatar colors and initials in project settings.
 
 ---
 
@@ -435,7 +437,7 @@ To attach files to a task:
 3. Click the paperclip icon in the editor toolbar
 4. Select one or more files (max 10 MB each, max 10 attachments per task)
 
-Files appear as cards below the description. Click to open in the default app. Hover to reveal a remove button.
+Files appear as cards below the description. Click to open in the default app. Hover to reveal a remove button. After removal, click **Undo** in the toast to restore the original file. Undo remains bound to the account and database where you removed it.
 
 Files are stored locally and synced to iCloud Drive for access from other devices.
 
@@ -549,6 +551,11 @@ Account data syncs automatically to Supabase in the background. SQLite is the lo
 
 ### New device setup
 Log in on a new device to pull down your synced data automatically. No manual import needed.
+
+### Recovery and diagnostics
+Use **Settings → General → Reconcile** to repair drift between local data and Supabase. **Force Full Sync** re-uploads local data and pulls shared projects. See the [sync scheduling contract](docs/security-optimization-2026-10-30.md#benchmarks) for automatic recovery and archived-project coverage.
+
+Open **Settings → Logs** for connection events and Supabase traffic summaries. See [Persistent diagnostics](docs/security-optimization-2026-10-30.md#persistent-diagnostics) for retained data, privacy limits, and optional host metrics setup.
 
 ### Offline support
 - **Personal projects** — fully usable offline. Create, edit, and complete tasks without internet. Changes sync when you reconnect.

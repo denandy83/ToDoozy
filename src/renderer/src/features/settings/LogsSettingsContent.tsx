@@ -78,7 +78,7 @@ export function LogsSettingsContent(): React.JSX.Element {
           </div>
         </div>
         <p className="mt-2 text-sm font-light text-muted">
-          Live connection events (Realtime channels and online/offline). Cleared on app restart. Times shown in your system timezone.
+          Connection events and Supabase traffic summaries. Aggregate traffic history is retained locally for seven days; other events clear on restart. Times shown in your system timezone.
         </p>
       </div>
 

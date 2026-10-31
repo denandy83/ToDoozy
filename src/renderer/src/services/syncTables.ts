@@ -14,6 +14,7 @@ import type {
 } from '../../../shared/types'
 import { captureSyncContext, type SyncContext } from './syncContext'
 import { readAll } from './readAll'
+import { remoteTaskOrder } from './remoteTaskOrder'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -214,10 +215,7 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
   },
 
   pullOrder(remotes) {
-    // Apply parents before children so parent_id FK is satisfied.
-    const parents = remotes.filter((t) => !t.parent_id)
-    const children = remotes.filter((t) => t.parent_id)
-    return [...parents, ...children]
+    return remoteTaskOrder(remotes)
   }
 }
 
@@ -1349,22 +1347,13 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   for (const row of localRows) {
     localById.set(desc.toRemote(row).id, row)
   }
-  const remoteById = new Map<string, TRemote>()
-  for (const row of remoteRows) {
-    remoteById.set(row.id, row)
-  }
+  const remoteIds = new Set(remoteRows.map((row) => row.id))
 
-  // Sort remote-only IDs by descriptor's pullOrder if provided (parents-first
-  // for tasks).
-  const remoteOnlyIds = [...remoteById.keys()].filter((id) => !localById.has(id))
-  let remoteOnlyRows = remoteOnlyIds.map((id) => remoteById.get(id)!)
-  if (desc.pullOrder) {
-    remoteOnlyRows = desc.pullOrder(remoteOnlyRows)
-  }
+  const incomingRows = desc.pullOrder ? desc.pullOrder(remoteRows) : remoteRows
 
   // Local-only: push to remote
   for (const id of localById.keys()) {
-    if (remoteById.has(id)) continue
+    if (remoteIds.has(id)) continue
     const local = localById.get(id)!
     try {
       await desc.remoteUpsert(local, context)
@@ -1374,23 +1363,19 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     }
   }
 
-  // Remote-only: pull
-  for (const remote of remoteOnlyRows) {
-    try {
-      if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
-      await desc.localApplyRemote(remote, api, context)
-      stats.pulled++
-    } catch {
-      stats.failed++
+  for (const remote of incomingRows) {
+    const id = remote.id
+    if (!localById.has(id)) {
+      try {
+        if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
+        await desc.localApplyRemote(remote, api, context)
+        stats.pulled++
+      } catch {
+        stats.failed++
+      }
+      continue
     }
-  }
-
-  // Both sides — LWW. Numeric compare via Date.parse so `…Z` and `…+00:00`
-  // for the same instant are treated as equal (see tsMs comment above).
-  for (const id of localById.keys()) {
-    if (!remoteById.has(id)) continue
     let local = localById.get(id)!
-    const remote = remoteById.get(id)!
     if (desc.name === 'themes') {
       try {
         await desc.localApplyRemote(remote, api, context)
