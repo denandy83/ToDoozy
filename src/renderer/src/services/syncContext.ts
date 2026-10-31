@@ -172,6 +172,14 @@ export async function requireProducerCurrent(origin: SyncProducer): Promise<void
   origin.assertCurrent()
 }
 
+export function syncProducerFromContext(context: SyncContext, userId: string): SyncProducer {
+  return { ...context, userId, scope: async () => context.scope, client: async () => { context.assertCurrent(); return context.client } }
+}
+
+export function projectSyncContext(parent: SyncContext, projectId: string, current = captureProjectScope()): SyncContext {
+  return channelSyncContext(parent, () => current(projectId), projectId)
+}
+
 export function channelSyncContext(parent: SyncContext, active: () => boolean, projectId: string): SyncContext {
   const assertCurrent = (): void => {
     parent.assertCurrent()

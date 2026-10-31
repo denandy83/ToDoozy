@@ -22,6 +22,9 @@ const cases = [
   { name: 'Star*Percent', unrelated: 'Star%Percent', canonical: 'Star*Percent' },
   { name: String.raw`Folder\Cost*%_2026`, unrelated: 'FolderCostXYZ2026', canonical: String.raw`Folder\Cost*%_2026` },
   { name: 'Regex.^$+?()[]{}|', unrelated: 'RegexX', canonical: 'Regex.^$+?()[]{}|' },
+  { name: 'οσ', unrelated: 'οσ extra', canonical: 'ΟΣ' },
+  { name: 'ος', unrelated: 'ος extra', canonical: 'ΟΣ' },
+  { name: 'Name \"quoted\",value', unrelated: 'Name quoted,value', canonical: 'NAME \"QUOTED\",VALUE' },
   { name: 'Étiquette', unrelated: 'Étiquette extra', canonical: 'éTIQUETTE' },
   { name: 'Literal Name', unrelated: 'Literal Name extra', canonical: 'LITERAL NAME' }
 ]

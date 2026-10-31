@@ -8,7 +8,7 @@ import { markSynced, refreshProducerPending, reportPushFailure } from './syncFee
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { channelSyncContext, captureSyncContext, captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { projectSyncContext, channelSyncContext, captureSyncContext, captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -381,17 +381,13 @@ export async function uploadProjectToSupabase(
   projectId: string,
   _ownerId?: string
 ): Promise<void> {
-  const supabase = await getSupabase()
-
-  // Verify we have an authenticated session before attempting Supabase operations
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) {
-    throw new Error('No authenticated Supabase session. Please log out and log back in.')
-  }
-  console.log('[SyncService] Sharing project with auth.uid:', session.user.id)
+  const origin = captureProjectProducer(projectId)
+  const supabase = await origin.client()
+  if (!supabase) throw new Error('No authenticated Supabase session. Please log out and log back in.')
+  const api = origin.api
 
   // Get project data from local
-  const project = await window.api.projects.findById(projectId)
+  const project = await api.projects.findById(projectId)
   if (!project) throw new Error('Project not found')
 
   // Create shared project and add owner as member atomically via SECURITY DEFINER function
@@ -405,7 +401,7 @@ export async function uploadProjectToSupabase(
   if (shareError) throw shareError
 
   // Upload statuses
-  const statuses = await window.api.statuses.findByProjectId(projectId)
+  const statuses = await api.statuses.findByProjectId(projectId)
   if (statuses.length > 0) {
     const { error: statusError } = await supabase.from('statuses').upsert(
       statuses.map((s) => ({
@@ -425,7 +421,7 @@ export async function uploadProjectToSupabase(
   }
 
   // Upload all project labels (not just task-assigned ones)
-  const projectLabels = await window.api.labels.findByProjectId(projectId)
+  const projectLabels = await api.labels.findByProjectId(projectId)
   const allLabelData = projectLabels.map((l) => ({ name: l.name, color: l.color }))
   await supabase.from('projects').update({ label_data: JSON.stringify(allLabelData) }).eq('id', projectId)
 
@@ -436,17 +432,17 @@ export async function uploadProjectToSupabase(
   // round-trips. getLabels filters tombstoned task_labels and label soft-delete
   // cascades to task_labels, so findByIds (which filters deleted_at) resolves
   // the identical set the per-label findById did.
-  const tasks = await window.api.tasks.findByProjectId(projectId)
+  const tasks = await api.tasks.findByProjectId(projectId)
   const labelIdsByTask = new Map<string, string[]>()
   const allLabelIds = new Set<string>()
   for (const task of tasks) {
-    const taskLabels = await window.api.tasks.getLabels(task.id)
+    const taskLabels = await api.tasks.getLabels(task.id)
     const ids = taskLabels.map((tl) => tl.label_id)
     labelIdsByTask.set(task.id, ids)
     for (const id of ids) allLabelIds.add(id)
   }
   const labels = allLabelIds.size > 0
-    ? await window.api.labels.findByIds([...allLabelIds])
+    ? await api.labels.findByIds([...allLabelIds])
     : []
   const labelById = new Map<string, { name: string; color: string }>(
     labels.map((l) => [l.id, { name: l.name, color: l.color }])
@@ -1178,6 +1174,7 @@ async function syncMembersDown(projectId: string, context: SyncContext, snapshot
  * Sync all shared project data from Supabase to local SQLite.
  */
 export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext): Promise<void> {
+  const projectCurrent = captureProjectScope()
   const admission = membershipSnapshot()
   // Never sync down when offline — would delete all local tasks
   if (!navigator.onLine) {
@@ -1185,6 +1182,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
     return
   }
   context ??= await captureSyncContext()
+  context = projectSyncContext(context, projectId, projectCurrent)
   context.assertCurrent()
   if (useAuthStore.getState().currentUser?.id !== userId) return
   const { api, client: supabase } = context

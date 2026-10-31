@@ -58,14 +58,15 @@ export class SupabaseLabelRepository implements AsyncLabelRepository {
   }
 
   async findByName(userId: string, name: string): Promise<Label | undefined> {
+    const namePattern = `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
     const { data } = await this.client
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .filter('name', 'imatch', `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+      .filter('name', 'imatch', namePattern)
       .limit(1)
       .single()
-    return typeof data?.name === 'string' && data.name.toLowerCase() === name.toLowerCase() ? data : undefined
+    return typeof data?.name === 'string' && new RegExp(namePattern, 'iu').exec(data.name)?.[0] === data.name ? data : undefined
   }
 
   async create(input: CreateLabelInput): Promise<Label> {
