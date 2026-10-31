@@ -74,15 +74,18 @@ describe('taskStore.hydrateAllForUser', () => {
     vi.resetModules()
   })
 
-  it('merges tasks and grouped label mappings from every project', async () => {
+  it('hydrates every accessible project and evicts tasks and labels from removed projects', async () => {
     const { useTaskStore } = await import('./taskStore')
-    // Pre-seed with an unrelated task that must be preserved (merge, not reset)
-    useTaskStore.setState({ tasks: { existing: makeTask('existing', 'pZ') }, taskLabels: {} })
+    useTaskStore.setState({
+      tasks: { existing: makeTask('existing', 'pZ') },
+      taskLabels: { existing: [mapping('existing', 'removed', 'Removed project')] }
+    })
 
     await useTaskStore.getState().hydrateAllForUser('u1')
 
     const { tasks, taskLabels } = useTaskStore.getState()
-    expect(Object.keys(tasks).sort()).toEqual(['a1', 'a2', 'b1', 'existing'])
+    expect(Object.keys(tasks).sort()).toEqual(['a1', 'a2', 'b1'])
+    expect(taskLabels['existing']).toBeUndefined()
     expect(taskLabels['a1'].map((l) => l.name).sort()).toEqual(['Bug', 'Feature'])
     expect(taskLabels['b1'].map((l) => l.name)).toEqual(['Bug'])
     // a2 has no labels — not present in the map
