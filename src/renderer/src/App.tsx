@@ -102,7 +102,7 @@ function App(): React.JSX.Element {
     // shared-project task chips fall back to other users' colors when the
     // viewer hasn't tagged anything in the active project yet.
     useLabelStore.getState().hydrateAllLabels()
-    hydrateAllForProject(currentProjectId, currentUser.id)
+    hydrateAllForProject(currentProjectId)
   }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
   // Instrumentation only — effect-run counter to detect StrictMode double-mount + dep churn.
@@ -190,7 +190,7 @@ function App(): React.JSX.Element {
       hydrateProjects(currentUser.id)
       hydrateStatuses(currentProjectId)
       hydrateLabels(currentProjectId)
-      hydrateAllForProject(currentProjectId, currentUser.id)
+      hydrateAllForProject(currentProjectId)
       hydrateAllTaskLabels(currentProjectId)
       hydrateMyDay(currentUser.id)
       hydrateSettings()

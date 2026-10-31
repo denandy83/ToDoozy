@@ -22,7 +22,7 @@ vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
 vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateAllLabels: async () => {}, hydrateLabels: async () => {} }) } }))
-vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {} }) } }))
+vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {}, hydrateAllForProject: async () => {} }) } }))
 
 let db: DatabaseSync
 let repo: ReturnType<typeof createRepositories>

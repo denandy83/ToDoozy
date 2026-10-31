@@ -291,3 +291,23 @@ it('keeps the real Telegram HTTP/form serialization consumer working after the q
     await new Promise<void>((done,reject)=>server.close(error=>error?reject(error):done()))
   }
 })
+
+it.each([
+  { now: '2026-01-16T22:45:00Z', day: '2026-01-16', next: '2026-01-17' },
+  { now: '2026-03-29T21:45:00Z', day: '2026-03-29', next: '2026-03-30' },
+  { now: '2026-10-25T22:45:00Z', day: '2026-10-25', next: '2026-10-26' }
+])('classifies civil/local and zoned due dates in Brussels on a UTC host at $now', async ({ now, day, next }) => {
+  const originalZone = process.env.TZ
+  process.env.TZ = 'UTC'
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(now))
+  try {
+    const dates = [day, `${day}T23:30`, `${day}T23:30:00Z`, `${next}T00:30:00+05:00`, `${day}T23:30:00-05:00`, next]
+    rows.tasks = dates.map((due_date, index) => ({ ...task(index), is_in_my_day: 0, due_date }))
+    expect((await api.getMyDayTasks()).map(row => row.id).sort()).toEqual(['task-00000', 'task-00001', 'task-00003'])
+  } finally {
+    vi.useRealTimers()
+    if (originalZone === undefined) delete process.env.TZ
+    else process.env.TZ = originalZone
+  }
+})

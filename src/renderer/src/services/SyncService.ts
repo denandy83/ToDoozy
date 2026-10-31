@@ -287,9 +287,9 @@ export async function subscribeToProject(projectId: string, context?: SyncContex
   await createSharedChannel(projectId, state)
 }
 
-export async function reconcileSharedSubscriptions(projects: Project[], context: SyncContext, subscribeMissing: boolean): Promise<void> {
+export async function reconcileSharedSubscriptions(projects: Project[], context: SyncContext, subscribeMissing: boolean, projectIds?: Set<string>): Promise<void> {
   const shared = new Set(projects.filter((project) => project.is_shared === 1).map((project) => project.id))
-  for (const id of channels.keys()) if (!shared.has(id)) await unsubscribeFromProject(id)
+  for (const id of channels.keys()) if ((!projectIds || projectIds.has(id)) && !shared.has(id)) await unsubscribeFromProject(id)
   for (const id of shared) {
     if (!await context.isCurrent()) return
     if (subscribeMissing || channels.has(id)) await subscribeToProject(id, context)

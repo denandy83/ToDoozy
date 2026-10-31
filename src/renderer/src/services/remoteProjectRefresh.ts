@@ -1,6 +1,5 @@
 import { readAll, readAllIn } from './readAll'
 import { captureSyncContext, type SyncContext } from './syncContext'
-import { useTaskStore } from '../shared/stores/taskStore'
 import { useLabelStore } from '../shared/stores/labelStore'
 import { logEvent } from '../shared/stores/logStore'
 
@@ -24,9 +23,7 @@ export async function refreshProjectLabels(projectId: string, context?: SyncCont
     if (link.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(projectId, link.label_id)
   }
   context.assertCurrent()
-  await useLabelStore.getState().hydrateLabels(projectId)
-  context.assertCurrent()
-  await useTaskStore.getState().hydrateAllTaskLabels(projectId)
+  await useLabelStore.getState().hydrateLabels(projectId, context)
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null

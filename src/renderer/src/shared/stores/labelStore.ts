@@ -1,3 +1,4 @@
+import type { SyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -45,7 +46,7 @@ interface LabelState {
 }
 
 interface LabelActions {
-  hydrateLabels(projectId: string): Promise<void>
+  hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   hydrateAllLabels(): Promise<void>
   createLabel(input: CreateLabelInput): Promise<Label>
   updateLabel(id: string, input: UpdateLabelInput): Promise<Label | null>
@@ -112,8 +113,8 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   loading: false,
   error: null,
 
-  async hydrateLabels(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent } = origin ?? hydrationContext()
     set({ loading: true, error: null })
     try {
       const labels = await api.labels.findByProjectId(projectId)

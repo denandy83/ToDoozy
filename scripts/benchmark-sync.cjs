@@ -154,7 +154,9 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   vm.createContext(sandbox);
   vm.runInContext(code,sandbox);
   const fixture=sandbox.fixture,{repo,stores}=fixture;
+  const nativeCalls=[];
   const api=new Proxy({}, {get:(_,namespace)=>new Proxy({}, {get:(_,method)=>async(...args)=>{
+    if(namespace!=='sync')nativeCalls.push({namespace,method,args});
     if(namespace==='app'&&method==='getChangelog')return '# Synthetic changelog';
     if(namespace==='releaseNotes'&&method==='sync')return {ok:true,count:0,cached:true};
     if(namespace==='auth'&&method==='getSupabaseConfig')return Promise.resolve({url:'http://127.0.0.1:9999',anonKey:'synthetic-public-key'});
@@ -164,7 +166,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
       const mapped={getQueue:'findAll',count:'count',enqueue:'enqueue',dequeue:'dequeue',updatePayload:'updatePayload'}[method];if(mapped)return Promise.resolve(repo.syncQueue[mapped](...args));
     }
     if(['timer','tray','log','power'].includes(namespace))return method.startsWith('on')?noop:Promise.resolve();
-    const op=namespace==='tasks'?({applyRemote:'applyRemoteTask',completeRecurring:'completeRecurringTask'}[method]??method):namespace==='labels'&&method==='findAll'?'findAllForUser':method;
+    const op=namespace==='tasks'?({applyRemote:'applyRemoteTask',completeRecurring:'completeRecurringTask'}[method]??method):namespace==='labels'&&method==='findAll'?'findAllForUser':namespace==='savedViews'&&method==='countMatching'?'countMatchingTasks':method;
     if(!repo[namespace]?.[op]){const message=`Unsupported fixture API ${namespace}.${op}`;fixtureErrors.push(message);return Promise.reject(Error(message))}
     return Promise.resolve(repo[namespace][op](...args));
   }})});
@@ -187,7 +189,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   stores.useAuthStore.setState({currentUser:{id:'u'},isOffline:false});stores.useSettingsStore.getState().setUserId('u');stores.useSyncStore.setState({realtimeConnected:connected});
   await stores.useProjectStore.getState().hydrateProjects('u');
   const untilIdle=async()=>{let quiet=0,last=-1;for(let i=0;i<2000;i++){await settle();if(!active&&requests.length===last)quiet++;else quiet=0;last=requests.length;if(quiet>=10)return;if(latency)await new Promise(resolve=>setTimeout(resolve,latency))}throw Error('Fixture did not settle')};
-  return {sandbox,services:fixture,repo,stores,projects,remote,requests,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
+  return {sandbox,services:fixture,repo,stores,projects,remote,requests,nativeCalls,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
     run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),untilIdle,context:()=>fixture.captureSyncContext(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
     changeConnected:value=>stores.useSyncStore.getState().setRealtimeConnected(value),beforeRequest:callback=>{beforeRequest=callback},
     runStartupTimers:async()=>{const jobs=[...timers].filter(([,job])=>job.ms===2000);for(const [id,{fn}] of jobs){timers.delete(id);await fn()}await untilIdle()},

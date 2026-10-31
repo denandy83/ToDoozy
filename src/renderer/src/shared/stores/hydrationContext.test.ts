@@ -17,11 +17,12 @@ beforeEach(() => {
   useStatusStore.setState({ statuses: {}, error: null })
   useTaskStore.setState({ tasks: {}, taskLabels: {}, error: null })
   started = new Promise((resolve) => { entered = resolve })
+  const pending = new Promise((resolve) => { finish = resolve })
   vi.stubGlobal('window', { api: { sync: {
     captureContext: async () => ({ generation, userId: useAuthStore.getState().currentUser?.id }),
     invokeContext: async (origin: { generation: number }) => {
       if (origin.generation !== generation) throw new Error('Sync database changed')
-      entered(); return new Promise((resolve) => { finish = resolve })
+      entered(); return pending
     }
   } } })
 })
@@ -38,7 +39,7 @@ const hydrations = [
   () => useTaskStore.getState().hydrateTemplates('p'),
   () => useTaskStore.getState().hydrateTaskLabels('t'),
   () => useTaskStore.getState().hydrateAllTaskLabels('p'),
-  () => useTaskStore.getState().hydrateAllForProject('p', 'a'),
+  () => useTaskStore.getState().hydrateAllForProject('p'),
   () => useTaskStore.getState().hydrateAllForUser('a')
 ]
 

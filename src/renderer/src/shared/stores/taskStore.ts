@@ -188,7 +188,7 @@ interface TaskActions {
   hydrateMyDay(userId: string): Promise<void>
   hydrateArchived(projectId: string): Promise<void>
   hydrateTemplates(projectId: string): Promise<void>
-  hydrateAllForProject(projectId: string, userId: string, producer?: SyncProducer): Promise<void>
+  hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   hydrateAllForUser(userId: string): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
@@ -225,6 +225,24 @@ interface TaskActions {
 }
 
 export type TaskStore = TaskState & TaskActions
+
+function mergeHydratedTasks(state: TaskStore, initial: TaskStore, projectIds: Set<string>, taskArrays: Task[][], labelMappingArrays: TaskLabelMapping[][]): Pick<TaskStore, 'tasks' | 'taskLabels'> {
+  const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
+  for (const rows of taskArrays) for (const task of rows) if (!task.deleted_at) tasks[task.id] = task
+  const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id ?? initial.tasks[id]?.project_id)))
+  const grouped: Record<string, Label[]> = {}
+  for (const mappings of labelMappingArrays) {
+    for (const { task_id, ...label } of mappings) {
+      if (tasks[task_id]) (grouped[task_id] ??= []).push(label)
+    }
+  }
+  Object.assign(taskLabels, grouped)
+  for (const [id, task] of Object.entries(state.tasks)) if (task !== initial.tasks[id]) tasks[id] = task
+  for (const id of Object.keys(initial.tasks)) if (!state.tasks[id]) delete tasks[id]
+  for (const [id, labels] of Object.entries(state.taskLabels)) if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
+  for (const id of Object.keys(initial.tasks)) if (projectIds.has(initial.tasks[id].project_id) && !tasks[id]) delete taskLabels[id]
+  return { tasks, taskLabels }
+}
 
 export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   tasks: {},
@@ -330,32 +348,20 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllForProject(_projectId: string, userId: string, producer?: SyncProducer): Promise<void> {
-    const { api, isCurrent } = producer ?? hydrationContext()
-    set({ loading: true, error: null })
+  async hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent } = origin ?? hydrationContext()
+    const initial = get()
     try {
-      // Load all projects' tasks for accurate sidebar counts
-      const allProjects = await api.projects.getProjectsForUser(userId)
-      const projectTaskPromises = allProjects.map((p) => api.tasks.findByProjectId(p.id))
-      const archivedPromises = allProjects.map((p) => api.tasks.findArchived(p.id))
-      const [myDay, templates, ...rest] = await Promise.all([
-        api.tasks.findMyDay(userId),
-        api.tasks.findAllTemplates(getUserId()),
-        ...projectTaskPromises,
-        ...archivedPromises
+      const [tasks, mappings] = await Promise.all([
+        api.tasks.findAllByProject(projectId, { includeTombstones: true }),
+        api.labels.findTaskLabelsByProject(projectId)
       ])
-      const taskMap: Record<string, Task> = {}
-      for (const tasks of rest) {
-        for (const task of tasks) taskMap[task.id] = task
-      }
-      for (const task of myDay) taskMap[task.id] = task
-      for (const task of templates) taskMap[task.id] = task
       if (!await isCurrent()) return
-      set({ tasks: taskMap, loading: false })
+      set((state) => mergeHydratedTasks(state, initial, new Set([projectId]), [tasks], [mappings]))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load tasks'
-      set({ error: message, loading: false })
+      const message = err instanceof Error ? err.message : 'Failed to load project tasks'
+      set({ error: message })
     }
   },
 
@@ -371,35 +377,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         Promise.all(allProjects.map((p) => api.labels.findTaskLabelsByProject(p.id)))
       ])
       if (!await isCurrent()) return
-      set((state) => {
-        const projectIds = new Set(allProjects.map((p) => p.id))
-        const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
-        for (const arr of taskArrays) {
-          for (const task of arr) if (!task.deleted_at) tasks[task.id] = task
-        }
-        const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id)))
-        for (const mappings of labelMappingArrays) {
-          const grouped: Record<string, Label[]> = {}
-          for (const m of mappings) {
-            const { task_id, ...label } = m
-            if (!grouped[task_id]) grouped[task_id] = []
-            grouped[task_id].push(label)
-          }
-          for (const [tid, labels] of Object.entries(grouped)) {
-            taskLabels[tid] = labels
-          }
-        }
-        for (const [id, task] of Object.entries(state.tasks)) {
-          if (task !== initial.tasks[id]) tasks[id] = task
-        }
-        for (const id of Object.keys(initial.tasks)) {
-          if (!state.tasks[id]) delete tasks[id]
-        }
-        for (const [id, labels] of Object.entries(state.taskLabels)) {
-          if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
-        }
-        return { tasks, taskLabels }
-      })
+      set((state) => mergeHydratedTasks(state, initial, new Set(allProjects.map((project) => project.id)), taskArrays, labelMappingArrays))
     } catch (err) {
       if (!await isCurrent()) return
       const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
@@ -485,7 +463,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
 
         // Cascade archive/unarchive to subtasks in store
         if (input.is_archived !== undefined) {
-          await get().hydrateAllForProject(task.project_id, origin.userId ?? '', origin)
+          await get().hydrateAllForProject(task.project_id, origin)
         }
 
         // Check if a recurring task was moved to done status → create clone

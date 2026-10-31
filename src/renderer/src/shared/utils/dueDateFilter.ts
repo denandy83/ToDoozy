@@ -29,6 +29,10 @@ function toIsoDate(d: Date): string {
  * Check if a task's due_date matches the active due date filter (preset or custom range).
  * Returns true if no filter is active, or if the task matches the filter.
  */
+export function isDueDateOverdue(dueDate: string | null): boolean {
+  return !!dueDate && calendarDateKey(dueDate) < localDateKey()
+}
+
 export function matchesDueDateFilter(
   dueDate: string | null,
   dueDatePreset: string | null,
@@ -38,7 +42,7 @@ export function matchesDueDateFilter(
     const now = new Date()
     const todayStr = toIsoDate(now)
     if (dueDatePreset === 'no_date') return !dueDate
-    if (dueDatePreset === 'overdue') return !!dueDate && calendarDateKey(dueDate) < todayStr
+    if (dueDatePreset === 'overdue') return isDueDateOverdue(dueDate)
     if (dueDatePreset === 'today') return !!dueDate && calendarDateKey(dueDate) === todayStr
     if (dueDatePreset === 'this_week') {
       if (!dueDate) return false

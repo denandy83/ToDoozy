@@ -1,10 +1,11 @@
+import { isDueDateOverdue } from '../../shared/utils/dueDateFilter'
 import { usePresence } from '../../shared/motion/usePresence'
 import { ensureProtocol } from '../../../../shared/referenceUrl'
 import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Trash2, ChevronRight, Plus, Calendar, CheckCircle2, ExternalLink, Repeat } from 'lucide-react'
 import { describeRecurrence } from '../../../../shared/recurrenceUtils'
-import { formatDate } from '../../shared/utils/dateFormat'
+import { formatDate, formatTime } from '../../shared/utils/dateFormat'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { StatusButton } from '../../shared/components/StatusButton'
 import { LabelChip } from '../../shared/components/LabelChip'
@@ -435,7 +436,7 @@ export function TaskRow({
         {/* Due date */}
         {task.due_date && !isDone && (
           <span className={`inline-flex flex-shrink-0 items-center gap-1 ui-metadata ${
-            task.due_date.split('T')[0] < new Date().toISOString().split('T')[0] ? 'text-danger' : 'text-muted'
+            isDueDateOverdue(task.due_date) ? 'text-danger' : 'text-muted'
           }`}>
             <Calendar size={10} />
             {formatDate(task.due_date, undefined, { omitCurrentYear: true })}
@@ -447,7 +448,7 @@ export function TaskRow({
           <span className="inline-flex flex-shrink-0 items-center gap-1 ui-metadata text-success">
             <CheckCircle2 size={10} />
             {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
-            {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
+            {task.completed_date.includes('T') ? ` ${formatTime(task.completed_date)}` : ''}
           </span>
         )}
 

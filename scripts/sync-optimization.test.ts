@@ -10,6 +10,9 @@ type Stores = {
   useProjectStore: typeof import('../src/renderer/src/shared/stores/projectStore').useProjectStore
   useViewStore: typeof import('../src/renderer/src/shared/stores/viewStore').useViewStore
   useTimerStore: typeof import('../src/renderer/src/shared/stores/timerStore').useTimerStore
+  useStatusStore: typeof import('../src/renderer/src/shared/stores/statusStore').useStatusStore
+  useLabelStore: typeof import('../src/renderer/src/shared/stores/labelStore').useLabelStore
+  useSavedViewStore: typeof import('../src/renderer/src/shared/stores/savedViewStore').useSavedViewStore
 }
 interface Channel {
   topic: string
@@ -32,6 +35,7 @@ interface Harness {
   channels: Channel[]
   requests: Array<{ table: string; method: string; url: string; body: unknown }>
   logs: unknown[]
+  nativeCalls: Array<{ namespace: string; method: string; args: unknown[] }>
   context(): Promise<import('../src/renderer/src/services/syncContext').SyncContext>
   run(): Promise<() => void>
   untilIdle(): Promise<void>
@@ -427,4 +431,76 @@ it.each([120, 10830])('switches a delayed Flowtime break to count-up for the rem
   expect(state.isRunning).toBe(true)
   expect(state.isPaused).toBe(false)
   state.stop()
+})
+
+
+it.each([false, true])('hydrates only the affected project after actual healthy events (shared=%s)', async shared => {
+  const h = await make({ projectCount: 3, shared: shared ? 3 : 0 })
+  for (let index = 0; index < 3; index++) {
+    const task = h.repo.tasks.create({ id: `cached-${index}`, owner_id: 'u', project_id: `p${index}`, status_id: `s${index}`, title: `Before ${index}`, priority: 0 })
+    h.remote.tasks.push({ ...task })
+    const label = h.repo.labels.create({ id: `cached-label-${index}`, user_id: 'u', name: `Label ${index}` })
+    h.repo.tasks.applyRemoteTaskLabels(task.id, [label.id])
+    h.remote.user_labels.push({ ...label })
+    h.remote.project_labels.push({ project_id: task.project_id, label_id: label.id, created_at: label.created_at, deleted_at: null })
+    h.remote.task_labels.push({ task_id: task.id, label_id: label.id, deleted_at: null })
+  }
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const unrelated = {
+      task: h.stores.useTaskStore.getState().tasks['cached-1'],
+      labels: h.stores.useTaskStore.getState().taskLabels['cached-1'],
+      status: h.stores.useStatusStore.getState().statuses.s1,
+      project: h.stores.useProjectStore.getState().projects.p1
+    }
+    const view = h.repo.savedViews.create({ id: 'scoped-count', user_id: 'u', name: 'p0', filter_config: '{"projectIds":["p0"],"priorities":[3]}' })
+    const otherView = h.repo.savedViews.create({ id: 'unrelated-count', user_id: 'u', name: 'p1', filter_config: '{"projectIds":["p1"]}' })
+    h.stores.useSavedViewStore.setState({ views: [view, otherView], viewCounts: { [view.id]: 0, [otherView.id]: 1 } })
+    h.nativeCalls.length = 0
+    h.remote.tasks[0] = { ...h.remote.tasks[0], title: 'Changed remotely', priority: 3, updated_at: stamp }
+    active(h, `${shared ? 'project' : 'personal'}:p0`).emit('tasks', 'UPDATE', h.remote.tasks[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useTaskStore.getState().tasks['cached-0'].title).toBe('Changed remotely')
+    expect(h.stores.useSavedViewStore.getState().viewCounts).toEqual({ [view.id]: 1, [otherView.id]: 1 })
+    const channel = active(h, `${shared ? 'project' : 'personal'}:p0`)
+    const status = h.remote.statuses.find(row => row.id === 's0')!
+    Object.assign(status, { name: 'Renamed remotely', order_index: 9, updated_at: stamp })
+    channel.emit('statuses', 'UPDATE', status)
+    const added = h.repo.labels.create({ id: 'existing-label', user_id: 'u', name: 'Existing unattached label' })
+    h.remote.user_labels.push({ ...added })
+    const link = { project_id: 'p0', label_id: added.id, created_at: stamp, deleted_at: null }
+    h.remote.project_labels.push(link)
+    channel.emit('project_labels', 'INSERT', link)
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useStatusStore.getState().statuses.s0.name).toBe('Renamed remotely')
+    expect(h.stores.useStatusStore.getState().statuses.s0.order_index).toBe(9)
+    expect(h.stores.useLabelStore.getState().projectLabels.p0.has(added.id)).toBe(true)
+    h.stores.useViewStore.setState({ currentView: 'saved-view', selectedSavedViewId: view.id })
+    h.stores.useSavedViewStore.setState({ viewCounts: { [view.id]: 99, [otherView.id]: 1 } })
+    const removedLink = h.remote.project_labels.find(row => row.label_id === 'cached-label-0')!
+    removedLink.deleted_at = '2030-01-02T00:00:00.000Z'
+    channel.emit('project_labels', 'UPDATE', removedLink)
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useTaskStore.getState().taskLabels['cached-0'] ?? []).toEqual([])
+    expect(h.stores.useLabelStore.getState().projectLabels.p0.has('cached-label-0')).toBe(false)
+    expect(h.stores.useSavedViewStore.getState().viewCounts).toEqual({ [view.id]: 99, [otherView.id]: 1 })
+    const removed = { ...h.remote.tasks[0] }
+    h.remote.tasks = h.remote.tasks.filter(row => row.id !== removed.id)
+    channel.emit('tasks', 'DELETE', removed)
+    await h.untilIdle(); await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useTaskStore.getState().tasks['cached-0']).toBeUndefined()
+    expect(h.stores.useTaskStore.getState().taskLabels['cached-0']).toBeUndefined()
+    expect(h.stores.useTaskStore.getState().tasks['cached-1']).toBe(unrelated.task)
+    expect(h.stores.useTaskStore.getState().taskLabels['cached-1']).toBe(unrelated.labels)
+    expect(h.stores.useStatusStore.getState().statuses.s1).toBe(unrelated.status)
+    expect(h.stores.useProjectStore.getState().projects.p1).toBe(unrelated.project)
+    const calls = h.nativeCalls.filter(call => ['projects','tasks','statuses','labels','settings','themes','savedViews','projectAreas','projectTemplates'].includes(call.namespace))
+    expect(calls.some(call => ['getProjectsForUser','findAll','findAllTemplates','findByUserId','getAll','getAllForUser'].includes(call.method)), JSON.stringify(calls)).toBe(false)
+    expect(calls.filter(call => ['settings','themes','projectAreas','projectTemplates'].includes(call.namespace))).toEqual([])
+    for (const call of calls.filter(call => ['findByProjectId','findAllByProject','findTaskLabelsByProject','getMembers'].includes(call.method))) expect(call.args[0]).toBe('p0')
+    expect(calls.filter(call => call.namespace === 'savedViews').every(call => call.method === 'countMatching' && String(call.args[0]).includes('p0'))).toBe(true)
+    expect(calls.filter(call => call.namespace === 'tasks' && call.method === 'getLabelState').every(call => call.args[0] === 'cached-0')).toBe(true)
+    expect(h.maxConcurrent()).toBe(1)
+  } finally { cleanup() }
 })

@@ -161,7 +161,7 @@ export async function completeTask(taskId: string): Promise<boolean> {
   return !!data
 }
 function dayKey(value: string|Date,zone: string): string {
-  if (typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  if (typeof value==='string' && !/[zZ+-]/.test(value.slice(10))) return value.slice(0,10)
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value))
   const get=(type:string): string=>parts.find(p=>p.type===type)!.value
   return `${get('year')}-${get('month')}-${get('day')}`

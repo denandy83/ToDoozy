@@ -180,7 +180,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
         if (!await origin.isCurrent()) return null
-        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        await useTaskStore.getState().hydrateAllForProject(id, origin)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
         if (!await origin.isCurrent()) return null
         await pushProjectArchive()
@@ -205,7 +205,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
         if (!await origin.isCurrent()) return null
-        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        await useTaskStore.getState().hydrateAllForProject(id, origin)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
         if (!await origin.isCurrent()) return null
         await pushProjectArchive()
