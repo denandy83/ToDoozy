@@ -7,7 +7,7 @@ import { markSynced, refreshProducerPending, reportPushFailure } from './syncFee
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext, captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { channelSyncContext, captureSyncContext, captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -63,23 +63,16 @@ export function setRealtimeCallback(cb: RealtimeCallback): () => void {
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
-  const parent = await state.context
-  const hydration = hydrationContext(parent, projectId)
-  const context: SyncContext = { ...parent, ...hydration }
-  const callbackOrigin: SyncContext = {
-    ...context,
-    isCurrent: async () => await context.isCurrent() && !state.cancelled,
-    assertCurrent: () => { context.assertCurrent(); if (state.cancelled) throw new Error('Shared channel cancelled') }
-  }
+  const context = await state.context
   const dispatch = (table: string, event: string, data: Record<string, unknown>): void => {
     const callback = onChangeCallback
     if (!callback) return
     void (async () => {
-      if (!await callbackOrigin.isCurrent()) return
-      callbackOrigin.assertCurrent()
-      await callback(table, event, data, callbackOrigin)
+      if (!await context.isCurrent()) return
+      context.assertCurrent()
+      await callback(table, event, data, context)
     })().catch(async error => {
-      if (await callbackOrigin.isCurrent()) logEvent('error', 'realtime', 'Shared callback failed', String(error))
+      if (await context.isCurrent()) logEvent('error', 'realtime', 'Shared callback failed', String(error))
     }).catch(() => {})
   }
   const supabase = await getSupabase()
@@ -102,8 +95,8 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void callbackOrigin.api.tasks.hardDelete(data.id).then(async () => { if (!await callbackOrigin.isCurrent()) return; callbackOrigin.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : []) })
-            .catch(async (error) => { if (await callbackOrigin.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)) }).catch(() => {})
+          void context.api.tasks.hardDelete(data.id).then(async () => { if (!await context.isCurrent()) return; context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : []) })
+            .catch(async (error) => { if (await context.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)) }).catch(() => {})
         } else {
           scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : [])
         }
@@ -119,8 +112,8 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void callbackOrigin.api.statuses.hardDelete(data.id).then(async () => { if (!await callbackOrigin.isCurrent()) return; callbackOrigin.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
-            .catch(async (error) => { if (await callbackOrigin.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)) }).catch(() => {})
+          void context.api.statuses.hardDelete(data.id).then(async () => { if (!await context.isCurrent()) return; context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
+            .catch(async (error) => { if (await context.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)) }).catch(() => {})
         } else scheduleRemoteProjectRefresh(projectId, context)
         dispatch('status', payload.eventType, data)
       }
@@ -295,6 +288,8 @@ export async function forceReconnectAllShared(): Promise<void> {
  * Auto-reconnects with backoff on CHANNEL_ERROR/TIMED_OUT/CLOSED.
  */
 export async function subscribeToProject(projectId: string, context?: SyncContext): Promise<void> {
+  if (context && !await context.isCurrent()) return
+  context = context?.subscriptionSource ?? context
   const existing = channels.get(projectId)
   if (existing) {
     context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
@@ -310,11 +305,7 @@ export async function subscribeToProject(projectId: string, context?: SyncContex
   const projectCurrent = captureProjectScope()
   const source = context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended())
   const state: SharedChannelState = {
-    context: source.then(parent => ({
-      ...parent,
-      isCurrent: async () => await parent.isCurrent() && projectCurrent(projectId),
-      assertCurrent: () => { parent.assertCurrent(); if (!projectCurrent(projectId)) throw new Error('Shared project invalidated') }
-    })),
+    context: source.then(parent => channelSyncContext(parent, () => !state.cancelled && projectCurrent(projectId), projectId)),
     channel: null,
     cancelled: false,
     attempt: 0,

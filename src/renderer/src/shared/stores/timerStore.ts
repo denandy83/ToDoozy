@@ -1,3 +1,4 @@
+import { formatTimerSeconds } from '../../../../shared/timerDisplay'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import { useSettingsStore } from './settingsStore'
@@ -606,11 +607,7 @@ function logCookieBreak(taskId: string, userId: string, earnedSeconds: number, s
 // ── Selectors ──────────────────────────────────────────────────────────
 
 export function formatTimeRemaining(seconds: number): string {
-  const abs = Math.abs(Math.floor(seconds))
-  const m = Math.floor(abs / 60)
-  const s = abs % 60
-  const prefix = seconds < 0 ? '-' : ''
-  return `${prefix}${m}:${s.toString().padStart(2, '0')}`
+  return formatTimerSeconds(seconds, true)
 }
 
 /** Drop private task context without writing an old-account focus session. */

@@ -1,3 +1,4 @@
+import { hydrationContext } from '../shared/stores/hydrationContext'
 import { captureProjectScope } from '../shared/stores/projectScope'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { TodoozyAPI } from '../../../preload/index.d'
@@ -11,6 +12,7 @@ export interface SyncContext {
   assertCurrent(): void
   isCurrent(): Promise<boolean>
   scope: string
+  subscriptionSource?: SyncContext
 }
 
 export interface SyncProducer {
@@ -127,4 +129,41 @@ export async function syncContextFromProducer(origin: SyncProducer): Promise<Syn
 export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {
   if (!await origin.isCurrent()) throw new Error('Sync account or database changed')
   origin.assertCurrent()
+}
+
+export function channelSyncContext(parent: SyncContext, active: () => boolean, projectId: string): SyncContext {
+  const assertCurrent = (): void => {
+    parent.assertCurrent()
+    if (!active()) throw new Error('Sync channel cancelled')
+  }
+  const origin = {
+    ...parent,
+    assertCurrent,
+    isCurrent: async () => active() && await parent.isCurrent() && active()
+  }
+  const guardQuery = <T extends object>(query: T): T => new Proxy(query, {
+    get(target, key) {
+      const method = Reflect.get(target, key)
+      if (typeof method !== 'function') return method
+      if (key === 'then') return (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => {
+        return Promise.resolve().then(() => {
+          assertCurrent()
+          return Reflect.apply(method, target, [(value: unknown) => { assertCurrent(); return value }])
+        }).then(resolve, reject)
+      }
+      return (...args: unknown[]) => {
+        assertCurrent()
+        const result = Reflect.apply(method, target, args)
+        return result && typeof result === 'object' ? guardQuery(result) : result
+      }
+    }
+  })
+  const client = new Proxy(parent.client, {
+    get(target, key) {
+      const method = Reflect.get(target, key)
+      if (key !== 'from' && key !== 'rpc') return typeof method === 'function' ? method.bind(target) : method
+      return (...args: unknown[]) => { assertCurrent(); return guardQuery(Reflect.apply(method, target, args)) }
+    }
+  })
+  return { ...origin, ...hydrationContext(origin, projectId), client, subscriptionSource: parent.subscriptionSource ?? parent }
 }

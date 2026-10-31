@@ -1,10 +1,11 @@
+import { captureProjectScope } from '../shared/stores/projectScope'
 import { hydrationContext } from '../shared/stores/hydrationContext'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { useAuthStore } from '../shared/stores/authStore'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
-import { captureSyncContext, captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
+import { channelSyncContext, captureSyncContext, captureSyncProducer, withSyncProducer, type SyncContext, type SyncProducer } from './syncContext'
 /**
  * PersonalSyncService — handles syncing personal (non-shared) project data
  * and user-level data (settings, themes, saved views, areas, labels) to Supabase.
@@ -2574,7 +2575,7 @@ interface PersonalChannelState {
   context: Promise<SyncContext>
   archived?: boolean
   channel: RealtimeChannel | null
-  onChange: (event: string, data: Record<string, unknown>) => void
+  onChange: (event: string, data: Record<string, unknown>, origin: SyncContext) => void
   cancelled: boolean
   attempt: number
   reconnectTimer: ReturnType<typeof setTimeout> | null
@@ -2620,6 +2621,8 @@ async function applyRemoteActivityRow(
   const first = await context.api.activityLog
     .applyRemote(input)
     .catch(() => 'missing-task' as const)
+  if (!await context.isCurrent()) return
+  context.assertCurrent()
   if (first === 'applied') {
     onApplied()
     return
@@ -2648,7 +2651,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
       if (state.cancelled) return
       try { context.assertCurrent() } catch { return }
-      void requestProjectRefresh(context, [projectId]).catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
+      void requestProjectRefresh(context, [projectId]).catch((error) => handlePullError(context, 'Project metadata refresh', error))
     })
   // Archived projects retain only restore/metadata discovery, not task activity.
   if (!archived) channel
@@ -2663,8 +2666,8 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
           : payload.new as Record<string, unknown>
         const apply = payload.eventType === 'DELETE' && typeof data.id === 'string' ? context.api.tasks.hardDelete(data.id) : Promise.resolve()
         void apply.then(() => {
-          if (!state.cancelled) { context.assertCurrent(); state.onChange(payload.eventType, data) }
-        }).catch((error) => logEvent('error', 'sync', 'Task refresh failed', String(error)))
+          if (!state.cancelled) { context.assertCurrent(); state.onChange(payload.eventType, data, context) }
+        }).catch((error) => handlePullError(context, 'Task refresh', error))
       }
     )
     .on(
@@ -2675,7 +2678,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         try { context.assertCurrent() } catch { return }
         const row = payload.new as Record<string, unknown>
         void applyRemoteActivityRow(row, () => {
-          if (!state.cancelled) state.onChange('activity', row)
+          if (!state.cancelled) state.onChange('activity', row, context)
         }, context)
       }
     )
@@ -2685,12 +2688,12 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
       try { context.assertCurrent() } catch { return }
       const data = payload.eventType === 'DELETE' ? payload.old : payload.new
       const apply = payload.eventType === 'DELETE' && typeof data.id === 'string' ? context.api.statuses.hardDelete(data.id) : Promise.resolve()
-      void apply.then(() => { if (!state.cancelled) return requestProjectRefresh(context, [projectId]); return undefined }).catch((error) => logEvent('error', 'sync', 'Status refresh failed', String(error)))
+      void apply.then(() => { if (!state.cancelled) return requestProjectRefresh(context, [projectId]); return undefined }).catch((error) => handlePullError(context, 'Status refresh', error))
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'project_labels', filter: `project_id=eq.${projectId}` }, () => {
       if (state.cancelled) return
       try { context.assertCurrent() } catch { return }
-      void requestProjectRefresh(context, [projectId]).catch((error) => logEvent('error', 'sync', 'Project label refresh failed', String(error)))
+      void requestProjectRefresh(context, [projectId]).catch((error) => handlePullError(context, 'Project label refresh', error))
     })
   channel.subscribe((status, err) => {
       if (state.cancelled) return
@@ -2850,7 +2853,7 @@ async function reconcileProjectSubscriptions(context: SyncContext, subscribeMiss
   for (const project of projects) {
     if (!await context.isCurrent()) return
     if (project.is_shared !== 1 && (subscribeMissing || personalChannelStates.has(project.id))) {
-      const onChange = personalChannelStates.get(project.id)?.onChange ?? ((event: string, data: Record<string, unknown>) => {
+      const onChange = personalChannelStates.get(project.id)?.onChange ?? ((event: string, data: Record<string, unknown>, context: SyncContext) => {
         const taskId = event === 'activity' ? data.task_id : data.id
         const taskIds = typeof taskId === 'string' ? new Map([[project.id, [taskId]]]) : new Map<string, string[]>()
         void requestProjectRefresh(context, [project.id], taskIds).then(async () => {
@@ -2872,9 +2875,11 @@ async function reconcileProjectSubscriptions(context: SyncContext, subscribeMiss
  */
 export async function subscribeToPersonalProject(
   projectId: string,
-  onChange: (event: string, data: Record<string, unknown>) => void,
+  onChange: (event: string, data: Record<string, unknown>, origin: SyncContext) => void,
   context?: SyncContext
 ): Promise<void> {
+  if (context && !await context.isCurrent()) return
+  context = context?.subscriptionSource ?? context
   const existing = personalChannelStates.get(projectId)
   if (existing) {
     context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
@@ -2885,8 +2890,10 @@ export async function subscribeToPersonalProject(
     if (existing.archived === archived && sameScope) return
   }
   const removal = existing ? unsubscribePersonalProject(projectId) : Promise.resolve()
+  const source = context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended())
+  const projectCurrent = captureProjectScope()
   const state: PersonalChannelState = {
-    context: context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended()),
+    context: source.then(parent => channelSyncContext(parent, () => !state.cancelled && projectCurrent(projectId), projectId)),
     channel: null,
     onChange,
     cancelled: false,
