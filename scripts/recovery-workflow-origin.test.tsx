@@ -278,3 +278,126 @@ it('retains recovery source and releases decision busy state on a current copy f
   expect(document.body.textContent).toContain('Failed to keep project copy')
   expect([...document.querySelectorAll('button')].filter(button => ['Keep Copy', 'Delete'].includes(button.textContent ?? '')).every(button => !button.disabled)).toBe(true)
 })
+
+it.each(['Keep Copy','Delete'].flatMap(action=>[false,true].map(overlap=>({action,overlap}))))('replaces a busy $action notice through real AppLayout wiring (overlap=$overlap)',async({action,overlap})=>{
+  const f=await setup(),pause=gate(),qPause=gate()
+  f.h.stores.useAuthStore.setState({isOffline:false})
+  f.h.repo.projects.create({id:'q',owner_id:'other',name:'SECOND REMOVAL'})
+  f.h.repo.projects.update('q',{is_shared:1})
+  const q=f.h.repo.projects.findById('q')
+  f.h.repo.projects.addMember('q','u','member')
+  f.h.remote.projects.push({...q});f.h.remote.project_members.push(...f.h.repo.projects.getMembers('q'))
+  await f.h.stores.useProjectStore.getState().hydrateProjects('u')
+  f.h.stores.useProjectStore.getState().setCurrentProject('p0')
+  await act(async()=>{f.root.render(createElement(f.h.services.RemovalApp));await f.h.untilIdle()})
+  const pChannel=f.h.channels.find((c:{topic:string;closed:boolean})=>c.topic==='project:p0'&&!c.closed)
+  await act(async()=>{pChannel.emit('project_members','DELETE',{project_id:'p0',user_id:'u'});await f.h.untilIdle()})
+  const method=action==='Keep Copy'?'create':'delete',original=f.h.repo.projects[method].bind(f.h.repo.projects)
+  let held=false
+  f.h.repo.projects[method]=async(...args:unknown[])=>{const result=original(...args);if(!held){held=true;pause.enter();await pause.wait}return result}
+  await click(action);await pause.entered
+  await act(async()=>{f.h.stores.useProjectStore.getState().setCurrentProject('q');await f.h.untilIdle()})
+  const channel=f.h.channels.find((c:{topic:string;closed:boolean})=>c.topic==='project:q'&&!c.closed)
+  await act(async()=>{channel.emit('project_members','DELETE',{project_id:'q',user_id:'u'});await f.h.untilIdle()})
+  expect(document.body.textContent).toContain('SECOND REMOVAL')
+  if(!overlap){pause.release();await idle(f.h)}
+  expect([...document.querySelectorAll('button')].every(b=>!b.disabled)).toBe(true)
+  const remove=f.h.repo.projects.delete.bind(f.h.repo.projects)
+  f.h.repo.projects.delete=async(id:string)=>{const value=remove(id);if(id==='q'){qPause.enter();await qPause.wait}return value}
+  await click('Delete');await qPause.entered
+  pause.release();await idle(f.h)
+  expect(document.body.textContent).toContain('SECOND REMOVAL')
+  expect([...document.querySelectorAll('button')].every(b=>b.disabled)).toBe(true)
+  expect(document.body.textContent).not.toMatch(/has been kept|Project deleted\./)
+  qPause.release();await idle(f.h)
+  expect(document.body.textContent).not.toContain('SECOND REMOVAL')
+  expect(f.h.repo.projects.findById('q').deleted_at).not.toBeNull()
+  if(action==='Keep Copy'){
+    const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0'&&p.id!=='q')
+    expect(f.h.repo.tasks.findAllByProject(copy.id)).toHaveLength(2)
+  }
+  expect(f.h.fixtureErrors).toEqual([])
+},15000)
+
+it.each([false,true])('copies cached foreign labels into authorized owned definitions (existing family=%s)',async collision=>{
+  const {makeLabelAuthorizationDatabase,labelId}=await import('./label-authorization-fixture')
+  const {readFileSync}=await import('node:fs')
+  const {createHash}=await import('node:crypto')
+  const pg=await makeLabelAuthorizationDatabase(),f=await setup()
+  const mapping=new Map<string,string>([['u',labelId(1)],['other',labelId(2)],['p0',labelId(11)]])
+  const encode=(value:string):string=>{
+    if(/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value))return value
+    let uuid=mapping.get(value)
+    if(!uuid){const hash=createHash('md5').update(value).digest('hex');uuid=`${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20)}`;mapping.set(value,uuid)}
+    return uuid
+  }
+  const convert=(row:Record<string,unknown>):Record<string,unknown>=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,typeof value==='string'&&(key==='id'||key.endsWith('_id'))?encode(value):value]))
+  const labelWrites:Array<{table:string;body:Record<string,unknown>[]}>=[]
+  try{
+    f.h.repo.labels.hardDelete('label')
+    f.h.repo.labels.create({id:'label',user_id:'other',project_id:'p0',name:'FOREIGN FAMILY',color:'#123456'})
+    f.h.repo.tasks.addLabel('child','label')
+    const source=f.h.repo.labels.findById('label')
+    f.h.remote.user_labels.push({...source})
+    if(collision){
+      f.h.repo.labels.create({id:'owned-family',user_id:'u',name:'foreign family',color:'#ABCDEF'})
+      f.h.repo.projects.create({id:'q',owner_id:'u',name:'UNRELATED Q'})
+      f.h.repo.projects.addMember('q','u','owner')
+      f.h.repo.labels.addToProject('q','owned-family')
+    }
+    const ownedBefore=collision?{...f.h.repo.labels.findById('owned-family')}:null
+    f.h.remote.project_members=f.h.remote.project_members.filter((m:{project_id:string;user_id:string})=>m.project_id!=='p0'||m.user_id!=='u')
+    await f.h.services.shared.discoverRemoteMemberships('u',await f.h.context())
+    await mount(f,'copy',vi.fn());await click('Keep Copy');await idle(f.h)
+    const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0'&&p.id!=='q')
+    const palette=f.h.repo.labels.findByProjectId(copy.id)
+    expect(palette).toHaveLength(1);expect(palette[0].user_id).toBe('u');expect(palette[0].id).not.toBe('label')
+    expect(palette[0].id).toBe(collision?'owned-family':palette[0].id)
+    if(collision)expect(f.h.repo.labels.findById('owned-family')).toEqual(ownedBefore)
+    else expect(palette[0].color).toBe(source.color)
+    const copied=f.h.repo.tasks.findAllByProject(copy.id)
+    expect(copied).toHaveLength(2)
+    const child=copied.find((t:{parent_id:string|null})=>t.parent_id)
+    expect(f.h.repo.tasks.getLabels(child.id).map((l:{label_id:string})=>l.label_id)).toEqual([palette[0].id])
+    expect(f.h.repo.labels.findById('label')).toMatchObject({id:source.id,user_id:source.user_id,name:source.name,color:source.color,updated_at:source.updated_at})
+    const transport=f.h.sandbox.fetch
+    await pg.exec(readFileSync(new URL('../supabase/migrations/20261031102321_label_junction_authorization.sql',import.meta.url),'utf8'))
+    f.h.sandbox.fetch=async(input:string,init:{method?:string;body?:string}={})=>{
+      const parsed=new URL(input),table=parsed.pathname.split('/').at(-1)!,method=init.method??'GET'
+      if(!['user_labels','project_labels','task_labels'].includes(table))return transport(input,init)
+      for(const row of f.h.remote.projects)await pg.query('INSERT INTO projects(id,owner_id) VALUES($1,$2) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.owner_id??'u')])
+      for(const row of f.h.remote.project_members)await pg.query('INSERT INTO project_members VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[encode(row.project_id),encode(row.user_id),row.role])
+      for(const row of f.h.remote.tasks)await pg.query('INSERT INTO tasks(id,project_id,deleted_at) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.project_id),row.deleted_at??null])
+      for(const row of f.h.remote.user_labels)await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.user_id),row.name,row.color])
+      await pg.query("SELECT set_config('request.jwt.claim.sub',$1,false),set_config('request.jwt.claim.role','authenticated',false)",[labelId(1)])
+      await pg.exec('SET ROLE authenticated')
+      try{
+        if(method==='POST'){
+          const body=JSON.parse(init.body!),rows=Array.isArray(body)?body:[body]
+          labelWrites.push({table,body:rows})
+          for(const row of rows){
+            const converted=convert(row),columns=Object.keys(converted),keys=table==='user_labels'?['id']:table==='project_labels'?['project_id','label_id']:['task_id','label_id']
+            const updates=columns.filter(k=>!keys.includes(k)).map(k=>`${k}=excluded.${k}`).join(',')
+            await pg.query(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${columns.map((_,i)=>'$'+(i+1)).join(',')}) ON CONFLICT(${keys.join(',')}) DO ${updates?'UPDATE SET '+updates:'NOTHING'}`,Object.values(converted))
+          }
+        }
+        const visible=await pg.query(`SELECT ${table==='user_labels'?'id':table==='project_labels'?'project_id,label_id':'task_id,label_id'} FROM ${table}`)
+        await pg.exec('RESET ROLE')
+        const response=await transport(input,init)
+        if(method!=='GET')return response
+        const data=await response.json()
+        const keys=table==='user_labels'?['id']:table==='project_labels'?['project_id','label_id']:['task_id','label_id']
+        return new Response(JSON.stringify(data.filter((r:Record<string,unknown>)=>visible.rows.some((row:Record<string,unknown>)=>keys.filter(k=>k in r).every(k=>row[k]===encode(String(r[k])))))),{headers:{'Content-Type':'application/json'}})
+      }catch(error){return new Response(JSON.stringify({message:String(error),code:'42501'}),{status:403,headers:{'Content-Type':'application/json'}})}
+      finally{await pg.exec('RESET ROLE')}
+    }
+    f.h.stores.useAuthStore.setState({isOffline:false})
+    await f.h.services.personal.fullUpload('u',await f.h.context())
+    await f.h.services.shared.processSyncQueue(await f.h.context());await idle(f.h)
+    expect(labelWrites.some(w=>w.table==='user_labels'&&w.body.some(l=>l.id===palette[0].id&&l.user_id==='u'))).toBe(true)
+    expect(labelWrites.filter(w=>w.table==='user_labels').flatMap(w=>w.body).some(l=>l.id==='label')).toBe(false)
+    expect((await pg.query('SELECT label_id FROM project_labels WHERE project_id=$1',[encode(copy.id)])).rows).toEqual([{label_id:encode(palette[0].id)}])
+    expect((await pg.query('SELECT label_id FROM task_labels WHERE task_id=$1',[encode(child.id)])).rows).toEqual([{label_id:encode(palette[0].id)}])
+    expect(f.h.fixtureErrors).toEqual([])
+  }finally{await pg.close()}
+},20000)

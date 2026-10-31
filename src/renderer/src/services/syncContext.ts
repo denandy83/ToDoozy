@@ -8,6 +8,7 @@ import { supabaseRequestMetrics } from '../../../shared/supabaseTelemetry'
 
 export interface SyncContext {
   api: TodoozyAPI
+  accountContext?: () => Promise<SyncContext>
   apiFor?: (assertCurrent: () => void) => TodoozyAPI
   client: SupabaseClient
   assertCurrent(): void
@@ -19,6 +20,7 @@ export interface SyncContext {
 
 export interface SyncProducer {
   api: TodoozyAPI
+  accountContext?: () => Promise<SyncContext>
   apiFor?: (assertCurrent: () => void) => TodoozyAPI
   client(): Promise<SupabaseClient | null>
   clientFor?: (assertCurrent: () => void) => SupabaseClient
@@ -115,7 +117,9 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     return clientFor(assertCurrent)
   })()
   const scope = async (): Promise<string> => { const origin = await database; return `${origin.userId}:${origin.generation}` }
-  return { api, apiFor, client, clientFor, assertCurrent, isCurrent, userId, scope }
+  const origin: SyncProducer = { api, apiFor, client, clientFor, assertCurrent, isCurrent, userId, scope }
+  origin.accountContext = () => syncContextFromProducer(origin)
+  return origin
 }
 
 export interface ProjectProducer extends SyncProducer {
@@ -125,17 +129,23 @@ export interface ProjectProducer extends SyncProducer {
 export function captureProjectProducer(projectId?: string): ProjectProducer {
   const current = captureProjectScope()
   const projects = new Set(projectId ? [projectId] : [])
-  const origin = captureSyncProducer(() => [...projects].every(current))
+  const origin = captureSyncProducer()
+  const guard = (): void => { origin.assertCurrent(); if (![...projects].every(current)) throw new Error('Project context changed') }
+  let client: Promise<SupabaseClient | null> | undefined
   return {
     ...origin,
-    isCurrent: async () => await origin.isCurrent() && (projects.size > 0 || current()),
+    api: origin.apiFor!(guard),
+    apiFor: check => origin.apiFor!(() => { guard(); check() }),
+    client: () => client ??= (async () => { guard(); const value = await origin.client(); guard(); return value ? origin.clientFor!(guard) : null })(),
+    clientFor: check => origin.clientFor!(() => { guard(); check() }),
+    isCurrent: async () => await origin.isCurrent() && [...projects].every(current) && (projects.size > 0 || current()),
     assertCurrent: () => {
-      origin.assertCurrent()
+      guard()
       if (!projects.size && !current()) throw new Error('Project context changed')
     },
     includeProject(id) {
       projects.add(id)
-      origin.assertCurrent()
+      guard()
     }
   }
 }
@@ -154,7 +164,7 @@ export async function syncContextFromProducer(origin: SyncProducer): Promise<Syn
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   await requireProducerCurrent(origin)
-  return { api: origin.api, apiFor: origin.apiFor, client, clientFor: origin.clientFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+  return { accountContext: origin.accountContext, api: origin.api, apiFor: origin.apiFor, client, clientFor: origin.clientFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
 }
 
 export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {

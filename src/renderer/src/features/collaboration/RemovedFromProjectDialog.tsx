@@ -90,9 +90,18 @@ export function RemovedFromProjectDialog({
                   }
                   // Copy labels to new project
                   const oldLabels = await api.labels.findByProjectId(oldId)
-                  for (const l of oldLabels) {
-                    await api.labels.addToProject(newId, l.id)
+                  const labelMap = new Map<string, string>()
+                  const copyLabel = async (id: string): Promise<string> => {
+                    const mapped = labelMap.get(id)
+                    if (mapped) return mapped
+                    const label = await api.labels.findById(id)
+                    if (!label) throw new Error('Label unavailable')
+                    const owned = label.user_id === currentUser.id ? label : await api.labels.adopt(currentUser.id, label)
+                    labelMap.set(id, owned.id)
+                    await api.labels.addToProject(newId, owned.id)
+                    return owned.id
                   }
+                  for (const l of oldLabels) await copyLabel(l.id)
                   // Copy tasks
                   const tasks = (await api.tasks.findAllByProject(oldId)).filter((task) => !task.is_archived && !task.is_template)
                   const taskMap: Record<string, string> = {}
@@ -103,7 +112,7 @@ export function RemovedFromProjectDialog({
                     // Copy task labels
                     const taskLabels = await api.tasks.getLabels(t.id)
                     for (const tl of taskLabels) {
-                      await api.tasks.addLabel(nid, tl.label_id)
+                      await api.tasks.addLabel(nid, await copyLabel(tl.label_id))
                     }
                   }
                   for (const t of tasks) {

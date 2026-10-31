@@ -182,3 +182,89 @@ it('preserves a newer native edit while a reorder write reply is held', async ()
   expect(h.remote.tasks[1].title).toBe('NEWER LOCAL EDIT')
   expect(h.fixtureErrors).toEqual([])
 })
+
+it.each(['validation', 'HTTP'].flatMap(point => [false, true].map(removed => ({ point, removed }))))('global replay survives its actual label-add trigger at $point (revoked=$removed)', async ({ point, removed }) => {
+  const h = await setup(), pause = gate(), context = await h.context()
+  for (const n of [0,1]) {
+    h.repo.labels.create({ id: 'palette'+n, user_id: 'u', name: 'PALETTE '+n })
+    h.remote.user_labels.push({ ...h.repo.labels.findById('palette'+n) })
+  }
+  h.repo.tasks.addLabel('task1','palette1')
+  h.remote.project_labels.push({ project_id:'p1',label_id:'palette1',deleted_at:null })
+  h.repo.syncQueue.clear()
+  const q = h.repo.tasks.update('task1',{title:'GLOBAL VALID Q'})
+  h.repo.syncQueue.enqueue('tasks',q.id,'UPDATE',JSON.stringify(q))
+  const removal = removed && point === 'HTTP' ? await pendingRevocation(h) : null
+  if (point === 'validation') holdReply(h,'projects:findById','p1',pause)
+  else {
+    const intercept = async (r: { table:string;method:string }): Promise<void> => {
+      if(r.table==='tasks' && r.method==='POST') {pause.enter();await pause.wait} else h.beforeRequest(intercept)
+    }
+    h.beforeRequest(intercept)
+  }
+  await h.stores.useLabelStore.getState().addToProject('p0','palette0')
+  await pause.entered
+  expect(h.remote.project_labels.some((l: {project_id:string;label_id:string})=>l.project_id==='p0'&&l.label_id==='palette0')).toBe(true)
+  const joined=h.services.shared.processSyncQueue(context)
+  if(removal){removal.release();await removal.done}else if(removed)await revoke(h)
+  const mark=h.nativeCalls.length
+  pause.release();await joined;await h.untilIdle()
+  expect(h.remote.tasks[1].title).toBe('GLOBAL VALID Q')
+  expect(h.remote.task_labels.some((l:{task_id:string;label_id:string})=>l.task_id==='task1'&&l.label_id==='palette1')).toBe(true)
+  expect(h.repo.tasks.getLabelState('task1').every((s:{sync_pending:number})=>s.sync_pending===0)).toBe(true)
+  expect(h.repo.syncQueue.findAll().some((e:{row_id:string})=>e.row_id==='task1')).toBe(false)
+  if(removed) expect(h.nativeCalls.slice(mark).filter(privateCall)).toEqual([])
+  expect(h.fixtureErrors).toEqual([])
+},15000)
+
+it('coalesces a late valid queue join into one followup without looping on retained entries',async()=>{
+  const h=await setup(),pause=gate(),context=await h.context()
+  const p=h.repo.tasks.update('task0',{title:'FIRST SNAPSHOT'})
+  h.repo.syncQueue.enqueue('tasks',p.id,'UPDATE',JSON.stringify(p))
+  h.repo.syncQueue.enqueue('tasks','unknown','DELETE',JSON.stringify({id:'unknown',deleted_at:'2030-01-01'}))
+  h.beforeRequest(async()=>{pause.enter();await pause.wait})
+  const first=h.services.shared.processSyncQueue(context);await pause.entered
+  const q=h.repo.tasks.update('task1',{title:'LATE Q'})
+  h.repo.syncQueue.enqueue('tasks',q.id,'UPDATE',JSON.stringify(q))
+  const joined=[h.services.shared.processSyncQueue(context),h.services.shared.processSyncQueue(context)]
+  pause.release();await Promise.all([first,...joined]);await h.untilIdle()
+  expect(h.remote.tasks[1].title).toBe('LATE Q')
+  expect(h.repo.syncQueue.findAll().map((e:{row_id:string})=>e.row_id)).toEqual(['unknown'])
+  expect(h.requests.filter((r:{table:string;method:string})=>r.table==='tasks'&&r.method==='POST')).toHaveLength(2)
+  expect(h.maxConcurrent()).toBe(1);expect(h.fixtureErrors).toEqual([])
+})
+
+it.each(['database','account'])('retains the original global queue %s boundary after a project trigger',async change=>{
+  const h=await setup(),pause=gate()
+  h.repo.labels.create({id:'trigger',user_id:'u',name:'TRIGGER'})
+  h.remote.user_labels.push({...h.repo.labels.findById('trigger')})
+  enqueueTasks(h);holdReply(h,'projects:findById','p1',pause)
+  await h.stores.useLabelStore.getState().addToProject('p0','trigger');await pause.entered
+  if(change==='database')h.replaceDatabase();else h.setAccount('other')
+  const mark=h.nativeCalls.length,requests=h.requests.length
+  pause.release();await h.untilIdle()
+  expect(h.nativeCalls.slice(mark)).toEqual([])
+  expect(h.requests.slice(requests)).toEqual([])
+  expect(h.remote.tasks[1].title).toBe('BEFORE 1')
+  expect(h.fixtureErrors).toEqual([])
+})
+
+it.each(['network','power'])('pauses the global queue at its original %s boundary',async boundary=>{
+  const h=await setup(),pause=gate()
+  h.repo.labels.create({id:'trigger',user_id:'u',name:'TRIGGER'})
+  h.remote.user_labels.push({...h.repo.labels.findById('trigger')})
+  const q=h.repo.tasks.update('task1',{title:'PAUSED Q'})
+  h.repo.syncQueue.enqueue('tasks',q.id,'UPDATE',JSON.stringify(q))
+  holdReply(h,'projects:findById','p1',pause)
+  await h.stores.useLabelStore.getState().addToProject('p0','trigger');await pause.entered
+  if(boundary==='power')h.setSuspended(true);else h.services.shared.setOnlineStatus(false)
+  const mark=h.nativeCalls.length,requests=h.requests.length
+  pause.release();await h.untilIdle()
+  expect(h.nativeCalls.slice(mark)).toEqual([]);expect(h.requests.slice(requests)).toEqual([])
+  expect(h.repo.syncQueue.findAll().some((e:{row_id:string})=>e.row_id==='task1')).toBe(true)
+  if(boundary==='power')h.setSuspended(false);else h.services.shared.setOnlineStatus(true)
+  await h.services.shared.processSyncQueue(await h.context());await h.untilIdle()
+  expect(h.remote.tasks[1].title).toBe('PAUSED Q')
+  expect(h.repo.syncQueue.findAll().some((e:{row_id:string})=>e.row_id==='task1')).toBe(false)
+  expect(h.fixtureErrors).toEqual([])
+})

@@ -889,6 +889,7 @@ export function AppLayout(): React.JSX.Element {
         {/* Removed from shared project dialog */}
         {removedFromProject && (
           <RemovedFromProjectDialog
+            key={`${window.api.sync.currentContext()}:${removedFromProject.id}`}
             removedFromProject={removedFromProject}
             currentUser={currentUser}
             onClose={() => setRemovedFromProject(null)}

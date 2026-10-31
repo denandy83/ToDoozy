@@ -599,21 +599,43 @@ export async function syncStatusChange(
 /**
  * Process queued offline changes.
  */
-let queueDrain: Promise<number> | null = null
-export function processSyncQueue(context?: SyncContext): Promise<number> {
-  if (!queueDrain) queueDrain = drainSyncQueue(context).finally(() => { queueDrain = null })
-  return queueDrain
-}
-
-async function drainSyncQueue(context?: SyncContext): Promise<number> {
-  let processed = 0
-  const origin = context ?? captureSyncProducer()
-  try { context ??= await captureSyncContext() } catch {
+let queueDrain: { scope: string; followup: boolean; promise: Promise<number> } | null = null
+export async function processSyncQueue(source?: SyncContext): Promise<number> {
+  const projectCurrent = captureProjectScope()
+  if (!isOnline || isSuspended()) return 0
+  const producer = source ? null : captureSyncProducer()
+  const origin = source ?? producer!
+  let context: SyncContext
+  try { context = source ? source.accountContext ? await source.accountContext() : source : await syncContextFromProducer(producer!) } catch {
     if (await origin.isCurrent()) useSyncStore.getState().setStatus('offline')
     return 0
   }
+  if (!await context.isCurrent()) return 0
+  try { context.assertCurrent() } catch { return 0 }
+  while (queueDrain) {
+    const current = queueDrain
+    if (current.scope === context.scope) { current.followup = true; return current.promise }
+    await current.promise
+    if (!await context.isCurrent()) return 0
+  }
+  const state = { scope: context.scope, followup: false, promise: Promise.resolve(0) }
+  queueDrain = state
+  state.promise = (async () => {
+    let processed = 0
+    do {
+      state.followup = false
+      processed += await drainSyncQueue(context, projectCurrent)
+    } while (state.followup && isOnline && !isSuspended() && await context.isCurrent())
+    if (queueDrain === state) queueDrain = null
+    return processed
+  })().finally(() => { if (queueDrain === state) queueDrain = null })
+  return state.promise
+}
+
+async function drainSyncQueue(context: SyncContext, projectCurrent: ReturnType<typeof captureProjectScope>): Promise<number> {
+  let processed = 0
+  context = channelSyncContext(context, () => isOnline && !isSuspended(), '')
   const { api, client: supabase, assertCurrent } = context
-  const projectCurrent = captureProjectScope()
   const userId = useAuthStore.getState().currentUser?.id
   try {
     const queue = await api.sync.getQueue()

@@ -31,6 +31,16 @@ async function compilation(ref, invitations = false, sharedHook = false) {
   walk(app);
   if (!effect || !startupEffect || !localBootstrapEffect || !localChangeEffect) throw Error('App sync effect unavailable');
   if (invitations && (!invitationCall || !invitationView)) throw Error('App invitation wiring unavailable');
+  let removalView;
+  if (sharedHook) {
+    const layout = ts.createSourceFile('AppLayout.tsx', textOf('src/renderer/src/AppLayout.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const findRemoval = node => {
+      if (ts.isJsxExpression(node) && node.expression?.getText(layout).includes('<RemovedFromProjectDialog')) removalView = node.getText(layout);
+      ts.forEachChild(node, findRemoval);
+    };
+    findRemoval(layout);
+    if (!removalView) throw Error('AppLayout removal wiring unavailable');
+  }
   const projectCachePath = 'src/renderer/src/shared/stores/projectCache.ts';
   const hasProjectCache = ref ? cp.spawnSync('git', ['cat-file','-e',`${ref}:${projectCachePath}`], {cwd:source,stdio:'ignore'}).status === 0 : fs.existsSync(path.join(source,projectCachePath));
   const nativeScopePath = 'src/renderer/src/shared/hooks/useDatabaseScope.ts';
@@ -69,6 +79,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
+    ${sharedHook ? `function RemovalApp(){const currentUser=useAuthStore(state=>state.currentUser),state=useProjectStore();const {removedFromProject,setRemovedFromProject}=useSharedProjectRealtime(state.projects[state.currentProjectId]??null,currentUser);return <>${removalView}</>}` : ''}
     const db=new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys=ON;CREATE TABLE schema_version(version INTEGER PRIMARY KEY)');
     for(const migrate of migrations)migrate(db);
@@ -83,7 +94,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     function runLocalBootstrap(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
     function NativeBootstrap(){const databaseScope=${hasNativeScope ? 'useDatabaseScope()' : 'window.api.sync.currentContext()'},currentUser=useAuthStore(state=>state.currentUser),userId=currentUser?.id??null,isAuthenticated=useAuthStore(state=>state.isAuthenticated),currentProjectId=useProjectStore(state=>state.currentProjectId);useEffect(${localBootstrapEffect},${localBootstrapDeps});useEffect(${projectEffect},${projectDeps});return null}
-    globalThis.fixture={${hasNativeScope ? 'observeDatabaseScope,useDatabaseScope,' : ''}NativeBootstrap,${sharedHook ? 'RemovedFromProjectDialog,DeployProjectTemplateWizard,ToastContainer,MemberSettings,StatsView,useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}syncContexts,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${hasNativeScope ? 'observeDatabaseScope,useDatabaseScope,' : ''}NativeBootstrap,${sharedHook ? 'RemovalApp,RemovedFromProjectDialog,DeployProjectTemplateWizard,ToastContainer,MemberSettings,StatsView,useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}syncContexts,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useAttachmentStore,useNotificationStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTemplateStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations || sharedHook ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
