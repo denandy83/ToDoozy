@@ -1,7 +1,8 @@
 import { hydrationContext, type HydrationOrigin } from '../stores/hydrationContext'
 import { captureProjectProducer } from '../../services/syncContext'
 import { useAuthStore } from '../stores/authStore'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState } from 'react'
+import { useDatabaseScope } from './useDatabaseScope'
 import { getAvatarColor, getAvatarInitials } from '../../../../shared/avatarUtils'
 
 interface MemberDisplayData {
@@ -93,7 +94,7 @@ export function getMemberDisplay(projectId: string, userId: string): MemberDispl
 
 function useMemberMap(projectId: string): Map<string, MemberDisplayData> | null {
   const ownerId = useAuthStore(state => state.currentUser?.id)
-  const scope = useSyncExternalStore(window.api.sync.onContextChanged, window.api.sync.currentContext)
+  const scope = useDatabaseScope()
   const [, setTick] = useState(0)
   const members = currentMembers(projectId)
   useEffect(() => {

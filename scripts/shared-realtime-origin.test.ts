@@ -16,7 +16,7 @@ async function setup(beforeRender: (h: Awaited<ReturnType<typeof makeHarness>>) 
   const h=await makeHarness({projectCount:1,shared:1,connected:false,sharedHook:true})
   h.repo.tasks.create({id:'t',owner_id:'u',project_id:'p0',status_id:'s0',title:'CURRENT TASK'})
   h.repo.users.update('other',{email:'shared-user+other@local'})
-  let profile='BASE MEMBER',holdProfile=false,profileError=initialProfileError
+  let profile='BASE MEMBER',holdProfile=false,holdMembership=false,profileError=initialProfileError
   const pause=gate()
   const fetch=h.sandbox.fetch
   h.sandbox.fetch=async(url:string,init:RequestInit)=>{
@@ -27,7 +27,9 @@ async function setup(beforeRender: (h: Awaited<ReturnType<typeof makeHarness>>) 
       if(failed)return new Response(JSON.stringify({message:'PRIVATE LATE ERROR'}),{status:500,headers:{'Content-Type':'application/json'}})
       return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json'}})
     }
-    return fetch(url,init)
+    const response=await fetch(url,init)
+    if(new URL(url).pathname.endsWith('/project_members')&&holdMembership){holdMembership=false;pause.enter();await pause.wait}
+    return response
   }
   beforeRender(h)
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);opened.push({h,root,host})
@@ -35,12 +37,12 @@ async function setup(beforeRender: (h: Awaited<ReturnType<typeof makeHarness>>) 
   await act(async()=>{root.render(createElement(Screen));await h.untilIdle()})
   const channel=h.channels.find((row:{topic:string;closed:boolean})=>row.topic==='project:p0'&&!row.closed)
   expect(channel).toBeDefined()
-  return {h,root,host,channel,pause,arm:()=>{profile='PRIVATE LATE PROFILE';holdProfile=true},failProfiles:(failed:boolean)=>{profileError=failed},current:()=>{profile='CURRENT MEMBER';profileError=false}}
+  return {h,root,host,channel,pause,arm:()=>{profile='PRIVATE LATE PROFILE';holdProfile=true},failProfiles:(failed:boolean)=>{profileError=failed},current:()=>{profile='CURRENT MEMBER';profileError=false},armMembership:()=>{holdMembership=true},setProfile:(value:string)=>{profile=value}}
 }
 it.each(['activity','member'].flatMap(table=>['account','generation','teardown','eviction'].map(change=>({table,change}))))('rejects retained $table bridge after $change',async({table,change})=>{
   const f=await setup(),owner=f.h.stores.useAuthStore.getState().currentUser
   if(change==='account')await act(async()=>{f.h.setAccount('other');await f.h.untilIdle()})
-  else if(change==='generation'){f.h.replaceDatabase();expect(f.h.stores.useAuthStore.getState().currentUser).toBe(owner)}
+  else if(change==='generation')await act(async()=>{f.h.replaceDatabase();expect(f.h.stores.useAuthStore.getState().currentUser).toBe(owner);await f.h.untilIdle()})
   else if(change==='teardown')await f.h.services.shared.unsubscribeFromProject('p0')
   else f.h.services.evictProjectData('p0')
   const calls=f.h.nativeCalls.length
@@ -159,7 +161,7 @@ it.each(['create','addMember'].flatMap(method => ['account','generation','cleanu
     await act(async () => { f.channel.emit('project_members','INSERT',member); await f.h.untilIdle() })
     await pause.entered
     if (change==='account') await act(async () => {f.h.setAccount('other');await f.h.untilIdle()})
-    else if (change==='generation') f.h.replaceDatabase()
+    else if (change==='generation') await act(async()=>{f.current();f.h.remote.project_members=f.h.remote.project_members.filter((m:{user_id:string})=>m.user_id!=='new-member');f.h.replaceDatabase();await f.h.untilIdle()})
     else if (change==='cleanup') await act(async () => f.root.unmount())
     else if (change==='teardown') await f.h.services.shared.unsubscribeFromProject('p0')
     else f.h.services.evictProjectData('p0')
@@ -171,3 +173,70 @@ it.each(['create','addMember'].flatMap(method => ['account','generation','cleanu
     expect(f.h.stores.useLogStore.getState().entries).toBe(entries)
     expect(f.h.fixtureErrors).toEqual([])
   })
+
+it.each(['hook','discovery'].flatMap(older => ['hook','discovery'].flatMap(newer => ['profile','membership'].flatMap(boundary => ['remove','join'].map(change => ({older,newer,boundary,change}))))))(
+  'supersedes $older $boundary snapshots with newer $newer $change intent',async ({older,newer,boundary,change})=>{
+    const f=await setup()
+    const x=remoteJoin(f.h,false,'ordered-x')
+    if(change==='remove') {
+      await act(async()=>{f.channel.emit('project_members','INSERT',x);await f.h.untilIdle()})
+      expect(f.host.textContent).toContain('ordered-x')
+      f.h.repo.users.update('ordered-x',{email:'shared-user+ordered-x@local'})
+    } else f.h.remote.project_members=f.h.remote.project_members.filter((m:{user_id:string})=>m.user_id!=='ordered-x')
+    if(older==='discovery')f.h.repo.users.update('other',{email:'shared-user+other@local'})
+    if(boundary==='profile')f.arm()
+    else f.armMembership()
+    const old=older==='hook'
+      ? (f.channel.emit('project_members','UPDATE',{project_id:'p0',user_id:'other'}),Promise.resolve())
+      : f.h.services.shared.discoverRemoteMemberships('u',await f.h.context(),f.h.repo.projects.findById('p0'))
+    await f.pause.entered; f.current()
+    if(change==='remove') f.h.remote.project_members=f.h.remote.project_members.filter((m:{user_id:string})=>m.user_id!=='ordered-x')
+    else remoteJoin(f.h,false,'ordered-y')
+    await act(async()=>{
+      if(newer==='hook')f.channel.emit('project_members',change==='remove'?'DELETE':'INSERT',{project_id:'p0',user_id:change==='remove'?'ordered-x':'ordered-y'})
+      else await f.h.services.shared.discoverRemoteMemberships('u',await f.h.context(),f.h.repo.projects.findById('p0'))
+      await f.h.untilIdle()
+    })
+    const expected=change==='remove'?'ordered-x':'ordered-y'
+    const before=f.h.repo.projects.getMembers('p0').map((m:{user_id:string})=>m.user_id)
+    expect(before.includes(expected)).toBe(change==='join')
+    const calls=f.h.nativeCalls.length
+    await act(async()=>{f.pause.release();await old;await f.h.untilIdle()})
+    const after=f.h.repo.projects.getMembers('p0').map((m:{user_id:string})=>m.user_id)
+    expect(after).toEqual(before)
+    expect(f.host.textContent?.includes(expected)).toBe(change==='join')
+    expect(f.host.textContent).not.toContain('PRIVATE LATE')
+    expect(f.h.nativeCalls.slice(calls).filter((call:{method:string})=>['addMember','removeMember','updateMember','create','update'].includes(call.method))).toEqual([])
+    expect(f.h.requests.filter((r:{table:string;method:string})=>r.table==='project_members'&&r.method!=='GET')).toEqual([])
+    expect(f.h.fixtureErrors).toEqual([])
+  })
+
+it('rebinds a retained selected roster on same-owner native replacement and hides the old first render',async()=>{
+  const f=await setup(h=>{remoteJoin(h,false,'private-warm-x')})
+  const owner=f.h.stores.useAuthStore.getState().currentUser
+  expect(f.host.textContent).toContain('private-warm-x')
+  f.h.remote.project_members=f.h.remote.project_members.filter((m:{user_id:string})=>m.user_id!=='private-warm-x')
+  remoteJoin(f.h,false,'current-y'); f.arm();f.current()
+  await act(async()=>{f.h.replaceDatabase();await new Promise(setImmediate)})
+  expect(f.host.textContent).not.toContain('private-warm-x')
+  await f.pause.entered
+  expect(f.h.stores.useAuthStore.getState().currentUser).toBe(owner)
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.host.textContent).toContain('current-y')
+  expect(f.host.textContent).not.toContain('private-warm-x')
+  expect(f.h.repo.projects.getMembers('p0').some((m:{user_id:string})=>m.user_id==='private-warm-x')).toBe(false)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it('does not revert newer acknowledged appearance with an older profile snapshot',async()=>{
+  const f=await setup();f.arm()
+  await act(async()=>{f.channel.emit('project_members','UPDATE',{project_id:'p0',user_id:'other'});await f.h.untilIdle()})
+  await f.pause.entered;f.current()
+  await f.h.services.shared.updateSharedMemberDisplay('p0','other','#123456','ZZ')
+  f.h.repo.projects.updateMember('p0','other',{display_color:'#123456',display_initials:'ZZ'})
+  await act(async()=>{f.channel.emit('project_members','UPDATE',{project_id:'p0',user_id:'other'});await f.h.untilIdle()})
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.h.repo.projects.getMembers('p0').find((m:{user_id:string})=>m.user_id==='other')).toMatchObject({role:'owner',display_color:'#123456',display_initials:'ZZ'})
+  expect(f.h.services.getMemberDisplay('p0','other')).toMatchObject({color:'#123456',initials:'ZZ'})
+  expect(f.h.fixtureErrors).toEqual([])
+})

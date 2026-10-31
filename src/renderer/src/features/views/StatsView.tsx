@@ -1,3 +1,4 @@
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
 import { hydrationContext } from '../../shared/stores/hydrationContext'
 import { localDateKey, localDayBounds, calendarDateKey } from '../../../../shared/localDate'
 import { MotionPresence } from '../../shared/motion/MotionPresence'
@@ -38,6 +39,12 @@ const PRIORITY_COLORS: Record<number, string> = {
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function StatsView(): React.JSX.Element {
+  const scope = useDatabaseScope()
+  const userId = useAuthStore(state => state.currentUser?.id)
+  return <ScopedStatsView key={JSON.stringify([scope, userId])} />
+}
+
+function ScopedStatsView(): React.JSX.Element {
   const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const allProjects = useProjectStore(selectAllProjects)
   const weekStartSetting = useSetting('week_start') ?? 'monday'

@@ -1,3 +1,4 @@
+import { invalidateMembershipSnapshots } from '../../services/membershipSnapshot'
 import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { useAuthStore } from './authStore'
 import { hydrationContext } from './hydrationContext'
@@ -272,7 +273,9 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   ): Promise<void> {
     const origin = captureProjectProducer(projectId)
     try {
+      await invalidateMembershipSnapshots(projectId, origin)
       await origin.api.projects.addMember(projectId, userId, role, invitedBy)
+      await invalidateMembershipSnapshots(projectId, origin)
       await requireProducerCurrent(origin)
       await get().hydrateMembers(projectId, origin)
       await requireProducerCurrent(origin)
@@ -287,7 +290,9 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   async removeMember(projectId: string, userId: string): Promise<boolean> {
     const origin = captureProjectProducer(projectId)
     try {
+      await invalidateMembershipSnapshots(projectId, origin)
       const result = await origin.api.projects.removeMember(projectId, userId)
+      await invalidateMembershipSnapshots(projectId, origin)
       await requireProducerCurrent(origin)
       await get().hydrateMembers(projectId, origin)
       await requireProducerCurrent(origin)

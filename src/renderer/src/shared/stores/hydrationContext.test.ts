@@ -70,3 +70,12 @@ it('publishes ordinary current-account label hydration', async () => {
   expect(useLabelStore.getState().labels.l.name).toBe('Label')
   expect(useLabelStore.getState().projectLabels.p).toEqual(new Set(['l']))
 })
+
+it('retains a current hydration across same-account same-database User object replacement',async()=>{
+  const operation=useLabelStore.getState().hydrateLabels('p')
+  await started
+  useAuthStore.setState({currentUser:{...useAuthStore.getState().currentUser!}})
+  finish([{id:'current-label',name:'Current label'}])
+  await operation
+  expect(useLabelStore.getState().labels['current-label'].name).toBe('Current label')
+})

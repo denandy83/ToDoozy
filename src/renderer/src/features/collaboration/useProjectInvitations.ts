@@ -1,3 +1,4 @@
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { User } from '../../../../shared/types'
 import { useAuthStore } from '../../shared/stores/authStore'
@@ -14,6 +15,7 @@ export interface ProjectInvitation {
   expired: boolean
 }
 interface Inbox {
+  scope: string | null
   owner: User | null
   items: ProjectInvitation[]
   busyToken: string | null
@@ -25,7 +27,7 @@ interface Session {
   isActive(): boolean
   databaseChanged(): void
 }
-const emptyInbox = (owner: User | null): Inbox => ({ owner, items: [], busyToken: null, error: null })
+const emptyInbox = (owner: User | null, scope: string | null = null): Inbox => ({ scope, owner, items: [], busyToken: null, error: null })
 
 export function useProjectInvitations(): {
   invite: ProjectInvitation | null
@@ -34,7 +36,10 @@ export function useProjectInvitations(): {
   accept(): Promise<void>
   decline(): Promise<void>
 } {
+  const scope = useDatabaseScope()
   const { currentUser, isAuthenticated, isOffline } = useAuthStore()
+  const userId = currentUser?.id
+  const email = currentUser?.email
   const [inbox, setInbox] = useState<Inbox>(() => emptyInbox(null))
   const [databaseRevision, setDatabaseRevision] = useState(0)
   const inboxRef = useRef(inbox)
@@ -59,22 +64,22 @@ export function useProjectInvitations(): {
     return current && session.isActive()
   }, [])
   const updateOwned = useCallback((session: Session, change: (state: Inbox) => Inbox): void => {
-    if (!session.isActive() || inboxRef.current.owner !== session.owner) return
+    if (!session.isActive() || inboxRef.current.owner?.id !== session.owner.id || inboxRef.current.scope !== window.api.sync.currentContext()) return
     update(change)
   }, [update])
 
   useEffect(() => {
-    if (!isAuthenticated || !currentUser || isOffline) {
+    const owner = useAuthStore.getState().currentUser
+    if (!isAuthenticated || !owner || isOffline) {
       sessionRef.current = null
       update(() => emptyInbox(null))
       return
     }
-    const owner = currentUser
     let active = true
     let validationSequence = 0
     let unsubscribe: (() => void) | undefined
     const ownsAccount = (): boolean => active && useAuthStore.getState().isAuthenticated
-      && useAuthStore.getState().currentUser === owner && !useAuthStore.getState().isOffline
+      && useAuthStore.getState().currentUser?.id === owner.id && !useAuthStore.getState().isOffline
     const origin = captureSyncProducer(ownsAccount)
     const stop = (): void => {
       if (!active) return
@@ -89,12 +94,12 @@ export function useProjectInvitations(): {
       databaseChanged: () => {
         if (!session.isActive()) return
         stop()
-        update(() => emptyInbox(owner))
+        update(() => emptyInbox(owner, scope))
         setDatabaseRevision((revision) => revision + 1)
       }
     }
     sessionRef.current = session
-    update(() => emptyInbox(owner))
+    update(() => emptyInbox(owner, scope))
     const present = (items: ProjectInvitation[], priority = false): void => {
       updateOwned(session, (state) => {
         const tokens = new Set(items.map((item) => item.token))
@@ -135,13 +140,13 @@ export function useProjectInvitations(): {
       }).catch(warn)
     }
     return stop
-  }, [currentUser, isAuthenticated, isOffline, databaseRevision, scopeIsCurrent, update, updateOwned])
+  }, [userId, email, isAuthenticated, isOffline, scope, databaseRevision, scopeIsCurrent, update, updateOwned])
 
   const perform = useCallback(async (action: 'accept' | 'decline'): Promise<void> => {
     const session = sessionRef.current
     const state = inboxRef.current
     const invitation = state.items[0]
-    if (!session?.isActive() || state.owner !== session.owner || !invitation) return
+    if (!session?.isActive() || state.owner?.id !== session.owner.id || !invitation) return
     const token = invitation.token
     const remove = (): void => updateOwned(session, (next) => ({
       ...next, items: next.items.filter((item) => item.token !== token),
@@ -191,7 +196,7 @@ export function useProjectInvitations(): {
   }, [scopeIsCurrent, updateOwned])
 
   // Do not wait for passive-effect cleanup to hide the previous user's data.
-  const visible = isAuthenticated && !isOffline && inbox.owner === currentUser ? inbox : null
+  const visible = isAuthenticated && !isOffline && inbox.owner?.id === currentUser?.id && inbox.scope === scope ? inbox : null
   const invite = visible?.items[0] ?? null
   return {
     invite,

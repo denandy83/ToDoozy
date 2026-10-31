@@ -1,3 +1,4 @@
+import { useSyncStore } from './syncStore'
 import { useTaskStore } from './taskStore'
 import { useProjectStore } from './projectStore'
 import { useStatusStore } from './statusStore'
@@ -21,6 +22,6 @@ export function resetAccountStores(): void {
   clear(useTaskStore); clear(useProjectStore); clear(useStatusStore); clear(useLabelStore)
   clear(useAttachmentStore); clear(useSavedViewStore); clear(useProjectAreaStore); clear(useTemplateStore)
   clear(useViewStore); clear(useSettingsStore); clear(useLogStore)
-  clear(useNotificationStore)
+  clear(useNotificationStore); clear(useSyncStore)
   resetTimerForAccount()
 }

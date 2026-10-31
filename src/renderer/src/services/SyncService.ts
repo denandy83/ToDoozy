@@ -1,3 +1,4 @@
+import { membershipSnapshot, invalidateMembershipSnapshots } from './membershipSnapshot'
 import { captureProjectScope } from '../shared/stores/projectScope'
 import { hydrationContext } from '../shared/stores/hydrationContext'
 import { evictProjectData } from '../shared/stores/projectCache'
@@ -943,6 +944,7 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
  * Returns newly discovered project IDs to sync down.
  */
 export async function discoverRemoteMemberships(userId: string, context?: SyncContext, scopedProject?: Project): Promise<string[]> {
+  const admission = membershipSnapshot()
   if (!navigator.onLine || isSuspended()) return []
   context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
   if (!await context.isCurrent() || useAuthStore.getState().currentUser?.id !== userId) return []
@@ -968,38 +970,47 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
   const missing: string[] = []
   for (const project of projects) {
     if (project.deleted_at) continue
+    const current = await admission(project.id, context)
+    const api = current.api
+    try {
     const local = await api.projects.findById(project.id)
-    if (!local) missing.push(project.id)
     const owner = await api.users.findById(project.owner_id)
     if (!owner) await api.users.create({ id: project.owner_id, email: placeholderEmail(project.owner_id), display_name: null, avatar_url: null })
     if (!scopedProject) await api.projects.applyRemote({ ...local, ...project })
     const isShared = project.owner_id !== userId || (counts.get(project.id) ?? 0) > 1 ? 1 : 0
     if ((await api.projects.findById(project.id))?.is_shared !== isShared) await api.projects.update(project.id, { is_shared: isShared })
-    await syncMembersDown(project.id, context, members.filter((member) => member.project_id === project.id) as ProjectMember[])
-    if (scopedProject) {
+    await syncMembersDown(project.id, current, members.filter((member) => member.project_id === project.id) as ProjectMember[])
+    {
       const snapshot = await api.projects.getMembers(project.id)
       const { useProjectStore } = await import('../shared/stores/projectStore')
-      if (!await context.isCurrent() || !hydration.isProjectCurrent(project.id)) return missing
-      context.assertCurrent()
+      if (!await current.isCurrent() || !hydration.isProjectCurrent(project.id)) continue
+      current.assertCurrent()
       useProjectStore.setState((state) => hydration.isProjectCurrent(project.id) ? { members: { ...state.members, [project.id]: snapshot } } : {})
     }
+    if (!local) missing.push(project.id)
+    } catch (error) { if (await current.isCurrent()) throw error }
   }
   const localProjects = scopedProject ? [scopedProject] : await api.projects.getProjectsForUser(userId)
   for (const local of localProjects) {
     if (accessible.has(local.id) || (local.owner_id === userId && !local.deleted_at)) continue
+    const current = await admission(local.id, context)
+    const api = current.api
+    try {
+    if (!await current.isCurrent()) continue
     await unsubscribeFromProject(local.id)
     const { unsubscribePersonalProject } = await import('./PersonalSyncService')
     await unsubscribePersonalProject(local.id)
     await api.projects.removeMember(local.id, userId)
-    if (!await context.isCurrent()) return missing
+    if (!await current.isCurrent()) continue
     const { useProjectStore } = await import('../shared/stores/projectStore')
-    if (!await context.isCurrent()) return missing
+    if (!await current.isCurrent()) continue
     evictProjectData(local.id)
     if (useProjectStore.getState().currentProjectId === local.id) useProjectStore.getState().setCurrentProject(null)
     useProjectStore.setState((state) => ({
       projects: Object.fromEntries(Object.entries(state.projects).filter(([id]) => id !== local.id)),
       members: Object.fromEntries(Object.entries(state.members).filter(([id]) => id !== local.id))
     }))
+    } catch (error) { if (await current.isCurrent()) throw error }
   }
   return missing
 }
@@ -1009,6 +1020,7 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
  * Used when a local project is discovered to be shared.
  */
 async function syncMembersDown(projectId: string, context: SyncContext, snapshot?: ProjectMember[]): Promise<void> {
+  context = await membershipSnapshot()(projectId, context)
   const { api, client: supabase } = context
   const result = snapshot ? { data: snapshot, error: null } : await readAll(() => supabase.from('project_members').select('*').eq('project_id', projectId), ['project_id','user_id'])
   if (result.error) throw new Error(result.error.message)
@@ -1082,6 +1094,7 @@ async function syncMembersDown(projectId: string, context: SyncContext, snapshot
  * Sync all shared project data from Supabase to local SQLite.
  */
 export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext): Promise<void> {
+  const admission = membershipSnapshot()
   // Never sync down when offline — would delete all local tasks
   if (!navigator.onLine) {
     console.log('[SyncService] Skipping syncProjectDown (offline)')
@@ -1329,7 +1342,8 @@ export async function syncProjectDown(projectId: string, userId: string, context
     }
   }
 
-  await syncMembersDown(projectId, context)
+  const members = await admission(projectId, context)
+  try { await syncMembersDown(projectId, members) } catch (error) { if (await members.isCurrent()) throw error }
 }
 
 /**
@@ -1343,6 +1357,7 @@ export async function updateSharedMemberDisplay(
   displayInitials: string | null,
   producer: SyncProducer = captureProjectProducer(projectId)
 ): Promise<void> {
+  await invalidateMembershipSnapshots(projectId, producer)
   const supabase = await producer.client()
   if (!supabase) throw new Error('Sign in to update member appearance')
   const { data, error } = await supabase
@@ -1354,12 +1369,14 @@ export async function updateSharedMemberDisplay(
   await requireProducerCurrent(producer)
   if (error) throw error
   if (data?.length !== 1) throw new Error('Project member appearance was not updated')
+  await invalidateMembershipSnapshots(projectId, producer)
 }
 
 /**
  * Remove all Supabase data for a project (unshare).
  */
 export async function removeProjectFromSupabase(projectId: string, origin = captureProjectProducer(projectId)): Promise<void> {
+  await invalidateMembershipSnapshots(projectId, origin)
   const supabase = await origin.client()
   if (!supabase) throw new Error('Not authenticated')
   await requireProducerCurrent(origin)
@@ -1381,6 +1398,7 @@ export async function removeProjectFromSupabase(projectId: string, origin = capt
   const { error } = await supabase.from('projects').delete().eq('id', projectId)
   await requireProducerCurrent(origin)
   if (error) throw error
+  await invalidateMembershipSnapshots(projectId, origin)
 }
 
 /**
@@ -1460,6 +1478,7 @@ export async function getSharedProjectMembers(projectId: string, origin: SyncCon
  * Remove a member from a shared project.
  */
 export async function removeSharedMember(projectId: string, userId: string, origin = captureProjectProducer(projectId)): Promise<void> {
+  await invalidateMembershipSnapshots(projectId, origin)
   const supabase = await origin.client()
   if (!supabase) throw new Error('Not authenticated')
   await requireProducerCurrent(origin)
@@ -1470,6 +1489,8 @@ export async function removeSharedMember(projectId: string, userId: string, orig
     .eq('user_id', userId)
   await requireProducerCurrent(origin)
   if (error) throw error
+
+  await invalidateMembershipSnapshots(projectId, origin)
 
   // Also remove locally
   await origin.api.projects.removeMember(projectId, userId)

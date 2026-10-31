@@ -41,6 +41,7 @@ function authTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 interface AuthState {
+  databaseScope: string | null
   currentUser: User | null
   isAuthenticated: boolean
   loading: boolean
@@ -194,6 +195,7 @@ async function finishSessionRecovery(
 }
 
 export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
+  databaseScope: null,
   currentUser: null,
   isAuthenticated: false,
   loading: false,
@@ -706,5 +708,22 @@ export const selectIsTokenPermanentlyDead = (state: AuthState): boolean => state
 
 // Includes direct auth restoration and account switches, not only UI logout.
 useAuthStore.subscribe((state, previous) => {
-  if (state.currentUser?.id !== previous.currentUser?.id) resetAccountStores()
+  if (state.currentUser?.id !== previous.currentUser?.id || (previous.databaseScope !== null && state.databaseScope !== previous.databaseScope)) resetAccountStores()
 })
+
+let scopeApi: typeof window.api | undefined
+let stopScope: (() => void) | undefined
+export function observeDatabaseScope(): string | null {
+  const api = window.api
+  const update = (): void => {
+    const databaseScope = api.sync.currentContext()
+    if (databaseScope !== useAuthStore.getState().databaseScope) useAuthStore.setState({ databaseScope })
+  }
+  if (scopeApi !== api) {
+    stopScope?.()
+    scopeApi = api
+    stopScope = api.sync.onContextChanged(update)
+  }
+  update()
+  return useAuthStore.getState().databaseScope
+}

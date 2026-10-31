@@ -1,4 +1,5 @@
-import { captureSyncContext } from './services/syncContext'
+import { useDatabaseScope } from './shared/hooks/useDatabaseScope'
+import { syncContextFromProducer, captureSyncProducer } from './services/syncContext'
 import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from './shared/stores/authStore'
 import { useProjectStore } from './shared/stores/projectStore'
@@ -10,6 +11,8 @@ import { useTemplateStore } from './shared/stores/templateStore'
 import { useTimerStore } from './shared/stores/timerStore'
 import { useUpdateStore } from './shared/stores/updateStore'
 import { useSyncStore } from './shared/stores/syncStore'
+import { useNotificationStore } from './shared/stores/notificationStore'
+import { useProjectAreaStore } from './shared/stores/projectAreaStore'
 import { useSavedViewStore } from './shared/stores/savedViewStore'
 import { logEvent } from './shared/stores/logStore'
 import { LoginScreen } from './features/auth/LoginScreen'
@@ -23,6 +26,8 @@ import { useToast } from './shared/components/Toast'
 import { startDiagnostics } from './services/diagnostics'
 
 function App(): React.JSX.Element {
+  const databaseScope = useDatabaseScope()
+  const userId = useAuthStore(state => state.currentUser?.id) ?? null
   useEffect(startDiagnostics, [])
   const { isAuthenticated, loading, currentUser, initAuth, isOffline } = useAuthStore()
   const { hydrateProjects, currentProjectId } = useProjectStore()
@@ -58,24 +63,31 @@ function App(): React.JSX.Element {
     }
   }, [])
 
-  // Hydrate settings, themes, projects when authenticated
   useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      setSettingsUserId(currentUser.id)
-      hydrateSettings()
-      hydrateThemes()
-      hydrateProjects(currentUser.id)
-      hydrateAllForUser(currentUser.id)
-      hydrateProjectTemplates(currentUser.id)
-      window.api.tray.setUserId(currentUser.id)
+    if (isAuthenticated && userId) {
+      const origin = captureSyncProducer()
+      setSettingsUserId(userId)
+      void hydrateSettings().catch(() => {})
+      void hydrateThemes().catch(() => {})
+      void hydrateProjects(userId, origin).catch(() => {})
+      void hydrateAllForUser(userId).catch(() => {})
+      void hydrateProjectTemplates(userId).catch(() => {})
+      void useLabelStore.getState().hydrateAllLabels(origin).catch(() => {})
+      void useSavedViewStore.getState().hydrate(userId, origin).catch(() => {})
+      void useProjectAreaStore.getState().hydrate(userId, origin).catch(() => {})
+      void useNotificationStore.getState().hydrate().catch(() => {})
+      void window.api.tray.setUserId(userId).catch(() => {})
     }
-  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateAllForUser, hydrateProjectTemplates])
+  }, [isAuthenticated, userId, databaseScope, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateAllForUser, hydrateProjectTemplates])
 
   const startupUserId = currentUser?.id ?? null
   useEffect(() => {
     if (!isAuthenticated || !startupUserId || isOffline) return
+    let active = true
+    const origin = captureSyncProducer(() => active && window.api.sync.currentContext() === databaseScope)
     const startBackground = async (): Promise<void> => {
       const { startOnlineMonitoring } = await import('./services/PersonalSyncService')
+      if (!await origin.isCurrent()) return
       startOnlineMonitoring()
 
       // Warm the What's New cache so first visit doesn't depend on a live fetch.
@@ -87,14 +99,15 @@ function App(): React.JSX.Element {
     }
     const timeout = setTimeout(startBackground, 2000)
     return () => {
+      active = false
       clearTimeout(timeout)
       import('./services/PersonalSyncService').then(({ stopOnlineMonitoring }) => stopOnlineMonitoring())
     }
-  }, [isAuthenticated, startupUserId, isOffline])
+  }, [isAuthenticated, startupUserId, isOffline, databaseScope])
 
   // Hydrate statuses and all tasks (regular + my day + archived + templates) when project changes
   useEffect(() => {
-    if (!currentProjectId || !currentUser) return
+    if (!currentProjectId || !userId) return
     hydrateStatuses(currentProjectId)
     hydrateLabels(currentProjectId)
     // Also load all of the current user's labels into the store. The
@@ -104,7 +117,7 @@ function App(): React.JSX.Element {
     // viewer hasn't tagged anything in the active project yet.
     useLabelStore.getState().hydrateAllLabels()
     hydrateAllForProject(currentProjectId)
-  }, [currentProjectId, currentUser, hydrateStatuses, hydrateLabels, hydrateAllForProject])
+  }, [currentProjectId, userId, databaseScope, hydrateStatuses, hydrateLabels, hydrateAllForProject])
 
   // Instrumentation only — effect-run counter to detect StrictMode double-mount + dep churn.
   const realtimeEffectRunCount = useRef(0)
@@ -116,7 +129,6 @@ function App(): React.JSX.Element {
   // and pulls would all bail anyway. When the session recovers (30s timer or
   // the SessionBanner's manual retry), isOffline flips false and the effect
   // re-runs: full pull + Realtime subscriptions with the live flush handlers.
-  const userId = currentUser?.id ?? null
   useEffect(() => {
     if (!userId || isOffline) return
     realtimeEffectRunCount.current += 1
@@ -124,15 +136,16 @@ function App(): React.JSX.Element {
 
     let disposed = false
     let needsInitialization = true
+    const producer = captureSyncProducer(() => !disposed && navigator.onLine && !isSuspended() && window.api.sync.currentContext() === databaseScope)
     const doPull = async (): Promise<void> => {
       if (disposed || !navigator.onLine || isSuspended() || useAuthStore.getState().currentUser?.id !== userId) return
       try {
-        const context = await captureSyncContext(() => !disposed && navigator.onLine && !isSuspended())
+        const context = await syncContextFromProducer(producer)
         const { requestSyncCatchUp } = await import('./services/PersonalSyncService')
         await requestSyncCatchUp(context, needsInitialization)
         needsInitialization = false
       } catch (error) {
-        if (!disposed) logEvent('error', 'sync', 'Background catch-up failed', String(error))
+        if (!disposed && window.api.sync.currentContext() === databaseScope) logEvent('error', 'sync', 'Background catch-up failed', String(error))
       }
     }
     void doPull()
@@ -166,7 +179,7 @@ function App(): React.JSX.Element {
     const setupRealtime = async (): Promise<void> => {
       if (!navigator.onLine || disposed) return
       const { subscribeToUserChannel } = await import('./services/UserChannelService')
-      if (disposed || useAuthStore.getState().currentUser?.id !== userId) return
+      if (disposed || window.api.sync.currentContext() !== databaseScope || useAuthStore.getState().currentUser?.id !== userId) return
       await subscribeToUserChannel(userId)
     }
     setupRealtime().catch((e) => console.warn('[Sync] Realtime setup failed, relying on polling:', e))
@@ -180,43 +193,43 @@ function App(): React.JSX.Element {
       import('./services/UserChannelService').then(({ unsubscribeUserChannel }) => unsubscribeUserChannel())
       import('./services/SyncService').then(({ unsubscribeAll }) => unsubscribeAll())
     }
-  }, [userId, isOffline])
+  }, [userId, isOffline, databaseScope])
 
   // Listen for data-changed from other processes (e.g. MCP server, quick-add)
   const hydrateMyDay = useTaskStore((s) => s.hydrateMyDay)
   const hydrateAllTaskLabels = useTaskStore((s) => s.hydrateAllTaskLabels)
   useEffect(() => {
-    if (!currentProjectId || !currentUser) return
+    if (!currentProjectId || !userId) return
     const unsub = window.api.onTasksChanged(() => {
-      hydrateProjects(currentUser.id)
+      hydrateProjects(userId)
       hydrateStatuses(currentProjectId)
       hydrateLabels(currentProjectId)
-      hydrateAllForUser(currentUser.id)
+      hydrateAllForUser(userId)
       hydrateAllTaskLabels(currentProjectId)
-      hydrateMyDay(currentUser.id)
+      hydrateMyDay(userId)
       hydrateSettings()
       // Local MCP / quick-add writes can change saved-view membership too.
-      useSavedViewStore.getState().scheduleRecount(currentUser.id)
+      useSavedViewStore.getState().scheduleRecount(userId)
     })
     return unsub
-  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForUser, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
+  }, [currentProjectId, userId, databaseScope, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForUser, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
 
   // Re-run My Day auto-add on app resume (sleep/wake) and window refocus
   const currentView = useViewStore((s) => s.currentView)
   useEffect(() => {
-    if (!currentUser) return
+    if (!userId) return
     const onVisible = (): void => {
-      if (!document.hidden) hydrateMyDay(currentUser.id)
+      if (!document.hidden) hydrateMyDay(userId)
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [currentUser, hydrateMyDay])
+  }, [userId, databaseScope, hydrateMyDay])
 
   // Re-run My Day auto-add when navigating to My Day view
   useEffect(() => {
-    if (!currentUser || currentView !== 'my-day') return
-    hydrateMyDay(currentUser.id)
-  }, [currentUser, currentView, hydrateMyDay])
+    if (!userId || currentView !== 'my-day') return
+    hydrateMyDay(userId)
+  }, [userId, databaseScope, currentView, hydrateMyDay])
 
   // Refresh tray badge when tasks change
   useEffect(() => {
@@ -325,7 +338,7 @@ function App(): React.JSX.Element {
 
   return (
     <>
-      <AppLayout />
+      <AppLayout key={JSON.stringify([userId, databaseScope])} />
       {invitations.invite && (
         <InviteDialog
           projectName={invitations.invite.projectName}

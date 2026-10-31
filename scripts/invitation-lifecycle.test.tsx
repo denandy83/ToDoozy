@@ -31,6 +31,7 @@ interface InvitationFixture {
   change(kind:'account'|'database'): Promise<void>
   layoutSnapshots: string[]
   arm(): void
+  pendingReads(): number
   setPending(tokens:string[]): void
 }
 async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
@@ -46,6 +47,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
   h.remote.project_members.push({project_id:'joined',user_id:'u',role:'member',joined_at:'2026-01-01T00:00:00Z'},{project_id:'joined',user_id:'other',role:'owner',joined_at:'2026-01-01T00:00:00Z'})
   h.remote.statuses.push({...h.repo.statuses.findByProjectId('p0')[0],id:'joined-status',project_id:'joined'})
   const pause=gate()
+  let pendingReadCount=0
   let blocked=false,armed=false,pending=[invite('PRIVATE FIRST'),invite('PRIVATE QUEUED')]
   const hold=async <T,>(value:T):Promise<T> => {
     if (!armed || blocked) return value
@@ -59,7 +61,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
     if (!String(url).includes('/rpc/')) return originalFetch(url,init)
     const body=JSON.parse(String(init?.body??'{}'))
     let result:unknown
-    if(path==='get_pending_invites_for_email') result=body.user_email === h.stores.useAuthStore.getState().currentUser?.email ? pending : []
+    if(path==='get_pending_invites_for_email') {pendingReadCount++;result=body.user_email === h.stores.useAuthStore.getState().currentUser?.email ? pending : []}
     else if(path==='validate_invite') result=body.invite_token==='EXPIRED' ? [] : [invite(body.invite_token)]
     else if(path==='accept_invite') result='joined'
     else if(path==='decline_invite') result=body.invite_token==='PUBLIC'?'dismissed':'declined'
@@ -110,7 +112,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
       await h.untilIdle()
     })
   }
-  return {h,host,pause,mount,open,click,idle,change,layoutSnapshots,arm:()=>{armed=true},setPending:(tokens:string[])=>{pending=tokens.map(invite)}}
+  return {h,host,pause,mount,open,click,idle,change,layoutSnapshots,pendingReads:()=>pendingReadCount,arm:()=>{armed=true},setPending:(tokens:string[])=>{pending=tokens.map(invite)}}
 }
 afterEach(async()=>{
   for(const {h,root,host} of opened.splice(0)) {
@@ -247,5 +249,21 @@ it('calls a late-arriving unsubscriber after the actual invitation channel is cr
   await f.mount();await f.idle()
   expect(f.h.channels).toHaveLength(1)
   expect(f.h.channels[0].closed).toBe(true)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it('replaces an already-rendered inbox on a native scope announcement without replacing the User object',async()=>{
+  const f=await setup();await f.mount()
+  const owner=f.h.stores.useAuthStore.getState().currentUser
+  expect(f.host.textContent).toContain('PRIVATE FIRST')
+  f.setPending(['CURRENT WARM INVITE'])
+  const before=f.pendingReads()
+  await act(async()=>{f.h.replaceDatabase();await f.h.untilIdle()})
+  expect(f.h.stores.useAuthStore.getState().currentUser).toBe(owner)
+  expect(f.host.textContent).not.toContain('PRIVATE FIRST')
+  expect(f.host.textContent).not.toContain('PRIVATE QUEUED')
+  expect(f.host.textContent).toContain('CURRENT WARM INVITE')
+  expect(f.pendingReads()-before).toBe(1)
+  expect(f.h.channels.filter((c:{topic:string;closed:boolean})=>c.topic==='invites:u@example.invalid'&&!c.closed)).toHaveLength(1)
   expect(f.h.fixtureErrors).toEqual([])
 })

@@ -17,14 +17,15 @@ function textOf(file, ref) {
 }
 async function compilation(ref, invitations = false, sharedHook = false) {
   const app = ts.createSourceFile('App.tsx', textOf('src/renderer/src/App.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let effect, startupEffect, localBootstrapEffect, localChangeEffect, invitationCall, invitationView;
+  let effect, startupEffect, localBootstrapEffect, localBootstrapDeps, projectEffect, projectDeps, localChangeEffect, invitationCall, invitationView;
   function walk(node) {
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('realtimeEffectRunCount.current += 1')) effect = node.arguments[0].getText(app);
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[1]?.getText(app).includes('startupUserId')) startupEffect = node.arguments[0].getText(app);
-    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.tray.setUserId')) localBootstrapEffect = node.arguments[0].getText(app);
+    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.tray.setUserId')) { localBootstrapEffect = node.arguments[0].getText(app); localBootstrapDeps = node.arguments[1].getText(app); }
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.onTasksChanged')) localChangeEffect = node.arguments[0].getText(app);
     if (ts.isVariableDeclaration(node) && node.initializer && ts.isCallExpression(node.initializer) && node.initializer.expression.getText(app) === 'useProjectInvitations') invitationCall = node.getText(app);
     if (ts.isJsxExpression(node) && node.expression && node.expression.getText(app).includes('<InviteDialog')) invitationView = node.getText(app);
+    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('hydrateAllForProject(currentProjectId)')) { projectEffect=node.arguments[0].getText(app);projectDeps=node.arguments[1].getText(app); }
     ts.forEachChild(node, walk);
   }
   walk(app);
@@ -32,17 +33,23 @@ async function compilation(ref, invitations = false, sharedHook = false) {
   if (invitations && (!invitationCall || !invitationView)) throw Error('App invitation wiring unavailable');
   const projectCachePath = 'src/renderer/src/shared/stores/projectCache.ts';
   const hasProjectCache = ref ? cp.spawnSync('git', ['cat-file','-e',`${ref}:${projectCachePath}`], {cwd:source,stdio:'ignore'}).status === 0 : fs.existsSync(path.join(source,projectCachePath));
+  const nativeScopePath = 'src/renderer/src/shared/hooks/useDatabaseScope.ts';
+  const hasNativeScope = ref ? cp.spawnSync('git', ['cat-file','-e',`${ref}:${nativeScopePath}`], {cwd:source,stdio:'ignore'}).status === 0 : fs.existsSync(path.join(source,nativeScopePath));
   const entry = `
+    import { useEffect } from 'react';
+    import { useAttachmentStore } from './shared/stores/attachmentStore';
     import { DatabaseSync } from 'node:sqlite';
     import { migrations } from '../../main/database/migrations';
     import { createRepositories } from '../../main/repositories';
     import * as personal from './services/PersonalSyncService';
     import * as shared from './services/SyncService';
     import * as user from './services/UserChannelService';
-    import { captureSyncContext, captureSyncProducer } from './services/syncContext';
+    import { captureSyncContext, captureSyncProducer${hasNativeScope ? ', syncContextFromProducer' : ''} } from './services/syncContext';
     import { isSuspended } from './services/powerState';
-    import { useAuthStore } from './shared/stores/authStore';
+    import { useAuthStore${hasNativeScope ? ', observeDatabaseScope' : ''} } from './shared/stores/authStore';
+    ${hasNativeScope ? "import { useDatabaseScope } from './shared/hooks/useDatabaseScope';" : ''}
     import { useSyncStore } from './shared/stores/syncStore';
+    import { useNotificationStore } from './shared/stores/notificationStore';
     import { useProjectAreaStore } from './shared/stores/projectAreaStore';
     ${hasProjectCache ? "import { evictProjectData } from './shared/stores/projectCache';" : ''}
     import { useProjectStore } from './shared/stores/projectStore';
@@ -57,7 +64,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent, useLogStore } from './shared/stores/logStore';
-    ${sharedHook ? "import { hydrationContext as memberHydrationContext } from './shared/stores/hydrationContext'; import { getMemberDisplay, useMemberDisplay, useProjectMemberDisplays, invalidateMemberDisplay } from './shared/hooks/useMemberDisplay'; import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
+    ${sharedHook ? "import { hydrationContext as memberHydrationContext } from './shared/stores/hydrationContext'; import { getMemberDisplay, useMemberDisplay, useProjectMemberDisplays, invalidateMemberDisplay } from './shared/hooks/useMemberDisplay'; import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime'; import { MemberSettings } from './features/collaboration/MemberSettings'; import { StatsView } from './features/views/StatsView';" : ''}
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
@@ -66,17 +73,18 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     for(const migrate of migrations)migrate(db);
     const repo=createRepositories(db);
     const realtimeEffectRunCount={current:0},currentProjectRef={current:null};
-    function runEffect(){const userId=useAuthStore.getState().currentUser?.id,isOffline=false;return (${effect})();}
-    function runStartup(){const startupUserId=useAuthStore.getState().currentUser?.id,isAuthenticated=!!startupUserId,isOffline=false;return (${startupEffect})();}
+    function runEffect(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id,isOffline=false;return (${effect})();}
+    function runStartup(){const databaseScope=window.api.sync.currentContext();const startupUserId=useAuthStore.getState().currentUser?.id,isAuthenticated=!!startupUserId,isOffline=false;return (${startupEffect})();}
     const {hydrateProjects}=useProjectStore.getState(),{hydrateStatuses}=useStatusStore.getState(),{hydrateLabels}=useLabelStore.getState();
     const {hydrateAllForProject,hydrateAllForUser,hydrateMyDay,hydrateAllTaskLabels}=useTaskStore.getState();
     const {setUserId:setSettingsUserId,hydrateSettings,hydrateThemes}=useSettingsStore.getState();
     const {hydrateProjectTemplates}=useTemplateStore.getState();
-    function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
-    function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
-      stores:{useAuthStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
-  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
+    function runLocalBootstrap(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
+    function runLocalChanges(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id??null;const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
+    function NativeBootstrap(){const databaseScope=${hasNativeScope ? 'useDatabaseScope()' : 'window.api.sync.currentContext()'},currentUser=useAuthStore(state=>state.currentUser),userId=currentUser?.id??null,isAuthenticated=useAuthStore(state=>state.isAuthenticated),currentProjectId=useProjectStore(state=>state.currentProjectId);useEffect(${localBootstrapEffect},${localBootstrapDeps});useEffect(${projectEffect},${projectDeps});return null}
+    globalThis.fixture={${hasNativeScope ? 'observeDatabaseScope,useDatabaseScope,' : ''}NativeBootstrap,${sharedHook ? 'MemberSettings,StatsView,useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+      stores:{useAuthStore,useAttachmentStore,useNotificationStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
+  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations || sharedHook ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
       build.onResolve({filter:/^@supabase\/supabase-js$/},()=>({path:'sdk',namespace:'fixture'}));
       build.onResolve({filter:/^\./},args=>{
@@ -189,6 +197,11 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
       const mapped={getQueue:'findAll',count:'count',enqueue:'enqueue',dequeue:'dequeue',updatePayload:'updatePayload'}[method];if(mapped)return Promise.resolve(repo.syncQueue[mapped](...args));
     }
     if(['timer','tray','log','power'].includes(namespace))return method.startsWith('on')?noop:Promise.resolve();
+    if(namespace==='stats'){
+      if(method==='focus')return repo.activityLog.getFocusStats(args[0],args[1]?.[0]??null,args[2],args[3]);
+      const methods={completions:['tasks','getCompletionStats'],streaks:['tasks','getStreakStats'],heatmap:['activityLog','getActivityHeatmap'],focusTaskList:['activityLog','getFocusTaskList'],taskList:['tasks','getStatsTaskList'],summary:['tasks','getTaskSummaryStats'],priorityBreakdown:['tasks','getPriorityBreakdown'],completionsByDayOfWeek:['tasks','getCompletionsByDayOfWeek'],projectBreakdown:['tasks','getProjectBreakdown'],cookieBalance:['activityLog','getCookieStats']};
+      const mapped=methods[method];if(mapped)return repo[mapped[0]][mapped[1]](...args);
+    }
     const op=namespace==='tasks'?({applyRemote:'applyRemoteTask',completeRecurring:'completeRecurringTask',autoAddMyDay:'autoAddMyDayTasks'}[method]??method):namespace==='labels'&&method==='findAll'?'findAllForUser':namespace==='savedViews'&&method==='countMatching'?'countMatchingTasks':method;
     if(!repo[namespace]?.[op]){const message=`Unsupported fixture API ${namespace}.${op}`;fixtureErrors.push(message);return Promise.reject(Error(message))}
     return Promise.resolve(repo[namespace][op](...args));

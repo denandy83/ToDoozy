@@ -15,9 +15,9 @@ export function hydrationContext(origin?: HydrationOrigin, projectId?: string): 
   const isProjectCurrent = captureProjectScope()
   const user = useAuthStore.getState().currentUser
   const database = origin ? null : window.api.sync.captureContext()
-  const sameUser = (): boolean => useAuthStore.getState().currentUser === user
+  const sameUser = (): boolean => useAuthStore.getState().currentUser?.id === user?.id
   const assertCurrent = (): void => {
-    if (origin ? useAuthStore.getState().currentUser?.id !== user?.id : !sameUser()) throw new Error('Hydration account changed')
+    if (!sameUser()) throw new Error('Hydration account changed')
     origin?.assertCurrent?.()
     if (projectId && !isProjectCurrent(projectId)) throw new Error('Project hydration invalidated')
   }

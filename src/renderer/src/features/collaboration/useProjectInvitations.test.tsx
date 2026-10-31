@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { User } from '../../../../shared/types'
 import { useProjectInvitations } from './useProjectInvitations'
 import { InviteDialog } from './InviteDialog'
-import { useAuthStore } from '../../shared/stores/authStore'
+import { observeDatabaseScope, useAuthStore } from '../../shared/stores/authStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
 import { useViewStore } from '../../shared/stores/viewStore'
 import * as service from '../../services/SyncService'
@@ -59,8 +59,11 @@ beforeEach(() => {
   vi.mocked(service.declineInvite).mockResolvedValue(undefined)
   vi.stubGlobal('window', Object.assign(window, { api: {
     onInviteReceived: (callback: typeof deepLink) => { deepLink=callback; return () => { if (deepLink === callback) deepLink=undefined } },
-    sync: { captureContext: async () => ({ userId: useAuthStore.getState().currentUser?.id, generation }) }
+    sync: { currentContext: () => JSON.stringify([useAuthStore.getState().currentUser?.id ?? null, generation]), onContextChanged: () => () => {}, captureContext: async () => ({ userId: useAuthStore.getState().currentUser?.id, generation }) }
   } }))
+  observeDatabaseScope()
+  useProjectStore.setState({ hydrateProjects: hydrate })
+  useViewStore.setState({ currentView: 'project', selectedProjectId: 'current-project' })
   host=document.createElement('div'); document.body.append(host); root=createRoot(host)
 })
 afterEach(async () => {
@@ -143,6 +146,7 @@ it.each(['Accept','Decline'].flatMap(action => ['account','generation'].flatMap(
   await mount(); await click(action)
   await act(async () => {
     if (kind === 'account') useAuthStore.setState({ currentUser:bob }); else generation++
+    observeDatabaseScope()
     // The normal account reset clears A's selection; seed B's own state before releasing A.
     useViewStore.setState({ currentView:'project', selectedProjectId:'current-project' })
   })

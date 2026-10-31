@@ -1,3 +1,7 @@
+import { membershipSnapshot } from '../../services/membershipSnapshot'
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
+import { logEvent } from '../../shared/stores/logStore'
+import { useProjectStore } from '../../shared/stores/projectStore'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { subscribeToProject, setRealtimeCallback, getSharedProjectMembers, unsubscribeFromProject } from '../../services/SyncService'
 import { captureProjectProducer, syncContextFromProducer, type SyncContext } from '../../services/syncContext'
@@ -14,7 +18,7 @@ export interface SharedProjectMember {
   role: string
 }
 export interface RemovedFromProject { id: string; name: string }
-interface Session { ownerId: string; projectId: string; active: boolean }
+interface Session { scope: string | null; ownerId: string; projectId: string; active: boolean }
 interface SharedState { session: Session | null; members: SharedProjectMember[]; removed: RemovedFromProject | null }
 interface UseSharedProjectRealtimeResult {
   projectMembers: SharedProjectMember[]
@@ -23,6 +27,7 @@ interface UseSharedProjectRealtimeResult {
 }
 
 export function useSharedProjectRealtime(selectedProject: Project | null, currentUser: User | null): UseSharedProjectRealtimeResult {
+  const scope = useDatabaseScope()
   const [state, setState] = useState<SharedState>({ session: null, members: [], removed: null })
   const sessionRef = useRef<Session | null>(null)
   const projectId = selectedProject?.id
@@ -32,15 +37,17 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
   useEffect(() => {
     if (!userId || !projectId || !shared) return
     const project = { id: projectId, name: projectName }
-    const session: Session = { ownerId: userId, projectId: project.id, active: true }
+    const session: Session = { scope, ownerId: userId, projectId: project.id, active: true }
     sessionRef.current = session
     const producer = captureProjectProducer(project.id)
-    const current = async (origin: SyncContext): Promise<boolean> => await origin.isCurrent() && session.active && sessionRef.current === session
+    const current = async (origin: SyncContext): Promise<boolean> => await origin.isCurrent() && window.api.sync.currentContext() === scope && session.active && sessionRef.current === session
     const assert = (origin: SyncContext): void => {
       origin.assertCurrent()
-      if (!session.active || sessionRef.current !== session) throw new Error('Shared project view changed')
+      if (window.api.sync.currentContext() !== scope || !session.active || sessionRef.current !== session) throw new Error('Shared project view changed')
     }
     const loadMembers = async (origin: SyncContext): Promise<void> => {
+      origin = await membershipSnapshot()(project.id, origin)
+      try {
       if (!await current(origin)) return
       assert(origin)
       const members = await getSharedProjectMembers(project.id, origin)
@@ -75,6 +82,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       assert(origin)
       setState(previous => previous.session === session ? { ...previous, members } : previous)
       invalidateMemberDisplay(project.id, origin)
+      } catch (error) { if (await current(origin)) throw error }
     }
     setState({ session, members: [], removed: null })
     let removed = false
@@ -107,8 +115,12 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       }
       } catch (error) { if (await current(origin)) throw error }
     })
+    const parentContext = syncContextFromProducer(producer)
+    const offMembers = useProjectStore.subscribe((next, previous) => {
+      if (next.members[project.id] !== previous.members[project.id]) void parentContext.then(loadMembers).catch(async error => { if (await producer.isCurrent()) logEvent('error', 'sync', 'Member refresh failed', String(error)) })
+    })
     void (async () => {
-      const parent = await syncContextFromProducer(producer)
+      const parent = await parentContext
       const origin: SyncContext = {
         ...parent,
         isCurrent: async () => await parent.isCurrent() && session.active,
@@ -124,10 +136,11 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
     return () => {
       session.active = false
       stopCallback()
+      offMembers()
       if (sessionRef.current === session) sessionRef.current = null
     }
-  }, [projectId, projectName, shared, userId])
-  const visible = state.session?.active && state.session.ownerId === currentUser?.id && state.session.projectId === selectedProject?.id
+  }, [projectId, projectName, shared, userId, scope])
+  const visible = state.session?.scope === scope && state.session?.active && state.session.ownerId === currentUser?.id && state.session.projectId === selectedProject?.id
   const setRemovedFromProject = useCallback<React.Dispatch<React.SetStateAction<RemovedFromProject | null>>>((value) => {
     setState(previous => ({ ...previous, removed: typeof value === 'function' ? value(previous.removed) : value }))
   }, [])

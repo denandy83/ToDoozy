@@ -1,3 +1,5 @@
+import { membershipSnapshot } from '../../services/membershipSnapshot'
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
 import { captureProjectProducer, requireProducerCurrent } from '../../services/syncContext'
 /**
  * Members section for project settings — shows member list, invite button,
@@ -44,7 +46,15 @@ interface MemberDisplay {
   display_initials: string | null
 }
 
-export function MemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
+export function MemberSettings(props: MemberSettingsProps): React.JSX.Element {
+  const scope = useDatabaseScope()
+  const userId = useAuthStore(state => state.currentUser?.id)
+  return <ScopedMemberSettings key={JSON.stringify([scope, userId, props.project.id])} {...props} onToast={message => {
+    if (scope === window.api.sync.currentContext() && userId === useAuthStore.getState().currentUser?.id) props.onToast(message)
+  }} />
+}
+
+function ScopedMemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateProject = useProjectStore((s) => s.updateProject)
   const [memberState, setMemberState] = useState<{ ownerId: string | undefined; projectId: string; rows: MemberDisplay[] }>({ ownerId: currentUser?.id, projectId: project.id, rows: [] })
@@ -85,7 +95,7 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
       setLoading(false)
       return
     }
-    const origin = captureProjectProducer(project.id)
+    const origin = await membershipSnapshot()(project.id, captureProjectProducer(project.id))
     if (currentUser?.id !== origin.userId) return
     try {
       const data = await getSharedProjectMembers(project.id, origin)
@@ -112,19 +122,24 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
 
   const handleGenerateInvite = async (): Promise<void> => {
     if (!currentUser) return
+    const origin = captureProjectProducer(project.id)
     try {
       const link = await generateInviteLink(project.id, currentUser.id)
+      await requireProducerCurrent(origin)
       await navigator.clipboard.writeText(link)
+      await requireProducerCurrent(origin)
       setCopiedLink(true)
       onToast('Invite link copied to clipboard (expires in 15 minutes)')
       setTimeout(() => setCopiedLink(false), 3000)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to generate invite:', err)
       onToast('Failed to generate invite link')
     }
   }
 
   const handleEmailInvite = async (): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     if (!currentUser || !emailInviteValue.trim()) return
     const email = emailInviteValue.trim().toLowerCase()
     // Basic email validation
@@ -140,13 +155,15 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
     setSendingEmailInvite(true)
     try {
       await generateInviteLink(project.id, currentUser.id, email)
+      await requireProducerCurrent(origin)
       setEmailInviteValue('')
       onToast(`Invite sent to ${email}. They'll see it when they open ToDoozy.`)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to send email invite:', err)
       onToast('Failed to send invite')
     } finally {
-      setSendingEmailInvite(false)
+      if (await origin.isCurrent()) setSendingEmailInvite(false)
     }
   }
 
@@ -166,13 +183,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
 
   const handleLeaveProject = async (keepLocal: boolean): Promise<void> => {
     if (!currentUser) return
+    const origin = captureProjectProducer(project.id)
     try {
-      await removeSharedMember(project.id, currentUser.id)
+      await removeSharedMember(project.id, currentUser.id, origin)
       await unsubscribeFromProject(project.id)
       if (keepLocal) {
         // Create a new local project with a fresh UUID so it can't collide with the shared original
         const newId = crypto.randomUUID()
-        await window.api.projects.create({
+        await origin.api.projects.create({
           id: newId,
           name: `${project.name} (local copy)`,
           description: project.description,
@@ -181,14 +199,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
           owner_id: currentUser.id,
           is_default: 0
         })
-        await window.api.projects.addMember(newId, currentUser.id, 'owner')
+        await origin.api.projects.addMember(newId, currentUser.id, 'owner')
         // Copy statuses to new project
-        const statuses = await window.api.statuses.findByProjectId(project.id)
+        const statuses = await origin.api.statuses.findByProjectId(project.id)
         const statusIdMap: Record<string, string> = {}
         for (const s of statuses) {
           const newStatusId = crypto.randomUUID()
           statusIdMap[s.id] = newStatusId
-          await window.api.statuses.create({
+          await origin.api.statuses.create({
             id: newStatusId,
             project_id: newId,
             name: s.name,
@@ -200,18 +218,18 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
           })
         }
         // Copy labels to new project
-        const oldLabels = await window.api.labels.findByProjectId(project.id)
+        const oldLabels = await origin.api.labels.findByProjectId(project.id)
         for (const l of oldLabels) {
-          await window.api.labels.addToProject(newId, l.id).catch(() => {})
+          await origin.api.labels.addToProject(newId, l.id).catch(() => {})
         }
         // Copy tasks to new project (remap status IDs and parent IDs)
-        const tasks = (await window.api.tasks.findAllByProject(project.id)).filter((task) => !task.is_archived && !task.is_template)
+        const tasks = (await origin.api.tasks.findAllByProject(project.id)).filter((task) => !task.is_archived && !task.is_template)
         const taskIdMap: Record<string, string> = {}
         // First pass: create all tasks without parent_id
         for (const t of tasks) {
           const newTaskId = crypto.randomUUID()
           taskIdMap[t.id] = newTaskId
-          await window.api.tasks.create({
+          await origin.api.tasks.create({
             id: newTaskId,
             project_id: newId,
             owner_id: currentUser.id,
@@ -230,28 +248,30 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
             reference_url: t.reference_url
           })
           // Copy labels
-          const labels = await window.api.tasks.getLabels(t.id)
+          const labels = await origin.api.tasks.getLabels(t.id)
           for (const l of labels) {
-            await window.api.tasks.addLabel(newTaskId, l.label_id).catch(() => {})
+            await origin.api.tasks.addLabel(newTaskId, l.label_id).catch(() => {})
           }
         }
         // Second pass: set parent_id for subtasks
         for (const t of tasks) {
           if (t.parent_id && taskIdMap[t.parent_id]) {
-            await window.api.tasks.update(taskIdMap[t.id], { parent_id: taskIdMap[t.parent_id] })
+            await origin.api.tasks.update(taskIdMap[t.id], { parent_id: taskIdMap[t.parent_id] })
           }
         }
         // Delete the old shared project locally
-        await window.api.projects.delete(project.id)
+        await origin.api.projects.delete(project.id)
         onToast('You left the project. A local copy has been kept.')
       } else {
-        await window.api.projects.delete(project.id)
+        await origin.api.projects.delete(project.id)
         onToast('You left the project.')
       }
       const { hydrateProjects } = useProjectStore.getState()
-      await hydrateProjects(currentUser.id)
+      await hydrateProjects(currentUser.id, origin)
+      await requireProducerCurrent(origin)
       setShowLeaveConfirm(false)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to leave project:', err)
       onToast('Failed to leave project')
     }
