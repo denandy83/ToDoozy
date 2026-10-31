@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
-import { hydrationContext } from './hydrationContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import type {
   Setting,
@@ -40,7 +40,7 @@ export type SettingsStore = SettingsState & SettingsActions
 let themeRevision = 0
 let pendingThemeWrites = 0
 
-export async function refreshSyncedTheme(userId: string, origin = hydrationContext()): Promise<void> {
+export async function refreshSyncedTheme(userId: string, origin: HydrationOrigin = hydrationContext()): Promise<void> {
   if (useSettingsStore.getState().userId !== userId || pendingThemeWrites) return
   const revision = ++themeRevision
   if (!await origin.isCurrent()) return

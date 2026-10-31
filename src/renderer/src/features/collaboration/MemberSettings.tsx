@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureProjectProducer, requireProducerCurrent } from '../../services/syncContext'
 /**
  * Members section for project settings — shows member list, invite button,
  * remove/leave/unshare actions.
@@ -47,7 +47,8 @@ interface MemberDisplay {
 export function MemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const [members, setMembers] = useState<MemberDisplay[]>([])
+  const [memberState, setMemberState] = useState<{ ownerId: string | undefined; projectId: string; rows: MemberDisplay[] }>({ ownerId: currentUser?.id, projectId: project.id, rows: [] })
+  const members = memberState.ownerId === currentUser?.id && memberState.projectId === project.id ? memberState.rows : []
   const [loading, setLoading] = useState(true)
   const [copiedLink, setCopiedLink] = useState(false)
   const [confirmUnshare, setConfirmUnshare] = useState(false)
@@ -61,14 +62,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const handleSaveMemberDisplay = async (userId: string): Promise<void> => {
     const color = editColor || null
     const initials = editInitials.trim() || null
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(project.id)
     try {
       if (project.is_shared === 1) await updateSharedMemberDisplay(project.id, userId, color, initials, origin)
       await requireProducerCurrent(origin)
       await origin.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
       await requireProducerCurrent(origin)
-      setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
-      invalidateMemberDisplay(project.id)
+      setMemberState(previous => ({ ...previous, rows: previous.rows.map(member => member.user_id === userId ? { ...member, display_color: color, display_initials: initials } : member) }))
+      invalidateMemberDisplay(project.id, origin)
       setEditingMemberId(null)
       onToast('Member appearance updated')
     } catch {
@@ -84,23 +85,26 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
       setLoading(false)
       return
     }
+    const origin = captureProjectProducer(project.id)
+    if (currentUser?.id !== origin.userId) return
     try {
-      const data = await getSharedProjectMembers(project.id)
+      const data = await getSharedProjectMembers(project.id, origin)
       // Enrich with local display overrides
-      const localMembers = await window.api.projects.getMembers(project.id)
+      const localMembers = await origin.api.projects.getMembers(project.id)
+      await requireProducerCurrent(origin)
       const localMap = new Map(localMembers.map((lm) => [lm.user_id, lm]))
-      setMembers(data.map((m) => ({
+      setMemberState({ ownerId: origin.userId, projectId: project.id, rows: data.map((m) => ({
         ...m,
         joined_at: m.joined_at,
         display_color: localMap.get(m.user_id)?.display_color ?? null,
         display_initials: localMap.get(m.user_id)?.display_initials ?? null
-      })))
+      })) })
     } catch (err) {
-      console.error('Failed to load members:', err)
+      if (await origin.isCurrent()) console.error('Failed to load members:', err)
     } finally {
-      setLoading(false)
+      if (await origin.isCurrent()) setLoading(false)
     }
-  }, [project.id, isShared])
+  }, [project.id, isShared, currentUser?.id])
 
   useEffect(() => {
     loadMembers()
@@ -147,11 +151,14 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   }
 
   const handleRemoveMember = async (userId: string): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     try {
-      await removeSharedMember(project.id, userId)
-      setMembers((prev) => prev.filter((m) => m.user_id !== userId))
+      await removeSharedMember(project.id, userId, origin)
+      await requireProducerCurrent(origin)
+      setMemberState(previous => ({ ...previous, rows: previous.rows.filter(member => member.user_id !== userId) }))
       onToast('Member removed')
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to remove member:', err)
       onToast('Failed to remove member')
     }
@@ -251,14 +258,19 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   }
 
   const handleUnshare = async (): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     try {
-      await removeProjectFromSupabase(project.id)
+      await removeProjectFromSupabase(project.id, origin)
+      await requireProducerCurrent(origin)
       await unsubscribeFromProject(project.id)
+      await requireProducerCurrent(origin)
       await updateProject(project.id, { is_shared: 0 })
-      setMembers([])
+      await requireProducerCurrent(origin)
+      setMemberState({ ownerId: origin.userId, projectId: project.id, rows: [] })
       setConfirmUnshare(false)
       onToast('Project unshared. All members have been notified.')
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to unshare:', err)
       onToast('Failed to unshare project')
     }

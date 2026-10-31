@@ -15,7 +15,7 @@ const settle = () => new Promise(setImmediate);
 function textOf(file, ref) {
   return ref ? cp.execFileSync('git', ['show', `${ref}:${file}`], { cwd: source, encoding: 'utf8' }) : fs.readFileSync(path.join(source, file), 'utf8');
 }
-async function compilation(ref, invitations = false) {
+async function compilation(ref, invitations = false, sharedHook = false) {
   const app = ts.createSourceFile('App.tsx', textOf('src/renderer/src/App.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let effect, startupEffect, localBootstrapEffect, localChangeEffect, invitationCall, invitationView;
   function walk(node) {
@@ -30,6 +30,8 @@ async function compilation(ref, invitations = false) {
   walk(app);
   if (!effect || !startupEffect || !localBootstrapEffect || !localChangeEffect) throw Error('App sync effect unavailable');
   if (invitations && (!invitationCall || !invitationView)) throw Error('App invitation wiring unavailable');
+  const projectCachePath = 'src/renderer/src/shared/stores/projectCache.ts';
+  const hasProjectCache = ref ? cp.spawnSync('git', ['cat-file','-e',`${ref}:${projectCachePath}`], {cwd:source,stdio:'ignore'}).status === 0 : fs.existsSync(path.join(source,projectCachePath));
   const entry = `
     import { DatabaseSync } from 'node:sqlite';
     import { migrations } from '../../main/database/migrations';
@@ -42,18 +44,20 @@ async function compilation(ref, invitations = false) {
     import { useAuthStore } from './shared/stores/authStore';
     import { useSyncStore } from './shared/stores/syncStore';
     import { useProjectAreaStore } from './shared/stores/projectAreaStore';
-    import { evictProjectData } from './shared/stores/projectCache';
+    ${hasProjectCache ? "import { evictProjectData } from './shared/stores/projectCache';" : ''}
     import { useProjectStore } from './shared/stores/projectStore';
-    import { useTaskStore } from './shared/stores/taskStore';
+    import { useTaskStore, selectMyDayTasks } from './shared/stores/taskStore';
     import { useLabelStore } from './shared/stores/labelStore';
     import { useStatusStore } from './shared/stores/statusStore';
     import { useSavedViewStore } from './shared/stores/savedViewStore';
     import { useTimerStore } from './shared/stores/timerStore';
     import { useViewStore } from './shared/stores/viewStore';
     import * as refresh from './services/remoteProjectRefresh';
+    import * as batches from './services/TaskBatchSyncManager';
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent, useLogStore } from './shared/stores/logStore';
+    ${sharedHook ? "import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
@@ -70,7 +74,7 @@ async function compilation(ref, invitations = false) {
     const {hydrateProjectTemplates}=useTemplateStore.getState();
     function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,evictProjectData,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
@@ -114,7 +118,7 @@ function expression(row,value) {
   if(value.startsWith('and('))return split(value.slice(4,-1)).every(x=>expression(row,x));
   const dot=value.indexOf('.');return predicate(row,value.slice(0,dot),value.slice(dot+1));
 }
-async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false,invitations=false}={}) {
+async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false,invitations=false,sharedHook=false}={}) {
   const authorizations=[];let session=null,beforeSession=null,localChange=null,inviteReceived=null;
   const requests=[],channels=[],logs=[],fixtureErrors=[],intervals=new Map(),timers=new Map();
   const remote={projects:[],project_members:[],tasks:[],statuses:[],user_labels:[],user_settings:[],user_themes:[],user_saved_views:[],user_project_areas:[],project_templates:[],project_labels:[],task_labels:[],activity_log:[]};
@@ -166,7 +170,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     const channel={topic,state:'joining',closed:false,bindings:[],on(_kind,filter,callback){this.bindings.push({filter,callback});return this},subscribe(callback){this.status=status=>{if(status==='SUBSCRIBED')this.state='joined';callback(status)};channels.push(this);if(connected)queueMicrotask(()=>{if(!this.closed)this.status('SUBSCRIBED')});return this},emit(table,eventType='UPDATE',row={}){for(const binding of this.bindings)if(binding.filter.table===table)binding.callback({eventType,new:row,old:row})}};
     return channel;
   },removeChannel:async(channel)=>{channel.closed=true;channel.state='closed';return 'ok'}};
-  const code=await compilation(ref,invitations);
+  const code=await compilation(ref,invitations,sharedHook);
   const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
     setInterval:(fn,ms)=>{const id=nextId++;intervals.set(id,{fn,ms});return id},clearInterval:id=>intervals.delete(id),setTimeout:(fn,ms)=>{const id=nextId++;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id)};
   runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>(await runtime.client.auth.getSession()).data.session;runtime.isSuspended=()=>suspended;

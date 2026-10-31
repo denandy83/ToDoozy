@@ -31,7 +31,7 @@ export async function reportPushFailure(
   try {
     await origin.api.sync.enqueue(table, rowId, operation, payload)
   } catch (e) {
-    console.error('[PersonalSync] Failed to enqueue after push error:', e)
+    if (await origin.isCurrent()) console.error('[PersonalSync] Failed to enqueue after push error:', e)
   }
   if (!await origin.isCurrent()) return
   useSyncStore.getState().setError(msg || `${context} failed`)

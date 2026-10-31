@@ -1,15 +1,10 @@
 import type { TodoozyAPI } from '../../../../preload/index.d'
 import type { SyncProducer } from '../../services/syncContext'
+import { captureProjectScope } from './projectScope'
+export { invalidateProjectHydration } from './projectScope'
 import { useAuthStore } from './authStore'
 
 export type HydrationOrigin = Pick<SyncProducer, 'api' | 'isCurrent'> & Partial<Pick<SyncProducer, 'assertCurrent'>>
-
-let evictionRevision = 0
-const projectEvictions = new Map<string, number>()
-
-export function invalidateProjectHydration(projectId: string): void {
-  projectEvictions.set(projectId, ++evictionRevision)
-}
 
 export function hydrationContext(origin?: HydrationOrigin, projectId?: string): {
   api: TodoozyAPI
@@ -17,8 +12,7 @@ export function hydrationContext(origin?: HydrationOrigin, projectId?: string): 
   assertCurrent(): void
   isProjectCurrent(id: string): boolean
 } {
-  const revision = evictionRevision
-  const isProjectCurrent = (id: string): boolean => (projectEvictions.get(id) ?? 0) <= revision
+  const isProjectCurrent = captureProjectScope()
   const user = useAuthStore.getState().currentUser
   const database = origin ? null : window.api.sync.captureContext()
   const sameUser = (): boolean => useAuthStore.getState().currentUser === user

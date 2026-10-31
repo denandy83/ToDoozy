@@ -1,4 +1,4 @@
-import { withSyncProducer, captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { withSyncProducer, captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { reportPushFailure } from '../../services/syncFeedback'
 import { hydrationContext } from './hydrationContext'
 import { evictProjectData } from './projectCache'
@@ -73,7 +73,7 @@ function scheduleSavedViewRecount(origin: SyncProducer): void {
   const userId = origin.userId ?? ''
   if (!userId) return
   import('./savedViewStore')
-    .then(async ({ useSavedViewStore }) => { if (await origin.isCurrent()) useSavedViewStore.getState().scheduleRecount(userId) })
+    .then(async ({ useSavedViewStore }) => { if (await origin.isCurrent()) useSavedViewStore.getState().scheduleRecount(userId, origin) })
     .catch(() => {})
 }
 
@@ -111,7 +111,7 @@ export async function syncIfShared(task: Task, operation: 'INSERT' | 'UPDATE' | 
   } catch (err) {
     await reportPushFailure(origin, 'syncIfShared', err, 'tasks', task.id, JSON.stringify(task), operation)
   }
-  }, producer)
+  }, producer ?? captureProjectProducer(task.project_id))
 }
 
 async function publishCreatedSubtree(root: Task, origin: SyncProducer): Promise<void> {
@@ -372,7 +372,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async createTask(input: CreateTaskInput): Promise<Task> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(input.project_id)
     const api = origin.api
     try {
       const task = await api.tasks.create(input)
@@ -383,6 +383,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       syncIfShared(task, 'INSERT', origin)
       logTaskActivity(task.id, 'created', null, null, origin)
       scheduleSavedViewRecount(origin)
+      await requireProducerCurrent(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create task'
@@ -393,10 +394,12 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<Task | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[id]?.project_id)
     const api = origin.api
     try {
       const oldTask = get().tasks[id] ?? await api.tasks.findById(id)
+      if (oldTask) origin.includeProject(oldTask.project_id)
+      if (input.project_id) origin.includeProject(input.project_id)
       const task = await api.tasks.update(id, input)
       if (task) {
         await requireProducerCurrent(origin)
@@ -467,7 +470,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
                 }
               }
             } catch (err) {
-              console.error('Failed to create recurring task clone:', err)
+              if (await origin.isCurrent()) console.error('Failed to create recurring task clone:', err)
             }
           }
         }
@@ -485,6 +488,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
             }
           }
         }
+        await requireProducerCurrent(origin)
         const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
         if (task.id === openTaskId && !isImmediateOp(input)) {
           await requireProducerCurrent(origin)
@@ -498,6 +502,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         }
         scheduleSavedViewRecount(origin)
       }
+      await requireProducerCurrent(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update task'
@@ -508,11 +513,12 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async deleteTask(id: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[id]?.project_id)
     const api = origin.api
     try {
       // Capture task before deletion for sync
       const taskToDelete = get().tasks[id] ?? await api.tasks.findById(id)
+      if (taskToDelete) origin.includeProject(taskToDelete.project_id)
       if (taskToDelete) logTaskActivity(id, 'deleted', taskToDelete.title, null, origin)
 
       // Collect task IDs to clean up attachment files before DB cascade
@@ -571,6 +577,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         if (taskToDelete) syncIfShared(taskToDelete, 'DELETE', origin)
         scheduleSavedViewRecount(origin)
       }
+      await requireProducerCurrent(origin)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete task'
@@ -581,14 +588,17 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async duplicateTask(id: string, newId: string): Promise<Task | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[id]?.project_id)
     const api = origin.api
     try {
+      const source = get().tasks[id] ?? await api.tasks.findById(id)
+      if (source) origin.includeProject(source.project_id)
       const task = await api.tasks.duplicate(id, newId)
       if (task) {
         await publishCreatedSubtree(task, origin)
         scheduleSavedViewRecount(origin)
       }
+      await requireProducerCurrent(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to duplicate task'
@@ -599,13 +609,16 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async saveTaskAsTemplate(id: string, newId: string): Promise<Task | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[id]?.project_id)
     const api = origin.api
     try {
+      const source = get().tasks[id] ?? await api.tasks.findById(id)
+      if (source) origin.includeProject(source.project_id)
       const template = await api.tasks.saveAsTemplate(id, newId)
       if (template) {
         await publishCreatedSubtree(template, origin)
       }
+      await requireProducerCurrent(origin)
       return template
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save as template'
@@ -616,24 +629,32 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async reorderTasks(taskIds: string[]): Promise<void> {
-    const origin = captureSyncProducer()
-    const api = origin.api
+    const batch = captureSyncProducer()
+    const origins = taskIds.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) }))
     try {
-      await api.tasks.reorder(taskIds)
-      const persisted = (await Promise.all(taskIds.map((id) => api.tasks.findById(id)))).filter((task) => !!task)
-      await requireProducerCurrent(origin)
-      set((state) => ({ tasks: { ...state.tasks, ...Object.fromEntries(persisted.map((task) => [task.id, task])) } }))
-      for (const task of persisted) syncIfShared(task, 'UPDATE', origin)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reorder tasks'
-      await requireProducerCurrent(origin)
-      set({ error: message })
-      throw err
+      await batch.api.tasks.reorder(taskIds)
+      await requireProducerCurrent(batch)
+      await Promise.all(origins.map(async ({ id, origin }) => {
+        try {
+          const task = await origin.api.tasks.findById(id)
+          if (!task) return
+          origin.includeProject(task.project_id)
+          await requireProducerCurrent(origin)
+          set(state => ({ tasks: { ...state.tasks, [id]: task } }))
+          syncIfShared(task, 'UPDATE', origin)
+        } catch (error) {
+          if (await origin.isCurrent()) throw error
+        }
+      }))
+    } catch (error) {
+      if (!await batch.isCurrent() || !(await Promise.all(origins.map(({ origin }) => origin.isCurrent()))).every(Boolean)) return
+      set({ error: error instanceof Error ? error.message : 'Failed to reorder tasks' })
+      throw error
     }
   },
 
   async createSubtask(parentId: string, input: CreateTaskInput): Promise<Task> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(input.project_id)
     const api = origin.api
     try {
       const task = await api.tasks.create({ ...input, parent_id: parentId })
@@ -649,6 +670,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       syncIfShared(task, 'INSERT', origin)
       logTaskActivity(task.id, 'created', null, null, origin)
       scheduleSavedViewRecount(origin)
+      await requireProducerCurrent(origin)
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create subtask'
@@ -659,9 +681,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async addLabel(taskId: string, labelId: string): Promise<void> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[taskId]?.project_id)
     const api = origin.api
     try {
+      const source = get().tasks[taskId] ?? await api.tasks.findById(taskId)
+      if (source) origin.includeProject(source.project_id)
       // Resolve to the current user's own same-name label before linking, so
       // we never attach another member's label id to this user's task (#d5b138b1).
       const linkId = await resolveLabelForCurrentUser(labelId, origin)
@@ -670,11 +694,13 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       const { pushProjectLabel } = await import('../../services/PersonalSyncService')
       if (projectId) await pushProjectLabel(projectId, linkId, null, origin)
       await get().hydrateTaskLabels(taskId, origin)
+      await requireProducerCurrent(origin)
       const labels = get().taskLabels[taskId] ?? []
       const added = labels.find((l) => l.id === linkId)
       logTaskActivity(taskId, 'label_added', null, added?.name ?? linkId, origin)
       const task = get().tasks[taskId]
       if (task) {
+        await requireProducerCurrent(origin)
         const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
         if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id, origin)
         else syncIfShared(task, 'UPDATE', origin)
@@ -682,7 +708,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       scheduleSavedViewRecount(origin)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add label'
-      console.error('[addLabel] threw', err)
+      if (await origin.isCurrent()) console.error('[addLabel] threw', err)
       await requireProducerCurrent(origin)
       set({ error: message })
       throw err
@@ -690,9 +716,11 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async removeLabel(taskId: string, labelId: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(get().tasks[taskId]?.project_id)
     const api = origin.api
     try {
+      const source = get().tasks[taskId] ?? await api.tasks.findById(taskId)
+      if (source) origin.includeProject(source.project_id)
       const labels = get().taskLabels[taskId] ?? []
       let passedLabel: Label | undefined =
         labels.find((l) => l.id === labelId)
@@ -712,20 +740,23 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         if (result) anyRemoved = true
       }
       await get().hydrateTaskLabels(taskId, origin)
+      await requireProducerCurrent(origin)
       if (anyRemoved) {
         logTaskActivity(taskId, 'label_removed', passedLabel?.name ?? labelId, null, origin)
         const task = get().tasks[taskId]
         if (task) {
-          const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
+          await requireProducerCurrent(origin)
+        const openTaskId = get().showDetailPanel ? get().lastSelectedTaskId : null
           if (task.id === openTaskId) TaskBatchSyncManager.markPending(task.id, origin)
           else syncIfShared(task, 'UPDATE', origin)
         }
         scheduleSavedViewRecount(origin)
       }
+      await requireProducerCurrent(origin)
       return anyRemoved
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to remove label'
-      console.error('[removeLabel] threw', err)
+      if (await origin.isCurrent()) console.error('[removeLabel] threw', err)
       await requireProducerCurrent(origin)
       set({ error: message })
       throw err
@@ -833,161 +864,105 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async bulkUpdateTasks(ids: string[], input: UpdateTaskInput): Promise<void> {
-    const origin = captureSyncProducer()
-    const api = origin.api
-    try {
-      const results = await Promise.all(
-        ids.map((id) => api.tasks.update(id, input))
-      )
-      await requireProducerCurrent(origin)
-      set((state) => {
-        const updated = { ...state.tasks }
-        for (const task of results) {
-          if (task) updated[task.id] = task
+    await Promise.all(ids.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) })).map(async ({ id, origin }) => {
+      try {
+        const source = get().tasks[id] ?? await origin.api.tasks.findById(id)
+        if (source) origin.includeProject(source.project_id)
+        if (input.project_id) origin.includeProject(input.project_id)
+        const task = await origin.api.tasks.update(id, input)
+        await requireProducerCurrent(origin)
+        if (task) {
+          set(state => ({ tasks: { ...state.tasks, [id]: task } }))
+          syncIfShared(task, 'UPDATE', origin)
+          scheduleSavedViewRecount(origin)
         }
-        return { tasks: updated }
-      })
-      // Sync all updated tasks to Supabase
-      for (const task of results) {
-        if (task) syncIfShared(task, 'UPDATE', origin)
+      } catch (error) {
+        if (!await origin.isCurrent()) return
+        set({ error: error instanceof Error ? error.message : 'Failed to bulk update tasks' })
+        throw error
       }
-      scheduleSavedViewRecount(origin)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to bulk update tasks'
-      await requireProducerCurrent(origin)
-      set({ error: message })
-      throw err
-    }
+    }))
   },
 
   async bulkDeleteTasks(ids: string[]): Promise<void> {
-    const origin = captureSyncProducer()
-    const api = origin.api
-    try {
-      // Capture tasks before deletion for sync
-      const tasksToDelete = ids.map((id) => get().tasks[id]).filter(Boolean) as Task[]
-      await Promise.all(ids.map((id) => api.tasks.delete(id)))
-      // Sync deletions to Supabase
-      for (const task of tasksToDelete) {
-        TaskBatchSyncManager.cancelPending(task.id)
-        syncIfShared(task, 'DELETE', origin)
-      }
-      await requireProducerCurrent(origin)
-      set((state) => {
-        const idsToRemove = new Set<string>(ids)
-        // Collect descendants
-        const collectChildren = (parentId: string): void => {
-          for (const task of Object.values(state.tasks)) {
-            if (task.parent_id === parentId && !idsToRemove.has(task.id)) {
-              idsToRemove.add(task.id)
-              collectChildren(task.id)
+    await Promise.all(ids.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) })).map(async ({ id, origin }) => {
+      try {
+        const source = get().tasks[id] ?? await origin.api.tasks.findById(id)
+        if (!source) return
+        origin.includeProject(source.project_id)
+        await origin.api.tasks.delete(id)
+        await requireProducerCurrent(origin)
+        set(state => {
+          const removed = new Set([id])
+          const collect = (parentId: string): void => {
+            for (const task of Object.values(state.tasks)) if (task.parent_id === parentId && !removed.has(task.id)) {
+              removed.add(task.id)
+              collect(task.id)
             }
           }
-        }
-        for (const id of ids) collectChildren(id)
-
-        const remaining: Record<string, Task> = {}
-        const remainingLabels: Record<string, Label[]> = {}
-        for (const [tid, task] of Object.entries(state.tasks)) {
-          if (!idsToRemove.has(tid)) remaining[tid] = task
-        }
-        for (const [tid, labels] of Object.entries(state.taskLabels)) {
-          if (!idsToRemove.has(tid)) remainingLabels[tid] = labels
-        }
-        const newExpanded = new Set(state.expandedTaskIds)
-        const newSelected = new Set(state.selectedTaskIds)
-        for (const rid of idsToRemove) {
-          newExpanded.delete(rid)
-          newSelected.delete(rid)
-        }
-        return {
-          tasks: remaining,
-          taskLabels: remainingLabels,
-          expandedTaskIds: newExpanded,
-          selectedTaskIds: newSelected,
-          lastSelectedTaskId: idsToRemove.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
-        }
-      })
-      scheduleSavedViewRecount(origin)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to bulk delete tasks'
-      await requireProducerCurrent(origin)
-      set({ error: message })
-      throw err
-    }
+          collect(id)
+          return {
+            tasks: Object.fromEntries(Object.entries(state.tasks).filter(([key]) => !removed.has(key))),
+            taskLabels: Object.fromEntries(Object.entries(state.taskLabels).filter(([key]) => !removed.has(key))),
+            expandedTaskIds: new Set([...state.expandedTaskIds].filter(key => !removed.has(key))),
+            selectedTaskIds: new Set([...state.selectedTaskIds].filter(key => !removed.has(key))),
+            lastSelectedTaskId: removed.has(state.lastSelectedTaskId ?? '') ? null : state.lastSelectedTaskId
+          }
+        })
+        TaskBatchSyncManager.cancelPending(id)
+        syncIfShared(source, 'DELETE', origin)
+        scheduleSavedViewRecount(origin)
+      } catch (error) {
+        if (!await origin.isCurrent()) return
+        set({ error: error instanceof Error ? error.message : 'Failed to bulk delete tasks' })
+        throw error
+      }
+    }))
   },
 
   async bulkAddLabel(ids: string[], labelId: string): Promise<void> {
-    const origin = captureSyncProducer()
-    const api = origin.api
-    try {
-      let linkId = await resolveLabelForCurrentUser(labelId, origin)
-      await Promise.all(ids.map((id) => api.tasks.addLabel(id, linkId)))
-      const { pushProjectLabel } = await import('../../services/PersonalSyncService')
-      const projectIds = new Set((await Promise.all(ids.map((id) => api.tasks.findById(id)))).filter((task) => !!task).map((task) => task.project_id))
-      for (const projectId of projectIds) linkId = await pushProjectLabel(projectId, linkId, null, origin) ?? linkId
-      // Re-hydrate labels for affected tasks
-      const labelResults: Record<string, Label[]> = {}
-      for (const id of ids) {
-        labelResults[id] = await api.labels.findByTaskId(id)
+    await Promise.all(ids.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) })).map(async ({ id, origin }) => {
+      try {
+        const source = get().tasks[id] ?? await origin.api.tasks.findById(id)
+        if (!source) return
+        origin.includeProject(source.project_id)
+        const linkId = await resolveLabelForCurrentUser(labelId, origin)
+        await origin.api.tasks.addLabel(id, linkId)
+        const { pushProjectLabel } = await import('../../services/PersonalSyncService')
+        await pushProjectLabel(source.project_id, linkId, null, origin)
+        await get().hydrateTaskLabels(id, origin)
+        await requireProducerCurrent(origin)
+        syncIfShared(source, 'UPDATE', origin)
+        scheduleSavedViewRecount(origin)
+      } catch (error) {
+        if (!await origin.isCurrent()) return
+        set({ error: error instanceof Error ? error.message : 'Failed to add label to tasks' })
+        throw error
       }
-      await requireProducerCurrent(origin)
-      set((state) => ({
-        taskLabels: { ...state.taskLabels, ...labelResults }
-      }))
-      // Sync affected tasks to Supabase (label_names changed)
-      for (const id of ids) {
-        const task = get().tasks[id]
-        if (task) syncIfShared(task, 'UPDATE', origin)
-      }
-      scheduleSavedViewRecount(origin)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add label to tasks'
-      await requireProducerCurrent(origin)
-      set({ error: message })
-      throw err
-    }
+    }))
   },
 
   async bulkRemoveLabel(ids: string[], labelId: string): Promise<void> {
-    const origin = captureSyncProducer()
-    const api = origin.api
-    try {
-      // Same name-based-removal as the single-task path: in shared
-      // projects the labelId may be the viewer's remapped label, while
-      // the actual task_labels row belongs to another user.
-      const passed = useLabelStore.getState().labels[labelId]
-      const targetName = passed?.name.toLowerCase() ?? null
-      await Promise.all(
-        ids.map(async (id) => {
-          const taskLabels = get().taskLabels[id] ?? []
-          const toRemove = targetName
-            ? taskLabels.filter((l) => l.name.toLowerCase() === targetName)
-            : taskLabels.filter((l) => l.id === labelId)
-          for (const l of toRemove) {
-            await api.tasks.removeLabel(id, l.id)
-          }
-        })
-      )
-      const labelResults: Record<string, Label[]> = {}
-      for (const id of ids) {
-        labelResults[id] = await api.labels.findByTaskId(id)
+    await Promise.all(ids.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) })).map(async ({ id, origin }) => {
+      try {
+        const source = get().tasks[id] ?? await origin.api.tasks.findById(id)
+        if (!source) return
+        origin.includeProject(source.project_id)
+        const name = useLabelStore.getState().labels[labelId]?.name.toLowerCase()
+        const labels = get().taskLabels[id] ?? []
+        for (const label of labels.filter(label => name ? label.name.toLowerCase() === name : label.id === labelId)) {
+          await origin.api.tasks.removeLabel(id, label.id)
+        }
+        await get().hydrateTaskLabels(id, origin)
+        await requireProducerCurrent(origin)
+        syncIfShared(source, 'UPDATE', origin)
+        scheduleSavedViewRecount(origin)
+      } catch (error) {
+        if (!await origin.isCurrent()) return
+        set({ error: error instanceof Error ? error.message : 'Failed to remove label from tasks' })
+        throw error
       }
-      await requireProducerCurrent(origin)
-      set((state) => ({
-        taskLabels: { ...state.taskLabels, ...labelResults }
-      }))
-      for (const id of ids) {
-        const task = get().tasks[id]
-        if (task) syncIfShared(task, 'UPDATE', origin)
-      }
-      scheduleSavedViewRecount(origin)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to remove label from tasks'
-      await requireProducerCurrent(origin)
-      set({ error: message })
-      throw err
-    }
+    }))
   },
 
   setPendingBulkDeleteTasks(ids: string[] | null): void {

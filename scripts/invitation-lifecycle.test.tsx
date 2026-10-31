@@ -1,8 +1,9 @@
 import { createRequire } from 'node:module'
-import { act, createElement, useLayoutEffect } from 'react'
+import { act, createElement, useLayoutEffect, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
+import type { User } from '../src/shared/types'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>',{url:'http://127.0.0.1/'})
 vi.stubGlobal('window',dom.window)
@@ -11,19 +12,33 @@ afterAll(()=>{dom.window.close();vi.unstubAllGlobals()})
 const require = createRequire(import.meta.url)
 const { makeHarness } = require('./benchmark-sync.cjs')
 const opened: Array<{h: Awaited<ReturnType<typeof makeHarness>>; root:Root; host:HTMLDivElement}> = []
-const response = (data: unknown, status=200) => new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}})
-const invite = (token: string) => ({token,project_id:'joined',project_name:token,owner_email:'OWNER '+token,status:'pending',expires_at:'2099-01-01T00:00:00Z'})
-function gate() {
+const response = (data: unknown, status=200): Response => new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}})
+const invite = (token: string): {token:string;project_id:string;project_name:string;owner_email:string;status:string;expires_at:string} => ({token,project_id:'joined',project_name:token,owner_email:'OWNER '+token,status:'pending',expires_at:'2099-01-01T00:00:00Z'})
+interface Gate { entered:Promise<void>; wait:Promise<void>; enter():void; release():void }
+function gate(): Gate {
   let enter!: () => void, release!: () => void
   return {entered:new Promise<void>(resolve => {enter=resolve}),wait:new Promise<void>(resolve => {release=resolve}),enter:()=>enter(),release:()=>release()}
 }
 type Point = 'pending'|'deep-link'|'realtime'|'accept'|'decline'|'sync-down'|'hydration'|'project-subscription'|'invite-subscription'
-async function setup(point?:Point, fail=false) {
+interface InvitationFixture {
+  h: Awaited<ReturnType<typeof makeHarness>>
+  host: HTMLDivElement
+  pause: Gate
+  mount(): Promise<void>
+  open(token:string): Promise<void>
+  click(label:string): Promise<void>
+  idle(): Promise<void>
+  change(kind:'account'|'database'): Promise<void>
+  layoutSnapshots: string[]
+  arm(): void
+  setPending(tokens:string[]): void
+}
+async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
   const h=await makeHarness({projectCount:1,invitations:true,connected:false})
   const host=document.createElement('div'); document.body.append(host)
   const root=createRoot(host); opened.push({h,root,host})
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true})
-  const user=(id:string)=>({id,email:id+'@example.invalid',display_name:null,avatar_url:null,created_at:'',updated_at:''})
+  const user=(id:string):User=>({id,email:id+'@example.invalid',display_name:null,avatar_url:null,created_at:'',updated_at:''})
   h.stores.useAuthStore.setState({currentUser:user('u'),isAuthenticated:true,isOffline:false})
   h.stores.useViewStore.setState({currentView:'project',selectedProjectId:'p0'})
   const joined={...h.repo.projects.findById('p0'),id:'joined',owner_id:'other',name:'PRIVATE JOINED',is_shared:1}
@@ -72,20 +87,20 @@ async function setup(point?:Point, fail=false) {
     return client
   }
   const layoutSnapshots:string[]=[]
-  function Screen() {
+  function Screen(): ReactElement {
     const state=h.stores.useAuthStore()
     useLayoutEffect(()=>{layoutSnapshots.push(host.textContent??'')},[state.currentUser])
     return createElement(h.services.InvitationApp)
   }
-  const idle=async()=>{await act(async()=>{await h.untilIdle()})}
-  const mount=async()=>{await act(async()=>{root.render(createElement(Screen));await h.untilIdle()})}
-  const open=async(token:string)=>{await act(async()=>{void h.emitInvite(token);await h.untilIdle()})}
-  const click=async(label:string)=>{
+  const idle=async():Promise<void>=>{await act(async()=>{await h.untilIdle()})}
+  const mount=async():Promise<void>=>{await act(async()=>{root.render(createElement(Screen));await h.untilIdle()})}
+  const open=async(token:string):Promise<void>=>{await act(async()=>{void h.emitInvite(token);await h.untilIdle()})}
+  const click=async(label:string):Promise<void>=>{
     const button=[...host.querySelectorAll('button')].find(node=>node.textContent===label)
     expect(button,host.textContent??'').toBeDefined()
     await act(async()=>{button!.click();await h.untilIdle()})
   }
-  const change=async(kind:'account'|'database')=>{
+  const change=async(kind:'account'|'database'):Promise<void>=>{
     pending=[invite('CURRENT INVITE')]
     await act(async()=>{
       if(kind==='account') {h.setAccount('other');h.stores.useAuthStore.setState({currentUser:user('other')})}

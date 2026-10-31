@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -176,7 +176,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async createLabel(input: CreateLabelInput): Promise<Label> {
-    const origin = captureSyncProducer()
+    const origin = input.project_id ? captureProjectProducer(input.project_id) : captureSyncProducer()
     const api = origin.api
     try {
       const label = await api.labels.create(input)
@@ -208,6 +208,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
           void pushProjectLabel(input.project_id, label.id, null, origin)
         }
       })
+      await requireProducerCurrent(origin)
       return label
     } catch (err) {
       await requireProducerCurrent(origin)
@@ -292,7 +293,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async removeFromProject(projectId: string, labelId: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(projectId)
     const api = origin.api
     try {
       // Resolve the name of the label being unlinked. In shared projects,
@@ -360,6 +361,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
           void pushRemoveLabelFromProject(projectId, id, origin)
         }
       }
+      await requireProducerCurrent(origin)
       return anyRemoved
     } catch (err) {
       await requireProducerCurrent(origin)
@@ -370,7 +372,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async addToProject(projectId: string, labelId: string): Promise<void> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(projectId)
     const api = origin.api
     try {
       await api.labels.addToProject(projectId, labelId)

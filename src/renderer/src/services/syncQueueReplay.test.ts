@@ -44,7 +44,7 @@ beforeEach(() => {
     sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async (_context: unknown, channel: string, args: unknown[]) => { const [ns, method] = channel.split(':'); return (window.api as never as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args) }, getQueue: vi.fn(async () => [...queue]), count: vi.fn(async () => queue.length), dequeue: vi.fn(async (id) => { const exists=queue.some((row)=>row.id===id);queue = queue.filter((row) => row.id !== id);return exists }) },
     settings: { findAllByUser: vi.fn(async () => [{ user_id: 'u', key: 'theme', value: 'dark', updated_at: '2026-10-25T12:00:00Z', deleted_at: null }]) },
     tasks: { findAllByProject: vi.fn(async () => []), findById: vi.fn(async () => local), getLabels: vi.fn(async () => []), getLabelState: vi.fn(async()=>[]), acknowledgeLabelState:vi.fn(async()=>undefined) },
-    projects: { findById: vi.fn(async () => ({ id: 'p', is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z', updated_at: '2026-10-25T13:00:00Z' })) }
+    projects: { findById: vi.fn(async () => ({ id: 'p', owner_id: 'u', is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z', updated_at: '2026-10-25T13:00:00Z' })) }
   } })
   useSyncStore.setState({ status: 'synced', pendingCount: 0, errorMessage: null })
   setOnlineStatus(true)

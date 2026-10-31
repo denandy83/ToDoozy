@@ -70,10 +70,12 @@ export async function flush(taskId: string): Promise<void> {
   const origin = pendingTaskIds.get(taskId)!
   cancelPending(taskId)
   if (!await origin.isCurrent()) return
-  const { syncIfShared } = await getStoreModule()
-  const task = await origin.api.tasks.findById(taskId)
-  if (!task || task.deleted_at || !await origin.isCurrent()) return
-  await syncIfShared(task, 'UPDATE', origin)
+  try {
+    const { syncIfShared } = await getStoreModule()
+    const task = await origin.api.tasks.findById(taskId)
+    if (!task || task.deleted_at || !await origin.isCurrent()) return
+    await syncIfShared(task, 'UPDATE', origin)
+  } catch (error) { if (await origin.isCurrent()) throw error }
 }
 
 /** Flush every pending task — panel close, app blur, and quit boundaries. */

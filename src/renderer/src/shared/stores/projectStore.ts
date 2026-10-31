@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { useAuthStore } from './authStore'
 import { hydrationContext } from './hydrationContext'
 import { evictProjectData } from './projectCache'
@@ -112,9 +112,10 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async createProject(input: CreateProjectInput): Promise<Project> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(input.id)
     try {
       const project = await origin.api.projects.create(input)
+      origin.includeProject(project.id)
       await requireProducerCurrent(origin)
       set((state) => ({
         projects: { ...state.projects, [project.id]: project }
@@ -122,7 +123,8 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       // Sync to Supabase
       import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
         if (!await origin.isCurrent()) return
-        pushProject(project, origin).catch((err) => {
+        pushProject(project, origin).catch(async (err) => {
+          if (!await origin.isCurrent()) return
           console.error('[ProjectStore] pushProject failed after create:', err)
         })
       })
@@ -137,7 +139,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async updateProject(id: string, input: UpdateProjectInput): Promise<Project | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
     try {
       const project = await origin.api.projects.update(id, input)
       await requireProducerCurrent(origin)
@@ -148,7 +150,8 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         // Sync to Supabase
         import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
           if (!await origin.isCurrent()) return
-          pushProject(project, origin).catch((err) => {
+          pushProject(project, origin).catch(async (err) => {
+          if (!await origin.isCurrent()) return
             console.error('[ProjectStore] pushProject failed after update:', err)
           })
         })
@@ -164,7 +167,8 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async deleteProject(id: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
+    const deletionOrigin = captureSyncProducer()
     try {
       const result = await origin.api.projects.delete(id)
       await requireProducerCurrent(origin)
@@ -185,13 +189,14 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         })
         // Sync deletion to Supabase
         import('../../services/PersonalSyncService').then(async ({ deleteProjectFromSupabase }) => {
-          if (!await origin.isCurrent()) return
-          deleteProjectFromSupabase(id, origin).catch((err) => {
+          if (!await deletionOrigin.isCurrent()) return
+          deleteProjectFromSupabase(id, deletionOrigin).catch(async (err) => {
+            if (!await deletionOrigin.isCurrent()) return
             console.error('[ProjectStore] deleteProjectFromSupabase failed:', err)
           })
         })
       }
-      await requireProducerCurrent(origin)
+      await requireProducerCurrent(deletionOrigin)
       return result
     } catch (err) {
       await requireProducerCurrent(origin)
@@ -202,7 +207,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async archiveProject(id: string): Promise<Project | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
     try {
       const current = get().projects[id] ?? await origin.api.projects.findById(id)
       await requireProducerCurrent(origin)
@@ -229,7 +234,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async unarchiveProject(id: string): Promise<Project | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
     try {
       const current = get().projects[id] ?? await origin.api.projects.findById(id)
       await requireProducerCurrent(origin)
@@ -265,7 +270,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
     role: string,
     invitedBy?: string
   ): Promise<void> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(projectId)
     try {
       await origin.api.projects.addMember(projectId, userId, role, invitedBy)
       await requireProducerCurrent(origin)
@@ -280,7 +285,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async removeMember(projectId: string, userId: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(projectId)
     try {
       const result = await origin.api.projects.removeMember(projectId, userId)
       await requireProducerCurrent(origin)

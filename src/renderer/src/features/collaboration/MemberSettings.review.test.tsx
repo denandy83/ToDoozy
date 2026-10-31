@@ -23,7 +23,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.stubGlobal('window', Object.assign(window, { api: {
     projects: { getMembers: async () => [] },
-    sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async () => update() }
+    sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async (_origin: unknown, method: string) => method === 'projects:getMembers' ? [] : update() }
   } }))
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })

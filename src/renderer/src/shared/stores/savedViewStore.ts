@@ -22,7 +22,7 @@ interface SavedViewActions {
    * task mutations / Realtime / WAL events so sidebar counts refresh when a task
    * starts (or stops) matching a view's filter without needing an app restart.
    */
-  scheduleRecount(userId: string): void
+  scheduleRecount(userId: string, producer?: HydrationOrigin): void
   setActiveViewFilterConfig(config: string | null): void
   setViewCount(viewId: string, count: number): void
   createView(userId: string, name: string, filterConfig: string, projectId?: string | null): Promise<SavedView>
@@ -105,8 +105,8 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
     await recomputeCounts(userId, skipId, projectId, origin)
   },
 
-  scheduleRecount(userId: string): void {
-    const origin = hydrationContext()
+  scheduleRecount(userId: string, producer?: HydrationOrigin): void {
+    const origin = hydrationContext(producer)
     if (recountTimer) clearTimeout(recountTimer)
     recountTimer = setTimeout(() => {
       recountTimer = null

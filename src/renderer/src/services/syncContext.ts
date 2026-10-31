@@ -1,3 +1,4 @@
+import { captureProjectScope } from '../shared/stores/projectScope'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { TodoozyAPI } from '../../../preload/index.d'
 import { useAuthStore } from '../shared/stores/authStore'
@@ -70,6 +71,28 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
   })()
   const scope = async (): Promise<string> => { const origin = await database; return `${origin.userId}:${origin.generation}` }
   return { api, client, assertCurrent, isCurrent, userId, scope }
+}
+
+export interface ProjectProducer extends SyncProducer {
+  includeProject(projectId: string): void
+}
+
+export function captureProjectProducer(projectId?: string): ProjectProducer {
+  const current = captureProjectScope()
+  const projects = new Set(projectId ? [projectId] : [])
+  const origin = captureSyncProducer(() => [...projects].every(current))
+  return {
+    ...origin,
+    isCurrent: async () => await origin.isCurrent() && (projects.size > 0 || current()),
+    assertCurrent: () => {
+      origin.assertCurrent()
+      if (!projects.size && !current()) throw new Error('Project context changed')
+    },
+    includeProject(id) {
+      projects.add(id)
+      origin.assertCurrent()
+    }
+  }
 }
 
 export async function withSyncProducer(operation: (origin: SyncProducer) => Promise<void>, origin = captureSyncProducer()): Promise<void> {

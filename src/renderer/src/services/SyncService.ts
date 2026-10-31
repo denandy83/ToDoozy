@@ -1,3 +1,4 @@
+import { captureProjectScope } from '../shared/stores/projectScope'
 import { hydrationContext } from '../shared/stores/hydrationContext'
 import { evictProjectData } from '../shared/stores/projectCache'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
@@ -5,7 +6,7 @@ import { markSynced, refreshProducerPending, reportPushFailure } from './syncFee
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext, captureSyncProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { captureSyncContext, captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -23,7 +24,7 @@ import { pushLabel, getCachedProjectName, requestSyncCatchUp, requestProjectRefr
 import { SYNC_TABLES } from './syncTables'
 import { isSuspended } from './powerState'
 
-type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>) => void
+type RealtimeCallback = (table: string, event: string, payload: Record<string, unknown>, origin: SyncContext) => void | Promise<void>
 
 interface SharedChannelState {
   context: Promise<SyncContext>
@@ -55,12 +56,31 @@ export function getOnlineStatus(): boolean {
   return isOnline
 }
 
-export function setRealtimeCallback(cb: RealtimeCallback): void {
+export function setRealtimeCallback(cb: RealtimeCallback): () => void {
   onChangeCallback = cb
+  return () => { if (onChangeCallback === cb) onChangeCallback = null }
 }
 
 async function createSharedChannel(projectId: string, state: SharedChannelState): Promise<void> {
-  const context = await state.context
+  const parent = await state.context
+  const hydration = hydrationContext(parent, projectId)
+  const context: SyncContext = { ...parent, ...hydration }
+  const callbackOrigin: SyncContext = {
+    ...context,
+    isCurrent: async () => await context.isCurrent() && !state.cancelled,
+    assertCurrent: () => { context.assertCurrent(); if (state.cancelled) throw new Error('Shared channel cancelled') }
+  }
+  const dispatch = (table: string, event: string, data: Record<string, unknown>): void => {
+    const callback = onChangeCallback
+    if (!callback) return
+    void (async () => {
+      if (!await callbackOrigin.isCurrent()) return
+      callbackOrigin.assertCurrent()
+      await callback(table, event, data, callbackOrigin)
+    })().catch(async error => {
+      if (await callbackOrigin.isCurrent()) logEvent('error', 'realtime', 'Shared callback failed', String(error))
+    }).catch(() => {})
+  }
   const supabase = await getSupabase()
   if (!await context.isCurrent() || state.cancelled) return
   const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
@@ -81,12 +101,12 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : []) })
-            .catch((error) => logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)))
+          void callbackOrigin.api.tasks.hardDelete(data.id).then(async () => { if (!await callbackOrigin.isCurrent()) return; callbackOrigin.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : []) })
+            .catch(async (error) => { if (await callbackOrigin.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)) }).catch(() => {})
         } else {
           scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : [])
         }
-        onChangeCallback?.('task', payload.eventType, data)
+        dispatch('task', payload.eventType, data)
       }
     )
     .on(
@@ -98,10 +118,10 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void context.api.statuses.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
-            .catch((error) => logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)))
+          void callbackOrigin.api.statuses.hardDelete(data.id).then(async () => { if (!await callbackOrigin.isCurrent()) return; callbackOrigin.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
+            .catch(async (error) => { if (await callbackOrigin.isCurrent()) logEvent('error', 'sync', 'Failed to apply remote status deletion', String(error)) }).catch(() => {})
         } else scheduleRemoteProjectRefresh(projectId, context)
-        onChangeCallback?.('status', payload.eventType, data)
+        dispatch('status', payload.eventType, data)
       }
     )
     .on(
@@ -112,7 +132,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         const data = payload.eventType === 'DELETE'
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
-        onChangeCallback?.('member', payload.eventType, data)
+        dispatch('member', payload.eventType, data)
       }
     )
     .on(
@@ -122,7 +142,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
         try { if (state.cancelled) return; context.assertCurrent() } catch { return }
         const data = payload.eventType === 'DELETE' ? payload.old : payload.new
         scheduleRemoteProjectRefresh(projectId, context, typeof data.task_id === 'string' ? [data.task_id] : [])
-        onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
+        dispatch('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )
     .on(
@@ -134,7 +154,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         scheduleRemoteProjectRefresh(projectId, context)
-        onChangeCallback?.('project_label', payload.eventType, data)
+        dispatch('project_label', payload.eventType, data)
       }
     )
   channel.subscribe((status, err) => {
@@ -278,14 +298,22 @@ export async function subscribeToProject(projectId: string, context?: SyncContex
   if (existing) {
     context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
     const archived = (await context.api.projects.findById(projectId))?.is_archived === 1
-    const sameScope = (await existing.context).scope === context.scope
+    const previous = await existing.context
+    const sameScope = previous.scope === context.scope
+    const previousCurrent = await previous.isCurrent()
     if (!await context.isCurrent() || existing.cancelled) return
     context.assertCurrent()
-    if (existing.archived === archived && sameScope) return
+    if (existing.archived === archived && sameScope && previousCurrent) return
   }
   const removal = existing ? unsubscribeFromProject(projectId) : Promise.resolve()
+  const projectCurrent = captureProjectScope()
+  const source = context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended())
   const state: SharedChannelState = {
-    context: context ? Promise.resolve(context) : captureSyncContext(() => navigator.onLine && !isSuspended()),
+    context: source.then(parent => ({
+      ...parent,
+      isCurrent: async () => await parent.isCurrent() && projectCurrent(projectId),
+      assertCurrent: () => { parent.assertCurrent(); if (!projectCurrent(projectId)) throw new Error('Shared project invalidated') }
+    })),
     channel: null,
     cancelled: false,
     attempt: 0,
@@ -593,6 +621,8 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
     return 0
   }
   const { api, client: supabase, assertCurrent } = context
+  const projectCurrent = captureProjectScope()
+  const userId = useAuthStore.getState().currentUser?.id
   try {
     const queue = await api.sync.getQueue()
     if (!queue.length || !isOnline) return 0
@@ -620,7 +650,18 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
         const row = descriptor ? await descriptor.localGetById(entry.row_id, api) : payload
         return JSON.stringify({ row: row ?? null, labels: entry.table_name === 'tasks' && row ? (await api.tasks.getLabels(entry.row_id)).map((link) => link.label_id).sort() : [] })
       }
-      return { entry, entries, payload, special, descriptor, snapshot }
+      const eligible = async (): Promise<boolean> => {
+        const row = descriptor?.scope === 'project' ? await descriptor.localGetById(entry.row_id, api) : null
+        const rowProjectId = row && typeof row === 'object' && 'project_id' in row && typeof row.project_id === 'string' ? row.project_id : null
+        const task = entry.table_name === 'task_labels' && !payload.projectId ? await api.tasks.findById(String(payload.task_id ?? entry.row_id)) : null
+        const projectId = entry.table_name === 'projects' ? entry.row_id : String(rowProjectId ?? payload.project_id ?? payload.projectId ?? task?.project_id ?? '')
+        if (!projectId) return true
+        if (!projectCurrent(projectId)) return false
+        const project = await api.projects.findById(projectId)
+        const permitted = !project || project.owner_id === userId || (await api.projects.getMembers(projectId)).some(member => member.user_id === userId)
+        return permitted && projectCurrent(projectId)
+      }
+      return { entry, entries, payload, special, descriptor, snapshot, eligible }
     })
     type Work = typeof work[number]
     const complete = async (item: Work): Promise<void> => {
@@ -638,7 +679,10 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
           let pending = tableItems.slice(index, index + 200)
           try {
             while (pending.length && isOnline) {
-              const snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
+              let snapshots = await Promise.all(pending.map((candidate) => candidate.snapshot()))
+              const eligibility = await Promise.all(pending.map(candidate => candidate.eligible()))
+              pending = pending.filter((_, index) => eligibility[index])
+              snapshots = snapshots.filter((_, index) => eligibility[index])
               const rows = snapshots.map((value) => JSON.parse(value).row)
               if (item.entry.table_name === 'user_settings' || item.entry.table_name === 'user_themes') {
                 for (const row of rows.filter((row) => row && (item.entry.table_name === 'user_themes' || row.key === 'theme_id'))) await item.descriptor!.remoteUpsert(row, context)
@@ -689,6 +733,7 @@ async function drainSyncQueue(context?: SyncContext): Promise<number> {
       try {
         while (isOnline) {
           const before = await item.snapshot()
+          if (!await item.eligible()) break
           assertCurrent()
           if (!await replaySpecialEntry(supabase, item.entry, context)) throw new Error('Unsupported queued operation')
           if (before !== await item.snapshot()) continue
@@ -1295,7 +1340,7 @@ export async function updateSharedMemberDisplay(
   userId: string,
   displayColor: string | null,
   displayInitials: string | null,
-  producer = captureSyncProducer()
+  producer: SyncProducer = captureProjectProducer(projectId)
 ): Promise<void> {
   const supabase = await producer.client()
   if (!supabase) throw new Error('Sign in to update member appearance')
@@ -1313,30 +1358,34 @@ export async function updateSharedMemberDisplay(
 /**
  * Remove all Supabase data for a project (unshare).
  */
-export async function removeProjectFromSupabase(projectId: string): Promise<void> {
-  const supabase = await getSupabase()
+export async function removeProjectFromSupabase(projectId: string, origin = captureProjectProducer(projectId)): Promise<void> {
+  const supabase = await origin.client()
+  if (!supabase) throw new Error('Not authenticated')
+  await requireProducerCurrent(origin)
 
   // Explicitly delete non-owner members first — direct deletes trigger Realtime events
   // (cascade deletes do NOT trigger Realtime, so members wouldn't get notified)
-  const { data: { session } } = await supabase.auth.getSession()
-  const ownerId = session?.user?.id
+  const ownerId = origin.userId
   if (ownerId) {
-    await supabase
+    const { error } = await supabase
       .from('project_members')
       .delete()
       .eq('project_id', projectId)
       .neq('user_id', ownerId)
+    await requireProducerCurrent(origin)
+    if (error) throw error
   }
 
   // Now delete the project (cascades remaining data: tasks, statuses, owner member row, etc.)
   const { error } = await supabase.from('projects').delete().eq('id', projectId)
+  await requireProducerCurrent(origin)
   if (error) throw error
 }
 
 /**
  * Get shared project members with their profile info from Supabase.
  */
-export async function getSharedProjectMembers(projectId: string): Promise<Array<{
+export async function getSharedProjectMembers(projectId: string, origin: SyncContext | SyncProducer = captureProjectProducer(projectId)): Promise<Array<{
   user_id: string
   role: string
   joined_at: string
@@ -1345,41 +1394,22 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   display_color: string | null
   display_initials: string | null
 }>> {
-  const supabase = await getSupabase()
-
-  const { data, error } = await supabase
-    .from('project_members')
-    .select('user_id, role, joined_at, display_color, display_initials')
-    .eq('project_id', projectId)
-
-  // RLS on project_members only returns rows for projects the caller is a member of.
-  // Empty data ⇒ caller is not a member, so the SECURITY DEFINER RPC below would
-  // raise "Access denied" (HTTP 400). Skip the RPC and return empty.
-  if (error || !data || data.length === 0) return []
-
-  // Use SECURITY DEFINER RPC to read auth.users directly — bypasses user_profiles
-  // view which only surfaces Google OAuth users (email/password users have no row).
-  // Falls back to user_profiles batch query if the RPC isn't deployed yet.
-  const { data: rpcProfiles, error: rpcError } = await supabase
-    .rpc('get_project_member_profiles', { p_project_id: projectId })
-
+  const source = 'userId' in origin ? await syncContextFromProducer(origin) : origin
+  const context = { ...source, ...hydrationContext(source, projectId) }
+  if (!await context.isCurrent()) throw new Error('Shared project context changed')
+  context.assertCurrent()
+  const { data, error } = await readAll(() => context.client.from('project_members')
+    .select('user_id, role, joined_at, display_color, display_initials').eq('project_id', projectId), ['user_id'])
+  if (!await context.isCurrent()) throw new Error('Shared project context changed')
+  context.assertCurrent()
+  if (error) throw new Error(error.message)
+  if (!data.length) return []
+  const { data: profiles, error: profileError } = await context.client.rpc('get_user_profiles', { p_user_ids: data.map(member => member.user_id) })
+  if (!await context.isCurrent()) throw new Error('Shared project context changed')
+  context.assertCurrent()
+  if (profileError) throw new Error(profileError.message)
   const profileMap = new Map<string, { email: string; display_name: string | null }>()
-
-  if (!rpcError && rpcProfiles) {
-    for (const p of rpcProfiles as Array<{ user_id: string; email: string; display_name: string | null }>) {
-      profileMap.set(p.user_id, { email: p.email, display_name: p.display_name })
-    }
-  } else {
-    // Fallback: use general profile lookup (also reads auth.users via SECURITY DEFINER)
-    const userIds = data.map((m) => m.user_id)
-    const { data: profiles } = await supabase
-      .rpc('get_user_profiles', { p_user_ids: userIds })
-    if (profiles) {
-      for (const p of (profiles as Array<{ id: string; email: string; display_name: string | null }>) ) {
-        profileMap.set(p.id, { email: p.email, display_name: p.display_name })
-      }
-    }
-  }
+  for (const profile of profiles ?? []) profileMap.set(profile.id, { email: profile.email, display_name: profile.display_name ?? null })
 
   const members: Array<{
     user_id: string
@@ -1392,6 +1422,8 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
   }> = []
 
   for (const member of data) {
+    if (!await context.isCurrent()) throw new Error('Shared project context changed')
+    context.assertCurrent()
     const profile = profileMap.get(member.user_id)
     if (profile) {
       members.push({
@@ -1404,7 +1436,7 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
         display_initials: member.display_initials ?? null
       })
     } else {
-      const localUser = await window.api.users.findById(member.user_id)
+      const localUser = await context.api.users.findById(member.user_id)
       members.push({
         user_id: member.user_id,
         role: member.role,
@@ -1417,21 +1449,27 @@ export async function getSharedProjectMembers(projectId: string): Promise<Array<
     }
   }
 
+  if (!await context.isCurrent()) throw new Error('Shared project context changed')
+  context.assertCurrent()
   return members
 }
 
 /**
  * Remove a member from a shared project.
  */
-export async function removeSharedMember(projectId: string, userId: string): Promise<void> {
-  const supabase = await getSupabase()
+export async function removeSharedMember(projectId: string, userId: string, origin = captureProjectProducer(projectId)): Promise<void> {
+  const supabase = await origin.client()
+  if (!supabase) throw new Error('Not authenticated')
+  await requireProducerCurrent(origin)
   const { error } = await supabase
     .from('project_members')
     .delete()
     .eq('project_id', projectId)
     .eq('user_id', userId)
+  await requireProducerCurrent(origin)
   if (error) throw error
 
   // Also remove locally
-  await window.api.projects.removeMember(projectId, userId)
+  await origin.api.projects.removeMember(projectId, userId)
+  await requireProducerCurrent(origin)
 }

@@ -1,3 +1,5 @@
+import { hydrationContext, type HydrationOrigin } from '../stores/hydrationContext'
+import { useAuthStore } from '../stores/authStore'
 import { useEffect, useState } from 'react'
 import { getAvatarColor, getAvatarInitials } from '../../../../shared/avatarUtils'
 
@@ -9,29 +11,35 @@ interface MemberDisplayData {
 }
 
 // Global cache: projectId -> userId -> display data
-const cache = new Map<string, Map<string, MemberDisplayData>>()
+const cache = new Map<string, { ownerId: string | undefined; current(id: string): boolean; members: Map<string, MemberDisplayData> }>()
 const listeners = new Set<() => void>()
 // Track pending reload requests — if a load is in progress and another is requested,
 // the project ID is queued here so it reloads again after the current one finishes.
-let pendingReload: string | null = null
+let pendingReload: { projectId: string; origin: HydrationOrigin } | null = null
 let activeLoad: string | null = null
 
 function notify(): void {
   for (const fn of listeners) fn()
 }
 
-async function loadProjectMembers(projectId: string): Promise<void> {
+async function loadProjectMembers(projectId: string, origin?: HydrationOrigin): Promise<void> {
+  const context = hydrationContext(origin, projectId)
+  const ownerId = useAuthStore.getState().currentUser?.id
   // If already loading this project, queue a reload instead of skipping
   if (activeLoad === projectId) {
-    pendingReload = projectId
+    pendingReload = { projectId, origin: context }
     return
   }
   activeLoad = projectId
   try {
-    const members = await window.api.projects.getMembers(projectId)
+    if (!await context.isCurrent()) return
+    context.assertCurrent()
+    const members = await context.api.projects.getMembers(projectId)
     const memberMap = new Map<string, MemberDisplayData>()
     for (const m of members) {
-      const user = await window.api.users.findById(m.user_id)
+      if (!await context.isCurrent()) return
+      context.assertCurrent()
+      const user = await context.api.users.findById(m.user_id)
       memberMap.set(m.user_id, {
         color: getAvatarColor(m.user_id, m.display_color),
         initials: getAvatarInitials(user?.display_name ?? null, user?.email ?? 'unknown', m.display_initials),
@@ -39,27 +47,31 @@ async function loadProjectMembers(projectId: string): Promise<void> {
         display_name: user?.display_name ?? null
       })
     }
-    cache.set(projectId, memberMap)
+    if (!await context.isCurrent()) return
+    context.assertCurrent()
+    cache.set(projectId, { ownerId, current: context.isProjectCurrent, members: memberMap })
     notify()
-  } finally {
+  } catch { return } finally {
     activeLoad = null
     // If a reload was requested while we were loading, do it now
-    if (pendingReload === projectId) {
+    if (pendingReload?.projectId === projectId) {
+      const pending = pendingReload
       pendingReload = null
-      loadProjectMembers(projectId)
+      void loadProjectMembers(projectId, pending.origin)
     }
   }
 }
 
 /** Invalidate cache for a project — call after updating member display settings */
-export function invalidateMemberDisplay(projectId: string): void {
+export function invalidateMemberDisplay(projectId: string, origin?: HydrationOrigin): void {
   cache.delete(projectId)
-  loadProjectMembers(projectId)
+  void loadProjectMembers(projectId, origin)
 }
 
 /** Get cached display data for a member. Returns defaults if not yet loaded. */
 export function getMemberDisplay(projectId: string, userId: string): MemberDisplayData | null {
-  const projectMap = cache.get(projectId)
+  const entry = cache.get(projectId)
+  const projectMap = entry?.ownerId === useAuthStore.getState().currentUser?.id && entry?.current(projectId) ? entry.members : null
   if (!projectMap) {
     loadProjectMembers(projectId)
     return null
@@ -78,7 +90,8 @@ export function useMemberDisplay(projectId: string, userId: string): MemberDispl
     return () => { listeners.delete(fn) }
   }, [projectId])
 
-  const data = cache.get(projectId)?.get(userId)
+  const entry = cache.get(projectId)
+  const data = entry?.ownerId === useAuthStore.getState().currentUser?.id && entry?.current(projectId) ? entry.members.get(userId) : undefined
   return data ?? {
     color: getAvatarColor(userId),
     initials: userId.slice(0, 2).toUpperCase(),
@@ -98,5 +111,6 @@ export function useProjectMemberDisplays(projectId: string): Map<string, MemberD
     return () => { listeners.delete(fn) }
   }, [projectId])
 
-  return cache.get(projectId) ?? new Map()
+  const entry = cache.get(projectId)
+  return entry?.ownerId === useAuthStore.getState().currentUser?.id && entry?.current(projectId) ? entry.members : new Map()
 }
