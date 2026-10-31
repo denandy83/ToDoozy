@@ -41,6 +41,8 @@ async function compilation(ref, invitations = false) {
     import { isSuspended } from './services/powerState';
     import { useAuthStore } from './shared/stores/authStore';
     import { useSyncStore } from './shared/stores/syncStore';
+    import { useProjectAreaStore } from './shared/stores/projectAreaStore';
+    import { evictProjectData } from './shared/stores/projectCache';
     import { useProjectStore } from './shared/stores/projectStore';
     import { useTaskStore } from './shared/stores/taskStore';
     import { useLabelStore } from './shared/stores/labelStore';
@@ -51,7 +53,7 @@ async function compilation(ref, invitations = false) {
     import * as refresh from './services/remoteProjectRefresh';
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
-    import { logEvent } from './shared/stores/logStore';
+    import { logEvent, useLogStore } from './shared/stores/logStore';
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
@@ -68,8 +70,8 @@ async function compilation(ref, invitations = false) {
     const {hydrateProjectTemplates}=useTemplateStore.getState();
     function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
-      stores:{useAuthStore,useSyncStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
+    globalThis.fixture={${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,evictProjectData,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+      stores:{useAuthStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
       build.onResolve({filter:/^@supabase\/supabase-js$/},()=>({path:'sdk',namespace:'fixture'}));
@@ -183,7 +185,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
       const mapped={getQueue:'findAll',count:'count',enqueue:'enqueue',dequeue:'dequeue',updatePayload:'updatePayload'}[method];if(mapped)return Promise.resolve(repo.syncQueue[mapped](...args));
     }
     if(['timer','tray','log','power'].includes(namespace))return method.startsWith('on')?noop:Promise.resolve();
-    const op=namespace==='tasks'?({applyRemote:'applyRemoteTask',completeRecurring:'completeRecurringTask'}[method]??method):namespace==='labels'&&method==='findAll'?'findAllForUser':namespace==='savedViews'&&method==='countMatching'?'countMatchingTasks':method;
+    const op=namespace==='tasks'?({applyRemote:'applyRemoteTask',completeRecurring:'completeRecurringTask',autoAddMyDay:'autoAddMyDayTasks'}[method]??method):namespace==='labels'&&method==='findAll'?'findAllForUser':namespace==='savedViews'&&method==='countMatching'?'countMatchingTasks':method;
     if(!repo[namespace]?.[op]){const message=`Unsupported fixture API ${namespace}.${op}`;fixtureErrors.push(message);return Promise.reject(Error(message))}
     return Promise.resolve(repo[namespace][op](...args));
   }})});

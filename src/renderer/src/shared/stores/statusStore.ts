@@ -28,24 +28,29 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   error: null,
 
   async hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent } = origin ?? hydrationContext()
-    set({ loading: true, error: null })
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId)
+    const initial = useStatusStore.getState().statuses
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const statuses = await api.statuses.findByProjectId(projectId)
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         // Remove old statuses for this project, then add new ones
         const updated: Record<string, Status> = {}
         for (const [id, s] of Object.entries(state.statuses)) {
-          if (s.project_id !== projectId) updated[id] = s
+          if (s.project_id !== projectId || s !== initial[id]) updated[id] = s
         }
         for (const status of statuses) {
-          updated[status.id] = status
+          if (state.statuses[status.id] === initial[status.id]) updated[status.id] = status
         }
         return { statuses: updated, loading: false }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load statuses'
       set({ error: message, loading: false })
     }

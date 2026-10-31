@@ -1,5 +1,5 @@
+import { hydrationContext } from '../shared/stores/hydrationContext'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
-import { requireSession } from './sessionRecovery'
 import { useAuthStore } from '../shared/stores/authStore'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
 import { remoteTaskOrder } from './remoteTaskOrder'
@@ -1858,8 +1858,11 @@ export async function requestProjectRefresh(context: SyncContext, projectIds: It
 async function refreshRemoteProjects(userId: string, context: SyncContext, projectIds: Set<string>, taskIds: Map<string, Set<string>>): Promise<{ pushed: number; pulled: number }> {
   let pulled = 0
   const { refreshProjectLabels } = await import('./remoteProjectRefresh')
+  const origin = context
   for (const projectId of projectIds) {
-    if (!navigator.onLine || isSuspended() || !await context.isCurrent()) break
+    const context = { ...origin, ...hydrationContext(origin, projectId) }
+    if (!navigator.onLine || isSuspended() || !await origin.isCurrent()) break
+    if (!await context.isCurrent()) continue
     const { useProjectStore } = await import('../shared/stores/projectStore')
     const cachedProject = useProjectStore.getState().projects[projectId]
     const metadataChanged = await pullProjectMetadata(projectId, context)
@@ -1877,7 +1880,8 @@ async function refreshRemoteProjects(userId: string, context: SyncContext, proje
       await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
       continue
     }
-    if (!await context.isCurrent()) return { pushed: 0, pulled }
+    if (!await context.isCurrent()) continue
+    context.assertCurrent()
     useProjectStore.setState((state) => state.projects[projectId] === cachedProject ? { projects: { ...state.projects, [projectId]: project } } : {})
     const ids = taskIds.get(projectId) ?? new Set<string>()
     if (project.is_archived === 1) {
@@ -1896,7 +1900,7 @@ async function refreshRemoteProjects(userId: string, context: SyncContext, proje
       import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
     ])
     await Promise.all([useTaskStore.getState().hydrateAllForProject(projectId, context), useStatusStore.getState().hydrateStatuses(projectId, context)])
-    if (!await context.isCurrent()) return { pushed: 0, pulled }
+    if (!await context.isCurrent()) continue
     const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
     await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
   }

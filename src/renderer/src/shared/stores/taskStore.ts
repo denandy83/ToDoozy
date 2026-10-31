@@ -227,19 +227,21 @@ interface TaskActions {
 
 export type TaskStore = TaskState & TaskActions
 
-function mergeHydratedTasks(state: TaskStore, initial: TaskStore, projectIds: Set<string>, taskArrays: Task[][], labelMappingArrays: TaskLabelMapping[][]): Pick<TaskStore, 'tasks' | 'taskLabels'> {
+function mergeHydratedTasks(state: TaskStore, initial: TaskStore, projectIds: Set<string>, taskArrays: Task[][], isProjectCurrent: (id: string) => boolean, labelMappingArrays?: TaskLabelMapping[][]): Pick<TaskStore, 'tasks' | 'taskLabels'> {
+  projectIds = new Set([...projectIds].filter(isProjectCurrent))
   const tasks = Object.fromEntries(Object.entries(state.tasks).filter(([, task]) => !projectIds.has(task.project_id)))
-  for (const rows of taskArrays) for (const task of rows) if (!task.deleted_at) tasks[task.id] = task
+  for (const rows of taskArrays) for (const task of rows) if (isProjectCurrent(task.project_id) && !task.deleted_at) tasks[task.id] = task
+  for (const [id, task] of Object.entries(state.tasks)) if (task !== initial.tasks[id]) tasks[id] = task
+  for (const id of Object.keys(initial.tasks)) if (!state.tasks[id]) delete tasks[id]
+  if (!labelMappingArrays) return { tasks, taskLabels: state.taskLabels }
   const taskLabels = Object.fromEntries(Object.entries(state.taskLabels).filter(([id]) => !projectIds.has(state.tasks[id]?.project_id ?? initial.tasks[id]?.project_id)))
   const grouped: Record<string, Label[]> = {}
   for (const mappings of labelMappingArrays) {
     for (const { task_id, ...label } of mappings) {
-      if (tasks[task_id]) (grouped[task_id] ??= []).push(label)
+      if (tasks[task_id] && isProjectCurrent(tasks[task_id].project_id)) (grouped[task_id] ??= []).push(label)
     }
   }
   Object.assign(taskLabels, grouped)
-  for (const [id, task] of Object.entries(state.tasks)) if (task !== initial.tasks[id]) tasks[id] = task
-  for (const id of Object.keys(initial.tasks)) if (!state.tasks[id]) delete tasks[id]
   for (const [id, labels] of Object.entries(state.taskLabels)) if (labels !== initial.taskLabels[id]) taskLabels[id] = labels
   for (const id of Object.keys(initial.tasks)) if (projectIds.has(initial.tasks[id].project_id) && !tasks[id]) delete taskLabels[id]
   return { tasks, taskLabels }
@@ -263,113 +265,93 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   error: null,
 
   async hydrateTasks(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true, error: null })
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId)
+    const initial = get()
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const tasks = await api.tasks.findByProjectId(projectId)
       if (!await isCurrent()) return
-      set((state) => {
-        const updated: Record<string, Task> = {}
-        for (const [id, t] of Object.entries(state.tasks)) {
-          if (t.project_id !== projectId) updated[id] = t
-        }
-        for (const task of tasks) {
-          updated[task.id] = task
-        }
-        return { tasks: updated, loading: false }
-      })
+      assertCurrent()
+      set((state) => ({ ...mergeHydratedTasks(state, initial, new Set([projectId]), [tasks], isProjectCurrent), loading: false }))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load tasks'
-      set({ error: message, loading: false })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load tasks', loading: false })
     }
   },
 
   async hydrateMyDay(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext()
+    const initial = get()
     try {
-      // Auto-add tasks based on due date setting
       const { getSetting } = useSettingsStore.getState()
       const autoAddMode = getSetting('myday_auto_add') ?? 'due_today'
-      if (autoAddMode !== 'off') {
-        await api.tasks.autoAddMyDay(userId, autoAddMode)
-      }
-
+      if (autoAddMode !== 'off') await api.tasks.autoAddMyDay(userId, autoAddMode)
       const tasks = await api.tasks.findMyDay(userId)
       if (!await isCurrent()) return
-      set((state) => {
-        const updated = { ...state.tasks }
-        for (const task of tasks) {
-          updated[task.id] = task
-        }
-        return { tasks: updated }
-      })
+      assertCurrent()
+      set((state) => mergeHydratedTasks(state, initial, new Set(), [tasks], isProjectCurrent))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load My Day tasks'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load My Day tasks' })
     }
   },
 
   async hydrateArchived(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId)
+    const initial = get()
     try {
       const tasks = await api.tasks.findArchived(projectId)
       if (!await isCurrent()) return
-      set((state) => {
-        const updated = { ...state.tasks }
-        for (const task of tasks) {
-          updated[task.id] = task
-        }
-        return { tasks: updated }
-      })
+      assertCurrent()
+      set((state) => mergeHydratedTasks(state, initial, new Set(), [tasks], isProjectCurrent))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load archived tasks'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load archived tasks' })
     }
   },
 
   async hydrateTemplates(_projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext()
+    const initial = get()
     try {
       const tasks = await api.tasks.findAllTemplates(getUserId())
       if (!await isCurrent()) return
-      set((state) => {
-        const updated = { ...state.tasks }
-        for (const task of tasks) {
-          updated[task.id] = task
-        }
-        return { tasks: updated }
-      })
+      assertCurrent()
+      set((state) => mergeHydratedTasks(state, initial, new Set(), [tasks], isProjectCurrent))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load templates'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load templates' })
     }
   },
 
   async hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent } = origin ?? hydrationContext()
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, projectId)
     const initial = get()
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
       const [tasks, mappings] = await Promise.all([
         api.tasks.findAllByProject(projectId, { includeTombstones: true }),
         api.labels.findTaskLabelsByProject(projectId)
       ])
       if (!await isCurrent()) return
-      set((state) => mergeHydratedTasks(state, initial, new Set([projectId]), [tasks], [mappings]))
+      assertCurrent()
+      set((state) => mergeHydratedTasks(state, initial, new Set([projectId]), [tasks], isProjectCurrent, [mappings]))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load project tasks'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load project tasks' })
     }
   },
 
   async hydrateAllForUser(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    // Cross-project hydration for views that span every project (Saved Views).
-    // Refresh every known project, preserving edits made while IPC reads run.
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext()
     const initial = get()
     try {
       const allProjects = await api.projects.getProjectsForUser(userId)
@@ -378,13 +360,14 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
         Promise.all(allProjects.map((p) => api.labels.findTaskLabelsByProject(p.id)))
       ])
       if (!await isCurrent()) return
+      assertCurrent()
       const activeIds = new Set(allProjects.map(project => project.id))
-      for (const id of new Set(Object.values(initial.tasks).map(task => task.project_id))) if (!activeIds.has(id)) evictProjectData(id)
-      set((state) => mergeHydratedTasks(state, initial, new Set(allProjects.map((project) => project.id)), taskArrays, labelMappingArrays))
+      for (const id of new Set(Object.values(initial.tasks).map(task => task.project_id))) if (!activeIds.has(id) && isProjectCurrent(id)) evictProjectData(id)
+      set((state) => mergeHydratedTasks(state, initial, activeIds, taskArrays, isProjectCurrent, labelMappingArrays))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load tasks for user'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load tasks for user' })
     }
   },
 
@@ -750,39 +733,40 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async hydrateTaskLabels(taskId: string, producer?: SyncProducer): Promise<void> {
-    const { api, isCurrent } = producer ?? hydrationContext()
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(producer)
+    const initial = get().taskLabels[taskId]
+    let projectId: string | undefined
     try {
+      const task = get().tasks[taskId] ?? await api.tasks.findById(taskId)
+      projectId = task?.project_id
+      if (!task || !isProjectCurrent(task.project_id) || !await isCurrent()) return
+      assertCurrent()
       const labels = await api.labels.findByTaskId(taskId)
-      if (!await isCurrent()) return
-      set((state) => ({
-        taskLabels: { ...state.taskLabels, [taskId]: labels }
-      }))
+      if (!await isCurrent() || !isProjectCurrent(task.project_id)) return
+      assertCurrent()
+      set((state) => state.taskLabels[taskId] === initial && isProjectCurrent(task.project_id)
+        ? { taskLabels: { ...state.taskLabels, [taskId]: labels } } : {})
     } catch (err) {
-      if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load task labels'
-      set({ error: message })
+      if (!await isCurrent() || (projectId && !isProjectCurrent(projectId))) return
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load task labels' })
     }
   },
 
   async hydrateAllTaskLabels(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+    const { api, isCurrent, assertCurrent } = hydrationContext(undefined, projectId)
+    const initial = get().taskLabels
     try {
-      const mappings: TaskLabelMapping[] =
-        await api.labels.findTaskLabelsByProject(projectId)
+      const mappings: TaskLabelMapping[] = await api.labels.findTaskLabelsByProject(projectId)
       const grouped: Record<string, Label[]> = {}
-      for (const m of mappings) {
-        const { task_id, ...label } = m
-        if (!grouped[task_id]) grouped[task_id] = []
-        grouped[task_id].push(label)
-      }
+      for (const { task_id, ...label } of mappings) (grouped[task_id] ??= []).push(label)
       if (!await isCurrent()) return
-      set((state) => ({
-        taskLabels: { ...state.taskLabels, ...grouped }
-      }))
+      assertCurrent()
+      set((state) => ({ taskLabels: { ...state.taskLabels, ...Object.fromEntries(Object.entries(grouped).filter(([id]) => state.taskLabels[id] === initial[id])) } }))
     } catch (err) {
       if (!await isCurrent()) return
-      const message = err instanceof Error ? err.message : 'Failed to load task labels'
-      set({ error: message })
+      assertCurrent()
+      set({ error: err instanceof Error ? err.message : 'Failed to load task labels' })
     }
   },
 

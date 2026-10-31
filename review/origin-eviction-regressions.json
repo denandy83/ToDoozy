@@ -1,0 +1,2158 @@
+{
+  "startingCommit": "e3afa9c3e955a527908a5736eadda2da0c7da8e8",
+  "sourceState": "Uncommitted review corrections; outer executor owns commit and complete validation",
+  "sourceFingerprint": "3ff639ad21927d8b28c50e03fc5d468944bc5a262cc945b8fad763967b6d6f60",
+  "sourceFiles": [
+    {
+      "path": "scripts/benchmark-sync.cjs",
+      "sha256": "0fee1ecc1ef2dbaaf6b8ac77415ddbd2f8cb86425b4adfeff7c3ef3bed8e006a"
+    },
+    {
+      "path": "scripts/project-eviction-races.test.ts",
+      "sha256": "5dffbd0b4c987446bc26bb48b29590aee04748cce2fb35a56293f1c9859e0941"
+    },
+    {
+      "path": "scripts/user-channel-origin.test.ts",
+      "sha256": "ce0551a5ef4e0570c5f3daa9ceeddca9871bd258e8ad4ce82e0595ebaf53ad53"
+    },
+    {
+      "path": "src/renderer/src/services/PersonalSyncService.ts",
+      "sha256": "8c267631863fa496aee90a018dfd9c5e6881a795dc22d718e6e3245390a6ff02"
+    },
+    {
+      "path": "src/renderer/src/services/SyncService.ts",
+      "sha256": "b6205ed2b65b60e25c86e7c5aa24814b2b9cfed543d8025f832522723e633aaa"
+    },
+    {
+      "path": "src/renderer/src/services/UserChannelService.ts",
+      "sha256": "417f3cfecaaff67ff4a446e5f96a2a93243942d62cea1fac3c7f0df295a03836"
+    },
+    {
+      "path": "src/renderer/src/services/remoteProjectRefresh.ts",
+      "sha256": "bf3b488c5376be3e45940823281ebf02363ca780e70b977e3c2202b981bc186c"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/hydrationContext.ts",
+      "sha256": "6568387f0057d64f088a2dbb924a8419537e2fcc439f73867310064a9d2b7a1b"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/labelStore.ts",
+      "sha256": "465d0a7a693e08e43e904c84fc2cf47ec2579dade9bfa03d674cb7880c001dd8"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/projectAreaStore.ts",
+      "sha256": "940fd97497913d96ca41ed90ca2884618e98590f56b401c3c6a088a0931a6e17"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/projectCache.ts",
+      "sha256": "eea54e316a15d6182e638e6bf814b47ee4ff98f2f2142b2db11ec525a2991336"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/projectStore.ts",
+      "sha256": "dabb3b3fbd9748cb3425a84fd2c78ce8e0cb07c4a580dadba87a1417913a77c5"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/savedViewStore.ts",
+      "sha256": "2a01d3ebec28ccc9bd42383bc1e065c9e66a0cec160bec22f8c3833c3703c7c6"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/statusStore.ts",
+      "sha256": "10975cd994f5478c004aef515f2ae31a90f45547575a11cb188a0116668cfd4b"
+    },
+    {
+      "path": "src/renderer/src/shared/stores/taskStore.ts",
+      "sha256": "19316a0e350b8eee96ebb5023b0506ad976f70e6ade2fadab8ba55c4b65108f7"
+    }
+  ],
+  "boundary": "Actual sync services, descriptors, stores, Supabase SDK interfaces and native in-memory SQLite repositories; synthetic Realtime/HTTP/IPC and synthetic users. Generation replacement leaves the User object unchanged. Existing actual App invitation extraction and SQL-role/CHECK fixtures are retained. No production data, configuration, credentials, deployments or physical I/O measurement.",
+  "before": {
+    "expectedFailures": [
+      {
+        "file": "scripts/project-eviction-races.test.ts",
+        "name": "does not resurrect an uncached 'bootstrap' snapshot after 'local' eviction",
+        "observedFailure": "AssertionError: expected { id: 't', project_id: 'p0', …(20) } to be undefined"
+      },
+      {
+        "file": "scripts/user-channel-origin.test.ts",
+        "name": "rejects retained 'user_labels' callbacks after 'generation'",
+        "observedFailure": "AssertionError: expected 'PRIVATE OLD PAYLOAD' to be 'CURRENT' // Object.is equality"
+      },
+      {
+        "file": "scripts/user-channel-origin.test.ts",
+        "name": "rejects retained 'user_saved_views' callbacks after 'generation'",
+        "observedFailure": "AssertionError: expected 'PRIVATE OLD PAYLOAD' to be 'CURRENT' // Object.is equality"
+      },
+      {
+        "file": "scripts/user-channel-origin.test.ts",
+        "name": "rejects retained 'user_project_areas' callbacks after 'generation'",
+        "observedFailure": "AssertionError: expected 'PRIVATE OLD PAYLOAD' to be 'CURRENT' // Object.is equality"
+      }
+    ],
+    "command": "TODOOZY_BENCH_REF=e3afa9c3e955a527908a5736eadda2da0c7da8e8 node_modules/.bin/vitest run --maxWorkers=2 scripts/user-channel-origin.test.ts scripts/project-eviction-races.test.ts -t 'bootstrap.*local|rejects retained.*generation'"
+  },
+  "after": {
+    "passed": 492,
+    "failed": 0,
+    "files": [
+      {
+        "file": "scripts/channel-teardown.test.ts",
+        "cases": [
+          {
+            "name": "cancels 'shared' 'client' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'client' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'client' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'client' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'database' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'database' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'database' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'database' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'project' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'project' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'project' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'shared' 'project' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'client' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'client' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'client' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'client' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'database' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'database' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'database' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'database' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'project' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'project' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'project' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'personal' 'project' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'client' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'client' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'client' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'client' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'database' setup during 'single' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'database' setup during 'single' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'database' setup during 'all' teardown (late rejection=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user' 'database' setup during 'all' teardown (late rejection=true)",
+            "status": "passed"
+          },
+          {
+            "name": "retains normal shared creation, rejoin, teardown and recreation",
+            "status": "passed"
+          },
+          {
+            "name": "retains normal personal creation, rejoin, teardown and recreation",
+            "status": "passed"
+          },
+          {
+            "name": "retains normal user creation, rejoin, teardown and recreation",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'shared' reconnect after teardown (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'shared' reconnect after teardown (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'personal' reconnect after teardown (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'personal' reconnect after teardown (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'user' reconnect after teardown (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels a pending 'user' reconnect after teardown (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "observes setup rejection while old user-channel removal is still pending",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds $family to a known replacement database during setup and recovery",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds $family to a known replacement database during setup and recovery",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds $family to a known replacement database during setup and recovery",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/invitation-lifecycle.test.tsx",
+        "cases": [
+          {
+            "name": "executes actual App invitation 'pending' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'pending' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'pending' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'pending' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'deep-link' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'deep-link' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'deep-link' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'deep-link' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'realtime' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'realtime' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'realtime' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'realtime' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'accept' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'accept' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'accept' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'accept' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'decline' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'decline' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'decline' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'decline' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'sync-down' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'sync-down' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'sync-down' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'sync-down' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'hydration' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'hydration' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'hydration' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'hydration' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'project-subscription' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'project-subscription' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'project-subscription' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'project-subscription' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'invite-subscription' boundary across 'account' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'invite-subscription' boundary across 'account' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'invite-subscription' boundary across 'database' replacement (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "executes actual App invitation 'invite-subscription' boundary across 'database' replacement (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "runs normal queued acceptance, native hydration, subscription and acknowledged decline through actual App wiring",
+            "status": "passed"
+          },
+          {
+            "name": "retains actual SDK Accept errors and permits retry",
+            "status": "passed"
+          },
+          {
+            "name": "retains actual SDK Decline errors and permits retry",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a newer token selected after held 'Accept' response (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a newer token selected after held 'Accept' response (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a newer token selected after held 'Decline' response (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a newer token selected after held 'Decline' response (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "dismisses expired and public invitations through the actual dialog and service",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds a known same-user database generation after a stale realtime validation",
+            "status": "passed"
+          },
+          {
+            "name": "does not loop retries when the native context becomes unavailable",
+            "status": "passed"
+          },
+          {
+            "name": "removes an invitation subscription that resolves after unmount",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer deep-link validation when the older response settles (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer deep-link validation when the older response settles (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "calls a late-arriving unsubscriber after the actual invitation channel is created",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/project-boundaries.test.ts",
+        "cases": [
+          {
+            "name": "cancels 'create' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'create' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'create' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'create' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'update' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'update' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'update' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'update' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'delete' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'delete' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'delete' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'delete' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member hydration' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member hydration' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member hydration' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'add member hydration' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member hydration' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member hydration' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member hydration' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'remove member hydration' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive lookup' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive lookup' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive lookup' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'archive lookup' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore lookup' success/error after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore lookup' success/error after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore lookup' success/error after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'restore lookup' success/error after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'create' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'create' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'update' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'update' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'delete' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'delete' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'add member' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'add member' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'remove member' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'remove member' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'archive' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'archive' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'restore' (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-context 'restore' (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'local' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'local' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'full-local' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'full-local' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'project-hydration' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'project-hydration' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'remote-scoped' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'remote-scoped' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'remote-full' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'remote-full' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'revoked-full' selected=false",
+            "status": "passed"
+          },
+          {
+            "name": "evicts removed project tasks and labels through 'revoked-full' selected=true",
+            "status": "passed"
+          },
+          {
+            "name": "keeps locally owned pending projects and tasks without membership during full hydration",
+            "status": "passed"
+          },
+          {
+            "name": "updates self and peer appearance through SDK and native paths, rejecting missing rows",
+            "status": "passed"
+          },
+          {
+            "name": "suppresses 'archive' return after the final cloud continuation crosses 'account'",
+            "status": "passed"
+          },
+          {
+            "name": "suppresses 'archive' return after the final cloud continuation crosses 'database'",
+            "status": "passed"
+          },
+          {
+            "name": "suppresses 'restore' return after the final cloud continuation crosses 'account'",
+            "status": "passed"
+          },
+          {
+            "name": "suppresses 'restore' return after the final cloud continuation crosses 'database'",
+            "status": "passed"
+          },
+          {
+            "name": "evicts detached peer label caches while preserving own labels and references in another project",
+            "status": "passed"
+          },
+          {
+            "name": "does not publish or invoke native hydration for an already stale 'account' origin (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "does not publish or invoke native hydration for an already stale 'account' origin (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "does not publish or invoke native hydration for an already stale 'database' origin (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "does not publish or invoke native hydration for an already stale 'database' origin (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "ignores a delayed default hydration request for another account",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/project-eviction-races.test.ts",
+        "cases": [
+          {
+            "name": "does not resurrect an uncached 'bootstrap' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'bootstrap' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'unvisited project' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'unvisited project' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'explicit-origin project' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'explicit-origin project' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'scoped tasks' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'scoped tasks' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'My Day' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'My Day' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'archived' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'archived' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'templates' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'templates' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'project snapshot' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'project snapshot' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'membership snapshot' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'membership snapshot' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'full membership snapshot' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'full membership snapshot' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'labels and junction' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'labels and junction' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'statuses' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'statuses' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'task labels' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'task labels' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'project task labels' snapshot after 'local' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "does not resurrect an uncached 'project task labels' snapshot after 'revocation' eviction",
+            "status": "passed"
+          },
+          {
+            "name": "rejects pre-eviction task data after an explicit rejoin and accepts a fresh snapshot",
+            "status": "passed"
+          },
+          {
+            "name": "rejects pre-eviction project data after an explicit rejoin and accepts a fresh snapshot",
+            "status": "passed"
+          },
+          {
+            "name": "rejects pre-eviction member data after an explicit rejoin and accepts a fresh snapshot",
+            "status": "passed"
+          },
+          {
+            "name": "rejects pre-eviction label data after an explicit rejoin and accepts a fresh snapshot",
+            "status": "passed"
+          },
+          {
+            "name": "rejects pre-eviction status data after an explicit rejoin and accepts a fresh snapshot",
+            "status": "passed"
+          },
+          {
+            "name": "uses access-filtered native task reads after revocation and permits a later legitimate rejoin",
+            "status": "passed"
+          },
+          {
+            "name": "guards direct membership discovery publication after eviction",
+            "status": "passed"
+          },
+          {
+            "name": "guards direct project refresh publication after eviction",
+            "status": "passed"
+          },
+          {
+            "name": "finishes unrelated project refreshes when one project snapshot is invalidated",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/project-metadata-events.test.ts",
+        "cases": [
+          {
+            "name": "unchanged restored metadata avoids membership reads through the actual shared=true callback",
+            "status": "passed"
+          },
+          {
+            "name": "unchanged restored metadata avoids membership reads through the actual shared=false callback",
+            "status": "passed"
+          },
+          {
+            "name": "preserves scoped metadata and archive/restore reconciliation for shared=true",
+            "status": "passed"
+          },
+          {
+            "name": "preserves scoped metadata and archive/restore reconciliation for shared=false",
+            "status": "passed"
+          },
+          {
+            "name": "repairs equal-clock task archive state without requesting project reconciliation or overwriting newer local edits",
+            "status": "passed"
+          },
+          {
+            "name": "discovers sharing changes announced by a newer metadata version and rebinds the personal channel",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/sync-optimization.test.ts",
+        "cases": [
+          {
+            "name": "publishes every 'duplicate' descendant and its labels with shared=false",
+            "status": "passed"
+          },
+          {
+            "name": "publishes every 'duplicate' descendant and its labels with shared=true",
+            "status": "passed"
+          },
+          {
+            "name": "publishes every 'template' descendant and its labels with shared=false",
+            "status": "passed"
+          },
+          {
+            "name": "publishes every 'template' descendant and its labels with shared=true",
+            "status": "passed"
+          },
+          {
+            "name": "publishes every 'recurrence' descendant and its labels with shared=false",
+            "status": "passed"
+          },
+          {
+            "name": "publishes every 'recurrence' descendant and its labels with shared=true",
+            "status": "passed"
+          },
+          {
+            "name": "cancels subtree publication when the originating account changes during the first write",
+            "status": "passed"
+          },
+          {
+            "name": "fences descendant publication when the database changes but the account ID stays the same",
+            "status": "passed"
+          },
+          {
+            "name": "discovers missed shared memberships and removes lost access before project sweeps while preserving local owner data",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds missed archive/restore transitions for shared=false and retains metadata-only monitoring",
+            "status": "passed"
+          },
+          {
+            "name": "rebinds missed archive/restore transitions for shared=true and retains metadata-only monitoring",
+            "status": "passed"
+          },
+          {
+            "name": "coalesces App health recovery, channel rejoins and project refresh behind one in-flight sweep",
+            "status": "passed"
+          },
+          {
+            "name": "tears down shared channels and rebinds the same project for a different account",
+            "status": "passed"
+          },
+          {
+            "name": "does no healthy fallback work and defers suspended/offline catch-up",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a routine task event scoped to one of20 projects with shared=false",
+            "status": "passed"
+          },
+          {
+            "name": "keeps a routine task event scoped to one of20 projects with shared=true",
+            "status": "passed"
+          },
+          {
+            "name": "drains new recovery after an old scoped pull loses its account/database context (other)",
+            "status": "passed"
+          },
+          {
+            "name": "drains new recovery after an old scoped pull loses its account/database context (u)",
+            "status": "passed"
+          },
+          {
+            "name": "consumes all 10830 elapsed seconds across valid perpetual timer phases",
+            "status": "passed"
+          },
+          {
+            "name": "consumes all 172830 elapsed seconds across valid perpetual timer phases",
+            "status": "passed"
+          },
+          {
+            "name": "stops finite timers normally and guards only zero-progress perpetual transitions",
+            "status": "passed"
+          },
+          {
+            "name": "retains long-break cadence across hundreds of delayed timer repetitions",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes only three event label states in a1000-task project (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes only three event label states in a1000-task project (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "merges affected IDs queued behind an in-flight serialized refresh",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes an explicit archived project label event without routine task/activity reads",
+            "status": "passed"
+          },
+          {
+            "name": "switches a delayed Flowtime break to count-up for the remaining120 seconds",
+            "status": "passed"
+          },
+          {
+            "name": "switches a delayed Flowtime break to count-up for the remaining10830 seconds",
+            "status": "passed"
+          },
+          {
+            "name": "hydrates only the affected project after actual healthy events (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "hydrates only the affected project after actual healthy events (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'tasks' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'statuses' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'project_labels' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'activity_log' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'rejoin' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'queued' callback (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'tasks' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'statuses' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'project_labels' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'activity_log' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'rejoin' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "uses refreshed singleton credentials on a healthy 'queued' callback (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "rejects a stale producer token resolution after account replacement",
+            "status": "passed"
+          },
+          {
+            "name": "rejects a stale producer token resolution after database replacement",
+            "status": "passed"
+          },
+          {
+            "name": "rejects a stale producer token resolution after session-user replacement",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes a cached producer client before a queued task publication",
+            "status": "passed"
+          },
+          {
+            "name": "keeps metadata rename and archive/restore callbacks scoped (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps metadata rename and archive/restore callbacks scoped (shared=true)",
+            "status": "passed"
+          },
+          {
+            "name": "reclassifies owner projects and channel bindings from scoped metadata membership discovery",
+            "status": "passed"
+          },
+          {
+            "name": "removes a remotely tombstoned project from scoped caches while retaining restore data (shared=false)",
+            "status": "passed"
+          },
+          {
+            "name": "removes a remotely tombstoned project from scoped caches while retaining restore data (shared=true)",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "scripts/user-channel-origin.test.ts",
+        "cases": [
+          {
+            "name": "rejects retained 'user_labels' callbacks after 'account'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_labels' callbacks after 'generation'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_labels' callbacks after 'cleanup'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_saved_views' callbacks after 'account'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_saved_views' callbacks after 'generation'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_saved_views' callbacks after 'cleanup'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_project_areas' callbacks after 'account'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_project_areas' callbacks after 'generation'",
+            "status": "passed"
+          },
+          {
+            "name": "rejects retained 'user_project_areas' callbacks after 'cleanup'",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'applyRemote' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findAllForUser' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_labels' held 'findByProjectId' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'applyRemote' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'findByUserId' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_saved_views' held 'countMatchingTasks' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'applyRemote' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'account' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'account' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'generation' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'generation' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'cleanup' (late error=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences 'user_project_areas' held 'findByUserId' reply across 'cleanup' (late error=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves current-origin 'user_labels' updates, tombstones and DELETE reconciliation semantics",
+            "status": "passed"
+          },
+          {
+            "name": "preserves current-origin 'user_saved_views' updates, tombstones and DELETE reconciliation semantics",
+            "status": "passed"
+          },
+          {
+            "name": "preserves current-origin 'user_project_areas' updates, tombstones and DELETE reconciliation semantics",
+            "status": "passed"
+          },
+          {
+            "name": "handles current 'user_labels' native failure without an unhandled callback",
+            "status": "passed"
+          },
+          {
+            "name": "handles current 'user_saved_views' native failure without an unhandled callback",
+            "status": "passed"
+          },
+          {
+            "name": "handles current 'user_project_areas' native failure without an unhandled callback",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user_labels' before native apply when cleanup occurs during scope validation",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user_saved_views' before native apply when cleanup occurs during scope validation",
+            "status": "passed"
+          },
+          {
+            "name": "cancels 'user_project_areas' before native apply when cleanup occurs during scope validation",
+            "status": "passed"
+          },
+          {
+            "name": "preserves a valid retained 'user_labels' origin when the user object refreshes",
+            "status": "passed"
+          },
+          {
+            "name": "preserves a valid retained 'user_saved_views' origin when the user object refreshes",
+            "status": "passed"
+          },
+          {
+            "name": "preserves a valid retained 'user_project_areas' origin when the user object refreshes",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "supabase/functions/mcp/securityHardening.test.ts",
+        "cases": [
+          {
+            "name": "reproduces the old anonymous ownership exploit and rejects it after migration",
+            "status": "passed"
+          },
+          {
+            "name": "prevents invite enumeration and wrong recipients while preserving targeted and untargeted acceptance",
+            "status": "passed"
+          },
+          {
+            "name": "limits profile visibility to self/shared members and explicitly grants RLS-protected tables",
+            "status": "passed"
+          },
+          {
+            "name": "preserves policy string-literal semantics while caching auth lookups",
+            "status": "passed"
+          },
+          {
+            "name": "requires a verified recipient email and leaves a rejected invite unconsumed",
+            "status": "passed"
+          },
+          {
+            "name": "does not disclose unrelated profile ids and revokes profile access with membership removal",
+            "status": "passed"
+          },
+          {
+            "name": "does not let ordinary members promote themselves through display-settings updates",
+            "status": "passed"
+          },
+          {
+            "name": "rejects an ordinary member inserting an owner identity into another project",
+            "status": "passed"
+          },
+          {
+            "name": "grants clean-reset API-key management without granting another user access",
+            "status": "passed"
+          },
+          {
+            "name": "preserves intentionally public release-note reads without client write privileges",
+            "status": "passed"
+          },
+          {
+            "name": "authorizes live invite reads only for owners and the confirmed stored recipient",
+            "status": "passed"
+          },
+          {
+            "name": "lets only the confirmed recipient decline, with an idempotent acknowledgement",
+            "status": "passed"
+          },
+          {
+            "name": "denies anonymous, wrong-recipient and unconfirmed declines without consuming invitations",
+            "status": "passed"
+          },
+          {
+            "name": "dismisses reusable public links without revoking them and rejects unavailable transitions",
+            "status": "passed"
+          },
+          {
+            "name": "cannot accept a declined invitation or decline an accepted invitation",
+            "status": "passed"
+          },
+          {
+            "name": "fails closed for synthetic nullable status outside the real schema",
+            "status": "passed"
+          },
+          {
+            "name": "fails closed for synthetic nullable expires_at outside the real schema",
+            "status": "passed"
+          },
+          {
+            "name": "upgrades the original three-state shared_project_invites_status_check without changing rows or unrelated constraints",
+            "status": "passed"
+          },
+          {
+            "name": "upgrades the original three-state project_invites_status_check without changing rows or unrelated constraints",
+            "status": "passed"
+          },
+          {
+            "name": "preserves existing four-state rows under shared_project_invites_status_check",
+            "status": "passed"
+          },
+          {
+            "name": "preserves existing four-state rows under project_invites_status_check",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/shared/stores/hydrationContext.test.ts",
+        "cases": [
+          {
+            "name": "rejects stale 'account' publication from hydration +0",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration +0",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 1",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 1",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 2",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 2",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 3",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 3",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 4",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 4",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 5",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 5",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 6",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 6",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 7",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 7",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 8",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 8",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 9",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 9",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 10",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 10",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'account' publication from hydration 11",
+            "status": "passed"
+          },
+          {
+            "name": "rejects stale 'database' publication from hydration 11",
+            "status": "passed"
+          },
+          {
+            "name": "publishes ordinary current-account label hydration",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/shared/stores/labelStore.boundary.test.ts",
+        "cases": [
+          {
+            "name": "fences held 'create' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create refresh' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create refresh' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create refresh' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'create refresh' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'update' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'update' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'update' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'update' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'delete' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'delete' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'delete' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'delete' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink lookup' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink lookup' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink lookup' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink lookup' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink batch' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink batch' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink batch' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'unlink batch' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'attach' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'attach' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'attach' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'attach' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'reorder' after 'account' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'reorder' after 'account' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'reorder' after 'database' replacement (failure=false)",
+            "status": "passed"
+          },
+          {
+            "name": "fences held 'reorder' after 'database' replacement (failure=true)",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'create' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'create refresh' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'update' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'delete' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'unlink lookup' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'unlink batch' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'attach' behavior and producer identity",
+            "status": "passed"
+          },
+          {
+            "name": "preserves same-account 'reorder' behavior and producer identity",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/shared/stores/labelStore.test.ts",
+        "cases": [
+          {
+            "name": "labelStore.createLabel — pushes project_labels junction (#77) pushes the junction row when a label is created inside a project",
+            "status": "passed"
+          },
+          {
+            "name": "labelStore.createLabel — pushes project_labels junction (#77) does NOT push a junction row when no project_id is provided",
+            "status": "passed"
+          },
+          {
+            "name": "labelStore.setLabelGroupOperator — quick operator switch on the active-filter chip all-of → is not: moves the include set into the exclude set, logic untouched",
+            "status": "passed"
+          },
+          {
+            "name": "labelStore.setLabelGroupOperator — quick operator switch on the active-filter chip all-of → any-of: keeps the include set, flips logic to \"any\"",
+            "status": "passed"
+          },
+          {
+            "name": "labelStore.setLabelGroupOperator — quick operator switch on the active-filter chip is not → any-of: moves the exclude set back into the include set",
+            "status": "passed"
+          },
+          {
+            "name": "labelStore.setLabelGroupOperator — quick operator switch on the active-filter chip resolves a label UUID argument to its lowercased name key",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/shared/stores/savedViewStore.test.ts",
+        "cases": [
+          {
+            "name": "useSavedViewStore — scheduleRecount coalesces rapid calls into a single countMatching per view (debounced 1s)",
+            "status": "passed"
+          },
+          {
+            "name": "useSavedViewStore — scheduleRecount skips the currently open saved view (it maintains its own live count)",
+            "status": "passed"
+          },
+          {
+            "name": "useSavedViewStore — scheduleRecount hydrateCounts recomputes every view (no skipping)",
+            "status": "passed"
+          },
+          {
+            "name": "useSavedViewStore — scheduleRecount falls back to 0 when a count query throws",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/shared/stores/taskStore.hydrateAllForUser.test.ts",
+        "cases": [
+          {
+            "name": "taskStore.hydrateAllForUser hydrates every accessible project and evicts tasks and labels from removed projects",
+            "status": "passed"
+          },
+          {
+            "name": "taskStore.hydrateAllForUser does not toggle loading (no full-reload flash)",
+            "status": "passed"
+          },
+          {
+            "name": "taskStore.hydrateAllForUser removes deleted task rows and stale label mappings from refreshed projects",
+            "status": "passed"
+          },
+          {
+            "name": "taskStore.hydrateAllForUser preserves local edits made while the cross-project read is in flight",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "file": "src/renderer/src/services/syncPull.integration.test.ts",
+        "cases": [
+          {
+            "name": "persists every task and status beyond the API cap before advancing either watermark",
+            "status": "passed"
+          },
+          {
+            "name": "does not advance the status watermark when a later page fails",
+            "status": "passed"
+          },
+          {
+            "name": "fetches every label definition and junction for a task and project",
+            "status": "passed"
+          },
+          {
+            "name": "imports archive metadata and timestamps on a fresh device: 0",
+            "status": "passed"
+          },
+          {
+            "name": "imports archive metadata and timestamps on a fresh device: 1",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes missed shared archive metadata at startup: 0",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes missed shared archive metadata at startup: 1",
+            "status": "passed"
+          },
+          {
+            "name": "preserves imported status/task tombstones and timestamps through fullPull",
+            "status": "passed"
+          },
+          {
+            "name": "preserves imported status/task tombstones and timestamps through sharedStartup",
+            "status": "passed"
+          },
+          {
+            "name": "R4/review-1: reads every remote task before project-wide queued label cleanup",
+            "status": "passed"
+          },
+          {
+            "name": "R4/review-1: reconciles every remote junction for one queued task",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'startup' archive=+0",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'search' archive=+0",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'full' archive=+0",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'incremental' archive=+0",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'startup' archive=1",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'search' archive=1",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'full' archive=1",
+            "status": "passed"
+          },
+          {
+            "name": "R15: original remote version cannot resurrect a local tombstone via 'incremental' archive=1",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'startup' archive inheritance=+0",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'search' archive inheritance=+0",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'full' archive inheritance=+0",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'incremental' archive inheritance=+0",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'startup' archive inheritance=1",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'search' archive inheritance=1",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'full' archive inheritance=1",
+            "status": "passed"
+          },
+          {
+            "name": "preserves newer metadata during 'incremental' archive inheritance=1",
+            "status": "passed"
+          },
+          {
+            "name": "converges rejected equal-version archive=0 before queue completion and subsequent pull",
+            "status": "passed"
+          },
+          {
+            "name": "converges rejected equal-version archive=1 before queue completion and subsequent pull",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles archive=0 beyond a metadata high-water without losing newer metadata",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles archive=1 beyond a metadata high-water without losing newer metadata",
+            "status": "passed"
+          },
+          {
+            "name": "pulls persisted reorder versions for tasks already present on the recipient",
+            "status": "passed"
+          },
+          {
+            "name": "discovers independent archive=0 changes below a later metadata watermark and converges equal conflicts",
+            "status": "passed"
+          },
+          {
+            "name": "discovers independent archive=1 changes below a later metadata watermark and converges equal conflicts",
+            "status": "passed"
+          },
+          {
+            "name": "refreshes shared task/status metadata during public reconcile before replaying retained archive intent",
+            "status": "passed"
+          },
+          {
+            "name": "preserves pending project label removal through actual startup imports",
+            "status": "passed"
+          },
+          {
+            "name": "preserves pending project label removal through actual realtime imports",
+            "status": "passed"
+          },
+          {
+            "name": "converges a 502-to-501 assignment snapshot only after a full read (complete)",
+            "status": "passed"
+          },
+          {
+            "name": "converges a 502-to-501 assignment snapshot only after a full read (second-page-failure)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps clock-ahead family removal through public reconciliation and later re-add (shared=0)",
+            "status": "passed"
+          },
+          {
+            "name": "keeps clock-ahead family removal through public reconciliation and later re-add (shared=1)",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles shared and user data on resume even when every channel rejoined while suspended",
+            "status": "passed"
+          },
+          {
+            "name": "retries personal catch-up on an already joined channel and coalesces concurrent sweeps",
+            "status": "passed"
+          },
+          {
+            "name": "keeps routine archived catch-up metadata-only and preserves explicit full reconciliation",
+            "status": "passed"
+          },
+          {
+            "name": "does no catch-up while suspended, offline or from an expired account context",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles ancestor order for existing restored trees in a single pass",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles ancestor order for remote-only restored trees in a single pass",
+            "status": "passed"
+          },
+          {
+            "name": "reconciles ancestor order for mixed restored trees in a single pass",
+            "status": "passed"
+          },
+          {
+            "name": "loads complete capped memberships before pruning in 'invite' failure=false",
+            "status": "passed"
+          },
+          {
+            "name": "loads complete capped memberships before pruning in 'invite' failure=true",
+            "status": "passed"
+          },
+          {
+            "name": "loads complete capped memberships before pruning in 'force-sync' failure=false",
+            "status": "passed"
+          },
+          {
+            "name": "loads complete capped memberships before pruning in 'force-sync' failure=true",
+            "status": "passed"
+          }
+        ]
+      }
+    ],
+    "command": "node_modules/.bin/vitest run --maxWorkers=2 scripts/channel-teardown.test.ts scripts/invitation-lifecycle.test.tsx scripts/project-boundaries.test.ts scripts/project-eviction-races.test.ts scripts/project-metadata-events.test.ts scripts/sync-optimization.test.ts scripts/user-channel-origin.test.ts supabase/functions/mcp/securityHardening.test.ts src/renderer/src/shared/stores/hydrationContext.test.ts src/renderer/src/shared/stores/labelStore.boundary.test.ts src/renderer/src/shared/stores/labelStore.test.ts src/renderer/src/shared/stores/savedViewStore.test.ts src/renderer/src/shared/stores/taskStore.hydrateAllForUser.test.ts src/renderer/src/services/syncPull.integration.test.ts"
+  },
+  "typeValidation": {
+    "modules": [
+      "src/renderer/src/services/PersonalSyncService.ts",
+      "src/renderer/src/services/SyncService.ts",
+      "src/renderer/src/services/UserChannelService.ts",
+      "src/renderer/src/services/remoteProjectRefresh.ts",
+      "src/renderer/src/shared/stores/hydrationContext.ts",
+      "src/renderer/src/shared/stores/labelStore.ts",
+      "src/renderer/src/shared/stores/projectAreaStore.ts",
+      "src/renderer/src/shared/stores/projectCache.ts",
+      "src/renderer/src/shared/stores/projectStore.ts",
+      "src/renderer/src/shared/stores/savedViewStore.ts",
+      "src/renderer/src/shared/stores/statusStore.ts",
+      "src/renderer/src/shared/stores/taskStore.ts"
+    ],
+    "diagnostics": 0,
+    "details": "",
+    "method": "TypeScript configured from tsconfig.web.json; syntactic and semantic diagnostics requested only for the changed renderer modules, with their real dependency graph; no emit."
+  },
+  "remainingValidation": "Outer Test/Document/Lint/Build/Push/PR/CI, fresh independent verifier, immutable paired benchmark and canonical report publication remain outer-executor work. Physical Supabase host I/O remains unmeasured."
+}

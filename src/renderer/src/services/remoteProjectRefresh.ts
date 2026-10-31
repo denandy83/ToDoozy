@@ -1,3 +1,4 @@
+import { hydrationContext } from '../shared/stores/hydrationContext'
 import { readAll, readAllIn } from './readAll'
 import { captureSyncContext, type SyncContext } from './syncContext'
 import { useLabelStore } from '../shared/stores/labelStore'
@@ -6,6 +7,7 @@ import { logEvent } from '../shared/stores/logStore'
 /** Fetch definitions before junctions: a brand-new remote label has a local FK. */
 export async function refreshProjectLabels(projectId: string, context?: SyncContext): Promise<void> {
   context ??= await captureSyncContext()
+  context = { ...context, ...hydrationContext(context, projectId) }
   const api = context.api
   const client = context.client
   const { data: links, error } = await readAll(() => client.from('project_labels').select('*').eq('project_id', projectId), ['project_id', 'label_id'])

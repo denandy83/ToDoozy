@@ -1,5 +1,5 @@
 import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
-import { hydrationContext } from './hydrationContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { ProjectArea, CreateProjectAreaInput } from '../../../../shared/types'
@@ -10,7 +10,7 @@ interface ProjectAreaState {
 }
 
 interface ProjectAreaActions {
-  hydrate(userId: string): Promise<void>
+  hydrate(userId: string, origin?: HydrationOrigin): Promise<void>
   createArea(userId: string, name: string, color?: string): Promise<ProjectArea>
   updateArea(id: string, updates: { name?: string; color?: string; is_collapsed?: number }): Promise<void>
   deleteArea(id: string): Promise<void>
@@ -25,15 +25,20 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
   areas: [],
   loading: false,
 
-  async hydrate(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true })
+  async hydrate(userId: string, origin?: HydrationOrigin): Promise<void> {
+    const context = hydrationContext(origin)
+    const { api, isCurrent, assertCurrent } = context
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true })
       const areas = await api.projectAreas.findByUserId(userId)
       if (!await isCurrent()) return
+      assertCurrent()
       set({ areas, loading: false })
     } catch {
       if (!await isCurrent()) return
+      assertCurrent()
       set({ loading: false })
     }
   },

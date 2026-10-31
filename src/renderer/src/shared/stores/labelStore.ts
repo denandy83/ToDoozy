@@ -1,5 +1,5 @@
 import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
-import { hydrationContext } from './hydrationContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -47,7 +47,7 @@ interface LabelState {
 
 interface LabelActions {
   hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
-  hydrateAllLabels(): Promise<void>
+  hydrateAllLabels(origin?: HydrationOrigin): Promise<void>
   createLabel(input: CreateLabelInput): Promise<Label>
   updateLabel(id: string, input: UpdateLabelInput): Promise<Label | null>
   deleteLabel(id: string): Promise<boolean>
@@ -114,50 +114,62 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   error: null,
 
   async hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent } = origin ?? hydrationContext()
-    set({ loading: true, error: null })
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId)
+    const initial = useLabelStore.getState()
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const labels = await api.labels.findByProjectId(projectId)
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         const updated = { ...state.labels }
         const labelIdSet = new Set<string>()
         for (const label of labels) {
-          updated[label.id] = label
+          if (state.labels[label.id] === initial.labels[label.id]) updated[label.id] = label
           labelIdSet.add(label.id)
         }
         return {
           labels: updated,
-          projectLabels: { ...state.projectLabels, [projectId]: labelIdSet },
+          projectLabels: state.projectLabels[projectId] === initial.projectLabels[projectId]
+            ? { ...state.projectLabels, [projectId]: labelIdSet } : state.projectLabels,
           loading: false
         }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load labels'
       set({ error: message, loading: false })
     }
   },
 
-  async hydrateAllLabels(): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateAllLabels(origin?: HydrationOrigin): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin)
+    const userId = getUserId()
+    const initial = useLabelStore.getState().labels
     try {
-      const labels = await api.labels.findAll(getUserId())
+      if (!await isCurrent()) return
+      assertCurrent()
+      const labels = await api.labels.findAll(userId)
       // Merge into existing labels rather than replace. Other users' labels
       // pulled by hydrateLabels(projectId) for shared projects must survive
       // this call — replacing the map wipes them and breaks the chip remap
       // (current user's same-name label disappears, chip falls back to the
       // other user's color).
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         const merged = { ...state.labels }
         for (const l of labels) {
-          merged[l.id] = l
+          if (state.labels[l.id] === initial[l.id]) merged[l.id] = l
         }
         return { ...state, labels: merged }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load all labels'
       set({ error: message })
     }

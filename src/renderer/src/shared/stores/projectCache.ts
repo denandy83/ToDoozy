@@ -1,3 +1,4 @@
+import { invalidateProjectHydration } from './hydrationContext'
 import { useTaskStore } from './taskStore'
 import { useStatusStore } from './statusStore'
 import { useLabelStore } from './labelStore'
@@ -5,6 +6,7 @@ import { useViewStore } from './viewStore'
 import { useAuthStore } from './authStore'
 
 export function evictProjectData(projectId: string): void {
+  invalidateProjectHydration(projectId)
   const removedLabels = new Set(useLabelStore.getState().projectLabels[projectId] ?? [])
   const initial = useTaskStore.getState()
   for (const task of Object.values(initial.tasks)) if (task.project_id === projectId) {

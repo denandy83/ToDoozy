@@ -66,7 +66,7 @@ async function handleUserTableChange(
   table: UserScopedRemoteTable,
   eventType: string,
   row: Record<string, unknown>,
-  userId: string
+  state: UserChannelState
 ): Promise<void> {
   // These tables soft-delete via UPDATE (deleted_at) — a hard DELETE event
   // carries only the PK in payload.old, which applyRemote can't use. Skip;
@@ -74,29 +74,41 @@ async function handleUserTableChange(
   if (eventType === 'DELETE') return
   const desc = SYNC_TABLES[USER_TABLE_TO_DESCRIPTOR[table]]
   if (!desc) return
-  const context = await captureSyncContext()
-  if (useAuthStore.getState().currentUser?.id !== userId) return
+  let context: SyncContext | undefined
   try {
-    // applyRemote implementations are LWW (skip when local updated_at is
-    // newer), so the echo of this device's own push is a no-op.
-    await desc.localApplyRemote(row, context.api)
+    const origin = await state.context
+    context = {
+      ...origin,
+      isCurrent: async () => await origin.isCurrent() && !state.cancelled,
+      assertCurrent: () => {
+        origin.assertCurrent()
+        if (state.cancelled) throw new Error('User channel cancelled')
+      }
+    }
+    if (!await context.isCurrent() || state.cancelled) return
+    context.assertCurrent()
+    await desc.localApplyRemote(row, context.api, context)
+    if (!await context.isCurrent() || state.cancelled) return
+    context.assertCurrent()
+    const currentProjectId = useProjectStore.getState().currentProjectId
+    switch (table) {
+      case 'user_labels':
+        await useLabelStore.getState().hydrateAllLabels(context)
+        if (!await context.isCurrent() || state.cancelled) return
+        context.assertCurrent()
+        if (currentProjectId) await useLabelStore.getState().hydrateLabels(currentProjectId, context)
+        break
+      case 'user_saved_views':
+        await useSavedViewStore.getState().hydrate(state.userId, context)
+        break
+      case 'user_project_areas':
+        await useProjectAreaStore.getState().hydrate(state.userId, context)
+        break
+    }
   } catch (err) {
+    if (!context || !await context.isCurrent() || state.cancelled) return
+    context.assertCurrent()
     logEvent('error', 'realtime', `User-channel apply failed for ${table}`, `err=${err instanceof Error ? err.message : String(err)}`)
-    return
-  }
-  if (!await context.isCurrent()) return
-  const currentProjectId = useProjectStore.getState().currentProjectId
-  switch (table) {
-    case 'user_labels':
-      await useLabelStore.getState().hydrateAllLabels()
-      if (currentProjectId) await useLabelStore.getState().hydrateLabels(currentProjectId)
-      break
-    case 'user_saved_views':
-      await useSavedViewStore.getState().hydrate(userId)
-      break
-    case 'user_project_areas':
-      await useProjectAreaStore.getState().hydrate(userId)
-      break
   }
 }
 
@@ -122,7 +134,7 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
       (payload) => {
         if (state.cancelled) return
         const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as Record<string, unknown>
-        void handleUserTableChange('user_labels', payload.eventType, row, userId)
+        void handleUserTableChange('user_labels', payload.eventType, row, state).catch(() => {})
       }
     )
     .on(
@@ -131,7 +143,7 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
       (payload) => {
         if (state.cancelled) return
         const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as Record<string, unknown>
-        void handleUserTableChange('user_saved_views', payload.eventType, row, userId)
+        void handleUserTableChange('user_saved_views', payload.eventType, row, state).catch(() => {})
       }
     )
     .on(
@@ -140,7 +152,7 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
       (payload) => {
         if (state.cancelled) return
         const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as Record<string, unknown>
-        void handleUserTableChange('user_project_areas', payload.eventType, row, userId)
+        void handleUserTableChange('user_project_areas', payload.eventType, row, state).catch(() => {})
       }
     )
     .subscribe((status, err) => {

@@ -1,5 +1,5 @@
 import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
-import { hydrationContext } from './hydrationContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { SavedView, CreateSavedViewInput } from '../../../../shared/types'
@@ -15,7 +15,7 @@ interface SavedViewState {
 }
 
 interface SavedViewActions {
-  hydrate(userId: string): Promise<void>
+  hydrate(userId: string, origin?: HydrationOrigin): Promise<void>
   hydrateCounts(userId: string, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   /**
    * Debounced (1s) recount of every saved view's matching-task count. Wired to
@@ -44,7 +44,9 @@ let recountTimer: ReturnType<typeof setTimeout> | null = null
  * and may carry unsaved filter edits) isn't clobbered by the saved-config count.
  */
 async function recomputeCounts(userId: string, skipViewId: string | null, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-  const { api, isCurrent } = origin ?? hydrationContext()
+  const { api, isCurrent, assertCurrent } = hydrationContext(origin)
+  if (!await isCurrent()) return
+  assertCurrent()
   const { views, viewCounts } = useSavedViewStore.getState()
   const counts: Record<string, number> = {}
   for (const view of views) {
@@ -62,10 +64,12 @@ async function recomputeCounts(userId: string, skipViewId: string | null, projec
       counts[view.id] = await api.savedViews.countMatching(view.filter_config, userId)
     } catch {
       if (!await isCurrent()) return
+      assertCurrent()
       counts[view.id] = 0
     }
   }
   if (!await isCurrent()) return
+  assertCurrent()
   useSavedViewStore.setState((state) => ({ viewCounts: projectId ? { ...state.viewCounts, ...counts } : counts }))
 }
 
@@ -75,17 +79,22 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   loading: false,
   activeViewFilterConfig: null,
 
-  async hydrate(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true })
+  async hydrate(userId: string, origin?: HydrationOrigin): Promise<void> {
+    const context = hydrationContext(origin)
+    const { api, isCurrent, assertCurrent } = context
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true })
       const views = await api.savedViews.findByUserId(userId)
       if (!await isCurrent()) return
+      assertCurrent()
       set({ views, loading: false })
       // Hydrate counts in background
-      useSavedViewStore.getState().hydrateCounts(userId)
+      void useSavedViewStore.getState().hydrateCounts(userId, undefined, context).catch(() => {})
     } catch {
       if (!await isCurrent()) return
+      assertCurrent()
       set({ loading: false })
     }
   },
@@ -108,7 +117,7 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
       const view = useViewStore.getState()
       const skipId = view.currentView === 'saved-view' ? view.selectedSavedViewId : null
       void origin.isCurrent().then(current => {
-        if (current) return recomputeCounts(userId, skipId)
+        if (current) return recomputeCounts(userId, skipId, undefined, origin)
         return undefined
       }).catch(() => {})
     }, 1000)

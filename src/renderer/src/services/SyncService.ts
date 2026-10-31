@@ -1,3 +1,4 @@
+import { hydrationContext } from '../shared/stores/hydrationContext'
 import { evictProjectData } from '../shared/stores/projectCache'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
 import { markSynced, refreshProducerPending, reportPushFailure } from './syncFeedback'
@@ -900,6 +901,7 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
   if (!navigator.onLine || isSuspended()) return []
   context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
   if (!await context.isCurrent() || useAuthStore.getState().currentUser?.id !== userId) return []
+  const hydration = hydrationContext(context)
   const { api, client } = context
   const { data: membershipRows, error } = await readAll(() => {
     const query = client.from('project_members').select('*')
@@ -932,8 +934,9 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     if (scopedProject) {
       const snapshot = await api.projects.getMembers(project.id)
       const { useProjectStore } = await import('../shared/stores/projectStore')
-      if (!await context.isCurrent()) return missing
-      useProjectStore.setState((state) => ({ members: { ...state.members, [project.id]: snapshot } }))
+      if (!await context.isCurrent() || !hydration.isProjectCurrent(project.id)) return missing
+      context.assertCurrent()
+      useProjectStore.setState((state) => hydration.isProjectCurrent(project.id) ? { members: { ...state.members, [project.id]: snapshot } } : {})
     }
   }
   const localProjects = scopedProject ? [scopedProject] : await api.projects.getProjectsForUser(userId)
