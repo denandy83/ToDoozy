@@ -57,7 +57,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent, useLogStore } from './shared/stores/logStore';
-    ${sharedHook ? "import { getMemberDisplay } from './shared/hooks/useMemberDisplay'; import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
+    ${sharedHook ? "import { hydrationContext as memberHydrationContext } from './shared/stores/hydrationContext'; import { getMemberDisplay, useMemberDisplay, useProjectMemberDisplays, invalidateMemberDisplay } from './shared/hooks/useMemberDisplay'; import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
@@ -74,7 +74,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     const {hydrateProjectTemplates}=useTemplateStore.getState();
     function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,getMemberDisplay,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,getMemberDisplay,useMemberDisplay,useProjectMemberDisplays,invalidateMemberDisplay,memberHydrationContext,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
@@ -177,8 +177,8 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   vm.createContext(sandbox);
   vm.runInContext(code,sandbox);
   const fixture=sandbox.fixture,{repo,stores}=fixture;
-  const nativeCalls=[];
-  const api=new Proxy({}, {get:(_,namespace)=>namespace==='onInviteReceived'?callback=>{inviteReceived=callback;return ()=>{if(inviteReceived===callback)inviteReceived=null}}:namespace==='onTasksChanged'?callback=>{localChange=callback;return ()=>{localChange=null}}:new Proxy({}, {get:(_,method)=>async(...args)=>{
+  const nativeCalls=[],contextListeners=new Set();
+  const api=new Proxy({}, {get:(_,namespace)=>namespace==='onInviteReceived'?callback=>{inviteReceived=callback;return ()=>{if(inviteReceived===callback)inviteReceived=null}}:namespace==='onTasksChanged'?callback=>{localChange=callback;return ()=>{localChange=null}}:new Proxy({}, {get:(_,method)=>namespace==='sync'&&method==='currentContext'?()=>JSON.stringify([stores.useAuthStore.getState().currentUser?.id??null,generation]):namespace==='sync'&&method==='onContextChanged'?listener=>{contextListeners.add(listener);return ()=>contextListeners.delete(listener)}:async(...args)=>{
     if(namespace!=='sync')nativeCalls.push({namespace,method,args,generation,userId:stores.useAuthStore.getState().currentUser?.id});
     if(namespace==='app'&&method==='getChangelog')return '# Synthetic changelog';
     if(namespace==='releaseNotes'&&method==='sync')return {ok:true,count:0,cached:true};
@@ -213,7 +213,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   await stores.useProjectStore.getState().hydrateProjects('u');
   const untilIdle=async()=>{let quiet=0,last=-1;for(let i=0;i<2000;i++){await settle();if(!active&&requests.length===last)quiet++;else quiet=0;last=requests.length;if(quiet>=10)return;if(latency)await new Promise(resolve=>setTimeout(resolve,latency))}throw Error('Fixture did not settle')};
   return {sandbox,services:fixture,repo,stores,projects,remote,requests,nativeCalls,authorizations,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
-    emitInvite:token=>inviteReceived?.(token),run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),runLocalBootstrap:()=>fixture.runLocalBootstrap(),runLocalChanges:()=>fixture.runLocalChanges(),emitLocalChange:()=>localChange?.(),setSession:(token,userId='u')=>{session={user:{id:userId},access_token:token}},beforeSession:callback=>{beforeSession=callback},untilIdle,context:()=>fixture.captureSyncContext(),producer:()=>fixture.captureSyncProducer(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},replaceDatabase:()=>{generation++},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
+    emitInvite:token=>inviteReceived?.(token),run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),runLocalBootstrap:()=>fixture.runLocalBootstrap(),runLocalChanges:()=>fixture.runLocalChanges(),emitLocalChange:()=>localChange?.(),setSession:(token,userId='u')=>{session={user:{id:userId},access_token:token}},beforeSession:callback=>{beforeSession=callback},untilIdle,context:()=>fixture.captureSyncContext(),producer:()=>fixture.captureSyncProducer(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},replaceDatabase:()=>{generation++;for(const listener of contextListeners)listener()},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null});for(const listener of contextListeners)listener()},
     changeConnected:value=>stores.useSyncStore.getState().setRealtimeConnected(value),beforeRequest:callback=>{beforeRequest=callback},
     runStartupTimers:async()=>{const jobs=[...timers].filter(([,job])=>job.ms===2000);for(const [id,{fn}] of jobs){timers.delete(id);await fn()}await untilIdle()},
     runIntervals:async()=>{for(const {fn}of [...intervals.values()])await fn();await untilIdle()},runTimers:async()=>{const jobs=[...timers.values()];timers.clear();for(const {fn}of jobs)await fn();await untilIdle()},

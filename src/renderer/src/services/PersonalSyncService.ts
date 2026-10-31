@@ -1875,12 +1875,12 @@ export async function requestSyncCatchUp(context: SyncContext, initialize = fals
 }
 
 /** Realtime task/status/label activity must never sweep unrelated projects. */
-export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>, taskIds: ReadonlyMap<string, Iterable<string>> = new Map()): Promise<void> {
+export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>, taskIds: ReadonlyMap<string, Iterable<string>> = new Map(), producer: SyncContext = context): Promise<void> {
   const userId = useAuthStore.getState().currentUser?.id
   const projects: ProjectRefreshes = new Map()
   for (const projectId of projectIds) {
     const scoped = { ...context, ...hydrationContext(context, projectId) }
-    projects.set(projectId, new Map([[context, { context: scoped, taskIds: new Set(taskIds.get(projectId)) }]]))
+    projects.set(projectId, new Map([[producer, { context: scoped, taskIds: new Set(taskIds.get(projectId)) }]]))
   }
   if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
   await enqueueReconcile({ userId, background: true, initialize: false, context: null, scope: context.scope, projects })

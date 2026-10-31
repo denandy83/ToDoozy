@@ -5,6 +5,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { TodoozyAPI, UpdateStatus } from './index.d'
 
+let databaseContext: { generation: number; userId: string | null } | null = null
+const contextListeners = new Set<() => void>()
+function updateDatabaseContext(context: { generation: number; userId: string | null }): void {
+  if (databaseContext && context.generation <= databaseContext.generation) return
+  databaseContext = context
+  for (const listener of contextListeners) listener()
+}
+ipcRenderer.on('sync:context-changed', (_event, context) => updateDatabaseContext(context))
+
 const api: TodoozyAPI = {
   diagnostics: {
     append: (summary) => ipcRenderer.invoke('diagnostics:append', summary),
@@ -306,7 +315,16 @@ const api: TodoozyAPI = {
   },
 
   sync: {
-    captureContext: () => ipcRenderer.invoke('sync:captureContext'),
+    currentContext: () => databaseContext ? JSON.stringify([databaseContext.userId, databaseContext.generation]) : null,
+    onContextChanged: (listener) => {
+      contextListeners.add(listener)
+      return () => { contextListeners.delete(listener) }
+    },
+    captureContext: async () => {
+      const context = await ipcRenderer.invoke('sync:captureContext')
+      updateDatabaseContext(context)
+      return context
+    },
     invokeContext: (context, channel, args) => ipcRenderer.invoke('sync:invokeContext', context, channel, args),
     getQueue: () => ipcRenderer.invoke('sync:getQueue'),
     enqueue: (tableName, rowId, operation, payload) =>

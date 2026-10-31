@@ -25,6 +25,7 @@ export interface SyncProducer {
 export function captureSyncProducer(active: () => boolean = () => true): SyncProducer {
   const userId = useAuthStore.getState().currentUser?.id
   const database = window.api.sync.captureContext()
+  void database.catch(() => {})
   const assertCurrent = (): void => {
     if (!active()) throw new Error('Sync paused')
     if (!userId || useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed or signed out')

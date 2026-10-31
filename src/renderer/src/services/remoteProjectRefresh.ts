@@ -44,12 +44,12 @@ export function scheduleRemoteProjectRefresh(projectId: string, origin: SyncCont
   if (timer) clearTimeout(timer)
   timer = setTimeout(async () => {
     timer = null
-    const pending = [...pendingProjects.values()].flatMap(projects => [...projects].map(([projectId, request]) => ({ projectId, ...request })))
+    const pending = [...pendingProjects].flatMap(([origin, projects]) => [...projects].map(([projectId, request]) => ({ origin, projectId, ...request })))
     pendingProjects.clear()
     const { requestProjectRefresh } = await import('./PersonalSyncService')
-    await Promise.all(pending.map(async ({ projectId, context, taskIds }) => {
+    await Promise.all(pending.map(async ({ origin, projectId, context, taskIds }) => {
       try {
-        await requestProjectRefresh(context, [projectId], new Map([[projectId, taskIds]]))
+        await requestProjectRefresh(context, [projectId], new Map([[projectId, taskIds]]), origin)
       } catch (error) {
         if (await context.isCurrent()) logEvent('error', 'sync', 'Remote project refresh failed', String(error))
       }

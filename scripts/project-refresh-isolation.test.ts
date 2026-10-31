@@ -132,3 +132,58 @@ it('accepts a fresh rejoined P origin while its older queued origin remains canc
   expect(h.maxConcurrent()).toBe(1)
   expect(h.fixtureErrors).toEqual([])
 })
+
+async function flushDebounce(h: Awaited<ReturnType<typeof makeHarness>>): Promise<void> {
+  const jobs = [...h.timers].filter(([, job]: [unknown, { ms: number }]) => job.ms === 250)
+  for (const [id, job] of jobs) { h.timers.delete(id); void job.fn() }
+  for (let i = 0; i < 5; i++) await new Promise(setImmediate)
+}
+function requestCounts(h: Awaited<ReturnType<typeof makeHarness>>): Record<string, number> {
+  return h.requests.filter((row: { method: string }) => row.method === 'GET').reduce((counts: Record<string, number>, row: { table: string }) => { counts[row.table] = (counts[row.table] ?? 0) + 1; return counts }, {})
+}
+async function batchedFollowups(batches: number, invalidate = false, firstProject = 'p0') {
+  const { h, channels } = await setup(), pause = gate()
+  changeRemote(h, 0); changeRemote(h, 1)
+  const tasks: string[] = []
+  for (let i = 0; i < 3; i++) {
+    const task = h.repo.tasks.create({ id: 'batch-'+i, project_id: 'p1', owner_id: 'u', status_id: 's1', title: 'UNCHANGED '+i })
+    h.remote.tasks.push({ ...task }); tasks.push(task.id)
+  }
+  h.beforeRequest(async () => { pause.enter(); await pause.wait })
+  channels.get(firstProject)!.emit('tasks', 'UPDATE', { id: firstProject === 'p0' ? 't0' : 't1', project_id: firstProject })
+  await flushDebounce(h); await pause.entered
+  for (let i = 0; i < batches; i++) {
+    const ids = batches === 1 ? tasks : [tasks[i % tasks.length]]
+    for (const id of ids) {
+      h.remote.task_labels.push({ task_id: id, label_id: 'label1', deleted_at: null })
+      channels.get('p1')!.emit('tasks', 'UPDATE', { id, project_id: 'p1' })
+    }
+    if (invalidate) channels.get('p0')!.emit('tasks', 'UPDATE', { id: 't0', project_id: 'p0' })
+    await flushDebounce(h)
+  }
+  if (invalidate) await evict(h)
+  pause.release(); await h.untilIdle()
+  if (invalidate) expectFreshQ(h)
+  else {
+    expect(h.stores.useTaskStore.getState().tasks.t0.title).toBe(firstProject === 'p0' ? 'FRESH 0' : 'OLD 0')
+    expect(h.stores.useTaskStore.getState().tasks.t1.title).toBe('FRESH 1')
+  }
+  for (const id of tasks) {
+    expect(h.repo.labels.findByTaskId(id).map((row: { id: string }) => row.id)).toEqual(['label1'])
+    expect(h.stores.useTaskStore.getState().taskLabels[id].map((row: { id: string }) => row.id)).toEqual(['label1'])
+  }
+  expect(h.maxConcurrent()).toBe(1)
+  expect(h.fixtureErrors).toEqual([])
+  return requestCounts(h)
+}
+it('coalesces separate debounce batches from the same channel into one complete pending followup', async () => {
+  const control = await batchedFollowups(1, false, 'p1')
+  const staggered = await batchedFollowups(3, false, 'p1')
+  expect(staggered).toEqual(control)
+  expect(staggered.projects).toBe(2)
+})
+it.each(['p0', 'p1'])('preserves independent origins while coalescing staggered batches behind %s', async firstProject => {
+  const control = await batchedFollowups(1, true, firstProject)
+  const staggered = await batchedFollowups(3, true, firstProject)
+  expect(staggered).toEqual(control)
+})

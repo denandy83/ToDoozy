@@ -19,6 +19,7 @@ vi.mock('./tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTime
 vi.mock('../renderer/src/services/PersonalSyncService', () => ({ pushTask: vi.fn(), deleteTaskFromSupabase: vi.fn(), pushProjectLabel: vi.fn(), pushRemoveLabelFromProject: vi.fn() }))
 vi.mock('../renderer/src/shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from './ipc-handlers'
+import { getMainWindow } from './index'
 import { useTaskStore } from '../renderer/src/shared/stores/taskStore'
 import { useLabelStore } from '../renderer/src/shared/stores/labelStore'
 import { useAuthStore } from '../renderer/src/shared/stores/authStore'
@@ -101,4 +102,17 @@ it('project label removal preserves chips and associations cached for another pr
   expect(repo.tasks.getLabelState(q.id)).toEqual(before)
   expect(repo.labels.findByProjectId('q')).toEqual([label])
   expect(repo.labels.findById('l')).toEqual(label)
+})
+
+it.each(['a','b'])('announces the current native scope on a switch to %s before guarded reads',async userId=>{
+  const send=vi.fn()
+  vi.mocked(getMainWindow).mockReturnValue({webContents:{send}} as never)
+  try {
+    const old=await invoke('sync:captureContext') as {generation:number;userId:string}
+    await invoke('auth:switchDatabase',userId)
+    const current=await invoke('sync:captureContext')
+    expect(send).toHaveBeenCalledExactlyOnceWith('sync:context-changed',current)
+    expect(current).toEqual({generation:old.generation+1,userId})
+    await expect(invoke('sync:invokeContext',old,'projects:getMembers',['p'])).rejects.toThrow('database changed')
+  } finally {vi.mocked(getMainWindow).mockReset()}
 })

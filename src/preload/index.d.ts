@@ -355,6 +355,8 @@ export interface NotificationsAPI {
 }
 
 export interface SyncAPI {
+  currentContext(): string | null
+  onContextChanged(listener: () => void): () => void
   captureContext(): Promise<{ generation: number; userId: string | null }>
   invokeContext(context: { generation: number; userId: string | null }, channel: string, args: unknown[]): Promise<unknown>
   getQueue(): Promise<SyncQueueEntry[]>
