@@ -271,3 +271,19 @@ describe('ProjectAreaRepository — applyRemote', () => {
     expect(local.updated_at).toBe(remote.updated_at)
   })
 })
+
+it('commits area edit intent atomically with its native row',()=>{
+  const db=createTestDb()
+  try{
+    const userId=seedUser(db),repo=new ProjectAreaRepository(db)
+    repo.create({id:'atomic-area',user_id:userId,name:'AREA'})
+    repo.update('atomic-area',{is_collapsed:1})
+    expect(repo.findById('atomic-area')?.is_collapsed).toBe(1)
+    expect(db.prepare("SELECT table_name,row_id,operation FROM sync_queue WHERE table_name='user_project_areas'").all()).toEqual([{table_name:'user_project_areas',row_id:'atomic-area',operation:'UPDATE'}])
+    const before=repo.findById('atomic-area')
+    db.exec("CREATE TEMP TRIGGER reject_area_intent BEFORE INSERT ON sync_queue WHEN NEW.table_name='user_project_areas' BEGIN SELECT RAISE(ABORT,'Synthetic queue write failure');END")
+    expect(()=>repo.update('atomic-area',{name:'UNCOMMITTED',is_collapsed:0})).toThrow('Synthetic queue write failure')
+    expect(repo.findById('atomic-area')).toEqual(before)
+    expect(db.prepare("SELECT COUNT(*) AS count FROM sync_queue WHERE table_name='user_project_areas'").get()).toEqual({count:1})
+  }finally{db.close()}
+})

@@ -290,7 +290,7 @@ it.each(['Accept','Decline'])('reserves the first %s action before a delayed nat
   expect(f.h.fixtureErrors).toEqual([])
 })
 
-it.each(['normal','before-accept','native','channel','revoked','deleted'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
+it.each(['normal','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
   const {PGlite}=await import('@electric-sql/pglite')
   const {readFileSync}=await import('node:fs')
   const pg=new PGlite()
@@ -309,19 +309,42 @@ it.each(['normal','before-accept','native','channel','revoked','deleted'])('retr
     for(const row of h.remote.projects)if(row.id==='joined')row.id=project
     for(const table of ['project_members','statuses'])for(const row of h.remote[table])if(row.project_id==='joined')row.project_id=project
     const transport=h.sandbox.fetch
-    let calls=0,failed=false
+    let calls=0,sqlCalls=0,failed=false,probePending=false,probeFailures=0
+    const originalApi=h.sandbox.window.api
+    h.sandbox.window.api=new Proxy(originalApi,{get(target,namespace){
+      if(namespace!=='sync')return Reflect.get(target,namespace)
+      return new Proxy(target.sync,{get(sync,method){
+        if(method!=='captureContext')return Reflect.get(sync,method)
+        return async()=>{
+          const current=await sync.captureContext()
+          if(probePending){probePending=false;probeFailures++;throw Error('Synthetic same-scope post-accept probe failure')}
+          return current
+        }
+      }})
+    }})
     h.sandbox.fetch=async(url:string,init:RequestInit)=>{
       const parsed=new URL(String(url))
       if(parsed.pathname.endsWith('/rpc/accept_invite')){
         calls++
-        if(mode==='before-accept'&&!failed){failed=true;return response({message:'Synthetic pre-commit failure'},503)}
+        if((mode==='before-accept'||mode==='offline-before')&&!failed){failed=true;return response({message:'Synthetic pre-commit failure'},503)}
         await pg.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[actor]);await pg.exec('SET ROLE authenticated')
-        try{return response((await pg.query<{id:string}>('SELECT public.accept_invite($1) AS id',[token])).rows[0].id)}
+        try{
+          sqlCalls++
+          const accepted=(await pg.query<{id:string}>('SELECT public.accept_invite($1) AS id',[token])).rows[0].id
+          const reply=response(accepted)
+          if(mode==='post-probe'&&!failed){
+            failed=true
+            const text=reply.text.bind(reply)
+            reply.text=async()=>{const value=await text();probePending=true;return value}
+          }
+          return reply
+        }
         catch(error){return response({message:(error as Error).message,code:'P0001'},400)}
         finally{await pg.exec('RESET ROLE')}
       }
       if(parsed.pathname.endsWith('/project_members')&&parsed.searchParams.has('user_id')){
         const rows=(await pg.query('SELECT user_id FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])).rows.map(()=>({user_id:'u'}))
+        if(mode==='offline-completion'&&!failed){failed=true;h.sandbox.navigator.onLine=false}
         return response(rows)
       }
       return transport(url,init)
@@ -336,15 +359,22 @@ it.each(['normal','before-accept','native','channel','revoked','deleted'])('retr
       if(mode==='channel'&&!failed&&h.repo.projects.findById(project)){failed=true;throw Error('Synthetic post-accept channel failure')}
       return getClient()
     }
-    await f.mount();await f.click('Accept')
+    await f.mount()
+    const originalScope=h.sandbox.window.api.sync.currentContext()
+    if(mode==='offline-before')h.sandbox.navigator.onLine=false
+    await f.click('Accept')
     if(mode!=='normal'){
       expect(f.host.textContent).toContain('PRIVATE FIRST')
       expect(f.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+      if(mode==='post-probe'){expect(probeFailures).toBe(1);expect(h.sandbox.window.api.sync.currentContext()).toBe(originalScope);expect(h.repo.projects.findById(project)).toBeUndefined()}
+      if(mode==='offline-completion')expect(h.repo.projects.findById(project)).toBeUndefined()
+      h.sandbox.navigator.onLine=true
       if(mode==='revoked')await pg.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])
       if(mode==='deleted')h.remote.projects.find((row:{id:string})=>row.id===project).deleted_at=new Date().toISOString()
       await f.click('Accept')
     }
-    expect(calls).toBe(mode==='before-accept'?2:1)
+    expect(calls).toBe(mode==='before-accept'||mode==='offline-before'?2:1)
+    expect(sqlCalls).toBe(1)
     if(mode==='revoked'||mode==='deleted'){
       expect(f.host.textContent).toContain('PRIVATE FIRST')
       expect(h.repo.projects.findById(project)).toBeUndefined()

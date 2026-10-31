@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureSyncProducer, requireProducerCurrent, syncContextFromProducer } from '../../services/syncContext'
 import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -71,13 +71,13 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
     try {
       const result = await origin.api.projectAreas.update(id, updates)
       await requireProducerCurrent(origin)
-      if (result && useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
-        set((state) => ({ areas: state.areas.map((area) => area === pending ? result : area) }))
-        import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-          if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === result) {
-            pushProjectArea({ ...result, user_id: result.user_id }, origin).catch(() => {})
-          }
-        })
+      if (result) {
+        if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
+          set((state) => ({ areas: state.areas.map((area) => area === pending ? result : area) }))
+        }
+        void import('../../services/SyncService').then(async ({ processSyncQueue }) => {
+          await processSyncQueue(await syncContextFromProducer(origin))
+        }).catch(() => {})
       }
     } catch (error) {
       if (await origin.isCurrent() && useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
@@ -85,11 +85,6 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
           const confirmed = await origin.api.projectAreas.findById(id)
           await requireProducerCurrent(origin)
           set((state) => ({ areas: state.areas.flatMap((area) => area !== pending ? [area] : confirmed ? [confirmed] : []) }))
-          if (confirmed) import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-            if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === confirmed) {
-              pushProjectArea(confirmed, origin).catch(() => {})
-            }
-          })
         } catch { }
       }
       throw error

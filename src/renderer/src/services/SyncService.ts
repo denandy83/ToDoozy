@@ -1003,17 +1003,19 @@ export async function acceptInvite(token: string, userId: string, origin = captu
   const projectCurrent = captureProjectScope()
   const context = await syncContextFromProducer(origin)
   const { data: projectId, error } = await context.client.rpc('accept_invite', { invite_token: token })
-  await requireProducerCurrent(origin)
+  origin.assertCurrent()
   if (error) throw new Error(error.message)
   if (typeof projectId !== 'string' || !projectId) throw new Error('Failed to accept invite')
-  const accepted = projectSyncContext(context, projectId, projectCurrent)
   const resume = async (): Promise<string> => {
+    await requireProducerCurrent(origin)
+    const accepted = projectSyncContext(context, projectId, projectCurrent)
     accepted.assertCurrent()
     const { data: membership, error: membershipError } = await accepted.client.from('project_members')
       .select('user_id').eq('project_id', projectId).eq('user_id', userId).maybeSingle()
     if (membershipError || membership?.user_id !== userId) throw new Error(membershipError?.message ?? 'Project membership is no longer available')
     await syncProjectDown(projectId, userId, accepted)
     await requireProducerCurrent(origin)
+    accepted.assertCurrent()
     return projectId
   }
   acknowledged?.(resume)
@@ -1203,14 +1205,11 @@ export async function syncProjectDown(projectId: string, userId: string, context
   const projectCurrent = captureProjectScope()
   const admission = membershipSnapshot()
   // Never sync down when offline — would delete all local tasks
-  if (!navigator.onLine) {
-    console.log('[SyncService] Skipping syncProjectDown (offline)')
-    return
-  }
+  if (!navigator.onLine) throw new Error('Project download is offline')
   context ??= await captureSyncContext()
   context = projectSyncContext(context, projectId, projectCurrent)
   context.assertCurrent()
-  if (useAuthStore.getState().currentUser?.id !== userId) return
+  if (useAuthStore.getState().currentUser?.id !== userId) throw new Error('Sync account changed')
   const { api, client: supabase } = context
 
   // Get shared project
@@ -1420,6 +1419,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
 
   const members = await admission(projectId, context)
   try { await syncMembersDown(projectId, members) } catch (error) { if (await members.isCurrent()) throw error }
+  context.assertCurrent()
 }
 
 /**
