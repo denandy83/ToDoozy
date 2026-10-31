@@ -12,7 +12,7 @@ const harness = vi.hoisted(() => ({
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, fn: (...args: unknown[]) => unknown) => harness.handlers.set(channel, fn) }, safeStorage: {}, BrowserWindow: {}, dialog: {}, shell: {}, app: {} }))
 vi.mock('keytar', () => ({ default: {} }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
-vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), getDatabasePath: vi.fn() }))
+vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), clearDatabaseUserId: vi.fn(), getDatabasePath: vi.fn() }))
 vi.mock('./quick-add', () => ({ hideQuickAddWindow: vi.fn() }))
 vi.mock('./index', () => ({ registerQuickAddShortcut: vi.fn(), registerAppToggleShortcut: vi.fn(), getMainWindow: vi.fn() }))
 vi.mock('./tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))

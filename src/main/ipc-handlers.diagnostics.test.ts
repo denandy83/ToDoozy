@@ -9,7 +9,7 @@ const harness=vi.hoisted(()=>({handlers:new Map<string,(event:unknown,...args:un
 vi.mock('electron',()=>({ipcMain:{handle:(channel:string,handler:(event:unknown,...args:unknown[])=>unknown)=>harness.handlers.set(channel,handler)},safeStorage:{},BrowserWindow:{},dialog:{},shell:{},app:{getPath:()=>harness.directory,getVersion:()=> 'synthetic-version'}}))
 vi.mock('keytar',()=>({default:{}}))
 vi.mock('@electron-toolkit/utils',()=>({is:{dev:false}}))
-vi.mock('./database',()=>({getDatabase:vi.fn(),switchDatabase:vi.fn(),getDatabasePath:vi.fn()}))
+vi.mock('./database',()=>({getDatabase:vi.fn(),switchDatabase:vi.fn(),clearDatabaseUserId:vi.fn(),getDatabasePath:vi.fn()}))
 vi.mock('./quick-add',()=>({hideQuickAddWindow:vi.fn()}))
 vi.mock('./index',()=>({registerQuickAddShortcut:vi.fn(),registerAppToggleShortcut:vi.fn(),getMainWindow:vi.fn()}))
 vi.mock('./tray',()=>({setTrayUserId:vi.fn(),refreshTray:vi.fn(),setTimerState:vi.fn(),clearTimerState:vi.fn()}))

@@ -76,10 +76,10 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
           ? payload.old as Record<string, unknown>
           : payload.new as Record<string, unknown>
         if (payload.eventType === 'DELETE' && typeof data.id === 'string') {
-          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context) })
+          void context.api.tasks.hardDelete(data.id).then(() => { context.assertCurrent(); scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : []) })
             .catch((error) => logEvent('error', 'sync', 'Failed to apply remote task deletion', String(error)))
         } else {
-          scheduleRemoteProjectRefresh(projectId, context)
+          scheduleRemoteProjectRefresh(projectId, context, typeof data.id === 'string' ? [data.id] : [])
         }
         onChangeCallback?.('task', payload.eventType, data)
       }
@@ -115,7 +115,8 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
       { event: '*', schema: 'public', table: 'activity_log', filter: `project_id=eq.${projectId}` },
       (payload) => {
         try { if (state.cancelled) return; context.assertCurrent() } catch { return }
-        scheduleRemoteProjectRefresh(projectId, context)
+        const data = payload.eventType === 'DELETE' ? payload.old : payload.new
+        scheduleRemoteProjectRefresh(projectId, context, typeof data.task_id === 'string' ? [data.task_id] : [])
         onChangeCallback?.('activity', payload.eventType, payload.new as Record<string, unknown>)
       }
     )

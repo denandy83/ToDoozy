@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { createRepositories } from '../src/main/repositories'
 import type { Project, Task } from '../src/shared/types'
 
@@ -339,4 +339,92 @@ it('retains long-break cadence across hundreds of delayed timer repetitions', as
   expect(state.sessionsCompleted).toBe(601)
   expect(state.totalFocusSecondsToday).toBe(601*60)
   timer.stop()
+})
+
+
+it.each([false, true])('refreshes only three event label states in a1000-task project (shared=%s)', async shared => {
+  const h = await make({ projectCount: 1, shared: shared ? 1 : 0 })
+  const tasks: Task[] = []
+  for (let index = 0; index < 1000; index++) {
+    const task = h.repo.tasks.create({ id: `event-${index}`, owner_id: 'u', project_id: 'p0', status_id: 's0', title: `Task ${index}`, is_archived: index === 1 ? 1 : 0, is_template: index === 2 ? 1 : 0 })
+    tasks.push(task)
+    h.remote.tasks.push({ ...task })
+  }
+  const label = h.repo.labels.create({ id: 'event-label', user_id: 'u', name: 'Event label' })
+  h.remote.user_labels.push({ ...label })
+  h.remote.project_labels.push({ project_id: 'p0', label_id: label.id, created_at: label.created_at, deleted_at: null })
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const snapshot = vi.spyOn(h.repo.tasks, 'getLabelState')
+    for (const task of tasks.slice(0, 3)) {
+      h.remote.task_labels.push({ task_id: task.id, label_id: label.id, deleted_at: null })
+      active(h, `${shared ? 'project' : 'personal'}:p0`).emit('tasks', 'UPDATE', { ...task })
+    }
+    await h.runTimers()
+    await h.untilIdle()
+    expect(snapshot.mock.calls.map(([id]) => id).sort()).toEqual(['event-0', 'event-0', 'event-1', 'event-1', 'event-2', 'event-2'])
+    for (const task of tasks.slice(0, 3)) expect(h.repo.tasks.getLabels(task.id).map(row => row.label_id)).toEqual([label.id])
+    expect(h.maxConcurrent()).toBe(1)
+    snapshot.mockRestore()
+  } finally { cleanup() }
+})
+
+it('merges affected IDs queued behind an in-flight serialized refresh', async () => {
+  const h = await make({ projectCount: 1 })
+  const tasks = ['queued-1', 'queued-2'].map(id => h.repo.tasks.create({ id, owner_id: 'u', project_id: 'p0', status_id: 's0', title: id }))
+  h.remote.tasks.push(...tasks.map(task => ({ ...task })))
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const snapshot = vi.spyOn(h.repo.tasks, 'getLabelState')
+    let entered!: () => void, finish!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    h.beforeRequest(() => { entered(); return new Promise(resolve => { finish = resolve }) })
+    const context = await h.context()
+    const first = h.services.personal.requestProjectRefresh(context, ['p0'])
+    await started
+    const pending = tasks.map(task => h.services.personal.requestProjectRefresh(context, ['p0'], new Map([['p0', [task.id]]])))
+    for (let index = 0; index < 5; index++) await new Promise(setImmediate)
+    finish()
+    await Promise.all([first, ...pending])
+    expect(snapshot.mock.calls.map(([id]) => id).sort()).toEqual(['queued-1', 'queued-1', 'queued-2', 'queued-2'])
+    expect(h.maxConcurrent()).toBe(1)
+    snapshot.mockRestore()
+  } finally { cleanup() }
+})
+
+it('refreshes an explicit archived project label event without routine task/activity reads', async () => {
+  const h = await make({ projectCount: 1, archived: 1 })
+  const task = h.repo.tasks.create({ id: 'archived-event', owner_id: 'u', project_id: 'p0', status_id: 's0', title: 'Archived' })
+  h.remote.tasks.push({ ...task })
+  const label = h.repo.labels.create({ id: 'archived-label', user_id: 'u', name: 'Archived label' })
+  h.remote.user_labels.push({ ...label })
+  h.remote.project_labels.push({ project_id: 'p0', label_id: label.id, created_at: label.created_at, deleted_at: null })
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    h.remote.task_labels.push({ task_id: task.id, label_id: label.id, deleted_at: null })
+    const start = h.requests.length
+    await h.services.personal.requestProjectRefresh(await h.context(), ['p0'], new Map([['p0', [task.id]]]))
+    expect(h.repo.tasks.getLabels(task.id).map(row => row.label_id)).toEqual([label.id])
+    expect(h.requests.slice(start).some(row => row.table === 'tasks' || row.table === 'activity_log')).toBe(false)
+  } finally { cleanup() }
+})
+
+it.each([120, 10830])('switches a delayed Flowtime break to count-up for the remaining%s seconds', async elapsed => {
+  const h = await make({ projectCount: 1 })
+  const timer = h.stores.useTimerStore.getState()
+  timer.startTimer({ taskId: 'flowtime', taskTitle: 'Flowtime', minutes: 25, breakMinutes: 1, reps: 3, isPerpetual: false, autoBreak: true, soundEnabled: false, notificationEnabled: false, userId: 'u', isFlowtime: true })
+  h.stores.useTimerStore.setState({ phase: 'break', remainingSeconds: 60, elapsedSeconds: 1200, sessionsCompleted: 1 })
+  timer.tick(elapsed)
+  const state = h.stores.useTimerStore.getState()
+  expect(state.phase).toBe('work')
+  expect(state.elapsedSeconds).toBe(elapsed - 60)
+  expect(state.remainingSeconds).toBe(1500)
+  expect(state.currentRep).toBe(2)
+  expect(state.sessionsCompleted).toBe(1)
+  expect(state.isRunning).toBe(true)
+  expect(state.isPaused).toBe(false)
+  state.stop()
 })

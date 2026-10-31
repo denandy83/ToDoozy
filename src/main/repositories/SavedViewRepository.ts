@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { SavedView, CreateSavedViewInput, UpdateSavedViewInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
 import { isRemoteNewer, toCanonicalIso } from './lww'
+import { dueDaySql } from './dateSql'
+import { projectAccessSql } from './projectAccessSql'
 import { localDateKey } from '../../shared/localDate'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'filter_config', 'project_id'] as const
@@ -185,13 +187,13 @@ export class SavedViewRepository {
     return this.findById(remote.id)!
   }
 
-  countMatchingTasks(filterConfig: string, _userId: string): number {
+  countMatchingTasks(filterConfig: string, userId: string): number {
     // Parse filter config and count matching tasks
     // This is a convenience method; frontend can also compute this
     try {
       const config = JSON.parse(filterConfig) as Record<string, unknown>
       let sql = 'SELECT COUNT(DISTINCT t.id) as count FROM tasks t'
-      const conditions: string[] = ['t.deleted_at IS NULL', 't.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
+      const conditions: string[] = [projectAccessSql('t'), 't.deleted_at IS NULL', 't.is_template = 0', 't.is_archived = 0', 't.parent_id IS NULL', 't.status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)']
       const params: (string | number)[] = []
 
       // Label filters are stored as lowercased label NAMES (the filter store keys
@@ -248,7 +250,7 @@ export class SavedViewRepository {
           params.push(...ids)
         }
       }
-      const date = "(CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END)"
+      const date = dueDaySql('t.due_date')
       const today = new Date()
       if (config.dueDatePreset === 'no_date') conditions.push('t.due_date IS NULL')
       else if (config.dueDatePreset === 'today' || config.dueDatePreset === 'overdue') {
@@ -307,7 +309,7 @@ export class SavedViewRepository {
       }
 
       sql += ' WHERE ' + conditions.join(' AND ')
-      const row = this.db.prepare(sql).get(...params) as { count: number } | undefined
+      const row = this.db.prepare(sql).get({ projectUser: userId }, ...params) as { count: number } | undefined
       return row?.count ?? 0
     } catch {
       return 0

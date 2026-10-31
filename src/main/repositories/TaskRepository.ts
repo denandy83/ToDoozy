@@ -1,3 +1,5 @@
+import { dueDaySql } from './dateSql'
+import { projectAccessSql } from './projectAccessSql'
 import { localDateKey } from '../../shared/localDate'
 import { SyncQueueRepository } from './SyncQueueRepository'
 import { LabelRepository } from './LabelRepository'
@@ -34,7 +36,12 @@ export interface TaskSearchFilters {
 }
 
 export class TaskRepository {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: DatabaseSync, private userId: string | null = null) {
+    db.function('due_instant', (value) => {
+      const instant = typeof value === 'string' ? Date.parse(value) : NaN
+      return Number.isFinite(instant) ? instant : null
+    })
+  }
 
   private assertParent(id: string, projectId: string, parentId: string | null | undefined): void {
     const seen = new Set([id])
@@ -71,11 +78,11 @@ export class TaskRepository {
       .prepare(
         `SELECT EXISTS(
            SELECT 1 FROM tasks
-           WHERE project_id = ? AND is_template = 0 AND deleted_at IS NULL
+           WHERE ${projectAccessSql('tasks')} AND project_id = ? AND is_template = 0 AND deleted_at IS NULL
            AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)
          ) AS has_orphan`
       )
-      .get(projectId, projectId) as { has_orphan: number }
+      .get({ projectUser: this.userId }, projectId, projectId) as { has_orphan: number }
     if (!probe.has_orphan) return 0
 
     const result = this.db
@@ -83,10 +90,10 @@ export class TaskRepository {
         `UPDATE tasks SET status_id = (
            SELECT id FROM statuses WHERE project_id = ? AND is_default = 1 LIMIT 1
          )
-         WHERE project_id = ? AND is_template = 0 AND deleted_at IS NULL
+         WHERE ${projectAccessSql('tasks')} AND project_id = ? AND is_template = 0 AND deleted_at IS NULL
          AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = ?)`
       )
-      .run(projectId, projectId, projectId)
+      .run({ projectUser: this.userId }, projectId, projectId, projectId)
     return Number(result.changes)
   }
 
@@ -100,17 +107,17 @@ export class TaskRepository {
     this.repairOrphanedStatuses(projectId)
     return this.db
       .prepare(
-        'SELECT * FROM tasks WHERE project_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC'
+        `SELECT * FROM tasks WHERE ${projectAccessSql('tasks')} AND project_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC`
       )
-      .all(projectId) as unknown as Task[]
+      .all({ projectUser: this.userId }, projectId) as unknown as Task[]
   }
 
   findByStatusId(statusId: string): Task[] {
     return this.db
       .prepare(
-        'SELECT * FROM tasks WHERE status_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC'
+        `SELECT * FROM tasks WHERE ${projectAccessSql('tasks')} AND status_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL ORDER BY order_index ASC`
       )
-      .all(statusId) as unknown as Task[]
+      .all({ projectUser: this.userId }, statusId) as unknown as Task[]
   }
 
   findMyDay(userId: string): Task[] {
@@ -129,11 +136,11 @@ export class TaskRepository {
       .prepare(
         `SELECT EXISTS(
            SELECT 1 FROM tasks
-           WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
+           WHERE ${projectAccessSql('tasks')} AND owner_id = ? AND is_template = 0 AND deleted_at IS NULL
            AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)
          ) AS has_orphan`
       )
-      .get(userId) as { has_orphan: number }
+      .get({ projectUser: userId }, userId) as { has_orphan: number }
 
     if (probe.has_orphan) {
       this.db
@@ -141,38 +148,38 @@ export class TaskRepository {
           `UPDATE tasks SET status_id = (
              SELECT s.id FROM statuses s WHERE s.project_id = tasks.project_id AND s.is_default = 1 LIMIT 1
            )
-           WHERE owner_id = ? AND is_template = 0 AND deleted_at IS NULL
+           WHERE ${projectAccessSql('tasks')} AND owner_id = ? AND is_template = 0 AND deleted_at IS NULL
            AND status_id NOT IN (SELECT id FROM statuses WHERE project_id = tasks.project_id)`
         )
-        .run(userId)
+        .run({ projectUser: userId }, userId)
     }
 
     return this.db
       .prepare(
         `SELECT * FROM tasks
          WHERE owner_id = ? AND is_archived = 0 AND is_template = 0 AND deleted_at IS NULL
-         AND is_in_my_day = 1
+         AND ${projectAccessSql('tasks')} AND is_in_my_day = 1
          ORDER BY order_index ASC`
       )
-      .all(userId) as unknown as Task[]
+      .all({ projectUser: userId }, userId) as unknown as Task[]
   }
 
   findArchived(projectId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_archived = 1 AND deleted_at IS NULL ORDER BY updated_at DESC')
-      .all(projectId) as unknown as Task[]
+      .prepare(`SELECT * FROM tasks WHERE ${projectAccessSql('tasks')} AND project_id = ? AND is_archived = 1 AND deleted_at IS NULL ORDER BY updated_at DESC`)
+      .all({ projectUser: this.userId }, projectId) as unknown as Task[]
   }
 
   findTemplates(projectId: string): Task[] {
     return this.db
-      .prepare('SELECT * FROM tasks WHERE project_id = ? AND is_template = 1 AND deleted_at IS NULL ORDER BY created_at ASC')
-      .all(projectId) as unknown as Task[]
+      .prepare(`SELECT * FROM tasks WHERE ${projectAccessSql('tasks')} AND project_id = ? AND is_template = 1 AND deleted_at IS NULL ORDER BY created_at ASC`)
+      .all({ projectUser: this.userId }, projectId) as unknown as Task[]
   }
 
   findSubtasks(parentId: string, includeArchived = false): Task[] {
     return this.db
-      .prepare(`SELECT * FROM tasks WHERE parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'} ORDER BY order_index ASC`)
-      .all(parentId) as unknown as Task[]
+      .prepare(`SELECT * FROM tasks WHERE ${projectAccessSql('tasks')} AND parent_id = ? AND deleted_at IS NULL ${includeArchived ? '' : 'AND is_archived = 0'} ORDER BY order_index ASC`)
+      .all({ projectUser: this.userId }, parentId) as unknown as Task[]
   }
 
   getSubtaskCount(parentId: string): { total: number; done: number } {
@@ -181,9 +188,9 @@ export class TaskRepository {
         `SELECT
            COUNT(*) as total,
            SUM(CASE WHEN status_id IN (SELECT id FROM statuses WHERE is_done = 1) THEN 1 ELSE 0 END) as done
-         FROM tasks WHERE parent_id = ? AND deleted_at IS NULL AND is_archived = 0`
+         FROM tasks WHERE ${projectAccessSql('tasks')} AND parent_id = ? AND deleted_at IS NULL AND is_archived = 0`
       )
-      .get(parentId) as { total: number; done: number }
+      .get({ projectUser: this.userId }, parentId) as { total: number; done: number }
     return { total: row.total, done: row.done ?? 0 }
   }
 
@@ -558,11 +565,11 @@ export class TaskRepository {
          FROM task_labels tl
          JOIN tasks t ON t.id = tl.task_id
          JOIN projects p ON p.id = t.project_id
-         WHERE COALESCE(p.is_shared, 0) = 1
+         WHERE ${projectAccessSql('t')} AND COALESCE(p.is_shared, 0) = 1
            AND t.deleted_at IS NULL
            AND tl.deleted_at IS NULL`
       )
-      .all() as unknown as TaskLabel[]
+      .all({ projectUser: this.userId }) as unknown as TaskLabel[]
   }
 
   findAllTemplates(userId: string): Task[] {
@@ -651,32 +658,29 @@ export class TaskRepository {
   }
 
   findWithUpcomingDueTimes(minutesAhead: number): Task[] {
-    // due_date is stored as local time without timezone (e.g. "2026-03-30T15:16")
-    // Compare using local time format to match
     const now = new Date()
     const cutoff = new Date(now.getTime() + minutesAhead * 60 * 1000)
-    const pad = (n: number): string => String(n).padStart(2, '0')
-    const toLocal = (d: Date): string =>
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    const instant = 'due_instant(due_date)'
     return this.db
       .prepare(
         `SELECT * FROM tasks
-         WHERE is_archived = 0
+         WHERE ${projectAccessSql('tasks')}
+         AND is_archived = 0
          AND is_template = 0
          AND deleted_at IS NULL
          AND due_date IS NOT NULL
          AND due_date LIKE '%T%'
-         AND due_date >= ?
-         AND due_date <= ?
+         AND ${instant} >= ?
+         AND ${instant} <= ?
          AND status_id NOT IN (SELECT id FROM statuses WHERE is_done = 1)
-         ORDER BY due_date ASC`
+         ORDER BY ${instant} ASC`
       )
-      .all(toLocal(now), toLocal(cutoff)) as unknown as Task[]
+      .all({ projectUser: this.userId }, now.getTime(), cutoff.getTime()) as unknown as Task[]
   }
 
   search(filters: TaskSearchFilters): Task[] {
     let sql = 'SELECT DISTINCT t.* FROM tasks t'
-    const conditions: string[] = ['t.is_template = 0', 't.deleted_at IS NULL']
+    const conditions: string[] = [projectAccessSql('t'), 't.is_template = 0', 't.deleted_at IS NULL']
     const params: (string | number)[] = []
 
     // Label filters — single or multiple
@@ -806,7 +810,7 @@ export class TaskRepository {
     sql += ' WHERE ' + conditions.join(' AND ')
     sql += ' ORDER BY t.order_index ASC'
 
-    return this.db.prepare(sql).all(...params) as unknown as Task[]
+    return this.db.prepare(sql).all({ projectUser: this.userId }, ...params) as unknown as Task[]
   }
 
   duplicate(id: string, newId: string): Task | undefined {
@@ -1047,7 +1051,7 @@ export class TaskRepository {
         where = 'AND s.is_done = 0'
         break
       case 'overdue':
-        where = `AND s.is_done = 0 AND t.due_date IS NOT NULL AND (CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END) < '${today}'`
+        where = `AND s.is_done = 0 AND t.due_date IS NOT NULL AND ${dueDaySql('t.due_date')} < '${today}'`
         break
     }
 
@@ -1093,7 +1097,7 @@ export class TaskRepository {
 
     const today = localDateKey()
     const overdue = (this.db.prepare(
-      `SELECT COUNT(*) as c ${baseSql} AND s.is_done = 0 AND t.due_date IS NOT NULL AND (CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END) < ?`
+      `SELECT COUNT(*) as c ${baseSql} AND s.is_done = 0 AND t.due_date IS NOT NULL AND ${dueDaySql('t.due_date')} < ?`
     ).get(...params, today) as { c: number }).c
 
     const avgRow = this.db.prepare(
@@ -1169,13 +1173,13 @@ export class TaskRepository {
 
     const today = localDateKey()
     const dateCondition = mode === 'due_today'
-      ? `(CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END) = ?`
-      : `(CASE WHEN length(t.due_date)=10 THEN t.due_date ELSE date(t.due_date,'localtime') END) <= ?`
+      ? `${dueDaySql('t.due_date')} = ?`
+      : `${dueDaySql('t.due_date')} <= ?`
 
     const sql = `
       SELECT t.id, t.parent_id FROM tasks t
       JOIN statuses s ON t.status_id = s.id
-      WHERE t.owner_id = ?
+      WHERE ${projectAccessSql('t')} AND t.owner_id = ?
         AND t.is_archived = 0
         AND t.is_template = 0
         AND t.deleted_at IS NULL
@@ -1188,7 +1192,7 @@ export class TaskRepository {
           OR (t.my_day_dismissed_date != '9999-12-31' AND t.my_day_dismissed_date != ?)
         )
     `
-    const rows = this.db.prepare(sql).all(userId, today, today) as { id: string; parent_id: string | null }[]
+    const rows = this.db.prepare(sql).all({ projectUser: userId }, userId, today, today) as { id: string; parent_id: string | null }[]
 
     if (rows.length === 0) return []
 

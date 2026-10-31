@@ -391,50 +391,39 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   },
 
   tick(elapsed = 1): void {
-    if (!Number.isFinite(elapsed) || elapsed <= 0) return
-    const state = get()
-    if (!state.isRunning || state.isPaused) return
-
-    if (state.isCookieBreak && state.phase === 'work') {
-      // Cookie flowtime: count UP elapsed, accumulate cookie pool
-      const earnRate = state.cookieMinutesPerHour / 60 // seconds earned per second worked
-      const newElapsed = state.elapsedSeconds + elapsed
-      const newEarned = state.cookieEarnedThisSession + earnRate*elapsed
-      const newPool = state.cookiePoolSeconds + earnRate*elapsed
-      set({
-        elapsedSeconds: newElapsed,
-        cookieEarnedThisSession: newEarned,
-        cookiePoolSeconds: newPool
-      })
-    } else if (state.isCookieBreakPhase && state.phase === 'break') {
-      // Cookie break: decrement pool (can go negative)
-      const newPool = state.cookiePoolSeconds - elapsed
-      set({ cookiePoolSeconds: newPool })
-      // Play sound + notification when crossing zero
-      if (state.cookiePoolSeconds > 0 && newPool <= 0) {
-        if (state.soundEnabled) playTimerSound()
-        if (state.notificationEnabled) {
-          showCookieNotification()
-        }
+    if (!Number.isFinite(elapsed) || elapsed <= 0 || !get().isRunning || get().isPaused) return
+    while (elapsed > 0 && get().isRunning && !get().isPaused) {
+      const state = get()
+      if (state.isCookieBreak && state.phase === 'work') {
+        const earned = state.cookieMinutesPerHour / 60 * elapsed
+        set({ elapsedSeconds: state.elapsedSeconds + elapsed, cookieEarnedThisSession: state.cookieEarnedThisSession + earned, cookiePoolSeconds: state.cookiePoolSeconds + earned })
+        break
       }
-    } else if (state.isFlowtime && state.phase === 'work') {
-      // Flowtime without cookie: count UP
-      set({ elapsedSeconds: state.elapsedSeconds + elapsed })
-    } else {
-      while (elapsed > 0 && get().isRunning && !get().isPaused) {
-        const remaining = get().remainingSeconds
-        if (!Number.isFinite(remaining)) { get().pause(); return }
-        if (remaining > elapsed) {
-          set({ remainingSeconds: remaining - elapsed })
-          break
+      if (state.isCookieBreakPhase && state.phase === 'break') {
+        const newPool = state.cookiePoolSeconds - elapsed
+        set({ cookiePoolSeconds: newPool })
+        if (state.cookiePoolSeconds > 0 && newPool <= 0) {
+          if (state.soundEnabled) playTimerSound()
+          if (state.notificationEnabled) showCookieNotification()
         }
-        const consumed = Math.max(0, remaining)
-        elapsed -= consumed
-        completePhase(get, set)
-        if (consumed === 0 && get().remainingSeconds <= 0 && get().isRunning) {
-          get().pause()
-          return
-        }
+        break
+      }
+      if (state.isFlowtime && state.phase === 'work') {
+        set({ elapsedSeconds: state.elapsedSeconds + elapsed })
+        break
+      }
+      const remaining = state.remainingSeconds
+      if (!Number.isFinite(remaining)) { get().pause(); return }
+      if (remaining > elapsed) {
+        set({ remainingSeconds: remaining - elapsed })
+        break
+      }
+      const consumed = Math.max(0, remaining)
+      elapsed -= consumed
+      completePhase(get, set)
+      if (consumed === 0 && get().remainingSeconds <= 0 && get().isRunning && !(get().isFlowtime && get().phase === 'work')) {
+        get().pause()
+        return
       }
     }
     syncTrayTimer(get())
@@ -508,6 +497,7 @@ function advanceRepOrStop(
     set({
       phase: 'work',
       remainingSeconds: state.workSeconds,
+      elapsedSeconds: 0,
       currentRep: state.currentRep + 1,
       isLongBreak: false
     })

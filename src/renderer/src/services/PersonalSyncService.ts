@@ -1613,7 +1613,7 @@ function pullWatermark(rows: Array<{ updated_at?: string }>): string | null {
   return dates.length ? new Date(Math.max(...dates) - 1).toISOString() : null
 }
 
-export async function pullNewTasks(projectId: string, context?: SyncContext, metadataLoaded = false, allTaskLabels = false): Promise<number> {
+export async function pullNewTasks(projectId: string, context?: SyncContext, metadataLoaded = false, taskIds: Iterable<string> = []): Promise<number> {
   try {
     context ??= await captureSyncContext()
     const api = context.api
@@ -1734,8 +1734,8 @@ export async function pullNewTasks(projectId: string, context?: SyncContext, met
     }
 
     // Also handles task label events whose task updated_at did not advance.
-    const labelTaskIds = allTaskLabels ? (await api.tasks.findByProjectId(projectId)).filter((task) => !task.deleted_at).map((task) => task.id) : touchedTaskIds
-    if (labelTaskIds.length) await pullTaskLabelsForTasks(labelTaskIds, undefined, context)
+    const labelTaskIds = [...new Set([...touchedTaskIds, ...taskIds])]
+    if (labelTaskIds.length) await refreshEventTaskLabels(projectId, labelTaskIds, context)
 
     const pName = projectNameCache.get(projectId) ?? projectId
     if (pulled > 0) {
@@ -1771,7 +1771,7 @@ export async function pullNewTasks(projectId: string, context?: SyncContext, met
  * reconcile triggered by the same boot's WS hiccup).
  */
 let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
-type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: Promise<SyncContext | null>; scope?: string; projectIds: Set<string> | null }
+type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: Promise<SyncContext | null>; scope?: string; projectIds: Set<string> | null; taskIds: Map<string, Set<string>> }
 let pendingReconcile: ReconcileRequest | null = null
 let lastReconcileAt = 0
 let lastReconcileScope = ''
@@ -1781,14 +1781,18 @@ export function reconcile(userId: string, background = false, initialize = false
     return Promise.resolve({ pushed: 0, pulled: 0 })
   }
   const context = origin ? Promise.resolve(origin) : captureSyncContext(() => navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline).catch(() => null)
-  return context.then((resolved) => resolved
-    ? enqueueReconcile({ userId, background, initialize, context: Promise.resolve(resolved), scope: resolved.scope, projectIds: null })
-    : { pushed: 0, pulled: 0 })
+  return context.then((resolved) => {
+    if (!resolved || (!background && !reconcileInFlight && resolved.scope === lastReconcileScope && Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS)) return { pushed: 0, pulled: 0 }
+    return enqueueReconcile({ userId, background, initialize, context: Promise.resolve(resolved), scope: resolved.scope, projectIds: null, taskIds: new Map() })
+  })
 }
 
 function absorbCoveredRequests(request: ReconcileRequest, scope: string): void {
   const pending = pendingReconcile
-  if (pending?.scope === scope && pending.background && (!pending.initialize || request.initialize)) pendingReconcile = null
+  if (pending?.scope === scope && pending.background && (!pending.initialize || request.initialize)) {
+    for (const [id, ids] of pending.taskIds) request.taskIds.set(id, new Set([...(request.taskIds.get(id) ?? []), ...ids]))
+    pendingReconcile = null
+  }
 }
 
 /** One owner serializes full recovery and project-scoped event pulls. */
@@ -1798,6 +1802,7 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
     request.background = request.background && pending.background
     request.initialize = request.initialize || pending.initialize
     request.projectIds = request.projectIds && pending.projectIds ? new Set([...pending.projectIds, ...request.projectIds]) : null
+    for (const [id, ids] of pending.taskIds) request.taskIds.set(id, new Set([...(request.taskIds.get(id) ?? []), ...ids]))
   }
   pendingReconcile = request
   if (reconcileInFlight) return reconcileInFlight
@@ -1809,7 +1814,6 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
         pendingReconcile = null
         const origin = await request.context
         if (!origin || !await origin.isCurrent()) continue
-        if (!request.background && origin.scope === lastReconcileScope && Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS) continue
         try {
           if (request.initialize) await initSync(request.userId, origin)
           // Join/event requests received during initialization precede every
@@ -1817,8 +1821,11 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
           // after the sweep starts still require a queued follow-up.
           if (!request.projectIds && await origin.isCurrent()) absorbCoveredRequests(request, origin.scope)
           const next = request.projectIds
-            ? await refreshRemoteProjects(request.userId, origin, request.projectIds)
+            ? await refreshRemoteProjects(request.userId, origin, request.projectIds, request.taskIds)
             : await reconcileImpl(request.userId, origin, request.background)
+          if (!request.projectIds) {
+            for (const [projectId, ids] of request.taskIds) await refreshEventTaskLabels(projectId, ids, origin)
+          }
           result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
           if (!request.background && await origin.isCurrent()) {
             lastReconcileAt = Date.now()
@@ -1848,13 +1855,13 @@ export async function requestSyncCatchUp(context: SyncContext, initialize = fals
 }
 
 /** Realtime task/status/label activity must never sweep unrelated projects. */
-export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>): Promise<void> {
+export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>, taskIds: ReadonlyMap<string, Iterable<string>> = new Map()): Promise<void> {
   const userId = useAuthStore.getState().currentUser?.id
   if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
-  await enqueueReconcile({ userId, background: true, initialize: false, context: Promise.resolve(context), scope: context.scope, projectIds: new Set(projectIds) })
+  await enqueueReconcile({ userId, background: true, initialize: false, context: Promise.resolve(context), scope: context.scope, projectIds: new Set(projectIds), taskIds: new Map([...taskIds].map(([id, ids]) => [id, new Set(ids)])) })
 }
 
-async function refreshRemoteProjects(userId: string, context: SyncContext, projectIds: Set<string>): Promise<{ pushed: number; pulled: number }> {
+async function refreshRemoteProjects(userId: string, context: SyncContext, projectIds: Set<string>, taskIds: Map<string, Set<string>>): Promise<{ pushed: number; pulled: number }> {
   let pulled = 0
   const { refreshProjectLabels } = await import('./remoteProjectRefresh')
   for (const projectId of projectIds) {
@@ -1862,13 +1869,32 @@ async function refreshRemoteProjects(userId: string, context: SyncContext, proje
     const metadataChanged = await pullProjectMetadata(projectId, context)
     if (metadataChanged) await reconcileProjectSubscriptions(context, true)
     const project = await context.api.projects.findById(projectId)
-    if (!project || project.deleted_at || project.is_archived === 1) continue
-    pulled += await pullNewTasks(projectId, context, true, true)
+    if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) continue
+    const ids = taskIds.get(projectId) ?? new Set<string>()
+    if (project.is_archived === 1) {
+      await refreshEventTaskLabels(projectId, ids, context)
+      continue
+    }
+    pulled += await pullNewTasks(projectId, context, true, ids)
     pulled += await pullActivityLogForProject(projectId, userId, context)
     await refreshProjectLabels(projectId, context)
   }
   await hydrateReconciledStores(userId, context)
   return { pushed: 0, pulled }
+}
+
+async function refreshEventTaskLabels(projectId: string, ids: Iterable<string>, context: SyncContext): Promise<void> {
+  const eventIds = [...new Set(ids)]
+  if (!eventIds.length) return
+  const userId = useAuthStore.getState().currentUser?.id
+  const project = await context.api.projects.findById(projectId)
+  if (!userId || !project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) return
+  const taskIds: string[] = []
+  for (const id of eventIds) {
+    const task = await context.api.tasks.findById(id)
+    if (task?.project_id === projectId && !task.deleted_at) taskIds.push(id)
+  }
+  await pullTaskLabelsForTasks(taskIds, undefined, context)
 }
 
 async function hydrateReconciledStores(userId: string, context: SyncContext): Promise<void> {
@@ -2747,7 +2773,9 @@ async function reconcileProjectSubscriptions(context: SyncContext, subscribeMiss
     if (!await context.isCurrent()) return
     if (project.is_shared !== 1 && (subscribeMissing || personalChannelStates.has(project.id))) {
       const onChange = personalChannelStates.get(project.id)?.onChange ?? ((event: string, data: Record<string, unknown>) => {
-        void requestProjectRefresh(context, [project.id]).then(async () => {
+        const taskId = event === 'activity' ? data.task_id : data.id
+        const taskIds = typeof taskId === 'string' ? new Map([[project.id, [taskId]]]) : new Map<string, string[]>()
+        void requestProjectRefresh(context, [project.id], taskIds).then(async () => {
           if (event === 'activity' && typeof data.task_id === 'string' && await context.isCurrent()) {
             const { useTaskStore } = await import('../shared/stores/taskStore')
             if (await context.isCurrent()) useTaskStore.getState().bumpActivityRefresh(data.task_id)

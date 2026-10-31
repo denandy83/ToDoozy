@@ -196,7 +196,7 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
           await window.api.labels.addToProject(newId, l.id).catch(() => {})
         }
         // Copy tasks to new project (remap status IDs and parent IDs)
-        const tasks = await window.api.tasks.findByProjectId(project.id)
+        const tasks = (await window.api.tasks.findAllByProject(project.id)).filter((task) => !task.is_archived && !task.is_template)
         const taskIdMap: Record<string, string> = {}
         // First pass: create all tasks without parent_id
         for (const t of tasks) {

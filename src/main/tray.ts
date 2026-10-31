@@ -19,7 +19,7 @@ function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number } {
   if (!currentUserId) return { tasks: [], totalNonDone: 0 }
 
   const db = getDatabase()
-  const taskRepo = new TaskRepository(db)
+  const taskRepo = new TaskRepository(db, currentUserId)
   const statusRepo = new StatusRepository(db)
 
   const allMyDayTasks = taskRepo.findMyDay(currentUserId)

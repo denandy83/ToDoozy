@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync, mkdtempS
 import keytar from 'keytar'
 import { join, basename, extname } from 'path'
 import { app } from 'electron'
-import { getDatabase, switchDatabase, getDatabasePath } from './database'
+import { getDatabase, switchDatabase, getDatabasePath, clearDatabaseUserId } from './database'
 import { createRepositories, type Repositories } from './repositories'
 import { hideQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
@@ -51,7 +51,7 @@ function handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1])
 
 function getRepos(): Repositories {
   if (!repos) {
-    repos = createRepositories(getDatabase())
+    repos = createRepositories(getDatabase(), databaseUserId)
   }
   return repos
 }
@@ -121,6 +121,8 @@ function registerAuthHandlers(): void {
   handle('auth:clearSession', () => {
     databaseGeneration++
     databaseUserId = null
+    clearDatabaseUserId()
+    repos = null
     clearEncryptedSession()
   })
 

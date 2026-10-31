@@ -529,3 +529,22 @@ it('does no catch-up while suspended, offline or from an expired account context
   expect(pageCounts).toEqual({})
   expect(vi.mocked(captureSyncContext)).not.toHaveBeenCalled()
 })
+
+it.each(['existing', 'remote-only', 'mixed'])('reconciles ancestor order for %s restored trees in a single pass', async mode => {
+  const base = repo.tasks.create({ id: 'root', owner_id: 'u', project_id: projectId, status_id: 'open', title: 'Root' })
+  const child = repo.tasks.create({ ...base, id: 'child', parent_id: 'root' })
+  const grandchild = repo.tasks.create({ ...base, id: 'grandchild', parent_id: 'child' })
+  const leaf = repo.tasks.create({ ...base, id: 'leaf', parent_id: 'grandchild' })
+  rows.tasks = [leaf, grandchild, child, base].map(task => ({ ...task, updated_at: '2030-01-01T00:00:00.000Z', deleted_at: null }))
+  repo.tasks.delete('child')
+  db.prepare("UPDATE tasks SET updated_at='2027-01-01T00:00:00Z' WHERE id != 'root'").run()
+  repo.tasks.delete('root')
+  db.prepare("UPDATE tasks SET updated_at='2028-01-01T00:00:00Z' WHERE id='root'").run()
+  if (mode !== 'existing') {
+    repo.tasks.hardDelete(mode === 'mixed' ? 'child' : 'root')
+  }
+  const result = await reconcileTable(SYNC_TABLES.tasks as Parameters<typeof reconcileTable>[0], projectId, 'u', context)
+  expect(result.failed).toBe(0)
+  expect(repo.tasks.findAllByProject(projectId).map(task => task.id).sort()).toEqual(['child', 'grandchild', 'leaf', 'root'])
+  for (const task of repo.tasks.findAllByProject(projectId)) expect(task.updated_at).toBe('2030-01-01T00:00:00.000Z')
+})

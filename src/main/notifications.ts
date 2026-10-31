@@ -1,6 +1,6 @@
 import { Notification, app } from 'electron'
 import { execFileSync } from 'child_process'
-import { getDatabase } from './database'
+import { getDatabase, getDatabaseUserId } from './database'
 import { createRepositories } from './repositories'
 import { getMainWindow } from './index'
 import { buildDevNotificationCommand } from './notification-command'
@@ -51,7 +51,9 @@ function checkAndSendNotifications(): void {
     }
 
     const db = getDatabase()
-    const repos = createRepositories(db)
+    const userId = getDatabaseUserId()
+    if (!userId) return
+    const repos = createRepositories(db, userId)
 
     const enabled = repos.settings.get('', 'notifications_enabled')
     if (enabled === 'false') return
