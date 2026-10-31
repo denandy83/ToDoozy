@@ -170,7 +170,7 @@ export function TaskRow({
         openContextMenu(task.id, e.clientX, e.clientY)
       }
     },
-    [task.id, selectedTaskIds, openContextMenu, openBulkContextMenu]
+    [task.id, selectedTaskIds, openContextMenu, openBulkContextMenu, readOnly]
   )
 
   const handleClick = useCallback((e: React.MouseEvent) => {

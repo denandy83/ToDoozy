@@ -42,7 +42,7 @@ export function scheduleRemoteProjectRefresh(projectId: string, context: SyncCon
       const groups = new Map<string, { context: SyncContext; ids: string[]; taskIds: Map<string, Set<string>> }>()
       for (const { projectId, context, taskIds } of pending) {
         if (!await context.isCurrent()) continue
-        const group = groups.get(context.scope) ?? { context, ids: [], taskIds: new Map() }
+        const group = groups.get(context.scope) ?? { context, ids: new Array<string>(), taskIds: new Map<string, Set<string>>() }
         group.ids.push(projectId)
         group.taskIds.set(projectId, taskIds)
         groups.set(context.scope, group)
