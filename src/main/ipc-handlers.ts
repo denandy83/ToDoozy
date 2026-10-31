@@ -422,6 +422,8 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  handle('labels:snapshotOwned', (_e, userId: string, id: string) => getRepos().labels.snapshotOwned(userId, id))
+
   handle(
     'labels:create',
     (_e, input: Parameters<Repositories['labels']['create']>[0]) => {

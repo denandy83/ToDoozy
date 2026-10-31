@@ -1,3 +1,4 @@
+import { hydrateProjectLabel, isProjectRecoveryActive } from './projectRecovery'
 import { membershipSnapshot, invalidateMembershipSnapshots } from './membershipSnapshot'
 import { captureProjectScope } from '../shared/stores/projectScope'
 import { hydrationContext } from '../shared/stores/hydrationContext'
@@ -599,7 +600,8 @@ export async function syncStatusChange(
 /**
  * Process queued offline changes.
  */
-let queueDrain: { scope: string; followup: boolean; promise: Promise<number> } | null = null
+type QueueDrain = { scope: string; followup: ReturnType<typeof captureProjectScope> | null; promise: Promise<number> }
+let queueDrain: QueueDrain | null = null
 export async function processSyncQueue(source?: SyncContext): Promise<number> {
   const projectCurrent = captureProjectScope()
   if (!isOnline || isSuspended()) return 0
@@ -614,17 +616,23 @@ export async function processSyncQueue(source?: SyncContext): Promise<number> {
   try { context.assertCurrent() } catch { return 0 }
   while (queueDrain) {
     const current = queueDrain
-    if (current.scope === context.scope) { current.followup = true; return current.promise }
+    if (current.scope === context.scope) {
+      const previous = current.followup
+      current.followup = previous ? id => previous(id) || projectCurrent(id) : projectCurrent
+      return current.promise
+    }
     await current.promise
     if (!await context.isCurrent()) return 0
   }
-  const state = { scope: context.scope, followup: false, promise: Promise.resolve(0) }
+  const state: QueueDrain = { scope: context.scope, followup: null, promise: Promise.resolve(0) }
   queueDrain = state
   state.promise = (async () => {
     let processed = 0
+    let checkpoint = projectCurrent
     do {
-      state.followup = false
-      processed += await drainSyncQueue(context, projectCurrent)
+      state.followup = null
+      processed += await drainSyncQueue(context, checkpoint)
+      checkpoint = state.followup ?? checkpoint
     } while (state.followup && isOnline && !isSuspended() && await context.isCurrent())
     if (queueDrain === state) queueDrain = null
     return processed
@@ -1078,7 +1086,7 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     const { useProjectStore } = await import('../shared/stores/projectStore')
     if (!await current.isCurrent()) continue
     current.assertCurrent()
-    useProjectStore.setState({ removal: { id: local.id, name: local.name, ownerId: userId, scope: window.api.sync.currentContext() } })
+    if (!isProjectRecoveryActive(local.id)) useProjectStore.setState({ removal: { id: local.id, name: local.name, ownerId: userId, scope: window.api.sync.currentContext() } })
     evictProjectData(local.id)
     if (useProjectStore.getState().currentProjectId === local.id) useProjectStore.getState().setCurrentProject(null)
     useProjectStore.setState((state) => ({
@@ -1236,46 +1244,14 @@ export async function syncProjectDown(projectId: string, userId: string, context
   // JSON would re-link labels that another member has since tombstoned,
   // because it's a stale snapshot from the initial share.
   //
-  // Step A: ensure label rows referenced by project_labels exist locally
-  // (create them by name if necessary). Step B: applyRemoteProjectLabel
-  // for every junction row, which preserves remote deleted_at, so a row
-  // tombstoned remotely stays tombstoned locally instead of being revived.
-  // Step C: cascade tombstones to local task_labels so the chip disappears
-  // immediately on this device.
   const { data: remoteProjectLabels } = await readAll(() => supabase
     .from('project_labels')
     .select('project_id, label_id, created_at, deleted_at')
     .eq('project_id', projectId), ['project_id', 'label_id'])
   if (remoteProjectLabels && remoteProjectLabels.length > 0) {
-    // Resolve label rows for any label_ids we don't have yet, by name.
-    const missingLabelIds = (
-      await Promise.all(
-        remoteProjectLabels.map(async (pl) => {
-          const local = await api.labels.findById(pl.label_id as string)
-          return local ? null : (pl.label_id as string)
-        })
-      )
-    ).filter((id): id is string => id !== null)
-    if (missingLabelIds.length > 0) {
-      const { data: remoteLabels } = await readAllIn(missingLabelIds, (ids) => supabase
-        .from('user_labels')
-        .select('id, name, color')
-        .in('id', ids), ['id'])
-      if (remoteLabels) {
-        for (const rl of remoteLabels) {
-          const name = rl.name as string
-          const existingByName = await api.labels.findByName(userId, name).catch(() => null)
-          if (!existingByName) {
-            await api.labels.create({
-              id: rl.id as string,
-              user_id: userId,
-              name,
-              color: (rl.color as string) ?? '#888888'
-            }).catch(() => {})
-          }
-        }
-      }
-    }
+    const ids = [...new Set(remoteProjectLabels.map(pl => String(pl.label_id)))]
+    const { data: remoteLabels } = await readAllIn(ids, batch => supabase.from('user_labels').select('*').in('id', batch))
+    for (const label of remoteLabels) await hydrateProjectLabel(label as unknown as Label, userId, context)
 
     for (const pl of remoteProjectLabels) {
       const labelId = pl.label_id as string
@@ -1553,22 +1529,31 @@ export async function getSharedProjectMembers(projectId: string, origin: SyncCon
 /**
  * Remove a member from a shared project.
  */
-export async function removeSharedMember(projectId: string, userId: string, origin = captureProjectProducer(projectId)): Promise<void> {
+export async function removeSharedMember(projectId: string, userId: string, origin: SyncProducer = captureProjectProducer(projectId)): Promise<void> {
   await invalidateMembershipSnapshots(projectId, origin)
-  const supabase = await origin.client()
+  const self = userId === origin.userId
+  const account = self ? await origin.accountContext!() : null
+  const supabase = account ? account.clientFor!(origin.assertCurrent, account.assertCurrent) : await origin.client()
   if (!supabase) throw new Error('Not authenticated')
   await requireProducerCurrent(origin)
-  const { error } = await supabase
-    .from('project_members')
-    .delete()
-    .eq('project_id', projectId)
-    .eq('user_id', userId)
-  await requireProducerCurrent(origin)
-  if (error) throw error
-
-  await invalidateMembershipSnapshots(projectId, origin)
-
-  // Also remove locally
-  await origin.api.projects.removeMember(projectId, userId)
-  await requireProducerCurrent(origin)
+  const { data, error } = await supabase.from('project_members').delete().eq('project_id', projectId).eq('user_id', userId).select('user_id')
+  if (account) {
+    if (!await account.isCurrent()) throw new Error('Sync account or database changed')
+    account.assertCurrent()
+    if (error) throw error
+    if (!data?.some(member => member.user_id === userId)) {
+      const result = await account.client.from('project_members').select('user_id').eq('project_id', projectId).eq('user_id', userId)
+      if (result.error) throw result.error
+      if (result.data?.length) throw new Error('Membership removal not acknowledged')
+    }
+    await invalidateMembershipSnapshots(projectId, account)
+    await account.api.projects.removeMember(projectId, userId)
+  } else {
+    await requireProducerCurrent(origin)
+    if (error) throw error
+    if (!data?.some(member => member.user_id === userId)) throw new Error('Membership removal not acknowledged')
+    await invalidateMembershipSnapshots(projectId, origin)
+    await origin.api.projects.removeMember(projectId, userId)
+    await requireProducerCurrent(origin)
+  }
 }

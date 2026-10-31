@@ -29,6 +29,7 @@ async function setup() {
   h.stores.useAuthStore.setState({ isOffline: true })
   h.repo.projects.update('p0', { name: 'PRIVATE PROJECT', description: 'PRIVATE DESCRIPTION' })
   h.repo.labels.create({ id: 'label', user_id: 'u', project_id: 'p0', name: 'LABEL', color: '#123456' })
+  h.remote.user_labels.push({ ...h.repo.labels.findById('label') })
   h.repo.tasks.create({ id: 'parent', project_id: 'p0', owner_id: 'u', status_id: 's0', title: 'PARENT' })
   h.repo.tasks.create({ id: 'child', project_id: 'p0', owner_id: 'u', status_id: 's0', title: 'CHILD', parent_id: 'parent' })
   h.repo.tasks.addLabel('child', 'label')
@@ -319,7 +320,8 @@ it.each(['Keep Copy','Delete'].flatMap(action=>[false,true].map(overlap=>({actio
   expect(f.h.fixtureErrors).toEqual([])
 },15000)
 
-it.each([false,true])('copies cached foreign labels into authorized owned definitions (existing family=%s)',async collision=>{
+it.each(['foreign','collision','download-fresh','download-legacy','cached-legacy','owned'].flatMap(mode=>['copy','leave'].map(entry=>({mode,entry}))))('recovers $mode label identities through actual $entry and role-checked replay',async({mode,entry})=>{
+  const collision=mode==='collision'
   const {makeLabelAuthorizationDatabase,labelId}=await import('./label-authorization-fixture')
   const {readFileSync}=await import('node:fs')
   const {createHash}=await import('node:crypto')
@@ -334,41 +336,34 @@ it.each([false,true])('copies cached foreign labels into authorized owned defini
   const convert=(row:Record<string,unknown>):Record<string,unknown>=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,typeof value==='string'&&(key==='id'||key.endsWith('_id'))?encode(value):value]))
   const labelWrites:Array<{table:string;body:Record<string,unknown>[]}>=[]
   try{
+    f.h.remote.user_labels = f.h.remote.user_labels.filter((label:{id:string})=>label.id!=='label')
     f.h.repo.labels.hardDelete('label')
-    f.h.repo.labels.create({id:'label',user_id:'other',project_id:'p0',name:'FOREIGN FAMILY',color:'#123456'})
+    f.h.repo.labels.create({id:'label',user_id:mode==='owned'||mode.endsWith('legacy')?'u':'other',project_id:'p0',name:'FOREIGN FAMILY',color:'#123456'})
     f.h.repo.tasks.addLabel('child','label')
     const source=f.h.repo.labels.findById('label')
-    f.h.remote.user_labels.push({...source})
+    f.h.remote.user_labels.push({...source,user_id:mode==='owned'?'u':'other',updated_at:'2099-01-01T00:00:00.000Z'})
+    f.h.remote.tasks.push(...f.h.repo.tasks.findAllByProject('p0'))
+    f.h.remote.project_labels.push({project_id:'p0',label_id:'label',created_at:source.created_at,deleted_at:null})
+    f.h.remote.task_labels.push({task_id:'child',label_id:'label',deleted_at:null})
     if(collision){
       f.h.repo.labels.create({id:'owned-family',user_id:'u',name:'foreign family',color:'#ABCDEF'})
+      f.h.remote.user_labels.push({...f.h.repo.labels.findById('owned-family')})
       f.h.repo.projects.create({id:'q',owner_id:'u',name:'UNRELATED Q'})
       f.h.repo.projects.addMember('q','u','owner')
       f.h.repo.labels.addToProject('q','owned-family')
     }
-    const ownedBefore=collision?{...f.h.repo.labels.findById('owned-family')}:null
-    f.h.remote.project_members=f.h.remote.project_members.filter((m:{project_id:string;user_id:string})=>m.project_id!=='p0'||m.user_id!=='u')
-    await f.h.services.shared.discoverRemoteMemberships('u',await f.h.context())
-    await mount(f,'copy',vi.fn());await click('Keep Copy');await idle(f.h)
-    const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0'&&p.id!=='q')
-    const palette=f.h.repo.labels.findByProjectId(copy.id)
-    expect(palette).toHaveLength(1);expect(palette[0].user_id).toBe('u');expect(palette[0].id).not.toBe('label')
-    expect(palette[0].id).toBe(collision?'owned-family':palette[0].id)
-    if(collision)expect(f.h.repo.labels.findById('owned-family')).toEqual(ownedBefore)
-    else expect(palette[0].color).toBe(source.color)
-    const copied=f.h.repo.tasks.findAllByProject(copy.id)
-    expect(copied).toHaveLength(2)
-    const child=copied.find((t:{parent_id:string|null})=>t.parent_id)
-    expect(f.h.repo.tasks.getLabels(child.id).map((l:{label_id:string})=>l.label_id)).toEqual([palette[0].id])
-    expect(f.h.repo.labels.findById('label')).toMatchObject({id:source.id,user_id:source.user_id,name:source.name,color:source.color,updated_at:source.updated_at})
     const transport=f.h.sandbox.fetch
     await pg.exec(readFileSync(new URL('../supabase/migrations/20261031102321_label_junction_authorization.sql',import.meta.url),'utf8'))
     f.h.sandbox.fetch=async(input:string,init:{method?:string;body?:string}={})=>{
       const parsed=new URL(input),table=parsed.pathname.split('/').at(-1)!,method=init.method??'GET'
       if(!['user_labels','project_labels','task_labels'].includes(table))return transport(input,init)
       for(const row of f.h.remote.projects)await pg.query('INSERT INTO projects(id,owner_id) VALUES($1,$2) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.owner_id??'u')])
+      await pg.exec('DELETE FROM project_members')
       for(const row of f.h.remote.project_members)await pg.query('INSERT INTO project_members VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[encode(row.project_id),encode(row.user_id),row.role])
       for(const row of f.h.remote.tasks)await pg.query('INSERT INTO tasks(id,project_id,deleted_at) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.project_id),row.deleted_at??null])
       for(const row of f.h.remote.user_labels)await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING',[encode(row.id),encode(row.user_id),row.name,row.color])
+      for(const row of f.h.remote.project_labels)await pg.query('INSERT INTO project_labels(project_id,label_id,created_at,deleted_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[encode(row.project_id),encode(row.label_id),row.created_at??new Date().toISOString(),row.deleted_at??null])
+      for(const row of f.h.remote.task_labels)await pg.query('INSERT INTO task_labels(task_id,label_id,deleted_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[encode(row.task_id),encode(row.label_id),row.deleted_at??null])
       await pg.query("SELECT set_config('request.jwt.claim.sub',$1,false),set_config('request.jwt.claim.role','authenticated',false)",[labelId(1)])
       await pg.exec('SET ROLE authenticated')
       try{
@@ -391,13 +386,144 @@ it.each([false,true])('copies cached foreign labels into authorized owned defini
       }catch(error){return new Response(JSON.stringify({message:String(error),code:'42501'}),{status:403,headers:{'Content-Type':'application/json'}})}
       finally{await pg.exec('RESET ROLE')}
     }
+    const ownedBefore=collision?{...f.h.repo.labels.findById('owned-family')}:null
+    if(mode==='download-fresh')f.h.repo.labels.hardDelete('label')
+    if(mode.startsWith('download')){
+      await f.h.services.shared.syncProjectDown('p0','u',await f.h.context())
+      expect(f.h.repo.labels.findById('label')?.user_id).toBe('other')
+    }
+    if(entry==='copy'){
+      f.h.remote.project_members=f.h.remote.project_members.filter((m:{project_id:string;user_id:string})=>m.project_id!=='p0'||m.user_id!=='u')
+      await f.h.services.shared.discoverRemoteMemberships('u',await f.h.context())
+      await mount(f,'copy',vi.fn());await click('Keep Copy');await idle(f.h)
+    }else{
+      f.h.stores.useAuthStore.setState({isOffline:false})
+      const project=f.h.repo.projects.findById('p0')
+      await act(async()=>{f.root.render(createElement(f.h.services.MemberSettings,{project,onToast:()=>{}}));await f.h.untilIdle()})
+      await click('Leave Project');await click('Keep Copy');await idle(f.h)
+    }
+    const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0'&&p.id!=='q')
+    const palette=f.h.repo.labels.findByProjectId(copy.id)
+    expect(palette).toHaveLength(1);expect(palette[0].user_id).toBe('u');if(mode==='owned')expect(palette[0].id).toBe('label');else expect(palette[0].id).not.toBe('label')
+    expect(palette[0].id).toBe(collision?'owned-family':palette[0].id)
+    if(collision)expect(f.h.repo.labels.findById('owned-family')).toEqual(ownedBefore)
+    else expect(palette[0].color).toBe(source.color)
+    const copied=f.h.repo.tasks.findAllByProject(copy.id)
+    expect(copied).toHaveLength(2)
+    const child=copied.find((t:{parent_id:string|null})=>t.parent_id)
+    expect(f.h.repo.tasks.getLabels(child.id).map((l:{label_id:string})=>l.label_id)).toEqual([palette[0].id])
+    if(!mode.endsWith('legacy'))expect(f.h.repo.labels.findById('label')).toMatchObject({id:source.id,user_id:source.user_id,name:source.name,color:source.color})
     f.h.stores.useAuthStore.setState({isOffline:false})
     await f.h.services.personal.fullUpload('u',await f.h.context())
     await f.h.services.shared.processSyncQueue(await f.h.context());await idle(f.h)
     expect(labelWrites.some(w=>w.table==='user_labels'&&w.body.some(l=>l.id===palette[0].id&&l.user_id==='u'))).toBe(true)
-    expect(labelWrites.filter(w=>w.table==='user_labels').flatMap(w=>w.body).some(l=>l.id==='label')).toBe(false)
+    if(mode!=='owned')expect(labelWrites.filter(w=>w.table==='user_labels').flatMap(w=>w.body).some(l=>l.id==='label')).toBe(false)
     expect((await pg.query('SELECT label_id FROM project_labels WHERE project_id=$1',[encode(copy.id)])).rows).toEqual([{label_id:encode(palette[0].id)}])
     expect((await pg.query('SELECT label_id FROM task_labels WHERE task_id=$1',[encode(child.id)])).rows).toEqual([{label_id:encode(palette[0].id)}])
     expect(f.h.fixtureErrors).toEqual([])
   }finally{await pg.close()}
 },20000)
+
+it.each(['normal','create','statuses','ack','unmount','account','database','failure','delete'])('finishes Settings Leave recovery with its original account scope (%s)',async point=>{
+  const f=await setup(),pause=gate(),toasts:string[]=[]
+  f.h.stores.useAuthStore.setState({isOffline:false})
+  await f.h.stores.useProjectStore.getState().hydrateProjects('u')
+  f.h.stores.useProjectStore.getState().setCurrentProject('p0')
+  const project=f.h.repo.projects.findById('p0')
+  await act(async()=>{f.root.render(createElement('div',null,createElement(f.h.services.MemberSettings,{project,onToast:(message:string)=>toasts.push(message)}),createElement(f.h.services.RemovalApp)));await f.h.untilIdle()})
+  const expectedStatuses=f.h.repo.statuses.findByProjectId('p0').map((s:{name:string;color:string})=>({name:s.name,color:s.color}))
+  await click('Leave Project')
+  const api=f.h.sandbox.window.api
+  let held=false
+  let duringRemoval:unknown=null
+  f.h.sandbox.window.api=new Proxy(api,{get(target,namespace){
+    if(namespace!=='sync')return target[namespace]
+    return new Proxy(target.sync,{get(sync,method){
+      if(method!=='invokeContext')return sync[method]
+      return async(origin:unknown,channel:string,args:unknown[])=>{
+        const result=await sync.invokeContext(origin,channel,args)
+        const matched=point==='statuses'?channel==='statuses:findByProjectId'&&args[0]==='p0':channel==='projects:create'
+        if(point!=='normal'&&point!=='delete'&&matched&&!held){held=true;pause.enter();await pause.wait;if(point==='failure')throw Error('COPY FAILED')}
+        return result
+      }
+    }})
+  }})
+  if(point==='ack'){
+    const fetch=f.h.sandbox.fetch
+    f.h.sandbox.fetch=async(url:string,init:RequestInit)=>{
+      const result=await fetch(url,init)
+      if(new URL(url).pathname.endsWith('/project_members')&&init.method==='DELETE'&&!held){held=true;pause.enter();await pause.wait}
+      return result
+    }
+  }
+  await click(point==='delete'?'Delete':'Keep Copy')
+  if(point!=='normal'&&point!=='delete'){
+    await pause.entered
+    await act(async()=>{await f.h.services.shared.discoverRemoteMemberships('u',await f.h.context(),project);await f.h.untilIdle()})
+    duringRemoval=f.h.stores.useProjectStore.getState().removal
+    if(point==='unmount')await act(async()=>f.root.render(null))
+    if(point==='account'||point==='database'){
+      const current=replaceNative(f,point==='account'?'other':'u')
+      await act(async()=>{if(point==='account')f.h.setAccount('other');else f.h.replaceDatabase();f.root.render(null);await f.h.untilIdle()})
+      const mark=f.h.nativeCalls.length
+      pause.release();await idle(f.h)
+      expect(f.h.nativeCalls.slice(mark)).toEqual([])
+      expect(current.tasks.findById('current-task').title).toBe('PRIVATE B TASK')
+      expect(toasts).toEqual([]);return
+    }
+    pause.release();await idle(f.h)
+  }else await idle(f.h)
+  expect(f.h.remote.project_members.some((m:{project_id:string;user_id:string})=>m.project_id==='p0'&&m.user_id==='u')).toBe(false)
+  if(point==='failure'){
+    expect(f.h.repo.projects.findById('p0').deleted_at).toBeNull()
+    expect(f.h.repo.tasks.findById('child').title).toBe('CHILD')
+    expect(f.h.stores.useProjectStore.getState().removal?.id).toBe('p0')
+  }else{
+    expect(f.h.repo.projects.findById('p0').deleted_at).not.toBeNull()
+    if(point!=='delete'){
+      const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0')
+      expect(copy).toBeDefined()
+      expect(f.h.repo.projects.getMembers(copy.id)).toHaveLength(1)
+      expect(f.h.repo.statuses.findByProjectId(copy.id).map((s:{name:string;color:string})=>({name:s.name,color:s.color}))).toEqual(expectedStatuses)
+      const tasks=f.h.repo.tasks.findAllByProject(copy.id)
+      expect(tasks).toHaveLength(2)
+      expect(tasks.find((t:{parent_id:string|null})=>t.parent_id)).toBeDefined()
+      expect(f.h.repo.tasks.getLabels(tasks.find((t:{parent_id:string|null})=>t.parent_id).id)).toHaveLength(1)
+    }
+    expect(f.h.stores.useProjectStore.getState().removal).toBeNull()
+    expect(toasts).toHaveLength(point==='unmount'?0:1)
+  }
+  expect(duringRemoval).toBeNull()
+  expect(f.h.fixtureErrors).toEqual([])
+},15000)
+
+it('requires an acknowledged remote removal before changing another member locally',async()=>{
+  const f=await setup(),fetch=f.h.sandbox.fetch
+  f.h.sandbox.fetch=async(url:string,init:RequestInit)=>new URL(url).pathname.endsWith('/project_members')&&init.method==='DELETE'
+    ?new Response('[]',{headers:{'Content-Type':'application/json'}}):fetch(url,init)
+  const origin=f.h.services.syncContexts.captureProjectProducer('p0')
+  await expect(f.h.services.shared.removeSharedMember('p0','other',origin)).rejects.toThrow(/not acknowledged/)
+  expect(f.h.repo.projects.getMembers('p0').some((m:{user_id:string})=>m.user_id==='other')).toBe(true)
+})
+
+it('retains a denied self-leave and allows a manual retry without publishing a false removal',async()=>{
+  const f=await setup(),messages:string[]=[]
+  f.h.stores.useAuthStore.setState({isOffline:false})
+  const project=f.h.repo.projects.findById('p0')
+  await act(async()=>{f.root.render(createElement(f.h.services.MemberSettings,{project,onToast:(message:string)=>messages.push(message)}));await f.h.untilIdle()})
+  await click('Leave Project')
+  const fetch=f.h.sandbox.fetch
+  f.h.sandbox.fetch=async(url:string,init:RequestInit)=>new URL(url).pathname.endsWith('/project_members')&&init.method==='DELETE'
+    ?new Response(JSON.stringify({message:'DENIED',code:'42501'}),{status:403,headers:{'Content-Type':'application/json'}}):fetch(url,init)
+  await click('Keep Copy');await idle(f.h)
+  expect(f.h.repo.projects.getProjectsForUser('u').map((p:{id:string})=>p.id)).toEqual(['p0'])
+  expect(f.h.repo.projects.findById('p0').deleted_at).toBeNull()
+  expect(f.h.stores.useProjectStore.getState().removal).toBeNull()
+  expect(messages).toEqual(['Failed to leave project'])
+  f.h.sandbox.fetch=fetch
+  await click('Keep Copy');await idle(f.h)
+  const copy=f.h.repo.projects.getProjectsForUser('u').find((p:{id:string})=>p.id!=='p0')
+  expect(f.h.repo.tasks.findAllByProject(copy.id)).toHaveLength(2)
+  expect(messages.at(-1)).toContain('A local copy has been kept')
+  expect(f.h.fixtureErrors).toEqual([])
+})

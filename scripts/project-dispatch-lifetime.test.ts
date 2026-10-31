@@ -268,3 +268,34 @@ it.each(['network','power'])('pauses the global queue at its original %s boundar
   expect(h.repo.syncQueue.findAll().some((e:{row_id:string})=>e.row_id==='task1')).toBe(false)
   expect(h.fixtureErrors).toEqual([])
 })
+
+it.each([false,true])('admits a fresh project queue checkpoint after authoritative rejoin (rejoin=%s)',async rejoin=>{
+  const h=await setup(),pause=gate(),context=await h.context()
+  h.repo.labels.create({id:'rejoin-label',user_id:'u',name:'REJOIN LABEL'})
+  h.remote.user_labels.push({...h.repo.labels.findById('rejoin-label')})
+  await h.services.shared.subscribeToProject('p0',context);await h.untilIdle();await h.runTimers()
+  const old=h.channels.find((c:{topic:string;closed:boolean})=>c.topic==='project:p0'&&!c.closed)
+  const q=h.repo.tasks.update('task1',{title:'VALID HELD Q'})
+  h.repo.syncQueue.clear();h.repo.syncQueue.enqueue('tasks',q.id,'UPDATE',JSON.stringify(q))
+  holdReply(h,'projects:findById','p1',pause)
+  const first=h.services.shared.processSyncQueue(context);await pause.entered
+  if(rejoin){
+    await revoke(h)
+    h.remote.project_members.push({project_id:'p0',user_id:'u',role:'member',joined_at:'2026-01-01'})
+    await h.services.shared.discoverRemoteMemberships('u',context,h.repo.projects.findById('p0'))
+    await h.stores.useProjectStore.getState().hydrateProjects('u')
+    await h.services.shared.subscribeToProject('p0',context);await h.untilIdle();await h.runTimers()
+    expect(h.channels.some((c:{topic:string;closed:boolean})=>c!==old&&c.topic==='project:p0'&&!c.closed)).toBe(true)
+    const native=h.nativeCalls.length,requests=h.requests.length
+    old.emit('tasks','UPDATE',{id:'task0',project_id:'p0',title:'STALE OLD CHANNEL'})
+    await h.untilIdle()
+    expect(h.nativeCalls.length).toBe(native);expect(h.requests.length).toBe(requests)
+  }
+  await h.stores.useLabelStore.getState().addToProject('p0','rejoin-label')
+  const joined=h.services.shared.processSyncQueue(context)
+  pause.release();await Promise.all([first,joined]);await h.untilIdle()
+  expect(h.remote.project_labels.some((l:{project_id:string;label_id:string;deleted_at:null|string})=>l.project_id==='p0'&&l.label_id==='rejoin-label'&&!l.deleted_at)).toBe(true)
+  expect(h.repo.syncQueue.findAll().some((e:{table_name:string})=>e.table_name==='project_labels')).toBe(false)
+  expect(h.remote.tasks[1].title).toBe('VALID HELD Q')
+  expect(h.fixtureErrors).toEqual([])
+},15000)

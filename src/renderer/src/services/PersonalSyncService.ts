@@ -1,3 +1,4 @@
+import { hydrateProjectLabel } from './projectRecovery'
 import { captureProjectScope } from '../shared/stores/projectScope'
 import { hydrationContext } from '../shared/stores/hydrationContext'
 import { syncTaskLabelChoices } from './taskLabelAdditions'
@@ -1250,34 +1251,9 @@ export async function fullPull(userId: string, context?: SyncContext): Promise<v
               .select('project_id, label_id, created_at, deleted_at')
               .eq('project_id', project.id), ['project_id', 'label_id'])
             if (remoteProjectLabels && remoteProjectLabels.length > 0) {
-              const missingLabelIds = (
-                await Promise.all(
-                  remoteProjectLabels.map(async (pl) => {
-                    const local = await api.labels.findById(pl.label_id as string)
-                    return local ? null : (pl.label_id as string)
-                  })
-                )
-              ).filter((id): id is string => id !== null)
-              if (missingLabelIds.length > 0) {
-                const { data: remoteLabels } = await readAllIn(missingLabelIds, (ids) => supabase
-                  .from('user_labels')
-                  .select('id, name, color')
-                  .in('id', ids), ['id'])
-                if (remoteLabels) {
-                  for (const rl of remoteLabels) {
-                    const name = rl.name as string
-                    const existingByName = await api.labels.findByName(userId, name).catch(() => null)
-                    if (!existingByName) {
-                      await api.labels.create({
-                        id: rl.id as string,
-                        user_id: userId,
-                        name,
-                        color: (rl.color as string) ?? '#888888'
-                      }).catch(() => {})
-                    }
-                  }
-                }
-              }
+              const ids = [...new Set(remoteProjectLabels.map(pl => String(pl.label_id)))]
+              const { data: definitions } = await readAllIn(ids, batch => supabase.from('user_labels').select('*').in('id', batch))
+              for (const definition of definitions) await hydrateProjectLabel(definition as Label, userId, context)
               for (const pl of remoteProjectLabels) {
                 const labelId = pl.label_id as string
                 const deletedAt = (pl.deleted_at as string | null | undefined) ?? null

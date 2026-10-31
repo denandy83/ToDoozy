@@ -32,10 +32,11 @@ interface InvitationFixture {
   layoutSnapshots: string[]
   arm(): void
   pendingReads(): number
+  mutations: string[]
   setPending(tokens:string[]): void
 }
 async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
-  const h=await makeHarness({projectCount:1,invitations:true,connected:false})
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,invitations:true,connected:false})
   const host=document.createElement('div'); document.body.append(host)
   const root=createRoot(host); opened.push({h,root,host})
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true})
@@ -47,6 +48,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
   h.remote.project_members.push({project_id:'joined',user_id:'u',role:'member',joined_at:'2026-01-01T00:00:00Z'},{project_id:'joined',user_id:'other',role:'owner',joined_at:'2026-01-01T00:00:00Z'})
   h.remote.statuses.push({...h.repo.statuses.findByProjectId('p0')[0],id:'joined-status',project_id:'joined'})
   const pause=gate()
+  const mutations:string[]=[]
   let pendingReadCount=0
   let blocked=false,armed=false,pending=[invite('PRIVATE FIRST'),invite('PRIVATE QUEUED')]
   const hold=async <T,>(value:T):Promise<T> => {
@@ -63,8 +65,8 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
     let result:unknown
     if(path==='get_pending_invites_for_email') {pendingReadCount++;result=body.user_email === h.stores.useAuthStore.getState().currentUser?.email ? pending : []}
     else if(path==='validate_invite') result=body.invite_token==='EXPIRED' ? [] : [invite(body.invite_token)]
-    else if(path==='accept_invite') result='joined'
-    else if(path==='decline_invite') result=body.invite_token==='PUBLIC'?'dismissed':'declined'
+    else if(path==='accept_invite') {mutations.push(path);result='joined'}
+    else if(path==='decline_invite') {mutations.push(path);result=body.invite_token==='PUBLIC'?'dismissed':'declined'}
     else return originalFetch(url,init)
     if ((point==='pending'&&path==='get_pending_invites_for_email') || ((point==='deep-link'||point==='realtime')&&path==='validate_invite') || (point==='accept'&&path==='accept_invite') || (point==='decline'&&path==='decline_invite')) {
       try { return response(await hold(result)) } catch { return response({code:'42501',message:'PRIVATE LATE FAILURE'},403) }
@@ -112,7 +114,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
       await h.untilIdle()
     })
   }
-  return {h,host,pause,mount,open,click,idle,change,layoutSnapshots,pendingReads:()=>pendingReadCount,arm:()=>{armed=true},setPending:(tokens:string[])=>{pending=tokens.map(invite)}}
+  return {h,host,pause,mount,open,click,idle,change,layoutSnapshots,mutations,pendingReads:()=>pendingReadCount,arm:()=>{armed=true},setPending:(tokens:string[])=>{pending=tokens.map(invite)}}
 }
 afterEach(async()=>{
   for(const {h,root,host} of opened.splice(0)) {
@@ -265,5 +267,25 @@ it('replaces an already-rendered inbox on a native scope announcement without re
   expect(f.host.textContent).toContain('CURRENT WARM INVITE')
   expect(f.pendingReads()-before).toBe(1)
   expect(f.h.channels.filter((c:{topic:string;closed:boolean})=>c.topic==='invites:u@example.invalid'&&!c.closed)).toHaveLength(1)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it.each(['Accept','Decline'])('reserves the first %s action before a delayed native probe',async first=>{
+  const f=await setup();await f.mount()
+  const pause=gate(),api=f.h.sandbox.window.api
+  let armed=true,held=false
+  f.h.sandbox.window.api=new Proxy(api,{get(target,namespace){
+    if(namespace!=='sync')return target[namespace]
+    return new Proxy(target.sync,{get(sync,method){
+      if(method!=='captureContext')return sync[method]
+      return async()=>{const result=await sync.captureContext();if(armed&&!held){held=true;pause.enter();await pause.wait}return result}
+    }})
+  }})
+  const calls=f.mutations
+  await f.click(first);await pause.entered
+  await f.click(first==='Accept'?'Decline':'Accept')
+  await f.idle();expect(calls).toEqual([])
+  armed=false;pause.release();await f.idle()
+  expect(calls).toEqual([first==='Accept'?'accept_invite':'decline_invite'])
   expect(f.h.fixtureErrors).toEqual([])
 })

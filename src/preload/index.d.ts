@@ -88,6 +88,7 @@ export interface LabelsAPI {
   findByProjectId(projectId: string): Promise<Label[]>
   findByName(userId: string, name: string): Promise<Label | null>
   adopt(userId: string, foreignLabel: Label): Promise<Label>
+  snapshotOwned(userId: string, id: string): Promise<Label>
   create(input: CreateLabelInput): Promise<Label>
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>

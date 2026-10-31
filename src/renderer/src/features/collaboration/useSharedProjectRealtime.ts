@@ -1,3 +1,4 @@
+import { isProjectRecoveryActive } from '../../services/projectRecovery'
 import { membershipSnapshot } from '../../services/membershipSnapshot'
 import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
 import { logEvent } from '../../shared/stores/logStore'
@@ -107,7 +108,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       if (table === 'member') {
         if (event === 'DELETE' && payload.user_id === session.ownerId && payload.project_id === project.id) {
           removed = true
-          useProjectStore.setState({ removal: { id: project.id, name: project.name, ownerId: userId, scope } })
+          if (!isProjectRecoveryActive(project.id)) useProjectStore.setState({ removal: { id: project.id, name: project.name, ownerId: userId, scope } })
           await unsubscribeFromProject(project.id)
         } else await loadMembers(origin)
       }

@@ -14,7 +14,7 @@ export interface SyncContext {
   assertCurrent(): void
   isCurrent(): Promise<boolean>
   scope: string
-  clientFor?: (assertCurrent: () => void) => SupabaseClient
+  clientFor?: (assertCurrent: () => void, assertAfter?: () => void) => SupabaseClient
   subscriptionSource?: SyncContext
 }
 
@@ -23,7 +23,7 @@ export interface SyncProducer {
   accountContext?: () => Promise<SyncContext>
   apiFor?: (assertCurrent: () => void) => TodoozyAPI
   client(): Promise<SupabaseClient | null>
-  clientFor?: (assertCurrent: () => void) => SupabaseClient
+  clientFor?: (assertCurrent: () => void, assertAfter?: () => void) => SupabaseClient
   assertCurrent(): void
   isCurrent(): Promise<boolean>
   userId: string | undefined
@@ -81,10 +81,10 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     })
   })
   const api = apiFor(assertCurrent)
-  let createScopedClient: ((guard: () => void) => SupabaseClient) | undefined
-  const clientFor = (guard: () => void): SupabaseClient => {
+  let createScopedClient: ((guard: () => void, after?: () => void) => SupabaseClient) | undefined
+  const clientFor = (guard: () => void, after = guard): SupabaseClient => {
     if (!createScopedClient) throw new Error('Sync client unavailable')
-    return createScopedClient(guard)
+    return createScopedClient(guard, after)
   }
   let authentication: Promise<SupabaseClient | null> | undefined
   const client = (): Promise<SupabaseClient | null> => authentication ??= (async () => {
@@ -96,13 +96,13 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     const config = await window.api.auth.getSupabaseConfig()
     await assertDatabase()
     const transport = supabaseRequestMetrics.wrap(globalThis.fetch, config.url)
-    createScopedClient = (guard) => createClient(config.url, config.anonKey, {
+    createScopedClient = (guard, after = guard) => createClient(config.url, config.anonKey, {
       global: { fetch: async (input, init) => {
         assertCurrent()
         guard()
         const response = await transport(input, init)
         assertCurrent()
-        guard()
+        after()
         return response
       } },
       accessToken: async () => {

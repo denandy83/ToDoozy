@@ -44,6 +44,7 @@ export function useProjectInvitations(): {
   const [databaseRevision, setDatabaseRevision] = useState(0)
   const inboxRef = useRef(inbox)
   const sessionRef = useRef<Session | null>(null)
+  const operationRef = useRef<{ session: Session; token: string } | null>(null)
   const update = useCallback((change: (state: Inbox) => Inbox): void => {
     const next = change(inboxRef.current)
     inboxRef.current = next
@@ -152,14 +153,16 @@ export function useProjectInvitations(): {
       ...next, items: next.items.filter((item) => item.token !== token),
       error: next.error?.token === token ? null : next.error
     }))
+    if (state.busyToken || (operationRef.current?.session === session && operationRef.current.token === token)) return
     // The expired-dialog OK button is a local dismissal, not a server mutation.
     if (invitation.expired) { remove(); return }
-    if (state.busyToken || !await scopeIsCurrent(session)) return
-    if (inboxRef.current.items[0]?.token !== token) return
+    const operation = { session, token }
+    operationRef.current = operation
     updateOwned(session, (next) => ({ ...next, busyToken: token, error: null }))
     const stillSelected = async (): Promise<boolean> => await scopeIsCurrent(session)
       && inboxRef.current.items[0]?.token === token
     try {
+      if (!await scopeIsCurrent(session) || inboxRef.current.items[0]?.token !== token) return
       if (action === 'accept') {
         const projectId = await acceptInvite(token, session.owner.id, session.origin)
         if (await stillSelected()) {
@@ -192,9 +195,10 @@ export function useProjectInvitations(): {
       await scopeIsCurrent(session)
       // An unavailable IPC probe cannot leave a current dialog permanently busy.
       // Ownership still fences this local UI cleanup; retries validate the origin.
-      updateOwned(session, (next) => ({
-        ...next, busyToken: next.busyToken === token ? null : next.busyToken
-      }))
+      if (operationRef.current === operation) {
+        operationRef.current = null
+        updateOwned(session, (next) => ({ ...next, busyToken: next.busyToken === token ? null : next.busyToken }))
+      }
     }
   }, [scopeIsCurrent, updateOwned])
 

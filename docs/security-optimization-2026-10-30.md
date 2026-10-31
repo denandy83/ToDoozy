@@ -2,7 +2,7 @@
 
 This change addresses the nonvisual findings from the combined October 26 audit.
 Source changes are release candidates until the PR is merged, the desktop is
-released and installed, and the two SQL migrations and MCP function are deployed.
+released and installed, and the three SQL migrations and MCP function are deployed.
 Do not equate a local benchmark with production disk I/O.
 
 ## Coverage
@@ -168,20 +168,33 @@ Supabase's Metrics API is beta and metric names may change. Official references:
 
 1. Complete the independent tests and `no-mistakes` review/test/lint/CI pipeline;
    merge the reviewed PR through the normal human gate.
-2. Apply `20261030213612_security_performance_hardening.sql`, then
-   `20261030221433_task_hierarchy_guard.sql`. These are prospective policy/grant,
-   function and index changes; do not run rollback scripts that restore unsafe
-   authorization. Validate catalog grants/policies and run Supabase advisors.
+2. Record the active desktop, MCP and bot versions, take the normal backup, and
+   check read-only database health. Apply the prerequisite migrations in order:
+   `20261030213612_security_performance_hardening.sql`, then
+   `20261030221433_task_hierarchy_guard.sql`. These RPC/grant/hierarchy changes
+   precede client features that depend on them. Validate catalog grants/policies
+   and run Supabase advisors; do not restore unsafe authorization with rollback
+   scripts.
 3. Deploy the MCP function with its imported modules. The default denies
    `set_whats_new`; configure `TODOOZY_RELEASE_ADMIN_IDS` server-side with only
    authorized release operators if that tool is needed.
 4. Rebuild/restart the bot from the same source with its existing private
    configuration. Set `TODOOZY_TIME_ZONE` to the user's IANA timezone when the
-   bot host timezone differs. Restart desktop clients on the released version;
-   older clients retain their old sync behavior.
+   bot host timezone differs. Release and install the matching desktop version
+   containing recovery-copy remapping and legacy label-identity repair. Confirm
+   the active client versions before applying the third migration,
+   `20261031102321_label_junction_authorization.sql`: older clients can replay
+   foreign label UUIDs during Keep Copy and the stricter guard correctly rejects
+   those writes. This migration remains pending reviewed application; it was not
+   deployed by source validation. Keep the first two migrations ahead of the
+   desktop release, and the compatible desktop recovery ahead of this guard.
 5. Verify only read-only production metadata/metrics. Behavioral authorization
    and mutation checks belong to isolated databases and synthetic accounts.
-   Record exact deployed versions and take comparable host metric windows.
+   Record exact deployed versions and take comparable host metric windows only
+   after explicit privileged-key storage/use approval and collector setup.
+   Physical host I/O remains unmeasured until authenticated samples from
+   comparable deployed windows and client versions exist. No automatic merge,
+   deployment, desktop installation or paid upgrade is authorized by these steps.
 
 Checks: `npm run typecheck`, `npm test`, `npm run check:telegram-bot`,
 `npm run lint`, `npm run build`, plus the independent database and sync fixtures.
