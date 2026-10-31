@@ -8,6 +8,7 @@ import { captureProjectProducer, syncContextFromProducer, type SyncContext } fro
 import { hydrationContext } from '../../shared/stores/hydrationContext'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import { useTaskStore } from '../../shared/stores'
+import { useAuthStore } from '../../shared/stores/authStore'
 import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
 import type { Project, ProjectMember, User } from '../../../../shared/types'
 
@@ -19,7 +20,7 @@ export interface SharedProjectMember {
 }
 export interface RemovedFromProject { id: string; name: string }
 interface Session { scope: string | null; ownerId: string; projectId: string; active: boolean }
-interface SharedState { session: Session | null; members: SharedProjectMember[]; removed: RemovedFromProject | null }
+interface SharedState { session: Session | null; members: SharedProjectMember[] }
 interface UseSharedProjectRealtimeResult {
   projectMembers: SharedProjectMember[]
   removedFromProject: RemovedFromProject | null
@@ -28,8 +29,9 @@ interface UseSharedProjectRealtimeResult {
 
 export function useSharedProjectRealtime(selectedProject: Project | null, currentUser: User | null): UseSharedProjectRealtimeResult {
   const scope = useDatabaseScope()
-  const [state, setState] = useState<SharedState>({ session: null, members: [], removed: null })
+  const [state, setState] = useState<SharedState>({ session: null, members: [] })
   const sessionRef = useRef<Session | null>(null)
+  const removal = useProjectStore(state => state.removal)
   const projectId = selectedProject?.id
   const projectName = selectedProject?.name ?? ''
   const shared = selectedProject?.is_shared === 1
@@ -90,7 +92,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       invalidateMemberDisplay(project.id, origin)
       } catch (error) { if (await current(origin)) throw error }
     }
-    setState({ session, members: [], removed: null })
+    setState({ session, members: [] })
     let removed = false
     const stopCallback = setRealtimeCallback(async (table, event, payload, channelOrigin) => {
       const view = hydrationContext(channelOrigin, project.id)
@@ -105,7 +107,7 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       if (table === 'member') {
         if (event === 'DELETE' && payload.user_id === session.ownerId && payload.project_id === project.id) {
           removed = true
-          setState(previous => previous.session === session ? { ...previous, removed: { id: project.id, name: project.name } } : previous)
+          useProjectStore.setState({ removal: { id: project.id, name: project.name, ownerId: userId, scope } })
           await unsubscribeFromProject(project.id)
         } else await loadMembers(origin)
       }
@@ -148,7 +150,12 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
   }, [projectId, projectName, shared, userId, scope])
   const visible = state.session?.scope === scope && state.session?.active && state.session.ownerId === currentUser?.id && state.session.projectId === selectedProject?.id
   const setRemovedFromProject = useCallback<React.Dispatch<React.SetStateAction<RemovedFromProject | null>>>((value) => {
-    setState(previous => ({ ...previous, removed: typeof value === 'function' ? value(previous.removed) : value }))
-  }, [])
-  return { projectMembers: visible ? state.members : [], removedFromProject: visible ? state.removed : null, setRemovedFromProject }
+    if (window.api.sync.currentContext() !== scope || useAuthStore.getState().currentUser?.id !== userId) return
+    useProjectStore.setState(previous => {
+      const removed = typeof value === 'function' ? value(previous.removal) : value
+      return { removal: removed && userId ? { ...removed, ownerId: userId, scope } : null }
+    })
+  }, [scope, userId])
+  const visibleRemoval = removal?.scope === scope && removal?.ownerId === userId
+  return { projectMembers: visible ? state.members : [], removedFromProject: visibleRemoval ? removal : null, setRemovedFromProject }
 }

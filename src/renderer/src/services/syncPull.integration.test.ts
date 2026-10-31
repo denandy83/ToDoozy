@@ -69,7 +69,7 @@ function matches(row: Record<string, unknown>, predicate: string): boolean {
   if (operator === 'lte') return String(row[key]) <= String(value)
   return operator === 'eq' ? row[key] === value : String(row[key]) > String(value)
 }
-function makeClient(): SupabaseClient {
+function makeClient(assertCurrent: () => void = () => {}): SupabaseClient {
   return {
     channel() {
       const channel={state:'joined',status:(_status:string)=>{},on(){return channel},subscribe(callback:(status:string)=>void){channel.status=callback;channels.push(channel);return channel}}
@@ -98,7 +98,9 @@ function makeClient(): SupabaseClient {
       maybeSingle: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       single: async () => ({ data: (rows[table] ?? []).find((row) => filters.every((filter) => filter(row))), error: null }),
       async then(resolve: (value: unknown) => unknown) {
+        assertCurrent()
         if(beforeQuery){const callback=beforeQuery;beforeQuery=null;await callback()}
+        assertCurrent()
         if (values) {
           if (table === 'tasks' && rejectedStatus && values.some((row) => row.status_id === rejectedStatus)) return Promise.resolve(resolve({ data: null, error: { message: 'Status must be active and belong to the task project' } }))
           for (const value of values) {
@@ -162,7 +164,7 @@ beforeEach(() => {
       }
     })
   })
-  context = { api: api as never, client, assertCurrent() { /* The fixture uses one fixed account and database. */ }, isCurrent: async () => true, scope: projectId }
+  context = { api: api as never, client, clientFor: makeClient, assertCurrent() { /* The fixture uses one fixed account and database. */ }, isCurrent: async () => true, scope: projectId }
   vi.mocked(getSupabase).mockResolvedValue(client)
   vi.stubGlobal('window', { api })
   vi.stubGlobal('navigator', { onLine: true })

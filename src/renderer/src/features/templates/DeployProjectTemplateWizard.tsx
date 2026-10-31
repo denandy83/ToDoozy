@@ -1,3 +1,7 @@
+import { captureProjectProducer, captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { hydrationContext } from '../../shared/stores/hydrationContext'
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
+import { useAuthStore } from '../../shared/stores/authStore'
 import { useDismissibleSurface } from '../../shared/motion/useDismissibleSurface'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
@@ -61,9 +65,21 @@ export function DeployProjectTemplateWizard({
   currentUser,
   onClose: finishClose,
   mode = 'deploy'
-}: DeployWizardProps): React.JSX.Element {
-  const surface = useDismissibleSurface(finishClose)
-  const onClose = surface.close
+}: DeployWizardProps): React.JSX.Element | null {
+  const scope = useDatabaseScope()
+  const initialScope = useRef(scope).current
+  const active = useRef(true)
+  const templateRef = useRef(template)
+  templateRef.current = template
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+  const closing = useRef<() => boolean>(() => false)
+  const surface = useDismissibleSurface(() => { if (closing.current()) finishClose() })
+  const onClose = useCallback(() => {
+    const closingTemplate = template
+    const ownerId = currentUser.id
+    closing.current = () => active.current && templateRef.current === closingTemplate && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === ownerId
+    surface.close()
+  }, [surface.close, template, currentUser.id, initialScope])
 
   const data: ProjectTemplateData = JSON.parse(template.data)
   const wizardRef = useRef<HTMLDivElement>(null)
@@ -132,19 +148,22 @@ export function DeployProjectTemplateWizard({
   }
 
   const handleCreate = useCallback(async () => {
-    if (creating) return
+    if (scope !== initialScope || creating || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+    const projectId = crypto.randomUUID()
+    const origin = captureProjectProducer(projectId, () => active.current && templateRef.current === template && window.api.sync.currentContext() === initialScope)
+    const { api } = hydrationContext(origin, projectId)
     setCreating(true)
     try {
-      const projectId = crypto.randomUUID()
+      await requireProducerCurrent(origin)
       const project = await createProject({
         id: projectId,
         name: projectName,
         color: projectColor,
         owner_id: currentUser.id
-      })
+      }, origin)
 
       // Add membership
-      await window.api.projects.addMember(project.id, currentUser.id, 'owner')
+      await api.projects.addMember(project.id, currentUser.id, 'owner')
 
       // Create statuses
       const statusIdMap: Record<number, string> = {}
@@ -152,7 +171,7 @@ export function DeployProjectTemplateWizard({
       for (let i = 0; i < statuses.length; i++) {
         const s = statuses[i]
         const statusId = crypto.randomUUID()
-        await window.api.statuses.create({
+        await api.statuses.create({
           id: statusId,
           project_id: project.id,
           name: s.name,
@@ -172,14 +191,14 @@ export function DeployProjectTemplateWizard({
       // Create or reuse global labels
       const labelIdMap: Record<string, string> = {}
       for (const l of labels) {
-        const existing = await window.api.labels.findByName(currentUser.id, l.name)
+        const existing = await api.labels.findByName(currentUser.id, l.name)
         if (existing) {
           // Reuse existing global label, just link to new project
-          await window.api.labels.addToProject(project.id, existing.id)
+          await api.labels.addToProject(project.id, existing.id)
           labelIdMap[l.name.toLowerCase()] = existing.id
         } else {
           const labelId = crypto.randomUUID()
-          await window.api.labels.create({
+          await api.labels.create({
             id: labelId,
             user_id: currentUser.id,
             project_id: project.id,
@@ -199,7 +218,7 @@ export function DeployProjectTemplateWizard({
           const taskId = crypto.randomUUID()
           const dueDate = computeDateFromOffset(deployDate, t.due_date_offset)
 
-          await window.api.tasks.create({
+          await api.tasks.create({
             id: taskId,
             project_id: project.id,
             owner_id: currentUser.id,
@@ -218,7 +237,7 @@ export function DeployProjectTemplateWizard({
           for (const labelName of t.labels) {
             const labelId = labelIdMap[labelName.toLowerCase()]
             if (labelId) {
-              await window.api.tasks.addLabel(taskId, labelId)
+              await api.tasks.addLabel(taskId, labelId)
             }
           }
           if (t.subtasks.length > 0) {
@@ -230,34 +249,38 @@ export function DeployProjectTemplateWizard({
       await createTaskTree(tasks, null)
 
       // Hydrate stores for the new project
-      await useProjectStore.getState().hydrateProjects(currentUser.id)
-      await useStatusStore.getState().hydrateStatuses(project.id)
-      await useLabelStore.getState().hydrateLabels(project.id)
-      await useTaskStore.getState().hydrateAllForProject(project.id)
+      await useProjectStore.getState().hydrateProjects(currentUser.id, origin)
+      await useStatusStore.getState().hydrateStatuses(project.id, origin)
+      await useLabelStore.getState().hydrateLabels(project.id, origin)
+      await useTaskStore.getState().hydrateAllForProject(project.id, origin)
 
+      await requireProducerCurrent(origin)
       // Navigate to new project
       useViewStore.getState().setSelectedProject(project.id)
       addToast({ message: `Project "${projectName}" created from template.` })
       onClose()
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to deploy project template:', err)
       addToast({ message: 'Failed to create project', variant: 'danger' })
     } finally {
-      setCreating(false)
+      if (await origin.isCurrent()) setCreating(false)
     }
-  }, [creating, projectName, projectColor, statuses, labels, tasks, deployDate, currentUser, createProject, addToast, onClose])
+  }, [creating, projectName, projectColor, statuses, labels, tasks, deployDate, currentUser, createProject, addToast, onClose, scope, template, initialScope])
 
   const handleSaveTemplate = useCallback(async () => {
-    if (creating) return
+    if (scope !== initialScope || creating || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+    const origin = captureSyncProducer(() => active.current && templateRef.current === template && window.api.sync.currentContext() === initialScope)
     setCreating(true)
     try {
+      await requireProducerCurrent(origin)
       // If user toggled off due date offsets, strip them
       const finalTasks = includeDueDateOffsets ? tasks : stripOffsetsUtil(tasks)
       const templateData: ProjectTemplateData = { statuses, labels, tasks: finalTasks }
       const dataStr = JSON.stringify(templateData)
       if (template.id && template.created_at) {
         // Update existing template
-        await updateProjectTemplate(template.id, { name: projectName, color: projectColor, data: dataStr })
+        await updateProjectTemplate(template.id, { name: projectName, color: projectColor, data: dataStr }, origin)
       } else {
         // Create new template
         await createProjectTemplate({
@@ -266,18 +289,21 @@ export function DeployProjectTemplateWizard({
           color: projectColor,
           owner_id: currentUser.id,
           data: dataStr
-        })
+        }, origin)
       }
+      await requireProducerCurrent(origin)
       addToast({ message: 'Project template saved' })
       onClose()
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to save project template:', err)
       addToast({ message: 'Failed to save template', variant: 'danger' })
     } finally {
-      setCreating(false)
+      if (await origin.isCurrent()) setCreating(false)
     }
-  }, [creating, projectName, projectColor, statuses, labels, tasks, includeDueDateOffsets, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose])
+  }, [creating, projectName, projectColor, statuses, labels, tasks, includeDueDateOffsets, template, currentUser, createProjectTemplate, updateProjectTemplate, addToast, onClose, scope, initialScope])
 
+  if (scope !== initialScope || useAuthStore.getState().currentUser?.id !== currentUser.id) return null
   return createPortal(
     <div
       {...surface.props}

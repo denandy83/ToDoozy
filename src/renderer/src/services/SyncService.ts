@@ -324,11 +324,11 @@ export async function subscribeToProject(projectId: string, context?: SyncContex
 
 export async function reconcileSharedSubscriptions(projects: Project[], context: SyncContext, subscribeMissing: boolean, projectIds?: Set<string>): Promise<void> {
   const shared = new Set(projects.filter((project) => project.is_shared === 1).map((project) => project.id))
-  for (const id of channels.keys()) if ((!projectIds || projectIds.has(id)) && !shared.has(id)) await unsubscribeFromProject(id)
   for (const id of shared) {
     if (!await context.isCurrent()) return
     if (subscribeMissing || channels.has(id)) await subscribeToProject(id, context)
   }
+  for (const id of channels.keys()) if ((!projectIds || projectIds.has(id)) && !shared.has(id)) await unsubscribeFromProject(id)
 }
 
 /**
@@ -988,19 +988,20 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     const api = current.api
     try {
     if (!await current.isCurrent()) continue
-    await unsubscribeFromProject(local.id)
     const { unsubscribePersonalProject } = await import('./PersonalSyncService')
-    await unsubscribePersonalProject(local.id)
     await api.projects.removeMember(local.id, userId)
     if (!await current.isCurrent()) continue
     const { useProjectStore } = await import('../shared/stores/projectStore')
     if (!await current.isCurrent()) continue
+    current.assertCurrent()
+    useProjectStore.setState({ removal: { id: local.id, name: local.name, ownerId: userId, scope: window.api.sync.currentContext() } })
     evictProjectData(local.id)
     if (useProjectStore.getState().currentProjectId === local.id) useProjectStore.getState().setCurrentProject(null)
     useProjectStore.setState((state) => ({
       projects: Object.fromEntries(Object.entries(state.projects).filter(([id]) => id !== local.id)),
       members: Object.fromEntries(Object.entries(state.members).filter(([id]) => id !== local.id))
     }))
+    await Promise.all([unsubscribeFromProject(local.id), unsubscribePersonalProject(local.id)])
     } catch (error) { if (await current.isCurrent()) throw error }
   }
   return missing

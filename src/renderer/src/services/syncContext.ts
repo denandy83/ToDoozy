@@ -12,12 +12,14 @@ export interface SyncContext {
   assertCurrent(): void
   isCurrent(): Promise<boolean>
   scope: string
+  clientFor?: (assertCurrent: () => void) => SupabaseClient
   subscriptionSource?: SyncContext
 }
 
 export interface SyncProducer {
   api: TodoozyAPI
   client(): Promise<SupabaseClient | null>
+  clientFor?: (assertCurrent: () => void) => SupabaseClient
   assertCurrent(): void
   isCurrent(): Promise<boolean>
   userId: string | undefined
@@ -62,6 +64,11 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
       }
     })
   })
+  let createScopedClient: ((guard: () => void) => SupabaseClient) | undefined
+  const clientFor = (guard: () => void): SupabaseClient => {
+    if (!createScopedClient) throw new Error('Sync client unavailable')
+    return createScopedClient(guard)
+  }
   let authentication: Promise<SupabaseClient | null> | undefined
   const client = (): Promise<SupabaseClient | null> => authentication ??= (async () => {
     await database
@@ -71,8 +78,16 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     if (session.user.id !== userId) throw new Error('Sync session account changed')
     const config = await window.api.auth.getSupabaseConfig()
     await assertDatabase()
-    return createClient(config.url, config.anonKey, {
-      global: { fetch: supabaseRequestMetrics.wrap(globalThis.fetch, config.url) },
+    const transport = supabaseRequestMetrics.wrap(globalThis.fetch, config.url)
+    createScopedClient = (guard) => createClient(config.url, config.anonKey, {
+      global: { fetch: async (input, init) => {
+        assertCurrent()
+        guard()
+        const response = await transport(input, init)
+        assertCurrent()
+        guard()
+        return response
+      } },
       accessToken: async () => {
         await assertDatabase()
         const current = await requireSession()
@@ -82,19 +97,20 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
       },
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     })
+    return clientFor(assertCurrent)
   })()
   const scope = async (): Promise<string> => { const origin = await database; return `${origin.userId}:${origin.generation}` }
-  return { api, client, assertCurrent, isCurrent, userId, scope }
+  return { api, client, clientFor, assertCurrent, isCurrent, userId, scope }
 }
 
 export interface ProjectProducer extends SyncProducer {
   includeProject(projectId: string): void
 }
 
-export function captureProjectProducer(projectId?: string): ProjectProducer {
+export function captureProjectProducer(projectId?: string, active: () => boolean = () => true): ProjectProducer {
   const current = captureProjectScope()
   const projects = new Set(projectId ? [projectId] : [])
-  const origin = captureSyncProducer(() => [...projects].every(current))
+  const origin = captureSyncProducer(() => active() && [...projects].every(current))
   return {
     ...origin,
     isCurrent: async () => await origin.isCurrent() && (projects.size > 0 || current()),
@@ -123,7 +139,7 @@ export async function syncContextFromProducer(origin: SyncProducer): Promise<Syn
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
   await requireProducerCurrent(origin)
-  return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+  return { api: origin.api, client, clientFor: origin.clientFor, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
 }
 
 export async function requireProducerCurrent(origin: SyncProducer): Promise<void> {
@@ -158,7 +174,8 @@ export function channelSyncContext(parent: SyncContext, active: () => boolean, p
       }
     }
   })
-  const client = new Proxy(parent.client, {
+  if (!parent.clientFor) throw new Error('Sync request context unavailable')
+  const client = new Proxy(parent.clientFor(assertCurrent), {
     get(target, key) {
       const method = Reflect.get(target, key)
       if (key !== 'from' && key !== 'rpc') return typeof method === 'function' ? method.bind(target) : method

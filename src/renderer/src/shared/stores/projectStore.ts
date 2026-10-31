@@ -1,5 +1,5 @@
 import { invalidateMembershipSnapshots } from '../../services/membershipSnapshot'
-import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer, type ProjectProducer } from '../../services/syncContext'
 import { useAuthStore } from './authStore'
 import { hydrationContext } from './hydrationContext'
 import { evictProjectData } from './projectCache'
@@ -15,6 +15,7 @@ import type {
 interface ProjectState {
   projects: Record<string, Project>
   members: Record<string, ProjectMember[]>
+  removal: { id: string; name: string; ownerId: string; scope: string | null } | null
   currentProjectId: string | null
   loading: boolean
   error: string | null
@@ -23,7 +24,7 @@ interface ProjectState {
 interface ProjectActions {
   hydrateProjects(userId: string, origin?: SyncProducer): Promise<void>
   hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
-  createProject(input: CreateProjectInput): Promise<Project>
+  createProject(input: CreateProjectInput, producer?: ProjectProducer): Promise<Project>
   updateProject(id: string, input: UpdateProjectInput): Promise<Project | null>
   deleteProject(id: string): Promise<boolean>
   archiveProject(id: string): Promise<Project | null>
@@ -40,6 +41,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   projects: {},
   members: {},
   currentProjectId: null,
+  removal: null,
   loading: false,
   error: null,
 
@@ -112,8 +114,8 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
     }
   },
 
-  async createProject(input: CreateProjectInput): Promise<Project> {
-    const origin = captureProjectProducer(input.id)
+  async createProject(input: CreateProjectInput, producer?: ProjectProducer): Promise<Project> {
+    const origin = producer ?? captureProjectProducer(input.id)
     try {
       const project = await origin.api.projects.create(input)
       origin.includeProject(project.id)

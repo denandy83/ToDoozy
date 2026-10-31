@@ -1904,7 +1904,6 @@ async function refreshRemoteProjects(userId: string, projects: ProjectRefreshes)
             const { discoverRemoteMemberships } = await import('./SyncService')
             await discoverRemoteMemberships(userId, context, snapshot)
           }
-          await reconcileProjectSubscriptions(context, true, new Set([projectId]))
         }
         const project = await context.api.projects.findById(projectId)
         if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) {
@@ -1922,6 +1921,7 @@ async function refreshRemoteProjects(userId: string, projects: ProjectRefreshes)
             await useTaskStore.getState().hydrateAllForProject(projectId, context)
             await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
           }
+          if (metadataChanged) await reconcileProjectSubscriptions(context, true, new Set([projectId]))
           continue
         }
         pulled += await pullNewTasks(projectId, context, true, ids)
@@ -1934,6 +1934,7 @@ async function refreshRemoteProjects(userId: string, projects: ProjectRefreshes)
         if (!await context.isCurrent()) continue
         const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
         await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
+        if (metadataChanged) await reconcileProjectSubscriptions(context, true, new Set([projectId]))
       } catch (error) { await handlePullError(context, 'refreshRemoteProjects', error) }
     }
   }
@@ -2848,8 +2849,6 @@ async function reconcileProjectSubscriptions(context: SyncContext, subscribeMiss
     ? (await Promise.all([...projectIds].map((id) => context.api.projects.findById(id)))).filter((project): project is NonNullable<typeof project> => !!project && !project.deleted_at)
     : await context.api.projects.getProjectsForUser(userId)
   const personal = new Set(projects.filter((project) => project.is_shared !== 1).map((project) => project.id))
-  for (const id of personalChannelStates.keys()) if ((!projectIds || projectIds.has(id)) && !personal.has(id)) await unsubscribePersonalProject(id)
-  await reconcileSharedSubscriptions(projects, context, subscribeMissing, projectIds)
   for (const project of projects) {
     if (!await context.isCurrent()) return
     if (project.is_shared !== 1 && (subscribeMissing || personalChannelStates.has(project.id))) {
@@ -2866,6 +2865,8 @@ async function reconcileProjectSubscriptions(context: SyncContext, subscribeMiss
       await subscribeToPersonalProject(project.id, onChange, context)
     }
   }
+  await reconcileSharedSubscriptions(projects, context, subscribeMissing, projectIds)
+  for (const id of personalChannelStates.keys()) if ((!projectIds || projectIds.has(id)) && !personal.has(id)) await unsubscribePersonalProject(id)
 }
 
 /**

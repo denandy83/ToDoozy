@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -16,10 +16,11 @@ interface TemplateState {
 
 interface TemplateActions {
   hydrateProjectTemplates(userId: string): Promise<void>
-  createProjectTemplate(input: CreateProjectTemplateInput): Promise<ProjectTemplate>
+  createProjectTemplate(input: CreateProjectTemplateInput, origin?: SyncProducer): Promise<ProjectTemplate>
   updateProjectTemplate(
     id: string,
-    input: UpdateProjectTemplateInput
+    input: UpdateProjectTemplateInput,
+    origin?: SyncProducer
   ): Promise<ProjectTemplate | null>
   deleteProjectTemplate(id: string): Promise<boolean>
   clearError(): void
@@ -52,9 +53,9 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
     },
 
     async createProjectTemplate(
-      input: CreateProjectTemplateInput
+      input: CreateProjectTemplateInput,
+      origin = captureSyncProducer()
     ): Promise<ProjectTemplate> {
-      const origin = captureSyncProducer()
       try {
         const template = await origin.api.projectTemplates.create(input)
         await requireProducerCurrent(origin)
@@ -75,9 +76,9 @@ export const useTemplateStore = createWithEqualityFn<TemplateStore>(
 
     async updateProjectTemplate(
       id: string,
-      input: UpdateProjectTemplateInput
+      input: UpdateProjectTemplateInput,
+      origin = captureSyncProducer()
     ): Promise<ProjectTemplate | null> {
-      const origin = captureSyncProducer()
       try {
         const template = await origin.api.projectTemplates.update(id, input)
         await requireProducerCurrent(origin)
