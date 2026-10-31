@@ -6,7 +6,7 @@ import { useAuthStore } from './authStore'
 
 export type HydrationOrigin = Pick<SyncProducer, 'api' | 'isCurrent'> & Partial<Pick<SyncProducer, 'assertCurrent'>>
 
-export function hydrationContext(origin?: HydrationOrigin, projectId?: string): {
+export function hydrationContext(origin?: HydrationOrigin, projectId?: string, requestedUserId?: string): {
   api: TodoozyAPI
   isCurrent(): Promise<boolean>
   assertCurrent(): void
@@ -26,32 +26,43 @@ export function hydrationContext(origin?: HydrationOrigin, projectId?: string): 
   void database?.catch(() => {})
   const sameUser = (): boolean => useAuthStore.getState().currentUser?.id === user?.id
   const assertCurrent = (): void => {
-    if (!sameUser()) throw new Error('Hydration account changed')
+    if (!sameUser() || (requestedUserId !== undefined && requestedUserId !== user?.id)) throw new Error('Hydration account changed')
     if (databaseScope !== null && readDatabaseScope() !== databaseScope) throw new Error('Hydration database changed')
     origin?.assertCurrent?.()
     if (projectId && !isProjectCurrent(projectId)) throw new Error('Project hydration invalidated')
   }
+  const invoke = async (namespace: string, method: string, args: unknown[]): Promise<unknown> => {
+    assertCurrent()
+    try {
+      if (origin) {
+        const target = Reflect.get(origin.api, namespace)
+        const result = await Reflect.apply(Reflect.get(target, method), target, args)
+        assertCurrent()
+        return result
+      }
+      const context = await database!
+      assertCurrent()
+      if (context.userId !== (user?.id ?? null)) throw new Error('Hydration database changed')
+      const result = await window.api.sync.invokeContext(context, `${namespace}:${method}`, args)
+      assertCurrent()
+      return result
+    } catch (error) { assertCurrent(); throw error }
+  }
+  let access: Promise<boolean> | undefined
+  const requireAccess = async (): Promise<void> => {
+    assertCurrent()
+    if (projectId && requestedUserId !== undefined) {
+      access ??= invoke('projects', 'getProjectsForUser', [requestedUserId, projectId]).then((rows) =>
+        Array.isArray(rows) && rows.some((row) => row.id === projectId))
+      if (!await access) throw new Error('Project hydration access changed')
+      assertCurrent()
+    }
+  }
   const api = new Proxy({} as TodoozyAPI, {
     get: (_, namespace: string) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
-        assertCurrent()
-        try {
-          if (origin) {
-            const target = Reflect.get(origin.api, namespace)
-            const result = await Reflect.apply(Reflect.get(target, method), target, args)
-            assertCurrent()
-            return result
-          }
-          const context = await database!
-          assertCurrent()
-          if (context.userId !== (user?.id ?? null)) throw new Error('Hydration database changed')
-          const result = await window.api.sync.invokeContext(context, `${namespace}:${method}`, args)
-          assertCurrent()
-          return result
-        } catch (error) {
-          assertCurrent()
-          throw error
-        }
+        await requireAccess()
+        return invoke(namespace, method, args)
       }
     })
   })
@@ -68,6 +79,7 @@ export function hydrationContext(origin?: HydrationOrigin, projectId?: string): 
         if (current.generation !== initial.generation || current.userId !== initial.userId
           || initial.userId !== (user?.id ?? null)) return false
       }
+      await requireAccess()
       assertCurrent()
       return true
     } catch { return false }

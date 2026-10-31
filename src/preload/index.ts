@@ -73,6 +73,7 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:findAllByUser', userId, options),
     findMaxUpdatedAt: (userId) => ipcRenderer.invoke('labels:findMaxUpdatedAt', userId),
     applyRemote: (label) => ipcRenderer.invoke('labels:applyRemote', label),
+    assertCanConsolidate: (fromId, canonical) => ipcRenderer.invoke('labels:assertCanConsolidate', fromId, canonical),
     consolidate: (fromId, canonical) =>
       ipcRenderer.invoke('labels:consolidate', fromId, canonical),
     removeFromProject: (projectId, labelId) =>
@@ -118,7 +119,7 @@ const api: TodoozyAPI = {
     updateMember: (projectId, userId, updates) =>
       ipcRenderer.invoke('projects:updateMember', projectId, userId, updates),
     getMembers: (projectId) => ipcRenderer.invoke('projects:getMembers', projectId),
-    getProjectsForUser: (userId) => ipcRenderer.invoke('projects:getProjectsForUser', userId),
+    getProjectsForUser: (userId, projectId) => ipcRenderer.invoke('projects:getProjectsForUser', userId, projectId),
     updateSidebarOrder: (updates) =>
       ipcRenderer.invoke('projects:updateSidebarOrder', updates),
     archiveWithTasks: (id) => ipcRenderer.invoke('projects:archiveWithTasks', id),

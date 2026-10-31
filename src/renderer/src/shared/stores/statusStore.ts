@@ -1,3 +1,4 @@
+import { useAuthStore } from './authStore'
 import { captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
@@ -28,7 +29,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   error: null,
 
   async hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId)
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
     const initial = useStatusStore.getState().statuses
     try {
       if (!await isCurrent()) return

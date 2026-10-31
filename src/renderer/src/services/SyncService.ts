@@ -998,16 +998,26 @@ export async function validateInviteToken(token: string, origin = captureSyncPro
 }
 
 /** Accept remotely and download only into the originating local database. */
-export async function acceptInvite(token: string, userId: string, origin = captureSyncProducer()): Promise<string> {
+export async function acceptInvite(token: string, userId: string, origin = captureSyncProducer(), acknowledged?: (resume: () => Promise<string>) => void): Promise<string> {
   if (origin.userId !== userId) throw new Error('Sync account changed')
+  const projectCurrent = captureProjectScope()
   const context = await syncContextFromProducer(origin)
   const { data: projectId, error } = await context.client.rpc('accept_invite', { invite_token: token })
   await requireProducerCurrent(origin)
   if (error) throw new Error(error.message)
   if (typeof projectId !== 'string' || !projectId) throw new Error('Failed to accept invite')
-  await syncProjectDown(projectId, userId, context)
-  await requireProducerCurrent(origin)
-  return projectId
+  const accepted = projectSyncContext(context, projectId, projectCurrent)
+  const resume = async (): Promise<string> => {
+    accepted.assertCurrent()
+    const { data: membership, error: membershipError } = await accepted.client.from('project_members')
+      .select('user_id').eq('project_id', projectId).eq('user_id', userId).maybeSingle()
+    if (membershipError || membership?.user_id !== userId) throw new Error(membershipError?.message ?? 'Project membership is no longer available')
+    await syncProjectDown(projectId, userId, accepted)
+    await requireProducerCurrent(origin)
+    return projectId
+  }
+  acknowledged?.(resume)
+  return resume()
 }
 
 /** Acknowledged targeted decline, or local dismissal of a reusable public link. */
@@ -1210,7 +1220,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
     .eq('id', projectId)
     .single()
 
-  if (!project) throw new Error('Shared project not found')
+  if (!project || project.deleted_at) throw new Error('Shared project not found')
 
   // Ensure the project owner's user record exists locally with real profile data
   const localOwner = await api.users.findById(project.owner_id)

@@ -448,17 +448,16 @@ async function consolidateLocalLabel(
     // If the canonical remote is tombstoned, revive it before remapping —
     // otherwise our local junctions would point at a deleted row.
     if (remote.deleted_at) {
-      const { error: reviveErr } = await supabase
-        .from('user_labels')
-        .update({ deleted_at: null, updated_at: new Date().toISOString() })
-        .eq('id', remote.id as string)
-      if (reviveErr) return false
-      remote.deleted_at = null
+      const revival = { ...remote, deleted_at: null, updated_at: new Date().toISOString() }
+      await (context?.api ?? window.api).labels.assertCanConsolidate(localId, revival as Label)
+      const { data: revived, error: reviveError } = await supabase.from('user_labels')
+        .update({ deleted_at: revival.deleted_at, updated_at: revival.updated_at })
+        .eq('user_id', userId).eq('id', remote.id).eq('name', remote.name)
+        .eq('updated_at', remote.updated_at).eq('deleted_at', remote.deleted_at).select('*').single()
+      if (reviveError || !revived) throw new Error(reviveError?.message ?? 'Label revival was not acknowledged')
+      if (revived.id !== remote.id || revived.user_id !== userId || revived.name !== remote.name || revived.deleted_at !== null) throw new Error('Label changed during revival')
+      remote = revived
     }
-    // Plain-object clone — supabase-js results can carry non-cloneable
-    // handlers/getters that confuse Electron's structured clone or leave
-    // properties as undefined on the receiving side. JSON-roundtrip
-    // guarantees a vanilla object with primitive values.
     const r = remote as Record<string, unknown>
     const canonicalLabel: Label = {
       id: String(r.id),

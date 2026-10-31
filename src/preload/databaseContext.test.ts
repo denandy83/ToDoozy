@@ -59,6 +59,8 @@ it('forwards optional project constraints and bulk task ownership through preloa
   expect(harness.invoke).toHaveBeenLastCalledWith('labels:getProjectLabelsForOwner','u','p')
   await api.labels.getProjectLabelsForSharedProjects('p')
   expect(harness.invoke).toHaveBeenLastCalledWith('labels:getProjectLabelsForSharedProjects','p')
+  await api.projects.getProjectsForUser('u','p')
+  expect(harness.invoke).toHaveBeenLastCalledWith('projects:getProjectsForUser','u','p')
   await api.tasks.findByIds(['t','q'])
   expect(harness.invoke).toHaveBeenLastCalledWith('tasks:findByIds',['t','q'])
   await api.tasks.applyRemoteTaskLabels('t',['l'],[],'p')

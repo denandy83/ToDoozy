@@ -47,7 +47,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
 
   async hydrateProjects(userId: string, origin?: SyncProducer): Promise<void> {
     if (useAuthStore.getState().currentUser?.id !== userId || (origin && origin.userId !== userId)) return
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin)
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, undefined, userId)
     const initial = get()
     try {
       if (!await isCurrent()) return
@@ -97,7 +97,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId)
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
     const initial = get().members[projectId]
     try {
       if (!await isCurrent()) return

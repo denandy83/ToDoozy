@@ -178,3 +178,18 @@ it('bulk-resolves native task IDs and rejects moved-task label imports atomicall
   expect(await origin.api.tasks.applyRemoteTaskLabels('t',['l'],[],'q')).toBe(1)
   expect(repo.tasks.getLabels('t').map(row=>row.label_id)).toEqual(['l'])
 })
+
+it('filters native hydration access to one project while retaining unfiltered callers and recovery rows',async()=>{
+  const repo=repositories[0]
+  repo.users.create({id:'b',email:'b@example.invalid'})
+  repo.projects.create({id:'q',owner_id:'b',name:'RECOVERY Q'})
+  expect((await invoke('projects:getProjectsForUser','a','p') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  expect(await invoke('projects:getProjectsForUser','a','q')).toEqual([])
+  expect((await invoke('projects:getProjectsForUser','a') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  repo.projects.addMember('p','b','member')
+  expect((await invoke('projects:getProjectsForUser','b','p') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  repo.projects.removeMember('p','b')
+  expect(await invoke('projects:getProjectsForUser','b','p')).toEqual([])
+  expect(repo.projects.findById('p')?.name).toBe('Project')
+  expect(repo.projects.findById('q')?.name).toBe('RECOVERY Q')
+})

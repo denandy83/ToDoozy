@@ -466,6 +466,8 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  handle('labels:assertCanConsolidate', (_e, fromId: string, canonical: Parameters<Repositories['labels']['consolidate']>[1]) => getRepos().labels.assertCanConsolidate(fromId, canonical))
+
   handle('labels:consolidate', (_e, fromId: string, canonical: Parameters<Repositories['labels']['consolidate']>[1]) => {
     return getRepos().labels.consolidate(fromId, canonical)
   })
@@ -608,8 +610,8 @@ export function registerIpcHandlers(): void {
     return getRepos().projects.getMembers(projectId)
   })
 
-  handle('projects:getProjectsForUser', (_e, userId: string) => {
-    return getRepos().projects.getProjectsForUser(userId)
+  handle('projects:getProjectsForUser', (_e, userId: string, projectId?: string) => {
+    return getRepos().projects.getProjectsForUser(userId, projectId)
   })
 
   handle(

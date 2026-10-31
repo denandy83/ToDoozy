@@ -44,7 +44,7 @@ let recountTimer: ReturnType<typeof setTimeout> | null = null
  * and may carry unsaved filter edits) isn't clobbered by the saved-config count.
  */
 async function recomputeCounts(userId: string, skipViewId: string | null, projectId?: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-  const { api, isCurrent, assertCurrent } = hydrationContext(origin)
+  const { api, isCurrent, assertCurrent } = hydrationContext(origin, undefined, userId)
   if (!await isCurrent()) return
   assertCurrent()
   const { views, viewCounts } = useSavedViewStore.getState()
@@ -80,7 +80,7 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   activeViewFilterConfig: null,
 
   async hydrate(userId: string, origin?: HydrationOrigin): Promise<void> {
-    const context = hydrationContext(origin)
+    const context = hydrationContext(origin, undefined, userId)
     const { api, isCurrent, assertCurrent } = context
     try {
       if (!await isCurrent()) return
@@ -106,7 +106,8 @@ export const useSavedViewStore = createWithEqualityFn<SavedViewStore>((set) => (
   },
 
   scheduleRecount(userId: string, producer?: HydrationOrigin): void {
-    const origin = hydrationContext(producer)
+    const origin = hydrationContext(producer, undefined, userId)
+    try { origin.assertCurrent() } catch { return }
     if (recountTimer) clearTimeout(recountTimer)
     recountTimer = setTimeout(() => {
       recountTimer = null

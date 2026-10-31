@@ -371,12 +371,15 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
     if (!verified || verified.id !== remote.id || verified.name !== remote.name || verified.user_id !== userId) throw new Error('Label changed during lookup')
     remote = verified
     if (remote.deleted_at) {
-      const { error: reviveError } = await supabase
-        .from('user_labels')
-        .update({ deleted_at: null, updated_at: new Date().toISOString() })
-        .eq('id', remote.id as string)
-      if (reviveError) throw new Error(reviveError.message)
-      remote.deleted_at = null
+      const revival = { ...remote, deleted_at: null, updated_at: new Date().toISOString() }
+      await origin.api.labels.assertCanConsolidate(localLabel.id, revival as Label)
+      const { data: revived, error: reviveError } = await supabase.from('user_labels')
+        .update({ deleted_at: revival.deleted_at, updated_at: revival.updated_at })
+        .eq('user_id', userId).eq('id', remote.id).eq('name', remote.name)
+        .eq('updated_at', remote.updated_at).eq('deleted_at', remote.deleted_at).select('*').single()
+      if (reviveError || !revived) throw new Error(reviveError?.message ?? 'Label revival was not acknowledged')
+      if (revived.id !== remote.id || revived.user_id !== userId || revived.name !== remote.name || revived.deleted_at !== null) throw new Error('Label changed during revival')
+      remote = revived
     }
     const r = remote as Record<string, unknown>
     const canonicalLabel: Label = {

@@ -100,6 +100,7 @@ export interface LabelsAPI {
   ): Promise<Label[]>
   findMaxUpdatedAt(userId: string): Promise<string | null>
   applyRemote(label: Label): Promise<Label>
+  assertCanConsolidate(fromId: string, canonical: Label): Promise<void>
   consolidate(fromId: string, canonical: Label): Promise<{ taskRemaps: number; projectRemaps: number }>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
@@ -153,7 +154,7 @@ export interface ProjectsAPI {
   removeMember(projectId: string, userId: string): Promise<boolean>
   updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): Promise<void>
   getMembers(projectId: string): Promise<ProjectMember[]>
-  getProjectsForUser(userId: string): Promise<Project[]>
+  getProjectsForUser(userId: string, projectId?: string): Promise<Project[]>
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>
   archiveWithTasks(id: string): Promise<Project | undefined>
   unarchiveWithTasks(id: string): Promise<Project | undefined>

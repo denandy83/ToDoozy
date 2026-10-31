@@ -26,7 +26,7 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
   loading: false,
 
   async hydrate(userId: string, origin?: HydrationOrigin): Promise<void> {
-    const context = hydrationContext(origin)
+    const context = hydrationContext(origin, undefined, userId)
     const { api, isCurrent, assertCurrent } = context
     try {
       if (!await isCurrent()) return
@@ -80,8 +80,17 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
         })
       }
     } catch (error) {
-      if (await origin.isCurrent() && previous) {
-        set((state) => ({ areas: state.areas.map((area) => area === pending ? previous : area) }))
+      if (await origin.isCurrent() && useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
+        try {
+          const confirmed = await origin.api.projectAreas.findById(id)
+          await requireProducerCurrent(origin)
+          set((state) => ({ areas: state.areas.flatMap((area) => area !== pending ? [area] : confirmed ? [confirmed] : []) }))
+          if (confirmed) import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+            if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === confirmed) {
+              pushProjectArea(confirmed, origin).catch(() => {})
+            }
+          })
+        } catch { }
       }
       throw error
     }

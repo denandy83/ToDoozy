@@ -353,3 +353,77 @@ it.each(['push','reconcile'].flatMap(path => ['rename','pending','delete','curre
   }
   expect(h.fixtureErrors).toEqual([])
 },20000)
+
+it.each(['push','reconcile'].flatMap(path=>['rename','delete','recreate'].map(state=>({path,state}))))('admits tombstone adoption before cloud revival through $path ($state)',async({path,state})=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,connected:false})
+  const pg=await makeLabelAuthorizationDatabase();opened.push({h,pg})
+  const timestamp='2026-01-01T00:00:00.000Z'
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color,order_index,created_at,updated_at,deleted_at) VALUES($1,$2,$3,$4,0,$5,$5,$5)',[canonicalId,labelId(1),'I','#00AA11',timestamp])
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4)',[sourceId,labelId(2),'FOREIGN','#444444'])
+  const source=h.repo.labels.create({id:sourceId,user_id:'u',project_id:'p0',name:'ı',color:'#444444'})
+  h.repo.syncQueue.enqueue('user_labels',sourceId,'UPDATE',JSON.stringify(source))
+  h.repo.tasks.create({id:'revival-task',project_id:'p0',owner_id:'u',status_id:'s0',title:'TASK'});h.repo.tasks.addLabel('revival-task',sourceId)
+  const canonical={id:canonicalId,user_id:'u',name:state==='rename'?'LOCAL RENAME':'I',color:'#00AA11',order_index:0,created_at:timestamp,updated_at:timestamp,deleted_at:state==='rename'?null:timestamp}
+  h.repo.labels.applyRemote(canonical)
+  if(state!=='recreate')h.repo.syncQueue.enqueue('user_labels',canonicalId,'UPDATE',JSON.stringify(canonical))
+  const before=h.repo.syncQueue.findAll(),beforeLinks=h.repo.tasks.getLabelState('revival-task')
+  const transport=labelTransport(pg,'authenticated'),patches:unknown[]=[]
+  await h.services.user.subscribeToUserChannel('u')
+  const base=h.sandbox.fetch
+  h.sandbox.fetch=async(url:string,init?:RequestInit)=>{
+    if(!['user_labels','project_labels','project_members'].includes(new URL(String(url)).pathname.split('/').pop()!))return base(url,init)
+    const result=await transport(url,init)
+    if(init?.method==='PATCH'){
+      patches.push(JSON.parse(String(init.body)))
+      const row=(await pg.query('SELECT * FROM user_labels WHERE id=$1',[canonicalId])).rows[0]
+      if(state!=='recreate')h.channels.find((row:{topic:string})=>row.topic==='user:u').emit('user_labels','UPDATE',{...JSON.parse(JSON.stringify(row)),user_id:'u'})
+      await h.untilIdle()
+    }
+    return result
+  }
+  let effective: unknown, failure: unknown
+  if(path==='push')effective=await h.services.personal.pushLabel(source,'u',h.producer())
+  else try{await h.services.syncTables.SYNC_TABLES.labels.remoteUpsert(source,await h.context())}catch(error){failure=error}
+  const immediate={source:h.repo.labels.findById(sourceId),canonical:h.repo.labels.findById(canonicalId),links:h.repo.tasks.getLabelState('revival-task'),queue:h.repo.syncQueue.findAll()}
+  const remote=(await pg.query<{deleted_at:string|null;updated_at:string}>('SELECT deleted_at,updated_at FROM user_labels WHERE id=$1',[canonicalId])).rows[0]
+  if(state!=='recreate')await h.services.shared.processSyncQueue(await h.context())
+  if(state==='recreate'){
+    if(path==='push')expect(effective).toBe(canonicalId);else expect(failure).toBeUndefined()
+    expect(patches).toHaveLength(1);expect(remote.deleted_at).toBeNull()
+    expect(h.repo.labels.findById(canonicalId).deleted_at).toBeNull()
+    expect(Date.parse(h.repo.labels.findById(canonicalId).updated_at)).toBe(new Date(remote.updated_at).getTime())
+    expect(h.repo.labels.findById(sourceId)).toBeUndefined()
+    expect(h.repo.tasks.getLabels('revival-task').map((row:{label_id:string})=>row.label_id)).toEqual([canonicalId])
+  }else{
+    if(path==='push')expect(effective).not.toBe(canonicalId);else expect(failure).toMatchObject({code:'42501'})
+    expect(patches).toEqual([]);expect(remote.deleted_at).not.toBeNull()
+    expect(immediate.source).toEqual(source)
+    expect(immediate.canonical).toMatchObject(canonical)
+    expect(immediate.links).toEqual(beforeLinks)
+    for(const command of before)expect(immediate.queue).toContainEqual(command)
+    expect(h.repo.labels.findById(canonicalId)).toMatchObject(canonical)
+  }
+  expect(h.fixtureErrors).toEqual([])
+},20000)
+
+it.each(['rename','delete'])('keeps queued canonical %s intent through a newer user-label event and actual replay',async state=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:0,connected:false})
+  const pg=await makeLabelAuthorizationDatabase();opened.push({h,pg})
+  const timestamp='2026-01-01T00:00:00.000Z'
+  const canonical={id:canonicalId,user_id:'u',name:state==='rename'?'LOCAL RENAME':'I',color:'#123456',order_index:0,created_at:timestamp,updated_at:timestamp,deleted_at:state==='delete'?timestamp:null}
+  h.repo.labels.applyRemote(canonical)
+  h.repo.syncQueue.enqueue('user_labels',canonicalId,'UPDATE',JSON.stringify(canonical))
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color,order_index,created_at,updated_at) VALUES($1,$2,$3,$4,0,$5,$6)',[canonicalId,labelId(1),'I','#123456',timestamp,'2099-01-01T00:00:00.000Z'])
+  h.sandbox.fetch=labelTransport(pg,'authenticated')
+  await h.services.user.subscribeToUserChannel('u')
+  const event=JSON.parse(JSON.stringify((await pg.query('SELECT * FROM user_labels WHERE id=$1',[canonicalId])).rows[0]))
+  h.channels[0].emit('user_labels','UPDATE',{...event,user_id:'u'});await h.untilIdle()
+  const afterEvent=h.repo.labels.findById(canonicalId)
+  await h.services.shared.processSyncQueue(await h.context())
+  expect(afterEvent).toMatchObject(canonical)
+  expect(h.repo.labels.findById(canonicalId)).toMatchObject(canonical)
+  const delivered=(await pg.query<{name:string;deleted_at:string|null}>('SELECT name,deleted_at FROM user_labels WHERE id=$1',[canonicalId])).rows[0]
+  expect(delivered.name).toBe(canonical.name)
+  expect(delivered.deleted_at===null).toBe(canonical.deleted_at===null)
+  expect(h.fixtureErrors).toEqual([])
+},20000)

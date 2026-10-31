@@ -20,8 +20,9 @@ beforeEach(() => {
   const pending = new Promise((resolve) => { finish = resolve })
   vi.stubGlobal('window', { api: { sync: {
     captureContext: async () => ({ generation, userId: useAuthStore.getState().currentUser?.id }),
-    invokeContext: async (origin: { generation: number }) => {
+    invokeContext: async (origin: { generation: number }, channel: string, args: unknown[]) => {
       if (origin.generation !== generation) throw new Error('Sync database changed')
+      if (channel === 'projects:getProjectsForUser' && args[1] === 'p') return [{ id: 'p' }]
       entered(); return pending
     }
   } } })

@@ -323,15 +323,16 @@ export class ProjectRepository {
       .all(projectId) as unknown as ProjectMember[]
   }
 
-  getProjectsForUser(userId: string): Project[] {
+  getProjectsForUser(userId: string, projectId?: string): Project[] {
     return this.db
       .prepare(
         `SELECT p.* FROM projects p
          WHERE p.deleted_at IS NULL AND (p.owner_id = ? OR EXISTS (
            SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?))
+         ${projectId === undefined ? '' : 'AND p.id = ?'}
          ORDER BY p.sidebar_order ASC, p.created_at ASC`
       )
-      .all(userId, userId) as unknown as Project[]
+      .all(...(projectId === undefined ? [userId, userId] : [userId, userId, projectId])) as unknown as Project[]
   }
 
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): void {

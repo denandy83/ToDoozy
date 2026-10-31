@@ -206,6 +206,9 @@ export class LabelRepository {
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
+    if (existing && this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(remote.id)
+      && (existing.name !== remote.name || existing.color !== remote.color || existing.order_index !== remote.order_index
+        || toCanonicalIso(existing.deleted_at ?? null) !== toCanonicalIso(remote.deleted_at ?? null))) return existing
     // Sticky ownership (LWW guard): a label row's owner never legitimately
     // changes in this app. If a newer remote row carries a DIFFERENT non-null
     // user_id than the local row already has, keep the local owner — only let
@@ -255,6 +258,24 @@ export class LabelRepository {
     }
   }
 
+  assertCanConsolidate(fromId: string, canonical: Label): void {
+    const toId = String(canonical.id)
+    const userIdParam = canonical.user_id ? String(canonical.user_id) : null
+    const nameParam = String(canonical.name ?? '')
+    const colorParam = String(canonical.color ?? '#888888')
+    const orderIndexParam = Number(canonical.order_index ?? 0)
+    const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
+    const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
+    const existing = this.findById(toId)
+    if (existing && fromId !== toId) {
+      const pending = this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(toId)
+      const differs = existing.name !== nameParam || existing.color !== colorParam || toCanonicalIso(existing.deleted_at ?? null) !== deletedAtParam
+      if (existing.user_id !== userIdParam || isRemoteNewer(updatedAtParam, existing.updated_at)
+        || (differs && (pending || !isRemoteNewer(existing.updated_at, updatedAtParam)))
+        || (pending && existing.order_index !== orderIndexParam)) throw new Error('Canonical label has local changes')
+    }
+  }
+
   /**
    * Replace all references to `fromId` with `canonical.id` across junction
    * tables, then hard-delete `fromId`. Used by sync when a local label
@@ -281,14 +302,7 @@ export class LabelRepository {
     const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
     const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
 
-    const existing = this.findById(toId)
-    if (existing && fromId !== toId) {
-      const pending = this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(toId)
-      const differs = existing.name !== nameParam || existing.color !== colorParam || toCanonicalIso(existing.deleted_at ?? null) !== deletedAtParam
-      if (existing.user_id !== userIdParam || isRemoteNewer(updatedAtParam, existing.updated_at)
-        || (differs && (pending || !isRemoteNewer(existing.updated_at, updatedAtParam)))
-        || (pending && existing.order_index !== orderIndexParam)) throw new Error('Canonical label has local changes')
-    }
+    this.assertCanConsolidate(fromId, canonical)
 
     let taskRemaps = 0
     let projectRemaps = 0

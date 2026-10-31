@@ -289,3 +289,74 @@ it.each(['Accept','Decline'])('reserves the first %s action before a delayed nat
   expect(calls).toEqual([first==='Accept'?'accept_invite':'decline_invite'])
   expect(f.h.fixtureErrors).toEqual([])
 })
+
+it.each(['normal','before-accept','native','channel','revoked','deleted'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
+  const {PGlite}=await import('@electric-sql/pglite')
+  const {readFileSync}=await import('node:fs')
+  const pg=new PGlite()
+  try{
+    const actor='00000000-0000-4000-8000-000000000001',project='00000000-0000-4000-8000-000000000010',token='00000000-0000-4000-8000-000000000020'
+    await pg.exec(`CREATE SCHEMA auth;CREATE ROLE anon;CREATE ROLE authenticated;GRANT USAGE ON SCHEMA public,auth TO authenticated;
+      CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT current_setting('request.jwt.claim.sub',true)::uuid $$;
+      CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz);
+      INSERT INTO auth.users VALUES('${actor}','u@example.invalid',now());
+      CREATE TABLE public.project_members(project_id uuid,user_id uuid,role text,joined_at timestamptz,PRIMARY KEY(project_id,user_id));
+      CREATE TABLE public.project_invites(token uuid PRIMARY KEY,project_id uuid,status text CHECK(status IN('pending','accepted','expired')),target_email text,accepted_by uuid,expires_at timestamptz);
+      INSERT INTO public.project_invites VALUES('${token}','${project}','pending','u@example.invalid',null,'2099-01-01');`)
+    const migration=readFileSync(new URL('../supabase/migrations/20261030213612_security_performance_hardening.sql',import.meta.url),'utf8')
+    await pg.exec(migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION public.accept_invite'),migration.indexOf('-- A recipient may consume')))
+    const f=await setup(),h=f.h
+    for(const row of h.remote.projects)if(row.id==='joined')row.id=project
+    for(const table of ['project_members','statuses'])for(const row of h.remote[table])if(row.project_id==='joined')row.project_id=project
+    const transport=h.sandbox.fetch
+    let calls=0,failed=false
+    h.sandbox.fetch=async(url:string,init:RequestInit)=>{
+      const parsed=new URL(String(url))
+      if(parsed.pathname.endsWith('/rpc/accept_invite')){
+        calls++
+        if(mode==='before-accept'&&!failed){failed=true;return response({message:'Synthetic pre-commit failure'},503)}
+        await pg.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[actor]);await pg.exec('SET ROLE authenticated')
+        try{return response((await pg.query<{id:string}>('SELECT public.accept_invite($1) AS id',[token])).rows[0].id)}
+        catch(error){return response({message:(error as Error).message,code:'P0001'},400)}
+        finally{await pg.exec('RESET ROLE')}
+      }
+      if(parsed.pathname.endsWith('/project_members')&&parsed.searchParams.has('user_id')){
+        const rows=(await pg.query('SELECT user_id FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])).rows.map(()=>({user_id:'u'}))
+        return response(rows)
+      }
+      return transport(url,init)
+    }
+    const apply=h.repo.projects.applyRemote.bind(h.repo.projects)
+    h.repo.projects.applyRemote=(row:{id:string})=>{
+      if(['native','revoked','deleted'].includes(mode)&&!failed&&row.id===project){failed=true;throw Error('Synthetic post-accept native failure')}
+      return apply(row)
+    }
+    const getClient=h.sandbox.runtime.getSupabase
+    h.sandbox.runtime.getSupabase=async()=>{
+      if(mode==='channel'&&!failed&&h.repo.projects.findById(project)){failed=true;throw Error('Synthetic post-accept channel failure')}
+      return getClient()
+    }
+    await f.mount();await f.click('Accept')
+    if(mode!=='normal'){
+      expect(f.host.textContent).toContain('PRIVATE FIRST')
+      expect(f.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+      if(mode==='revoked')await pg.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])
+      if(mode==='deleted')h.remote.projects.find((row:{id:string})=>row.id===project).deleted_at=new Date().toISOString()
+      await f.click('Accept')
+    }
+    expect(calls).toBe(mode==='before-accept'?2:1)
+    if(mode==='revoked'||mode==='deleted'){
+      expect(f.host.textContent).toContain('PRIVATE FIRST')
+      expect(h.repo.projects.findById(project)).toBeUndefined()
+      expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(mode==='deleted'?1:0)
+    }else{
+      expect(f.host.textContent).not.toContain('PRIVATE FIRST')
+      expect(f.host.textContent).toContain('PRIVATE QUEUED')
+      expect(h.repo.projects.findById(project)).toBeDefined()
+      expect(h.stores.useViewStore.getState().selectedProjectId).toBe(project)
+      expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(1)
+    }
+    expect((await pg.query<{status:string}>('SELECT status FROM project_invites')).rows[0].status).toBe('accepted')
+    expect(h.fixtureErrors).toEqual([])
+  }finally{await pg.close()}
+},20000)

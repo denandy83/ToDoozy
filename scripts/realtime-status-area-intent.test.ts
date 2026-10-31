@@ -117,3 +117,44 @@ it.each(families)('ignores late status from a replaced %s channel in the same sc
   expect(h.timers.size).toBe(timers)
   expect(h.fixtureErrors).toEqual([])
 })
+
+it.each([true,false].flatMap(firstFail=>[true,false].flatMap(secondFail=>[false,true].map(reverse=>({firstFail,secondFail,reverse})))))('recovers persisted area state after overlapping writes ($firstFail/$secondFail, reverse=$reverse)',async({firstFail,secondFail,reverse})=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:0,connected:false});opened.push(h)
+  h.services.observeDatabaseScope();h.repo.projectAreas.create({id:'area',user_id:'u',name:'AREA'})
+  await h.stores.useProjectAreaStore.getState().hydrate('u')
+  h.services.db.exec("CREATE TEMP TABLE area_fault(enabled INTEGER);INSERT INTO area_fault VALUES(0);CREATE TEMP TRIGGER area_abort BEFORE UPDATE ON project_areas WHEN (SELECT enabled FROM area_fault)=1 BEGIN SELECT RAISE(ABORT,'Synthetic area write failure');END")
+  const update=h.repo.projectAreas.update.bind(h.repo.projectAreas),releases:Array<()=>void>=[]
+  h.repo.projectAreas.update=async(...args:unknown[])=>{
+    const failure=releases.length===0?firstFail:secondFail
+    h.services.db.prepare('UPDATE area_fault SET enabled=?').run(failure?1:0)
+    let row:unknown,error:unknown
+    try{row=update(...args)}catch(value){error=value}
+    await new Promise<void>(resolve=>{releases.push(resolve)})
+    if(error)throw error
+    return row
+  }
+  const store=h.stores.useProjectAreaStore
+  store.getState().toggleCollapsed('area');await h.untilIdle()
+  store.getState().toggleCollapsed('area');await h.untilIdle()
+  expect(releases).toHaveLength(2)
+  const order=reverse?[1,0]:[0,1]
+  for(const index of order){releases[index]();await h.untilIdle()}
+  expect(store.getState().areas[0].is_collapsed).toBe(h.repo.projectAreas.findById('area').is_collapsed)
+  expect(h.fixtureErrors).toEqual([])
+})
+it('does not publish a held failed-area recovery read over a newer successful click',async()=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:0,connected:false});opened.push(h)
+  h.repo.projectAreas.create({id:'area',user_id:'u',name:'AREA'});await h.stores.useProjectAreaStore.getState().hydrate('u')
+  const original=h.repo.projectAreas.update.bind(h.repo.projectAreas),read=h.repo.projectAreas.findById.bind(h.repo.projectAreas)
+  let release!:()=>void,entered!:()=>void,fail=true,hold=true
+  const ready=new Promise<void>(r=>{entered=r}),wait=new Promise<void>(r=>{release=r})
+  h.repo.projectAreas.update=(...args:unknown[])=>{if(fail){fail=false;throw Error('Synthetic failed write')}return original(...args)}
+  h.repo.projectAreas.findById=async(...args:unknown[])=>{const row=read(...args);if(hold){hold=false;entered();await wait}return row}
+  const first=h.stores.useProjectAreaStore.getState().updateArea('area',{is_collapsed:1}).catch((error:unknown)=>error)
+  await ready
+  await h.stores.useProjectAreaStore.getState().updateArea('area',{is_collapsed:0})
+  release();expect(String(await first)).toContain('Synthetic failed write');await h.untilIdle()
+  expect(h.stores.useProjectAreaStore.getState().areas[0].is_collapsed).toBe(0)
+  expect(read('area').is_collapsed).toBe(0)
+  expect(h.fixtureErrors).toEqual([])
+})

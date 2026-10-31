@@ -114,7 +114,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   error: null,
 
   async hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId)
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
     const initial = useLabelStore.getState()
     try {
       if (!await isCurrent()) return

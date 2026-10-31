@@ -200,16 +200,18 @@ function App(): React.JSX.Element {
   const hydrateAllTaskLabels = useTaskStore((s) => s.hydrateAllTaskLabels)
   useEffect(() => {
     if (!currentProjectId || !userId) return
+    const origin = captureSyncProducer()
     const unsub = window.api.onTasksChanged(() => {
-      hydrateProjects(userId)
-      hydrateStatuses(currentProjectId)
-      hydrateLabels(currentProjectId)
-      hydrateAllForUser(userId)
-      hydrateAllTaskLabels(currentProjectId)
-      hydrateMyDay(userId)
+      try { origin.assertCurrent() } catch { return }
+      hydrateProjects(userId, origin)
+      hydrateStatuses(currentProjectId, origin)
+      hydrateLabels(currentProjectId, origin)
+      hydrateAllForUser(userId, origin)
+      hydrateAllTaskLabels(currentProjectId, origin)
+      hydrateMyDay(userId, origin)
       hydrateSettings()
       // Local MCP / quick-add writes can change saved-view membership too.
-      useSavedViewStore.getState().scheduleRecount(userId)
+      useSavedViewStore.getState().scheduleRecount(userId, origin)
     })
     return unsub
   }, [currentProjectId, userId, databaseScope, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForUser, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
@@ -218,8 +220,10 @@ function App(): React.JSX.Element {
   const currentView = useViewStore((s) => s.currentView)
   useEffect(() => {
     if (!userId) return
+    const origin = captureSyncProducer()
     const onVisible = (): void => {
-      if (!document.hidden) hydrateMyDay(userId)
+      try { origin.assertCurrent() } catch { return }
+      if (!document.hidden) hydrateMyDay(userId, origin)
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)

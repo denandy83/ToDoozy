@@ -24,6 +24,7 @@ interface Inbox {
 interface Session {
   owner: User
   origin: SyncProducer
+  accepted: Map<string, () => Promise<string>>
   isActive(): boolean
   databaseChanged(): void
 }
@@ -91,7 +92,7 @@ export function useProjectInvitations(): {
       if (sessionRef.current === session) sessionRef.current = null
     }
     const session: Session = {
-      owner, origin, isActive: () => ownsAccount() && sessionRef.current === session,
+      owner, origin, accepted: new Map(), isActive: () => ownsAccount() && sessionRef.current === session,
       databaseChanged: () => {
         if (!session.isActive()) return
         stop()
@@ -149,10 +150,10 @@ export function useProjectInvitations(): {
     const invitation = state.items[0]
     if (!session?.isActive() || state.owner?.id !== session.owner.id || !invitation) return
     const token = invitation.token
-    const remove = (): void => updateOwned(session, (next) => ({
+    const remove = (): void => { session.accepted.delete(token); updateOwned(session, (next) => ({
       ...next, items: next.items.filter((item) => item.token !== token),
       error: next.error?.token === token ? null : next.error
-    }))
+    })) }
     if (state.busyToken || (operationRef.current?.session === session && operationRef.current.token === token)) return
     // The expired-dialog OK button is a local dismissal, not a server mutation.
     if (invitation.expired) { remove(); return }
@@ -164,7 +165,8 @@ export function useProjectInvitations(): {
     try {
       if (!await scopeIsCurrent(session) || inboxRef.current.items[0]?.token !== token) return
       if (action === 'accept') {
-        const projectId = await acceptInvite(token, session.owner.id, session.origin)
+        const resume = session.accepted.get(token)
+        const projectId = resume ? await resume() : await acceptInvite(token, session.owner.id, session.origin, (complete) => { session.accepted.set(token, complete) })
         if (await stillSelected()) {
           session.origin.assertCurrent()
           await useProjectStore.getState().hydrateProjects(session.owner.id, session.origin)

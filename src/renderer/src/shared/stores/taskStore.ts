@@ -1,6 +1,6 @@
 import { withSyncProducer, captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { reportPushFailure } from '../../services/syncFeedback'
-import { hydrationContext } from './hydrationContext'
+import { type HydrationOrigin, hydrationContext } from './hydrationContext'
 import { evictProjectData } from './projectCache'
 import { useMemo, useRef } from 'react'
 import { sortSubtasksForDisplay } from '../utils/sortTasks'
@@ -186,11 +186,11 @@ interface TaskState {
 
 interface TaskActions {
   hydrateTasks(projectId: string): Promise<void>
-  hydrateMyDay(userId: string): Promise<void>
+  hydrateMyDay(userId: string, origin?: HydrationOrigin): Promise<void>
   hydrateArchived(projectId: string): Promise<void>
   hydrateTemplates(projectId: string): Promise<void>
   hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
-  hydrateAllForUser(userId: string): Promise<void>
+  hydrateAllForUser(userId: string, origin?: HydrationOrigin): Promise<void>
   createTask(input: CreateTaskInput): Promise<Task>
   updateTask(id: string, input: UpdateTaskInput): Promise<Task | null>
   deleteTask(id: string): Promise<boolean>
@@ -201,7 +201,7 @@ interface TaskActions {
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
   hydrateTaskLabels(taskId: string, producer?: SyncProducer): Promise<void>
-  hydrateAllTaskLabels(projectId: string): Promise<void>
+  hydrateAllTaskLabels(projectId: string, origin?: HydrationOrigin): Promise<void>
   setCurrentTask(id: string | null): void
   navigateTask(id: string): void
   selectTask(id: string, options?: { fromContextMenu?: boolean; openPanel?: boolean }): void
@@ -265,7 +265,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   error: null,
 
   async hydrateTasks(projectId: string): Promise<void> {
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId)
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId, getUserId())
     const initial = get()
     try {
       if (!await isCurrent()) return
@@ -282,8 +282,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateMyDay(userId: string): Promise<void> {
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext()
+  async hydrateMyDay(userId: string, origin?: HydrationOrigin): Promise<void> {
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, undefined, userId)
     const initial = get()
     try {
       const { getSetting } = useSettingsStore.getState()
@@ -301,7 +301,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async hydrateArchived(projectId: string): Promise<void> {
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId)
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(undefined, projectId, getUserId())
     const initial = get()
     try {
       const tasks = await api.tasks.findArchived(projectId)
@@ -331,7 +331,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async hydrateAllForProject(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, projectId)
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, projectId, getUserId())
     const initial = get()
     try {
       if (!await isCurrent()) return
@@ -350,8 +350,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllForUser(userId: string): Promise<void> {
-    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext()
+  async hydrateAllForUser(userId: string, origin?: HydrationOrigin): Promise<void> {
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, undefined, userId)
     const initial = get()
     try {
       const allProjects = await api.projects.getProjectsForUser(userId)
@@ -785,7 +785,10 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
       projectId = task?.project_id
       if (!task || !isProjectCurrent(task.project_id) || !await isCurrent()) return
       assertCurrent()
-      const labels = await api.labels.findByTaskId(taskId)
+      const project = hydrationContext({ api, isCurrent, assertCurrent }, task.project_id, getUserId())
+      if (!await project.isCurrent()) return
+      const labels = await project.api.labels.findByTaskId(taskId)
+      if (!await project.isCurrent()) return
       if (!await isCurrent() || !isProjectCurrent(task.project_id)) return
       assertCurrent()
       set((state) => state.taskLabels[taskId] === initial && isProjectCurrent(task.project_id)
@@ -797,8 +800,8 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     }
   },
 
-  async hydrateAllTaskLabels(projectId: string): Promise<void> {
-    const { api, isCurrent, assertCurrent } = hydrationContext(undefined, projectId)
+  async hydrateAllTaskLabels(projectId: string, origin?: HydrationOrigin): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, getUserId())
     const initial = get().taskLabels
     try {
       const mappings: TaskLabelMapping[] = await api.labels.findTaskLabelsByProject(projectId)
