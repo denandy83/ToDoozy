@@ -48,6 +48,7 @@ describe('DEFAULT_TIMER_PRESETS', () => {
 describe('useTimerStore', () => {
   // We need to mock window.api for the store to work
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.stubGlobal('window', {
       ...globalThis.window,
       api: {
@@ -68,6 +69,7 @@ describe('useTimerStore', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 

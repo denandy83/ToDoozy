@@ -426,8 +426,7 @@ export async function pushProjectLabel(
       // another user it should already be on Supabase from their push.
       const localLabel = await origin.api.labels.findById(labelId)
       if (!deletedAt && localLabel) {
-        const { useAuthStore } = await import('../shared/stores/authStore')
-        const authedUserId = useAuthStore.getState().currentUser?.id ?? null
+        const authedUserId = origin.userId
         if (authedUserId && localLabel.user_id === authedUserId) {
           labelId = await pushLabel(localLabel, authedUserId, origin) ?? labelId
           effectiveId = labelId
@@ -471,7 +470,7 @@ export async function pushProjectLabel(
  * is tombstoned. (Remote task_labels has no `deleted_at`, so cleanup must
  * be a hard DELETE rather than a tombstone.)
  */
-export async function pushRemoveLabelFromProject(projectId: string, labelId: string): Promise<void> {
+export async function pushRemoveLabelFromProject(projectId: string, labelId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!(await origin.api.sync.getQueue()).some((entry) => { const intent = JSON.parse(entry.payload); return entry.table_name === 'task_labels' && intent.remove_project_label && intent.projectId === projectId && intent.labelId === labelId })) return
     const { processSyncQueue, getOnlineStatus } = await import('./SyncService')
@@ -480,7 +479,7 @@ export async function pushRemoveLabelFromProject(projectId: string, labelId: str
     if (!client) { await refreshProducerPending(origin); return }
     if (!await origin.isCurrent()) return
     await processSyncQueue({ api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() })
-  })
+  }, producer)
 }
 
 /**
@@ -488,7 +487,7 @@ export async function pushRemoveLabelFromProject(projectId: string, labelId: str
  * Hard-DELETE is reserved for the 30-day purge job; tombstones are how
  * other devices learn the label is gone (Realtime UPDATE event).
  */
-export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
+export async function deleteLabelFromSupabase(labelId: string, producer?: SyncProducer): Promise<void> {
   return withSyncProducer(async (origin) => {
     if (!(await hasLiveSession(origin, 'deleteLabel', `label=${labelId}`))) return
     try {
@@ -507,7 +506,7 @@ export async function deleteLabelFromSupabase(labelId: string): Promise<void> {
     } catch (err) {
       await reportPushFailure(origin, 'deleteLabel', err, 'user_labels', labelId, JSON.stringify({ id: labelId, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }), 'UPDATE')
     }
-  })
+  }, producer)
 }
 
 /**
@@ -1410,7 +1409,7 @@ export async function pullProjectMetadata(projectId: string, context?: SyncConte
     const supabase = context.client
     const { data: remote, error } = await supabase
       .from('projects')
-      .select('name, color, icon, description, updated_at, is_archived, archive_updated_at')
+      .select('name, color, icon, description, updated_at, is_archived, archive_updated_at, deleted_at')
       .eq('id', projectId)
       .maybeSingle()
 
@@ -1866,25 +1865,43 @@ async function refreshRemoteProjects(userId: string, context: SyncContext, proje
   const { refreshProjectLabels } = await import('./remoteProjectRefresh')
   for (const projectId of projectIds) {
     if (!navigator.onLine || isSuspended() || !await context.isCurrent()) break
+    const { useProjectStore } = await import('../shared/stores/projectStore')
+    const cachedProject = useProjectStore.getState().projects[projectId]
     const metadataChanged = await pullProjectMetadata(projectId, context)
-    if (metadataChanged) await reconcileProjectSubscriptions(context, true, new Set([projectId]))
+    if (metadataChanged) {
+      const snapshot = await context.api.projects.findById(projectId)
+      if (snapshot) {
+        const { discoverRemoteMemberships } = await import('./SyncService')
+        await discoverRemoteMemberships(userId, context, snapshot)
+      }
+      await reconcileProjectSubscriptions(context, true, new Set([projectId]))
+    }
     const project = await context.api.projects.findById(projectId)
-    if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) continue
+    if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) {
+      const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
+      await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
+      continue
+    }
+    if (!await context.isCurrent()) return { pushed: 0, pulled }
+    useProjectStore.setState((state) => state.projects[projectId] === cachedProject ? { projects: { ...state.projects, [projectId]: project } } : {})
     const ids = taskIds.get(projectId) ?? new Set<string>()
     if (project.is_archived === 1) {
       await refreshEventTaskLabels(projectId, ids, context)
+      if (cachedProject?.is_archived !== project.is_archived || cachedProject?.archive_updated_at !== project.archive_updated_at || ids.size) {
+        const [{ useTaskStore }, { useSavedViewStore }] = await Promise.all([import('../shared/stores/taskStore'), import('../shared/stores/savedViewStore')])
+        await useTaskStore.getState().hydrateAllForProject(projectId, context)
+        await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
+      }
       continue
     }
     pulled += await pullNewTasks(projectId, context, true, ids)
     pulled += await pullActivityLogForProject(projectId, userId, context)
     await refreshProjectLabels(projectId, context)
-    const [{ useTaskStore }, { useStatusStore }, { useProjectStore }] = await Promise.all([
-      import('../shared/stores/taskStore'), import('../shared/stores/statusStore'), import('../shared/stores/projectStore')
+    const [{ useTaskStore }, { useStatusStore }] = await Promise.all([
+      import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
     ])
-    const cachedProject = useProjectStore.getState().projects[projectId]
     await Promise.all([useTaskStore.getState().hydrateAllForProject(projectId, context), useStatusStore.getState().hydrateStatuses(projectId, context)])
     if (!await context.isCurrent()) return { pushed: 0, pulled }
-    useProjectStore.setState((state) => state.projects[projectId] === cachedProject ? { projects: { ...state.projects, [projectId]: project } } : {})
     const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
     await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
   }
@@ -2597,7 +2614,7 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
       if (state.cancelled) return
       try { context.assertCurrent() } catch { return }
-      void requestSyncCatchUp(context).catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
+      void requestProjectRefresh(context, [projectId]).catch((error) => logEvent('error', 'sync', 'Project metadata refresh failed', String(error)))
     })
   // Archived projects retain only restore/metadata discovery, not task activity.
   if (!archived) channel

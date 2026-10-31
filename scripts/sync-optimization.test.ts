@@ -34,6 +34,10 @@ interface Harness {
   }
   channels: Channel[]
   requests: Array<{ table: string; method: string; url: string; body: unknown }>
+  authorizations: string[]
+  setSession(token: string, userId?: string): void
+  beforeSession(callback: () => Promise<void>): void
+  producer(): import('../src/renderer/src/services/syncContext').SyncProducer
   logs: unknown[]
   nativeCalls: Array<{ namespace: string; method: string; args: unknown[] }>
   context(): Promise<import('../src/renderer/src/services/syncContext').SyncContext>
@@ -50,7 +54,7 @@ interface Harness {
 }
 const require = createRequire(import.meta.url)
 const fixture = require('./benchmark-sync.cjs') as {
-  makeHarness(options: { projectCount: number; archived?: number; shared?: number; connected?: boolean }): Promise<Harness>
+  makeHarness(options: { projectCount: number; archived?: number; shared?: number; connected?: boolean; inspectAuthorization?: boolean }): Promise<Harness>
   trafficScenario(options: { projectCount: number; connected: boolean; archived?: number; flaps?: number }): Promise<{ timerRequests: number; activeFallbackIntervals: number; initialRequests: number }>
   eventScenario(options: { projectCount: number; shared: boolean }): Promise<{ requests: number; extraNextTimerRequests: number; remoteWrites: number; requestsByTable: Record<string, number> }>
   behaviorScenarios(): Promise<Array<{ name: string; passed: boolean; error?: string }>>
@@ -502,5 +506,163 @@ it.each([false, true])('hydrates only the affected project after actual healthy 
     expect(calls.filter(call => call.namespace === 'savedViews').every(call => call.method === 'countMatching' && String(call.args[0]).includes('p0'))).toBe(true)
     expect(calls.filter(call => call.namespace === 'tasks' && call.method === 'getLabelState').every(call => call.args[0] === 'cached-0')).toBe(true)
     expect(h.maxConcurrent()).toBe(1)
+  } finally { cleanup() }
+})
+
+
+it.each([false, true].flatMap(shared => ['tasks','statuses','project_labels','activity_log','rejoin','queued'].map(event => ({ shared, event }))))('uses refreshed singleton credentials on a healthy $event callback (shared=$shared)', async ({ shared, event }) => {
+  const h = await make({ projectCount: 2, shared: shared ? 2 : 0, inspectAuthorization: true })
+  h.setSession('synthetic-old-expired')
+  const task = h.repo.tasks.create({ id: 'token-task', owner_id: 'u', project_id: 'p0', status_id: 's0', title: 'Before' })
+  h.remote.tasks.push({ ...task })
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const origin = await h.context()
+    const channel = active(h, `${shared ? 'project' : 'personal'}:p0`)
+    h.authorizations.length = 0
+    Object.assign(h.remote.tasks[0], { title: 'Fresh token task', updated_at: stamp })
+    h.setSession('synthetic-new-refreshed')
+    if (event === 'rejoin') channel.status('SUBSCRIBED')
+    else if (event === 'queued') h.services.refresh.scheduleRemoteProjectRefresh('p0', origin, [task.id])
+    else if (event === 'project_labels') {
+      const label = h.repo.labels.create({ id: 'fresh-label', user_id: 'u', name: 'Fresh' })
+      h.remote.user_labels.push({ ...label })
+      const link = { project_id: 'p0', label_id: label.id, created_at: stamp, deleted_at: null }
+      h.remote.project_labels.push(link); channel.emit(event, 'INSERT', link)
+    } else if (event === 'activity_log') {
+      const row = { id: 'fresh-activity', project_id: 'p0', task_id: task.id, user_id: 'u', action: 'Fresh activity', created_at: stamp }
+      h.remote.activity_log.push(row); channel.emit(event, 'INSERT', row)
+    } else channel.emit(event, 'UPDATE', event === 'tasks' ? h.remote.tasks[0] : h.remote.statuses[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useTaskStore.getState().tasks[task.id].title).toBe('Fresh token task')
+    expect(h.authorizations.length).toBeGreaterThan(0)
+    expect(h.authorizations.every(value => value === 'Bearer synthetic-new-refreshed')).toBe(true)
+    expect(h.stores.useSyncStore.getState().realtimeConnected).toBe(true)
+    expect(h.maxConcurrent()).toBe(1)
+  } finally { cleanup() }
+})
+
+it.each(['account','database','session-user'])('rejects a stale producer token resolution after %s replacement', async change => {
+  const h = await make({ projectCount: 1, inspectAuthorization: true })
+  h.setSession('synthetic-old-expired')
+  const origin = await h.context()
+  let entered!: () => void, finish!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  h.beforeSession(() => { entered(); return new Promise(resolve => { finish = resolve }) })
+  const operation = origin.client.from('tasks').select('*').throwOnError()
+  const rejected = expect(Promise.resolve(operation)).rejects.toThrow(/account|database|session/i)
+  await started
+  if (change !== 'session-user') h.setAccount(change === 'account' ? 'other' : 'u')
+  h.setSession('synthetic-replacement', change === 'database' ? 'u' : 'other')
+  finish(); await rejected
+  expect(h.authorizations).toEqual([])
+  if (change !== 'session-user') await expect(origin.api.tasks.findById('reused')).rejects.toThrow(/database|account/i)
+})
+
+it('refreshes a cached producer client before a queued task publication', async () => {
+  const h = await make({ projectCount: 1, inspectAuthorization: true })
+  h.setSession('synthetic-old-expired')
+  const producer = h.producer()
+  await producer.client()
+  const task = h.repo.tasks.create({ id: 'queued-token', owner_id: 'u', project_id: 'p0', status_id: 's0', title: 'Queued with refreshed auth' })
+  h.setSession('synthetic-new-refreshed')
+  await h.services.personal.pushTask(task, producer)
+  expect(h.remote.tasks.find(row => row.id === task.id)?.title).toBe(task.title)
+  expect(h.authorizations.length).toBeGreaterThan(0)
+  expect(h.authorizations.every(value => value === 'Bearer synthetic-new-refreshed')).toBe(true)
+})
+
+it.each([false, true])('keeps metadata rename and archive/restore callbacks scoped (shared=%s)', async shared => {
+  const h = await make({ projectCount: 2, shared: shared ? 2 : 0 })
+  for (let index = 0; index < 2; index++) {
+    const task = h.repo.tasks.create({ id: `metadata-${index}`, owner_id: 'u', project_id: `p${index}`, status_id: `s${index}`, title: `Task ${index}` })
+    h.remote.tasks.push({ ...task })
+  }
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const topic = `${shared ? 'project' : 'personal'}:p0`
+    const unaffected = active(h, `${shared ? 'project' : 'personal'}:p1`)
+    const unrelatedTask = h.stores.useTaskStore.getState().tasks['metadata-1']
+    h.nativeCalls.length = 0
+    Object.assign(h.remote.projects[0], { name: 'Renamed p0', updated_at: stamp })
+    active(h, topic).emit('projects', 'UPDATE', h.remote.projects[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useProjectStore.getState().projects.p0.name).toBe('Renamed p0')
+    for (const archived of [1,0]) {
+      const updated = `2030-01-0${archived ? 2 : 3}T00:00:00.000Z`
+      Object.assign(h.remote.projects[0], { is_archived: archived, archive_updated_at: updated, updated_at: updated })
+      active(h, topic).emit('projects', 'UPDATE', h.remote.projects[0])
+      await h.runTimers(); await h.untilIdle()
+      expect(h.stores.useProjectStore.getState().projects.p0.is_archived).toBe(archived)
+      expect(h.stores.useTaskStore.getState().tasks['metadata-0'].is_archived).toBe(archived)
+      if (archived) expect(tables(active(h, topic))).toEqual(['projects'])
+      else expect(tables(active(h, topic))).toContain('tasks')
+    }
+    expect(h.stores.useTaskStore.getState().tasks['metadata-1']).toBe(unrelatedTask)
+    expect(unaffected.closed).toBe(false)
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    for (const call of h.nativeCalls.filter(call => ['findByProjectId','findAllByProject','findTaskLabelsByProject','getMembers'].includes(call.method))) expect(call.args[0]).toBe('p0')
+    const late = active(h, topic)
+    cleanup(); await h.untilIdle()
+    const requests = h.requests.length
+    late.emit('projects', 'UPDATE', h.remote.projects[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(h.requests).toHaveLength(requests)
+  } finally { cleanup() }
+})
+
+
+it('reclassifies owner projects and channel bindings from scoped metadata membership discovery', async () => {
+  const h = await make({ projectCount: 2 })
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    const unrelated = active(h, 'personal:p1')
+    h.nativeCalls.length = 0
+    h.requests.length = 0
+    const personal = active(h, 'personal:p0')
+    h.remote.project_members.push({ project_id: 'p0', user_id: 'other', role: 'member' })
+    Object.assign(h.remote.projects[0], { name: 'Now shared', updated_at: stamp })
+    personal.emit('projects', 'UPDATE', h.remote.projects[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(personal.closed).toBe(true)
+    expect(active(h, 'project:p0')).toBeDefined()
+    expect(h.stores.useProjectStore.getState().projects.p0.is_shared).toBe(1)
+    expect(h.stores.useProjectStore.getState().members.p0.map(member => member.user_id).sort()).toEqual(['other','u'])
+    const shared = active(h, 'project:p0')
+    h.remote.project_members = h.remote.project_members.filter(member => member.project_id !== 'p0' || member.user_id === 'u')
+    Object.assign(h.remote.projects[0], { name: 'Personal again', updated_at: '2030-01-02T00:00:00.000Z' })
+    shared.emit('projects', 'UPDATE', h.remote.projects[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(shared.closed).toBe(true)
+    expect(active(h, 'personal:p0')).toBeDefined()
+    expect(h.stores.useProjectStore.getState().projects.p0.is_shared).toBe(0)
+    expect(h.stores.useProjectStore.getState().members.p0.map(member => member.user_id)).toEqual(['u'])
+    expect(unrelated.closed).toBe(false)
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    for (const request of h.requests.filter(row => row.table === 'project_members')) expect(new URL(request.url).searchParams.get('project_id')).toBe('eq.p0')
+  } finally { cleanup() }
+})
+
+
+it.each([false, true])('removes a remotely tombstoned project from scoped caches while retaining restore data (shared=%s)', async shared => {
+  const h = await make({ projectCount: 2, shared: shared ? 2 : 0 })
+  const task = h.repo.tasks.create({ id: 'retained-project-task', owner_id: 'u', project_id: 'p0', status_id: 's0', title: 'Retained for restore' })
+  h.remote.tasks.push({ ...task })
+  const cleanup = await h.run()
+  try {
+    await h.untilIdle()
+    h.nativeCalls.length = 0
+    Object.assign(h.remote.projects[0], { deleted_at: stamp, updated_at: stamp })
+    active(h, `${shared ? 'project' : 'personal'}:p0`).emit('projects', 'UPDATE', h.remote.projects[0])
+    await h.runTimers(); await h.untilIdle()
+    expect(h.stores.useProjectStore.getState().projects.p0).toBeUndefined()
+    expect(h.stores.useTaskStore.getState().tasks[task.id]).toBeUndefined()
+    expect(h.repo.projects.findById('p0')?.deleted_at).toBe(stamp)
+    expect(h.repo.tasks.findById(task.id)).toBeDefined()
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    expect(h.stores.useProjectStore.getState().projects.p1).toBeDefined()
   } finally { cleanup() }
 })

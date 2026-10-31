@@ -28,7 +28,7 @@ function App(): React.JSX.Element {
   const { hydrateProjects, currentProjectId } = useProjectStore()
   const { hydrateStatuses } = useStatusStore()
   const { hydrateLabels } = useLabelStore()
-  const { hydrateAllForProject } = useTaskStore()
+  const { hydrateAllForProject, hydrateAllForUser } = useTaskStore()
   const { setUserId: setSettingsUserId, hydrateSettings, hydrateThemes } = useSettingsStore()
   const { hydrateProjectTemplates } = useTemplateStore()
   const { addToast } = useToast()
@@ -65,10 +65,11 @@ function App(): React.JSX.Element {
       hydrateSettings()
       hydrateThemes()
       hydrateProjects(currentUser.id)
+      hydrateAllForUser(currentUser.id)
       hydrateProjectTemplates(currentUser.id)
       window.api.tray.setUserId(currentUser.id)
     }
-  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateProjectTemplates])
+  }, [isAuthenticated, currentUser, setSettingsUserId, hydrateSettings, hydrateThemes, hydrateProjects, hydrateAllForUser, hydrateProjectTemplates])
 
   const startupUserId = currentUser?.id ?? null
   useEffect(() => {
@@ -190,7 +191,7 @@ function App(): React.JSX.Element {
       hydrateProjects(currentUser.id)
       hydrateStatuses(currentProjectId)
       hydrateLabels(currentProjectId)
-      hydrateAllForProject(currentProjectId)
+      hydrateAllForUser(currentUser.id)
       hydrateAllTaskLabels(currentProjectId)
       hydrateMyDay(currentUser.id)
       hydrateSettings()
@@ -198,7 +199,7 @@ function App(): React.JSX.Element {
       useSavedViewStore.getState().scheduleRecount(currentUser.id)
     })
     return unsub
-  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForProject, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
+  }, [currentProjectId, currentUser, hydrateProjects, hydrateStatuses, hydrateLabels, hydrateAllForUser, hydrateAllTaskLabels, hydrateMyDay, hydrateSettings])
 
   // Re-run My Day auto-add on app resume (sleep/wake) and window refocus
   const currentView = useViewStore((s) => s.currentView)

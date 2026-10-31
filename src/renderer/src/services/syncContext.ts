@@ -58,7 +58,13 @@ export function captureSyncProducer(active: () => boolean = () => true): SyncPro
     await assertDatabase()
     return createClient(config.url, config.anonKey, {
       global: { fetch: supabaseRequestMetrics.wrap(globalThis.fetch, config.url) },
-      accessToken: async () => { await assertDatabase(); return session.access_token },
+      accessToken: async () => {
+        await assertDatabase()
+        const current = await requireSession()
+        await assertDatabase()
+        if (!current || current.user.id !== userId) throw new Error('Sync session account changed or signed out')
+        return current.access_token
+      },
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
     })
   })()

@@ -65,7 +65,7 @@ async function createSharedChannel(projectId: string, state: SharedChannelState)
   const channel = supabase
     .channel(`project:${projectId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${projectId}` }, () => {
-      try { if (state.cancelled) return; context.assertCurrent(); void requestSyncCatchUp(context).catch(() => {}) } catch { return }
+      try { if (state.cancelled) return; context.assertCurrent(); void requestProjectRefresh(context, [projectId]).catch(() => {}) } catch { return }
     })
   if (!archived) channel.on(
       'postgres_changes',
@@ -907,17 +907,25 @@ export function countMembersByProject(rows: { project_id: string }[]): Map<strin
  * Discover shared projects the user is a member of in Supabase
  * but doesn't have locally. Returns project IDs to sync down.
  */
-export async function discoverRemoteMemberships(userId: string, context?: SyncContext): Promise<string[]> {
+export async function discoverRemoteMemberships(userId: string, context?: SyncContext, scopedProject?: Project): Promise<string[]> {
   if (!navigator.onLine || isSuspended()) return []
   context ??= await captureSyncContext(() => navigator.onLine && !isSuspended())
   if (!await context.isCurrent() || useAuthStore.getState().currentUser?.id !== userId) return []
   const { api, client } = context
-  const { data: memberships, error } = await readAll(() => client.from('project_members').select('*').eq('user_id', userId), ['project_id', 'user_id'])
+  const { data: membershipRows, error } = await readAll(() => {
+    const query = client.from('project_members').select('*')
+    return scopedProject ? query.eq('project_id', scopedProject.id) : query.eq('user_id', userId)
+  }, ['project_id', 'user_id'])
   if (error) throw new Error(error.message)
+  const memberships = scopedProject ? membershipRows.filter((member) => member.user_id === userId) : membershipRows
   const ids = memberships.map((member) => member.project_id as string)
-  const { data: projects, error: projectError } = await readAllIn(ids, (batch) => client.from('projects').select('*').in('id', batch))
+  const { data: projects, error: projectError } = scopedProject
+    ? { data: memberships.length ? [scopedProject] : [], error: null }
+    : await readAllIn(ids, (batch) => client.from('projects').select('*').in('id', batch))
   if (projectError) throw new Error(projectError.message)
-  const { data: members, error: memberError } = await readAllIn(ids, (batch) => client.from('project_members').select('*').in('project_id', batch), ['project_id','user_id'])
+  const { data: members, error: memberError } = scopedProject
+    ? { data: membershipRows, error: null }
+    : await readAllIn(ids, (batch) => client.from('project_members').select('*').in('project_id', batch), ['project_id','user_id'])
   if (memberError) throw new Error(memberError.message)
   const counts = countMembersByProject(members as Array<{ project_id: string }>)
   const accessible = new Set(projects.filter((project) => !project.deleted_at).map((project) => project.id as string))
@@ -928,13 +936,20 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     if (!local) missing.push(project.id)
     const owner = await api.users.findById(project.owner_id)
     if (!owner) await api.users.create({ id: project.owner_id, email: placeholderEmail(project.owner_id), display_name: null, avatar_url: null })
-    await api.projects.applyRemote({ ...local, ...project })
+    if (!scopedProject) await api.projects.applyRemote({ ...local, ...project })
     const isShared = project.owner_id !== userId || (counts.get(project.id) ?? 0) > 1 ? 1 : 0
     if ((await api.projects.findById(project.id))?.is_shared !== isShared) await api.projects.update(project.id, { is_shared: isShared })
     await syncMembersDown(project.id, context, members.filter((member) => member.project_id === project.id) as ProjectMember[])
+    if (scopedProject) {
+      const snapshot = await api.projects.getMembers(project.id)
+      const { useProjectStore } = await import('../shared/stores/projectStore')
+      if (!await context.isCurrent()) return missing
+      useProjectStore.setState((state) => ({ members: { ...state.members, [project.id]: snapshot } }))
+    }
   }
-  for (const local of await api.projects.getProjectsForUser(userId)) {
-    if (accessible.has(local.id) || local.owner_id === userId) continue
+  const localProjects = scopedProject ? [scopedProject] : await api.projects.getProjectsForUser(userId)
+  for (const local of localProjects) {
+    if (accessible.has(local.id) || (local.owner_id === userId && !local.deleted_at)) continue
     await unsubscribeFromProject(local.id)
     const { unsubscribePersonalProject } = await import('./PersonalSyncService')
     await unsubscribePersonalProject(local.id)

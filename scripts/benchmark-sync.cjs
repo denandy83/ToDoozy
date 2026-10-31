@@ -17,14 +17,16 @@ function textOf(file, ref) {
 }
 async function compilation(ref) {
   const app = ts.createSourceFile('App.tsx', textOf('src/renderer/src/App.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let effect, startupEffect;
+  let effect, startupEffect, localBootstrapEffect, localChangeEffect;
   function walk(node) {
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('realtimeEffectRunCount.current += 1')) effect = node.arguments[0].getText(app);
     if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[1]?.getText(app).includes('startupUserId')) startupEffect = node.arguments[0].getText(app);
+    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.tray.setUserId')) localBootstrapEffect = node.arguments[0].getText(app);
+    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect' && node.arguments[0]?.getText(app).includes('window.api.onTasksChanged')) localChangeEffect = node.arguments[0].getText(app);
     ts.forEachChild(node, walk);
   }
   walk(app);
-  if (!effect || !startupEffect) throw Error('App sync effect unavailable');
+  if (!effect || !startupEffect || !localBootstrapEffect || !localChangeEffect) throw Error('App sync effect unavailable');
   const entry = `
     import { DatabaseSync } from 'node:sqlite';
     import { migrations } from '../../main/database/migrations';
@@ -32,7 +34,7 @@ async function compilation(ref) {
     import * as personal from './services/PersonalSyncService';
     import * as shared from './services/SyncService';
     import * as user from './services/UserChannelService';
-    import { captureSyncContext } from './services/syncContext';
+    import { captureSyncContext, captureSyncProducer } from './services/syncContext';
     import { isSuspended } from './services/powerState';
     import { useAuthStore } from './shared/stores/authStore';
     import { useSyncStore } from './shared/stores/syncStore';
@@ -45,6 +47,7 @@ async function compilation(ref) {
     import { useViewStore } from './shared/stores/viewStore';
     import * as refresh from './services/remoteProjectRefresh';
     import { useSettingsStore } from './shared/stores/settingsStore';
+    import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent } from './shared/stores/logStore';
     const db=new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys=ON;CREATE TABLE schema_version(version INTEGER PRIMARY KEY)');
@@ -53,7 +56,13 @@ async function compilation(ref) {
     const realtimeEffectRunCount={current:0},currentProjectRef={current:null};
     function runEffect(){const userId=useAuthStore.getState().currentUser?.id,isOffline=false;return (${effect})();}
     function runStartup(){const startupUserId=useAuthStore.getState().currentUser?.id,isAuthenticated=!!startupUserId,isOffline=false;return (${startupEffect})();}
-    globalThis.fixture={personal,shared,user,refresh,captureSyncContext,repo,db,runEffect,runStartup,
+    const {hydrateProjects}=useProjectStore.getState(),{hydrateStatuses}=useStatusStore.getState(),{hydrateLabels}=useLabelStore.getState();
+    const {hydrateAllForProject,hydrateAllForUser,hydrateMyDay,hydrateAllTaskLabels}=useTaskStore.getState();
+    const {setUserId:setSettingsUserId,hydrateSettings,hydrateThemes}=useSettingsStore.getState();
+    const {hydrateProjectTemplates}=useTemplateStore.getState();
+    function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
+    function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
+    globalThis.fixture={personal,shared,user,refresh,captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useSyncStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){
@@ -97,7 +106,8 @@ function expression(row,value) {
   if(value.startsWith('and('))return split(value.slice(4,-1)).every(x=>expression(row,x));
   const dot=value.indexOf('.');return predicate(row,value.slice(0,dot),value.slice(dot+1));
 }
-async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0}={}) {
+async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false}={}) {
+  const authorizations=[];let session=null,beforeSession=null,localChange=null;
   const requests=[],channels=[],logs=[],fixtureErrors=[],intervals=new Map(),timers=new Map();
   const remote={projects:[],project_members:[],tasks:[],statuses:[],user_labels:[],user_settings:[],user_themes:[],user_saved_views:[],user_project_areas:[],project_templates:[],project_labels:[],task_labels:[],activity_log:[]};
   let nextId=1,active=0,maxConcurrent=0,suspended=false,disposed=false,generation=1,beforeRequest=null;
@@ -110,6 +120,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     try {
       if(beforeRequest){const callback=beforeRequest;beforeRequest=null;await callback()}
       if(latency)await new Promise(resolve=>setTimeout(resolve,latency));
+      if(inspectAuthorization)authorizations.push(new Headers(options.headers).get('authorization'));
       const body=options.body?JSON.parse(options.body):null;
       const record={url:String(url),body,table,method,requestBytes:Buffer.byteLength(String(url))+Buffer.byteLength(options.body??''),responseBytes:0,transportMs:performance.now()-start};requests.push(record);
       const finish=(data,status=200)=>{const json=JSON.stringify(data);record.responseBytes+=Buffer.byteLength(json);return new Response(method==='HEAD'?null:json,{status,headers:{'Content-Type':'application/json','Content-Range':`0-${Math.max(0,data?.length-1)}/${Array.isArray(data)?data.length:1}`}})};
@@ -143,19 +154,19 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   };
   runtime.transport=transport;
   const rest=createClient('http://127.0.0.1:9999','synthetic-public-key',{auth:{persistSession:false,autoRefreshToken:false},global:{fetch:transport}});
-  runtime.client={from:(...args)=>rest.from(...args),rpc:(...args)=>rest.rpc(...args),auth:{getSession:async()=>({data:{session:{user:{id:'u'},access_token:'synthetic'}}})},channel(topic){
+  runtime.client={from:(...args)=>rest.from(...args),rpc:(...args)=>rest.rpc(...args),auth:{getSession:async()=>{if(beforeSession){const callback=beforeSession;beforeSession=null;await callback()}return {data:{session:session??{user:{id:sandbox.fixture?.stores.useAuthStore.getState().currentUser?.id??'u'},access_token:'synthetic'}}}}},channel(topic){
     const channel={topic,state:'joining',closed:false,bindings:[],on(_kind,filter,callback){this.bindings.push({filter,callback});return this},subscribe(callback){this.status=status=>{if(status==='SUBSCRIBED')this.state='joined';callback(status)};channels.push(this);if(connected)queueMicrotask(()=>{if(!this.closed)this.status('SUBSCRIBED')});return this},emit(table,eventType='UPDATE',row={}){for(const binding of this.bindings)if(binding.filter.table===table)binding.callback({eventType,new:row,old:row})}};
     return channel;
   },removeChannel:async(channel)=>{channel.closed=true;channel.state='closed';return 'ok'}};
   const code=await compilation(ref);
   const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
     setInterval:(fn,ms)=>{const id=nextId++;intervals.set(id,{fn,ms});return id},clearInterval:id=>intervals.delete(id),setTimeout:(fn,ms)=>{const id=nextId++;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id)};
-  runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>({user:{id:sandbox.fixture?.stores.useAuthStore.getState().currentUser?.id??'u'},access_token:'synthetic'});runtime.isSuspended=()=>suspended;
+  runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>(await runtime.client.auth.getSession()).data.session;runtime.isSuspended=()=>suspended;
   vm.createContext(sandbox);
   vm.runInContext(code,sandbox);
   const fixture=sandbox.fixture,{repo,stores}=fixture;
   const nativeCalls=[];
-  const api=new Proxy({}, {get:(_,namespace)=>new Proxy({}, {get:(_,method)=>async(...args)=>{
+  const api=new Proxy({}, {get:(_,namespace)=>namespace==='onTasksChanged'?callback=>{localChange=callback;return ()=>{localChange=null}}:new Proxy({}, {get:(_,method)=>async(...args)=>{
     if(namespace!=='sync')nativeCalls.push({namespace,method,args});
     if(namespace==='app'&&method==='getChangelog')return '# Synthetic changelog';
     if(namespace==='releaseNotes'&&method==='sync')return {ok:true,count:0,cached:true};
@@ -189,8 +200,8 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
   stores.useAuthStore.setState({currentUser:{id:'u'},isOffline:false});stores.useSettingsStore.getState().setUserId('u');stores.useSyncStore.setState({realtimeConnected:connected});
   await stores.useProjectStore.getState().hydrateProjects('u');
   const untilIdle=async()=>{let quiet=0,last=-1;for(let i=0;i<2000;i++){await settle();if(!active&&requests.length===last)quiet++;else quiet=0;last=requests.length;if(quiet>=10)return;if(latency)await new Promise(resolve=>setTimeout(resolve,latency))}throw Error('Fixture did not settle')};
-  return {sandbox,services:fixture,repo,stores,projects,remote,requests,nativeCalls,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
-    run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),untilIdle,context:()=>fixture.captureSyncContext(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
+  return {sandbox,services:fixture,repo,stores,projects,remote,requests,nativeCalls,authorizations,channels,logs,fixtureErrors,intervals,timers,codeFingerprint:createHash('sha256').update(code).digest('hex'),
+    run:()=>fixture.runEffect(),runStartup:()=>fixture.runStartup(),runLocalBootstrap:()=>fixture.runLocalBootstrap(),runLocalChanges:()=>fixture.runLocalChanges(),emitLocalChange:()=>localChange?.(),setSession:(token,userId='u')=>{session={user:{id:userId},access_token:token}},beforeSession:callback=>{beforeSession=callback},untilIdle,context:()=>fixture.captureSyncContext(),producer:()=>fixture.captureSyncProducer(),maxConcurrent:()=>maxConcurrent,setSuspended:value=>{suspended=value},setAccount:value=>{generation++;stores.useAuthStore.setState({currentUser:value?{id:value}:null})},
     changeConnected:value=>stores.useSyncStore.getState().setRealtimeConnected(value),beforeRequest:callback=>{beforeRequest=callback},
     runStartupTimers:async()=>{const jobs=[...timers].filter(([,job])=>job.ms===2000);for(const [id,{fn}] of jobs){timers.delete(id);await fn()}await untilIdle()},
     runIntervals:async()=>{for(const {fn}of [...intervals.values()])await fn();await untilIdle()},runTimers:async()=>{const jobs=[...timers.values()];timers.clear();for(const {fn}of jobs)await fn();await untilIdle()},

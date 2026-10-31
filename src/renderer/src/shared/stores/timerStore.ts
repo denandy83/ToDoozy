@@ -113,16 +113,19 @@ function clearTickInterval(): void {
   }
 }
 
+function checkpointTimer(): void {
+  const state = useTimerStore.getState()
+  if (!tickInterval || !state.isRunning || state.isPaused) return
+  const now = Date.now()
+  const elapsed = Math.max(0, (now - lastTickAt) / 1000)
+  lastTickAt = now
+  if (elapsed > 0) state.tick(elapsed)
+}
+
 function startTickInterval(): void {
   clearTickInterval()
   lastTickAt = Date.now()
-  tickInterval = setInterval(() => {
-    const now = Date.now()
-    const elapsed = Math.max(0, Math.floor((now-lastTickAt)/1000))
-    if (!elapsed) return
-    lastTickAt += elapsed*1000
-    useTimerStore.getState().tick(elapsed)
-  }, 1000)
+  tickInterval = setInterval(checkpointTimer, 1000)
 }
 
 // ── Day boundary helper ───────────────────────────────────────────────
@@ -241,48 +244,32 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   },
 
   pause(): void {
+    checkpointTimer()
+    if (!get().isRunning || get().isPaused) return
     clearTickInterval()
     set({ isPaused: true })
     syncTrayTimer(get())
   },
 
   resume(): void {
+    if (!get().isRunning || !get().isPaused) return
     set({ isPaused: false })
     startTickInterval()
     syncTrayTimer(get())
   },
 
   skipBreak(): void {
+    checkpointTimer()
     const state = get()
-    if (!state.isRunning || state.phase !== 'break') return
-    // Cookie break uses backToWork() instead
-    if (state.isCookieBreakPhase) return
-
+    if (!state.isRunning || state.phase !== 'break' || state.isCookieBreakPhase) return
     clearTickInterval()
-    if (state.isFlowtime) {
-      // Flowtime without cookie: resume counting up from 0
-      set({
-        phase: 'work',
-        remainingSeconds: state.workSeconds,
-        elapsedSeconds: 0,
-        isLongBreak: false,
-        currentRep: state.currentRep + 1
-      })
-    } else {
-      // Normal: start next work rep
-      set({
-        phase: 'work',
-        remainingSeconds: state.workSeconds,
-        elapsedSeconds: 0,
-        isLongBreak: false,
-        currentRep: state.currentRep + 1
-      })
-    }
-    startTickInterval()
+    advanceRepOrStop(get, set)
+    if (get().isRunning && !get().isPaused) startTickInterval()
     syncTrayTimer(get())
   },
 
   stop(): void {
+    checkpointTimer()
     clearTickInterval()
     const state = get()
 
@@ -332,6 +319,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   },
 
   startFlowtimeBreak(): void {
+    checkpointTimer()
     const state = get()
     if (!state.isRunning || !state.isFlowtime || state.phase !== 'work') return
     // If cookie break is enabled, use startCookieBreak instead
@@ -360,6 +348,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   },
 
   startCookieBreak(): void {
+    checkpointTimer()
     const state = get()
     if (!state.isRunning || !state.isCookieBreak || state.phase !== 'work') return
 
@@ -374,6 +363,7 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   },
 
   backToWork(): void {
+    checkpointTimer()
     const state = get()
     if (!state.isRunning || !state.isCookieBreakPhase || state.phase !== 'break') return
 
@@ -503,6 +493,7 @@ function advanceRepOrStop(
     })
     syncTrayTimer(get())
   } else {
+    set({ isRunning: false })
     get().stop()
   }
 }
@@ -625,6 +616,7 @@ export function formatTimeRemaining(seconds: number): string {
 /** Drop private task context without writing an old-account focus session. */
 export function resetTimerForAccount(): void {
   clearTickInterval()
+  lastTickAt = 0
   cachedUserId = null
   useTimerStore.setState(useTimerStore.getInitialState(), true)
   if (typeof window !== 'undefined') {
