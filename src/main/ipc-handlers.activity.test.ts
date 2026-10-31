@@ -138,3 +138,43 @@ it.each(['a','b'])('announces the current native scope on a switch to %s before 
     await expect(invoke('sync:invokeContext',old,'projects:getMembers',['p'])).rejects.toThrow('database changed')
   } finally {vi.mocked(getMainWindow).mockReset()}
 })
+
+it('projects fresh native junction reads while retaining cohort and unfiltered IPC compatibility',async()=>{
+  const repo=repositories[0]
+  repo.projects.create({id:'q',owner_id:'a',name:'Q'})
+  repo.projects.create({id:'shared',owner_id:'a',name:'SHARED'})
+  repo.projects.update('shared',{is_shared:1})
+  for(const project of ['p','q','shared']) {
+    repo.labels.create({id:'link-'+project,user_id:'a',name:'LINK '+project,project_id:project})
+    repo.labels.removeFromProject(project,'link-'+project)
+  }
+  const origin=captureSyncProducer()
+  const personal=await origin.api.labels.getProjectLabelsForOwner('a')
+  expect(personal.map(row=>row.project_id).sort()).toEqual(['p','q'])
+  expect(await origin.api.labels.getProjectLabelsForOwner('a','p')).toEqual(personal.filter(row=>row.project_id==='p'))
+  expect(await origin.api.labels.getProjectLabelsForOwner('a','shared')).toEqual([])
+  expect(await origin.api.labels.getProjectLabelsForOwner('other','p')).toEqual([])
+  const shared=await origin.api.labels.getProjectLabelsForSharedProjects()
+  expect(shared).toHaveLength(1);expect(shared[0]).toMatchObject({project_id:'shared',label_id:'link-shared',deleted_at:expect.any(String)})
+  expect(await origin.api.labels.getProjectLabelsForSharedProjects('shared')).toEqual(shared)
+  expect(await origin.api.labels.getProjectLabelsForSharedProjects('q')).toEqual([])
+  repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'link-p',created_at:'2030-01-01T00:00:00.000Z',deleted_at:null})
+  expect((await origin.api.labels.getProjectLabelsForOwner('a','p'))[0]).toMatchObject({created_at:'2030-01-01T00:00:00.000Z',deleted_at:null})
+})
+
+it('bulk-resolves native task IDs and rejects moved-task label imports atomically through IPC',async()=>{
+  const repo=repositories[0]
+  repo.projects.create({id:'q',owner_id:'a',name:'Q'})
+  repo.statuses.create({id:'qs',project_id:'q',name:'OPEN'})
+  repo.tasks.create({id:'t',project_id:'p',owner_id:'a',status_id:'s',title:'T'})
+  repo.tasks.create({id:'qt',project_id:'q',owner_id:'a',status_id:'qs',title:'Q'})
+  const origin=captureSyncProducer()
+  expect((await origin.api.tasks.findByIds(['qt','missing','t','qt'])).map(row=>row.id)).toEqual(['qt','t','qt'])
+  expect(await origin.api.tasks.findByIds([])).toEqual([])
+  repo.tasks.update('t',{project_id:'q',status_id:'qs'})
+  expect(await origin.api.tasks.applyRemoteTaskLabels('t',['l'],[],'p')).toBe(0)
+  expect(repo.tasks.getLabels('t')).toEqual([])
+  expect(repo.labels.findByProjectId('q')).toEqual([])
+  expect(await origin.api.tasks.applyRemoteTaskLabels('t',['l'],[],'q')).toBe(1)
+  expect(repo.tasks.getLabels('t').map(row=>row.label_id)).toEqual(['l'])
+})

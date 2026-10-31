@@ -608,7 +608,8 @@ export class LabelRepository {
    * IDs) and get re-pushed every reconcile cycle.
    */
   getProjectLabelsForOwner(
-    userId: string
+    userId: string,
+    projectId?: string
   ): Array<{ project_id: string; label_id: string; created_at: string; deleted_at: string | null }> {
     return this.db
       .prepare(
@@ -616,9 +617,9 @@ export class LabelRepository {
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
          WHERE p.owner_id = ?
-           AND COALESCE(p.is_shared, 0) = 0`
+           AND COALESCE(p.is_shared, 0) = 0${projectId === undefined ? '' : ' AND pl.project_id = ?'}`
       )
-      .all(userId) as unknown as Array<{
+      .all(...(projectId === undefined ? [userId] : [userId, projectId])) as unknown as Array<{
       project_id: string
       label_id: string
       created_at: string
@@ -631,7 +632,7 @@ export class LabelRepository {
    * on any project marked is_shared=1. The user has local access to these
    * projects (they're a member or owner), so all rows here are reconcilable.
    */
-  getProjectLabelsForSharedProjects(): Array<{
+  getProjectLabelsForSharedProjects(projectId?: string): Array<{
     project_id: string
     label_id: string
     created_at: string
@@ -642,9 +643,9 @@ export class LabelRepository {
         `SELECT pl.project_id, pl.label_id, pl.created_at, pl.deleted_at
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
-         WHERE COALESCE(p.is_shared, 0) = 1`
+         WHERE COALESCE(p.is_shared, 0) = 1${projectId === undefined ? '' : ' AND pl.project_id = ?'}`
       )
-      .all() as unknown as Array<{
+      .all(...(projectId === undefined ? [] : [projectId])) as unknown as Array<{
       project_id: string
       label_id: string
       created_at: string

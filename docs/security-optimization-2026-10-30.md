@@ -34,6 +34,16 @@ bulk data repair in this change. User-retired reports and `later` features remai
 outside this work. No paid compute, Broadcast migration, or new cloud telemetry
 table is required for these fixes.
 
+Exact label-name lookups keep PostgreSQL's directional case matching. When a
+candidate exists, a second owner-, ID- and exact-name-filtered read validates it
+against the original escaped pattern before reuse or consolidation. This adds
+one read per existing-label lookup (and per sync collision lookup); an absent
+candidate still takes one read. A renamed, removed or unverifiable candidate
+returns an error rather than creating or merging another identity. Recovery
+junction reads are constrained by project, and known-project task-label imports
+reuse their retained context; arbitrary task IDs use a bounded native bulk read.
+These are app request/native transfer costs, not measured physical cloud I/O.
+
 ## Invitation response lifecycle
 
 Invitation state and queued dialogs belong to their authenticated user. Reads,

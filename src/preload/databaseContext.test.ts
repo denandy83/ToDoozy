@@ -52,3 +52,15 @@ it.each([false, true])('keeps a native scope announcement ahead of an older held
   expect(api.sync.currentContext()).toBe('[null,3]')
   expect(listener).toHaveBeenCalledTimes(2)
 })
+
+it('forwards optional project constraints and bulk task ownership through preload',async()=>{
+  harness.invoke.mockResolvedValue([])
+  await api.labels.getProjectLabelsForOwner('u','p')
+  expect(harness.invoke).toHaveBeenLastCalledWith('labels:getProjectLabelsForOwner','u','p')
+  await api.labels.getProjectLabelsForSharedProjects('p')
+  expect(harness.invoke).toHaveBeenLastCalledWith('labels:getProjectLabelsForSharedProjects','p')
+  await api.tasks.findByIds(['t','q'])
+  expect(harness.invoke).toHaveBeenLastCalledWith('tasks:findByIds',['t','q'])
+  await api.tasks.applyRemoteTaskLabels('t',['l'],[],'p')
+  expect(harness.invoke).toHaveBeenLastCalledWith('tasks:applyRemoteTaskLabels','t',['l'],[],'p')
+})

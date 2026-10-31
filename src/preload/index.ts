@@ -21,6 +21,7 @@ const api: TodoozyAPI = {
     hostRecent: () => ipcRenderer.invoke('diagnostics:hostRecent')
   },
   tasks: {
+    findByIds: (ids: string[]) => ipcRenderer.invoke('tasks:findByIds', ids),
     findById: (id) => ipcRenderer.invoke('tasks:findById', id),
     findByProjectId: (projectId) => ipcRenderer.invoke('tasks:findByProjectId', projectId),
     findByStatusId: (statusId) => ipcRenderer.invoke('tasks:findByStatusId', statusId),
@@ -42,8 +43,8 @@ const api: TodoozyAPI = {
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
-    applyRemoteTaskLabels: (taskId, labelIds, baseline) =>
-      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline),
+    applyRemoteTaskLabels: (taskId, labelIds, baseline, projectId) =>
+      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline, projectId),
     getLabelState: (taskId) => ipcRenderer.invoke('tasks:getLabelState',taskId),
     acknowledgeLabelState: (taskId,delivered) => ipcRenderer.invoke('tasks:acknowledgeLabelState',taskId,delivered),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
@@ -78,10 +79,10 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:removeFromProject', projectId, labelId),
     addToProject: (projectId, labelId) =>
       ipcRenderer.invoke('labels:addToProject', projectId, labelId),
-    getProjectLabelsForOwner: (userId) =>
-      ipcRenderer.invoke('labels:getProjectLabelsForOwner', userId),
-    getProjectLabelsForSharedProjects: () =>
-      ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects'),
+    getProjectLabelsForOwner: (userId, projectId) =>
+      ipcRenderer.invoke('labels:getProjectLabelsForOwner', userId, projectId),
+    getProjectLabelsForSharedProjects: (projectId) =>
+      ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects', projectId),
     applyRemoteProjectLabel: (remote) =>
       ipcRenderer.invoke('labels:applyRemoteProjectLabel', remote),
     softDeleteTaskLabelsForProjectLabel: (projectId, labelId) =>

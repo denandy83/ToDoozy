@@ -99,6 +99,16 @@ export class TaskRepository {
 
   // Raw find — returns the row even if soft-deleted (sync layer needs this to
   // compare local vs remote timestamps and to detect tombstones).
+  findByIds(ids: string[]): Task[] {
+    const rows: Task[] = []
+    for (let index = 0; index < ids.length; index += 400) {
+      const chunk = ids.slice(index, index + 400)
+      rows.push(...this.db.prepare(`SELECT * FROM tasks WHERE id IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as unknown as Task[])
+    }
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return ids.flatMap((id) => { const row = byId.get(id); return row ? [row] : [] })
+  }
+
   findById(id: string): Task | undefined {
     return this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as unknown as Task | undefined
   }
@@ -493,10 +503,10 @@ export class TaskRepository {
     new SyncQueueRepository(this.db).enqueue('task_labels',taskId,'UPDATE',JSON.stringify({task_id:taskId,assignment_intent:true}))
   }
 
-  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): number {
-    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.applyRemoteTaskLabels(taskId,labelIds,baseline))
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[], projectId?: string): number {
+    if (!this.db.isTransaction) return withTransaction(this.db,()=>this.applyRemoteTaskLabels(taskId,labelIds,baseline,projectId))
     const task = this.findById(taskId)
-    if (!task) return 0
+    if (!task || (projectId !== undefined && task.project_id !== projectId)) return 0
     const current = this.getLabelState(taskId)
     const before = new Map(baseline?.map((row)=>[row.label_id,row]))
     const existing = new Map(current.map((row)=>[row.label_id,row]))

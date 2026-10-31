@@ -280,6 +280,8 @@ export function registerIpcHandlers(): void {
   // ── Tasks ──────────────────────────────────────────────────────────
   handle('tasks:rebaseSyncVersion', (_e, id: string, expectedAt: string, appliedAt: string) => getRepos().tasks.rebaseSyncVersion(id, expectedAt, appliedAt))
 
+  handle('tasks:findByIds', (_e, ids: string[]) => getRepos().tasks.findByIds(ids))
+
   handle('tasks:findById', (_e, id: string) => {
     return getRepos().tasks.findById(id) ?? null
   })
@@ -476,12 +478,12 @@ export function registerIpcHandlers(): void {
     return getRepos().labels.addToProject(projectId, labelId)
   })
 
-  handle('labels:getProjectLabelsForOwner', (_e, userId: string) => {
-    return getRepos().labels.getProjectLabelsForOwner(userId)
+  handle('labels:getProjectLabelsForOwner', (_e, userId: string, projectId?: string) => {
+    return getRepos().labels.getProjectLabelsForOwner(userId, projectId)
   })
 
-  handle('labels:getProjectLabelsForSharedProjects', () => {
-    return getRepos().labels.getProjectLabelsForSharedProjects()
+  handle('labels:getProjectLabelsForSharedProjects', (_e, projectId?: string) => {
+    return getRepos().labels.getProjectLabelsForSharedProjects(projectId)
   })
 
   handle(

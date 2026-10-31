@@ -432,15 +432,19 @@ async function consolidateLocalLabel(
     // Fetch the canonical remote row in full — we need its data to insert
     // into local labels before the FK-bound junction remap can run.
     const namePattern = `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
-    const { data: remote, error: lookupErr } = await supabase
+    let { data: remote, error: lookupErr } = await supabase
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
       .filter('name', 'imatch', namePattern)
       .limit(1)
       .maybeSingle()
-    if (lookupErr || !remote || typeof remote.name !== 'string' || new RegExp(namePattern, 'iu').exec(remote.name)?.[0] !== remote.name) return false
-    if ((remote.id as string) === localId) return false
+    if (lookupErr || !remote || remote.id === localId) return false
+    if (typeof remote.id !== 'string' || typeof remote.name !== 'string') return false
+    const { data: verified, error: verificationError } = await supabase.from('user_labels').select('*')
+      .eq('user_id', userId).eq('id', remote.id).eq('name', remote.name).filter('name', 'imatch', namePattern).maybeSingle()
+    if (verificationError || !verified || verified.id !== remote.id || verified.name !== remote.name || verified.user_id !== userId) return false
+    remote = verified
     // If the canonical remote is tombstoned, revive it before remapping —
     // otherwise our local junctions would point at a deleted row.
     if (remote.deleted_at) {

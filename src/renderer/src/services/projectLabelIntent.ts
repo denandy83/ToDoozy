@@ -7,8 +7,8 @@ export async function currentProjectLink(projectId: string, labelId: string, api
   const project = await api.projects.findById(projectId)
   if (!project) return null
   const links = project.is_shared === 1
-    ? await api.labels.getProjectLabelsForSharedProjects()
-    : await api.labels.getProjectLabelsForOwner(project.owner_id)
+    ? await api.labels.getProjectLabelsForSharedProjects(projectId)
+    : await api.labels.getProjectLabelsForOwner(project.owner_id, projectId)
   const link = links.find((row) => row.project_id === projectId && row.label_id === labelId)
   return link ? { created_at: link.created_at, deleted_at: link.deleted_at } : null
 }
@@ -18,7 +18,7 @@ export async function currentProjectLabelFamily(projectId: string, labelId: stri
   const project = await api.projects.findById(projectId)
   if (!project) return []
   const name = labelName ?? (await api.labels.findById(labelId))?.name
-  const links = project.is_shared === 1 ? await api.labels.getProjectLabelsForSharedProjects() : await api.labels.getProjectLabelsForOwner(project.owner_id)
+  const links = project.is_shared === 1 ? await api.labels.getProjectLabelsForSharedProjects(projectId) : await api.labels.getProjectLabelsForOwner(project.owner_id, projectId)
   const family = []
   for (const link of links.filter((row) => row.project_id === projectId)) {
     if (link.label_id === labelId || (name && (await api.labels.findById(link.label_id))?.name.toLowerCase() === name.toLowerCase())) family.push(link)

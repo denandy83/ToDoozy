@@ -22,6 +22,7 @@ const cases = [
   { name: 'Star*Percent', unrelated: 'Star%Percent', canonical: 'Star*Percent' },
   { name: String.raw`Folder\Cost*%_2026`, unrelated: 'FolderCostXYZ2026', canonical: String.raw`Folder\Cost*%_2026` },
   { name: 'Regex.^$+?()[]{}|', unrelated: 'RegexX', canonical: 'Regex.^$+?()[]{}|' },
+  { name: 'ırmak', unrelated: 'ırmak extra', canonical: 'IRMAK' },
   { name: 'οσ', unrelated: 'οσ extra', canonical: 'ΟΣ' },
   { name: 'ος', unrelated: 'ος extra', canonical: 'ΟΣ' },
   { name: 'Name \"quoted\",value', unrelated: 'Name quoted,value', canonical: 'NAME \"QUOTED\",VALUE' },
@@ -36,6 +37,8 @@ type TransportOptions = {
   roles?: Array<{current_user: string; rolbypassrls: boolean}>
   mismatch?: boolean
   rejectReads?: boolean
+  recheck?: 'rename' | 'remove' | 'error'
+  reads?: number
 }
 function labelTransport(pg: Database, role: 'authenticated' | 'service_role', options: TransportOptions = {}): (input: string, init?: RequestInit) => Promise<Response> {
   const columns = new Set(['id','user_id','name','color','order_index','created_at','updated_at','deleted_at','project_id','label_id','role'])
@@ -49,6 +52,11 @@ function labelTransport(pg: Database, role: 'authenticated' | 'service_role', op
     try {
       const roleRow = (await pg.query<{current_user: string; rolbypassrls: boolean}>('SELECT current_user,rolbypassrls FROM pg_roles WHERE rolname=current_user')).rows[0]
       options.roles?.push(roleRow)
+      const namedRead = method==='GET' && table==='user_labels' && url.searchParams.has('name')
+      if (namedRead) options.reads = (options.reads ?? 0) + 1
+      if (namedRead && options.reads===2 && options.recheck==='rename') await pg.query('UPDATE user_labels SET name=$1 WHERE id=$2',['RENAMED CANDIDATE',canonicalId])
+      if (namedRead && options.reads===2 && options.recheck==='remove') await pg.query('DELETE FROM user_labels WHERE id=$1',[canonicalId])
+      if (namedRead && options.reads===2 && options.recheck==='error') throw Object.assign(new Error('Synthetic verification failure'),{code:'57014'})
       if (options.rejectReads && method==='GET' && table==='user_labels') throw Object.assign(new Error('Synthetic read failure'),{code:'57014'})
       let rows: Row[] = []
       if (method==='POST') {
@@ -155,7 +163,7 @@ it.each(schedules)('consolidates $name literally through $path ($state)', async 
     expect(queries).toEqual([])
   } else {
     if (path==='push') expect(effective).toBe(canonicalId)
-    expect(queries).toEqual([{user_id:labelId(1),name:canonical,color:'#00AA11'}])
+    expect(queries).toEqual(Array.from({length:2},()=>({user_id:labelId(1),name:canonical,color:'#00AA11'})))
     expect(h.repo.labels.findById(sourceId)).toBeUndefined()
     expect(h.repo.labels.findByTaskId('literal-task').map((row:{id:string;name:string;color:string})=>({id:row.id,name:row.name,color:row.color}))).toEqual([{id:canonicalId,name:canonical,color:'#00AA11'}])
     expect(h.repo.labels.findByProjectId('p0').map((row:{id:string})=>row.id)).toEqual([canonicalId])
@@ -179,7 +187,8 @@ it.each(siblingSchedules)('resolves $name literally through $surface ($state)', 
   if (state==='present') await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4)',[canonicalId,labelId(1),canonical,'#00AA11'])
   const roles: Array<{current_user: string;rolbypassrls: boolean}> = [], denied: string[] = []
   const role = surface==='mcp'?'service_role':'authenticated'
-  h.sandbox.fetch = labelTransport(pg,role,{roles,denied})
+  const cost: TransportOptions = {roles,denied}
+  h.sandbox.fetch = labelTransport(pg,role,cost)
   const client = (await h.context()).client
   let result: LabelResult | undefined
   if (surface==='main') result = await new siblings.SupabaseLabelRepository(client,'u').findByName('u',name)
@@ -195,6 +204,7 @@ it.each(siblingSchedules)('resolves $name literally through $surface ($state)', 
   expect(links).toEqual(surface==='mcp'?[result!.id,labelId(91)].sort():[labelId(91)])
   expect((await pg.query('SELECT name,color FROM user_labels WHERE id=$1',[unrelatedId])).rows).toEqual([{name:unrelated,color:'#AA1100'}])
   expect(roles.length).toBeGreaterThan(0); expect(roles.every(row=>row.current_user===role&&row.rolbypassrls===(role==='service_role'))).toBe(true)
+  expect(cost.reads).toBe(state==='present'?2:1)
   expect(denied).toEqual([]); expect(h.fixtureErrors).toEqual([])
 },15000)
 
@@ -224,12 +234,11 @@ it.each(['main','mcp'])('rejects a mismatched returned name through $0 lookup', 
   await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4)',[canonicalId,labelId(1),name,'#00AA11'])
   h.sandbox.fetch = labelTransport(pg,surface==='mcp'?'service_role':'authenticated',{mismatch:true})
   const client = (await h.context()).client
-  if (surface==='main') expect(await new siblings.SupabaseLabelRepository(client,'u').findByName('u',name)).toBeUndefined()
+  if (surface==='main') await expect(new siblings.SupabaseLabelRepository(client,'u').findByName('u',name)).rejects.toThrow('Label changed during lookup')
   else {
     const envelope = await siblings.dispatchTool('create_label',{project_id:'p0',name,color:'#553399'},{handlers:siblings.createHandlers(siblings.createRepos(client,'u'),'u')})
-    expect(envelope.isError).not.toBe(true)
-    const result = JSON.parse(envelope.content[0].text)
-    expect(result).toMatchObject({name,color:'#553399'}); expect(result.id).not.toBe(canonicalId)
+    expect(envelope.isError).toBe(true)
+    expect(envelope.content[0].text).toContain('Label changed during lookup')
   }
   expect((await pg.query('SELECT * FROM project_labels WHERE label_id=$1',[canonicalId])).rows).toEqual([])
   expect(h.fixtureErrors).toEqual([])
@@ -250,5 +259,52 @@ it('retains MCP project authorization and read failures during literal lookup', 
   const failed = await dispatch({project_id:'p0',name:'NEW * LABEL'})
   expect(failed.isError).toBe(true); expect(failed.content[0].text).toContain('Synthetic read failure')
   expect((await pg.query('SELECT * FROM user_labels WHERE name=$1',['NEW * LABEL'])).rows).toEqual([])
+  expect(h.fixtureErrors).toEqual([])
+},15000)
+
+it.each(['push','reconcile','main','mcp'].flatMap(surface=>['rename','remove','error'].map(recheck=>({surface,recheck}))))('stops $surface when candidate verification encounters $recheck',async({surface,recheck})=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,connected:false})
+  const pg=await makeLabelAuthorizationDatabase();opened.push({h,pg})
+  await pg.exec('GRANT SELECT ON project_members TO service_role')
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4),($5,$6,$7,$8)',[sourceId,labelId(2),'FOREIGN','#444444',canonicalId,labelId(1),'IRMAK','#00AA11'])
+  const source=h.repo.labels.create({id:sourceId,user_id:'u',project_id:'p0',name:'ırmak',color:'#444444'})
+  h.repo.tasks.create({id:'literal-task',project_id:'p0',owner_id:'u',status_id:'s0',title:'PENDING TASK'})
+  h.repo.tasks.addLabel('literal-task',sourceId)
+  h.repo.syncQueue.enqueue('user_labels',sourceId,'UPDATE',JSON.stringify(source))
+  const before=h.repo.tasks.getLabelState('literal-task')
+  const cost: TransportOptions={recheck:recheck as TransportOptions['recheck']}
+  h.sandbox.fetch=labelTransport(pg,surface==='mcp'?'service_role':'authenticated',cost)
+  const client=(await h.context()).client
+  if(surface==='push')expect(await h.services.personal.pushLabel(source,'u',h.producer())).toBeUndefined()
+  else if(surface==='reconcile')await expect(h.services.syncTables.SYNC_TABLES.labels.remoteUpsert(source,await h.context())).rejects.toMatchObject({code:'42501'})
+  else if(surface==='main')await expect(new siblings.SupabaseLabelRepository(client,'u').findByName('u','ırmak')).rejects.toThrow(/Label changed|Synthetic verification failure/)
+  else {
+    const result=await siblings.dispatchTool('create_label',{project_id:'p0',name:'ırmak',color:'#553399'},{handlers:siblings.createHandlers(siblings.createRepos(client,'u'),'u')})
+    expect(result.isError).toBe(true)
+  }
+  expect(cost.reads).toBe(2)
+  expect(h.repo.labels.findById(sourceId)).toEqual(source)
+  expect(h.repo.tasks.getLabelState('literal-task')).toEqual(before)
+  expect(h.repo.labels.findByProjectId('p0').map((row:LabelResult)=>row.id)).toEqual([sourceId])
+  expect(h.repo.syncQueue.findAll().some((row:{row_id:string})=>row.row_id===sourceId)).toBe(true)
+  expect((await pg.query('SELECT id FROM user_labels WHERE user_id=$1 AND name=$2',[labelId(1),'ırmak'])).rows).toEqual([])
+  expect((await pg.query('SELECT * FROM project_labels WHERE label_id=$1',[canonicalId])).rows).toEqual([])
+  expect(h.fixtureErrors).toEqual([])
+},15000)
+
+it.each(['main','mcp'])('keeps the database directional nonmatch for ASCII I versus dotless ı through %s',async surface=>{
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,connected:false})
+  const pg=await makeLabelAuthorizationDatabase();opened.push({h,pg})
+  await pg.exec('GRANT SELECT ON project_members TO service_role')
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color) VALUES($1,$2,$3,$4)',[canonicalId,labelId(1),'ırmak','#00AA11'])
+  h.sandbox.fetch=labelTransport(pg,surface==='mcp'?'service_role':'authenticated')
+  const client=(await h.context()).client
+  if(surface==='main')expect(await new siblings.SupabaseLabelRepository(client,'u').findByName('u','IRMAK')).toBeUndefined()
+  else {
+    const result=await siblings.dispatchTool('create_label',{project_id:'p0',name:'IRMAK',color:'#553399'},{handlers:siblings.createHandlers(siblings.createRepos(client,'u'),'u')})
+    expect(result.isError).not.toBe(true)
+    const row=JSON.parse(result.content[0].text);expect(row).toMatchObject({name:'IRMAK',color:'#553399'});expect(row.id).not.toBe(canonicalId)
+  }
+  expect((await pg.query('SELECT * FROM project_labels WHERE label_id=$1',[canonicalId])).rows).toEqual([])
   expect(h.fixtureErrors).toEqual([])
 },15000)

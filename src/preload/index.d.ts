@@ -46,6 +46,7 @@ import type {
 } from '../shared/types'
 
 export interface TasksAPI {
+  findByIds(ids: string[]): Promise<Task[]>
   findById(id: string): Promise<Task | null>
   findByProjectId(projectId: string): Promise<Task[]>
   findByStatusId(statusId: string): Promise<Task[]>
@@ -69,7 +70,7 @@ export interface TasksAPI {
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
-  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): Promise<number>
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[], projectId?: string): Promise<number>
   getLabelState(taskId: string): Promise<TaskLabelSyncState[]>
   acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): Promise<void>
   getLabels(taskId: string): Promise<TaskLabel[]>
@@ -102,7 +103,7 @@ export interface LabelsAPI {
   consolidate(fromId: string, canonical: Label): Promise<{ taskRemaps: number; projectRemaps: number }>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
-  getProjectLabelsForOwner(userId: string): Promise<
+  getProjectLabelsForOwner(userId: string, projectId?: string): Promise<
     Array<{
       project_id: string
       label_id: string
@@ -110,7 +111,7 @@ export interface LabelsAPI {
       deleted_at: string | null
     }>
   >
-  getProjectLabelsForSharedProjects(): Promise<
+  getProjectLabelsForSharedProjects(projectId?: string): Promise<
     Array<{
       project_id: string
       label_id: string

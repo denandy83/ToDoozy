@@ -1381,7 +1381,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
 
   if (remoteTasks?.length) {
     const { pullTaskLabelsForTasks } = await import('./PersonalSyncService')
-    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context)
+    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context,projectId)
   }
 
   // Delete local tasks that no longer exist in Supabase

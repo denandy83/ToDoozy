@@ -59,14 +59,21 @@ export class SupabaseLabelRepository implements AsyncLabelRepository {
 
   async findByName(userId: string, name: string): Promise<Label | undefined> {
     const namePattern = `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
-    const { data } = await this.client
+    const { data, error } = await this.client
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
       .filter('name', 'imatch', namePattern)
       .limit(1)
-      .single()
-    return typeof data?.name === 'string' && new RegExp(namePattern, 'iu').exec(data.name)?.[0] === data.name ? data : undefined
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) return undefined
+    if (typeof data.id !== 'string' || typeof data.name !== 'string') throw new Error('Invalid label candidate')
+    const { data: verified, error: verificationError } = await this.client.from('user_labels').select('*')
+      .eq('user_id', userId).eq('id', data.id).eq('name', data.name).filter('name', 'imatch', namePattern).maybeSingle()
+    if (verificationError) throw new Error(verificationError.message)
+    if (!verified || verified.id !== data.id || verified.name !== data.name || verified.user_id !== userId) throw new Error('Label changed during lookup')
+    return verified
   }
 
   async create(input: CreateLabelInput): Promise<Label> {

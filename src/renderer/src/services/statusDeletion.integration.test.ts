@@ -46,6 +46,7 @@ let afterLabelSnapshot: (()=>Promise<void>) | null
 let beforeProjectWrite: (()=>Promise<void>) | null
 let projectBatches: number[]
 let failProjectWriteNumber: number | null
+let failLaterProjectWrites: boolean
 let beforeAssignmentWrite: (()=>Promise<void>) | null
 let assignmentBatches: number[], paletteReads: number, failDefinitions: boolean
 let assignmentSchedule: 'delete-last' | 'add-last' | null, failAssignments: boolean
@@ -95,7 +96,7 @@ beforeEach(async () => {
     await remote.query(`INSERT INTO statuses(${keys.join(',')}) VALUES(${keys.map((_,index)=>'$'+(index+1)).join(',')})`,Object.values(status))
   }
   await remote.query('INSERT INTO tasks(id,project_id,status_id) VALUES($1,$2,$3)',[task,project,source])
-  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; beforeAssignmentWrite=null; beforeProjectWrite=null;projectBatches=[];failProjectWriteNumber=null; assignmentBatches=[];paletteReads=0;failDefinitions=false;assignmentSchedule=null;failAssignments=false;assignmentCompletions=[]; setOnlineStatus(false)
+  fail=false; rpcCalls=0; beforeRpc=null; afterRpc=null; failTaskWrites=false; failRecovery=false; failRecoveryResponse=false; beforeLabelWrite=null; taskUpdates=[]; afterLabelSnapshot=null; beforeAssignmentWrite=null; beforeProjectWrite=null;projectBatches=[];failProjectWriteNumber=null;failLaterProjectWrites=false; assignmentBatches=[];paletteReads=0;failDefinitions=false;assignmentSchedule=null;failAssignments=false;assignmentCompletions=[]; setOnlineStatus(false)
   useAuthStore.setState({ currentUser: { id: owner } as never })
   useStatusStore.setState({ statuses: Object.fromEntries(repos.statuses.findByProjectId(project).map((row) => [row.id,row])), error: null })
   vi.mocked(requireSession).mockResolvedValue({ user: { id: owner }, access_token: 'synthetic-owner' } as Session)
@@ -134,7 +135,7 @@ beforeEach(async () => {
         if(table==='tasks' && (values || patch) && (failTaskWrites || (failRecovery && patch))) throw new Error('synthetic task transport failure')
         if(values) {
           if(table==='project_labels') {projectBatches.push(values.length);if(beforeProjectWrite) {const hook=beforeProjectWrite;beforeProjectWrite=null;await hook()}
-            if(failProjectWriteNumber===projectBatches.length) throw new Error('Synthetic delayed sibling failure')
+            if(failProjectWriteNumber!==null && (failProjectWriteNumber===projectBatches.length || (failLaterProjectWrites && projectBatches.length>failProjectWriteNumber))) throw new Error('Synthetic delayed sibling failure')
           }
           if(table==='user_labels' && beforeLabelWrite) {const hook=beforeLabelWrite;beforeLabelWrite=null;await hook()}
           for(const row of values) {
@@ -147,7 +148,7 @@ beforeEach(async () => {
         }
         const params:unknown[]=patch?Object.values(patch):[]
         const bind=(value:unknown):string => { params.push(value); return '$'+params.length }
-        const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:op==='ILIKE'?`${quote(key)} ILIKE ${bind(value)}`:`${quote(key)}=${bind(value)}`).join(' AND ')
+        const where=filters.map(([key,value,op])=>op==='IS'?`${quote(key)} IS NULL`:op==='ANY'?`${quote(key)}=ANY(${bind(value)})`:op==='ILIKE'?`${quote(key)} ILIKE ${bind(value)}`:op==='IMATCH'?`${quote(key)} ~* ${bind(value)}`:`${quote(key)}=${bind(value)}`).join(' AND ')
         if(removing) {
           const data=(await remote.query(`DELETE FROM ${quote(table)} WHERE ${where} RETURNING *`,params)).rows
           if(table==='task_labels') assignmentCompletions.push('delete')
@@ -167,7 +168,8 @@ beforeEach(async () => {
       } catch(error) { return {data:null,error:{message:String(error)}} }
     }
     const chain={
-      ilike(key:string,value:string) {filters.push([key,value,'ILIKE']);return chain},
+      ilike(key:string,value:string) {filters.push([key,value.replace(/\*/g,'%'),'ILIKE']);return chain},
+      filter(key:string,operator:string,value:string) {if(operator!=='imatch')throw new Error('Unsupported fixture operator');filters.push([key,value,'IMATCH']);return chain},
       select(value='*') {columns=value;return chain}, eq(key:string,value:unknown) {filters.push([key,value,'=']);return chain},
       is(key:string,value:unknown) {filters.push([key,value,'IS']);return chain}, in(key:string,value:unknown) {filters.push([key,value,'ANY']);return chain},
       order() {return chain},limit() {return chain},or() {afterCursor=true;return chain},
@@ -783,7 +785,7 @@ it.each([0,1].flatMap((shared)=>['Family','Étiquette'].map((name)=>({shared,nam
   await useLabelStore.getState().removeFromProject(project,canonical)
   const commands=repos.syncQueue.findAll().map((row)=>JSON.parse(row.payload)).filter((row)=>row.remove_project_label)
   expect(commands).toHaveLength(2)
-  projectBatches=[];failProjectWriteNumber=2
+  projectBatches=[];failProjectWriteNumber=2;failLaterProjectWrites=true
   setOnlineStatus(true);await processSyncQueue()
   expect(repos.syncQueue.findAll().filter((row)=>JSON.parse(row.payload).remove_project_label)).toHaveLength(1)
   failProjectWriteNumber=null
@@ -963,7 +965,8 @@ it.each([0,1].flatMap((shared)=>['source','target'].flatMap((newest)=>['add','re
     fresh.tasks.applyRemoteTask(repos.tasks.findById(task)!)
     fresh.labels.applyRemote(repos.labels.findById(family.canonical)!)
     const api=new Proxy({}, {get:(_,ns:keyof typeof fresh)=>new Proxy({}, {get:(_,method:string)=>async(...args:unknown[])=>(fresh[ns] as unknown as Record<string,(...args:unknown[])=>unknown>)[method](...args)})}) as TodoozyAPI
-    await pullTaskLabelsForTasks([task],owner,{...context,api})
+    const apiFor=(guard:()=>void):TodoozyAPI=>new Proxy(api,{get:(target,ns)=>new Proxy(Reflect.get(target,ns),{get:(methods,method)=>async(...args:unknown[])=>{guard();const result=await Reflect.apply(Reflect.get(methods,method),methods,args);guard();return result}})})
+    await pullTaskLabelsForTasks([task],owner,{...context,api,apiFor})
     expect(fresh.labels.findByTaskId(task).map((row)=>row.id).sort()).toEqual([family.unrelated,...(choice==='add'?[family.canonical]:[])].sort())
   } finally {observer.close()}
 },15000)
