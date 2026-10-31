@@ -147,7 +147,7 @@ export interface ProjectsAPI {
   findMaxUpdatedAt(ownerId: string): Promise<string | null>
   applyRemote(project: Project): Promise<Project>
   list(userId: string): Promise<Project[]>
-  addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
+  addMember(projectId: string, userId: string, role: string, invitedBy?: string, joinedAt?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
   updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): Promise<void>
   getMembers(projectId: string): Promise<ProjectMember[]>

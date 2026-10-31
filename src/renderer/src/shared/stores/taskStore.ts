@@ -936,15 +936,29 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
   },
 
   async bulkAddLabel(ids: string[], labelId: string): Promise<void> {
+    const labels = new Map<string, Promise<string>>()
+    const projectSync = new Map<string, Promise<unknown>>()
     await Promise.all(ids.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) })).map(async ({ id, origin }) => {
       try {
         const source = get().tasks[id] ?? await origin.api.tasks.findById(id)
         if (!source) return
         origin.includeProject(source.project_id)
-        const linkId = await resolveLabelForCurrentUser(labelId, origin)
+        let label = labels.get(source.project_id)
+        if (!label) {
+          label = resolveLabelForCurrentUser(labelId, origin)
+          labels.set(source.project_id, label)
+        }
+        const linkId = await label
+        await requireProducerCurrent(origin)
         await origin.api.tasks.addLabel(id, linkId)
-        const { pushProjectLabel } = await import('../../services/PersonalSyncService')
-        await pushProjectLabel(source.project_id, linkId, null, origin)
+        await requireProducerCurrent(origin)
+        let sync = projectSync.get(source.project_id)
+        if (!sync) {
+          sync = import('../../services/PersonalSyncService').then(({ pushProjectLabel }) => pushProjectLabel(source.project_id, linkId, null, origin))
+          projectSync.set(source.project_id, sync)
+        }
+        await sync
+        await requireProducerCurrent(origin)
         await get().hydrateTaskLabels(id, origin)
         await requireProducerCurrent(origin)
         syncIfShared(source, 'UPDATE', origin)

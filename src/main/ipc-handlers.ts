@@ -585,8 +585,8 @@ export function registerIpcHandlers(): void {
 
   handle(
     'projects:addMember',
-    (_e, projectId: string, userId: string, role: string, invitedBy?: string) => {
-      return getRepos().projects.addMember(projectId, userId, role, invitedBy)
+    (_e, projectId: string, userId: string, role: string, invitedBy?: string, joinedAt?: string) => {
+      return getRepos().projects.addMember(projectId, userId, role, invitedBy, joinedAt)
     }
   )
 

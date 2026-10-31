@@ -291,13 +291,13 @@ export class ProjectRepository {
   }
 
   // Project members
-  addMember(projectId: string, userId: string, role: string, invitedBy?: string): void {
+  addMember(projectId: string, userId: string, role: string, invitedBy?: string, joinedAt?: string): void {
     this.db
       .prepare(
         `INSERT INTO project_members (project_id, user_id, role, invited_by, joined_at)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(projectId, userId, role, invitedBy ?? null, new Date().toISOString())
+      .run(projectId, userId, role, invitedBy ?? null, joinedAt ?? new Date().toISOString())
   }
 
   updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): void {

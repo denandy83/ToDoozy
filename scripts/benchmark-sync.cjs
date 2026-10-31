@@ -57,7 +57,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     import { useSettingsStore } from './shared/stores/settingsStore';
     import { useTemplateStore } from './shared/stores/templateStore';
     import { logEvent, useLogStore } from './shared/stores/logStore';
-    ${sharedHook ? "import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
+    ${sharedHook ? "import { getMemberDisplay } from './shared/hooks/useMemberDisplay'; import { useSharedProjectRealtime } from './features/collaboration/useSharedProjectRealtime';" : ''}
     ${invitations ? `import { useProjectInvitations } from './features/collaboration/useProjectInvitations';
     import { InviteDialog } from './features/collaboration/InviteDialog';
     function InvitationApp(){const ${invitationCall};globalThis.fixture.invitation = invitations;return <>${invitationView}</>}` : ''}
@@ -74,7 +74,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     const {hydrateProjectTemplates}=useTemplateStore.getState();
     function runLocalBootstrap(){const currentUser=useAuthStore.getState().currentUser,isAuthenticated=!!currentUser;return (${localBootstrapEffect})();}
     function runLocalChanges(){const currentUser=useAuthStore.getState().currentUser,currentProjectId=useProjectStore.getState().currentProjectId;return (${localChangeEffect})();}
-    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
+    globalThis.fixture={${sharedHook ? 'useSharedProjectRealtime,getMemberDisplay,' : ''}${invitations ? 'InvitationApp,' : ''}personal,shared,user,refresh,batches,selectMyDayTasks,${hasProjectCache ? 'evictProjectData,' : ''}captureSyncContext,captureSyncProducer,repo,db,runEffect,runStartup,runLocalBootstrap,runLocalChanges,
       stores:{useAuthStore,useLogStore,useSyncStore,useProjectAreaStore,useProjectStore,useTaskStore,useLabelStore,useStatusStore,useSavedViewStore,useSettingsStore,useTimerStore,useViewStore}};`;
   const result = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(source, 'src/renderer/src'), loader: invitations ? 'tsx' : 'ts' }, jsx:'automatic', bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
     plugins: [{name:'isolated-runtime',setup(build){

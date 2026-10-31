@@ -1066,7 +1066,8 @@ async function syncMembersDown(projectId: string, context: SyncContext, snapshot
         projectId,
         member.user_id,
         member.role,
-        member.invited_by ?? undefined
+        member.invited_by ?? undefined,
+        member.joined_at
       )
     }
 
@@ -1442,7 +1443,7 @@ export async function getSharedProjectMembers(projectId: string, origin: SyncCon
         user_id: member.user_id,
         role: member.role,
         joined_at: member.joined_at,
-        email: localUser?.email ?? 'unknown',
+        email: localUser?.email ?? placeholderEmail(member.user_id),
         display_name: localUser?.display_name ?? null,
         display_color: member.display_color ?? null,
         display_initials: member.display_initials ?? null

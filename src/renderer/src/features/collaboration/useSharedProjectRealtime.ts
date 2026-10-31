@@ -46,6 +46,14 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
       const members = await getSharedProjectMembers(project.id, origin)
       if (!await current(origin)) return
       assert(origin)
+      const localMembers = await origin.api.projects.getMembers(project.id)
+      const localMemberIds = new Set(localMembers.map(member => member.user_id))
+      for (const member of localMembers) {
+        if (members.some(remote => remote.user_id === member.user_id)) continue
+        if (!await current(origin)) return
+        assert(origin)
+        await origin.api.projects.removeMember(project.id, member.user_id)
+      }
       for (const member of members) {
         if (!await current(origin)) return
         assert(origin)
@@ -56,6 +64,11 @@ export function useSharedProjectRealtime(selectedProject: Project | null, curren
         else if (isPlaceholderEmail(user.email) && !isPlaceholderEmail(member.email)) await origin.api.users.update(member.user_id, { email: member.email, display_name: member.display_name })
         if (!await current(origin)) return
         assert(origin)
+        if (!localMemberIds.has(member.user_id)) {
+          await origin.api.projects.addMember(project.id, member.user_id, member.role, undefined, member.joined_at)
+          if (!await current(origin)) return
+          assert(origin)
+        }
         await origin.api.projects.updateMember(project.id, member.user_id, { display_color: member.display_color, display_initials: member.display_initials })
       }
       if (!await current(origin)) return

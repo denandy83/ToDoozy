@@ -1765,7 +1765,8 @@ export async function pullNewTasks(projectId: string, context?: SyncContext, met
  * background recovery must not skip missed events because of that cooldown.
  */
 let reconcileInFlight: Promise<{ pushed: number; pulled: number }> | null = null
-type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: Promise<SyncContext | null>; scope?: string; projectIds: Set<string> | null; taskIds: Map<string, Set<string>> }
+type ProjectRefreshes = Map<string, Map<SyncContext, { context: SyncContext; taskIds: Set<string> }>>
+type ReconcileRequest = { userId: string; background: boolean; initialize: boolean; context: SyncContext | null; scope: string; projects: ProjectRefreshes }
 let pendingReconcile: ReconcileRequest | null = null
 let lastReconcileAt = 0
 let lastReconcileScope = ''
@@ -1777,14 +1778,30 @@ export function reconcile(userId: string, background = false, initialize = false
   const context = origin ? Promise.resolve(origin) : captureSyncContext(() => navigator.onLine && !isSuspended() && !useAuthStore.getState().isOffline).catch(() => null)
   return context.then((resolved) => {
     if (!resolved || (!background && !reconcileInFlight && resolved.scope === lastReconcileScope && Date.now() - lastReconcileAt < RECONCILE_COOLDOWN_MS)) return { pushed: 0, pulled: 0 }
-    return enqueueReconcile({ userId, background, initialize, context: Promise.resolve(resolved), scope: resolved.scope, projectIds: null, taskIds: new Map() })
+    return enqueueReconcile({ userId, background, initialize, context: resolved, scope: resolved.scope, projects: new Map() })
   })
+}
+
+function mergeProjectRefreshes(target: ProjectRefreshes, source: ProjectRefreshes): void {
+  for (const [projectId, origins] of source) {
+    let merged = target.get(projectId)
+    if (!merged) {
+      merged = new Map()
+      target.set(projectId, merged)
+    }
+    for (const [origin, request] of origins) {
+      try { request.context.assertCurrent() } catch { continue }
+      let pending = merged.get(origin)
+      try { pending?.context.assertCurrent() } catch { pending = undefined }
+      merged.set(origin, { context: request.context, taskIds: new Set([...(pending?.taskIds ?? []), ...request.taskIds]) })
+    }
+  }
 }
 
 function absorbCoveredRequests(request: ReconcileRequest, scope: string): void {
   const pending = pendingReconcile
   if (pending?.scope === scope && pending.background && (!pending.initialize || request.initialize)) {
-    for (const [id, ids] of pending.taskIds) request.taskIds.set(id, new Set([...(request.taskIds.get(id) ?? []), ...ids]))
+    mergeProjectRefreshes(request.projects, pending.projects)
     pendingReconcile = null
   }
 }
@@ -1795,8 +1812,9 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
   if (pending && pending.userId === request.userId && pending.scope === request.scope) {
     request.background = request.background && pending.background
     request.initialize = request.initialize || pending.initialize
-    request.projectIds = request.projectIds && pending.projectIds ? new Set([...pending.projectIds, ...request.projectIds]) : null
-    for (const [id, ids] of pending.taskIds) request.taskIds.set(id, new Set([...(request.taskIds.get(id) ?? []), ...ids]))
+    request.context ??= pending.context
+    mergeProjectRefreshes(pending.projects, request.projects)
+    request.projects = pending.projects
   }
   pendingReconcile = request
   if (reconcileInFlight) return reconcileInFlight
@@ -1806,19 +1824,25 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
       while (pendingReconcile) {
         const request = pendingReconcile
         pendingReconcile = null
-        const origin = await request.context
-        if (!origin || !await origin.isCurrent()) continue
+        const origin = request.context
+        if (!origin || !await origin.isCurrent()) {
+          const next = await refreshRemoteProjects(request.userId, request.projects)
+          result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
+          continue
+        }
         try {
           if (request.initialize) await initSync(request.userId, origin)
           // Join/event requests received during initialization precede every
           // read in this full sweep. Absorb that covered work; requests arriving
           // after the sweep starts still require a queued follow-up.
-          if (!request.projectIds && await origin.isCurrent()) absorbCoveredRequests(request, origin.scope)
-          const next = request.projectIds
-            ? await refreshRemoteProjects(request.userId, origin, request.projectIds, request.taskIds)
-            : await reconcileImpl(request.userId, origin, request.background)
-          if (!request.projectIds) {
-            for (const [projectId, ids] of request.taskIds) await refreshEventTaskLabels(projectId, ids, origin)
+          if (await origin.isCurrent()) absorbCoveredRequests(request, origin.scope)
+          const next = await reconcileImpl(request.userId, origin, request.background)
+          for (const [projectId, origins] of request.projects) {
+            for (const { context, taskIds: ids } of origins.values()) {
+              if (!await context.isCurrent()) continue
+              try { await refreshEventTaskLabels(projectId, ids, context) }
+              catch (error) { await handlePullError(context, 'refreshEventTaskLabels', error) }
+            }
           }
           result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
           if (!request.background && await origin.isCurrent()) {
@@ -1829,6 +1853,8 @@ function enqueueReconcile(request: ReconcileRequest): Promise<{ pushed: number; 
           // A canceled account/database job must not abandon the next account's
           // already queued work. Report current failures and keep one owner.
           await handlePullError(origin, 'reconcile', error)
+          const next = await refreshRemoteProjects(request.userId, request.projects)
+          result = { pushed: result.pushed + next.pushed, pulled: result.pulled + next.pulled }
         }
       }
       return result
@@ -1851,58 +1877,64 @@ export async function requestSyncCatchUp(context: SyncContext, initialize = fals
 /** Realtime task/status/label activity must never sweep unrelated projects. */
 export async function requestProjectRefresh(context: SyncContext, projectIds: Iterable<string>, taskIds: ReadonlyMap<string, Iterable<string>> = new Map()): Promise<void> {
   const userId = useAuthStore.getState().currentUser?.id
+  const projects: ProjectRefreshes = new Map()
+  for (const projectId of projectIds) {
+    const scoped = { ...context, ...hydrationContext(context, projectId) }
+    projects.set(projectId, new Map([[context, { context: scoped, taskIds: new Set(taskIds.get(projectId)) }]]))
+  }
   if (!userId || !navigator.onLine || isSuspended() || useAuthStore.getState().isOffline || !await context.isCurrent()) return
-  await enqueueReconcile({ userId, background: true, initialize: false, context: Promise.resolve(context), scope: context.scope, projectIds: new Set(projectIds), taskIds: new Map([...taskIds].map(([id, ids]) => [id, new Set(ids)])) })
+  await enqueueReconcile({ userId, background: true, initialize: false, context: null, scope: context.scope, projects })
 }
 
-async function refreshRemoteProjects(userId: string, context: SyncContext, projectIds: Set<string>, taskIds: Map<string, Set<string>>): Promise<{ pushed: number; pulled: number }> {
+async function refreshRemoteProjects(userId: string, projects: ProjectRefreshes): Promise<{ pushed: number; pulled: number }> {
   let pulled = 0
   const { refreshProjectLabels } = await import('./remoteProjectRefresh')
-  const origin = context
-  for (const projectId of projectIds) {
-    const context = { ...origin, ...hydrationContext(origin, projectId) }
-    if (!navigator.onLine || isSuspended() || !await origin.isCurrent()) break
-    if (!await context.isCurrent()) continue
-    const { useProjectStore } = await import('../shared/stores/projectStore')
-    const cachedProject = useProjectStore.getState().projects[projectId]
-    const metadataChanged = await pullProjectMetadata(projectId, context)
-    if (metadataChanged) {
-      const snapshot = await context.api.projects.findById(projectId)
-      if (snapshot) {
-        const { discoverRemoteMemberships } = await import('./SyncService')
-        await discoverRemoteMemberships(userId, context, snapshot)
-      }
-      await reconcileProjectSubscriptions(context, true, new Set([projectId]))
-    }
-    const project = await context.api.projects.findById(projectId)
-    if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) {
-      const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
-      await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
-      continue
-    }
-    if (!await context.isCurrent()) continue
-    context.assertCurrent()
-    useProjectStore.setState((state) => state.projects[projectId] === cachedProject ? { projects: { ...state.projects, [projectId]: project } } : {})
-    const ids = taskIds.get(projectId) ?? new Set<string>()
-    if (project.is_archived === 1) {
-      await refreshEventTaskLabels(projectId, ids, context)
-      if (cachedProject?.is_archived !== project.is_archived || cachedProject?.archive_updated_at !== project.archive_updated_at || ids.size) {
-        const [{ useTaskStore }, { useSavedViewStore }] = await Promise.all([import('../shared/stores/taskStore'), import('../shared/stores/savedViewStore')])
-        await useTaskStore.getState().hydrateAllForProject(projectId, context)
+  for (const [projectId, origins] of projects) {
+    for (const { context, taskIds: ids } of origins.values()) {
+      if (!navigator.onLine || isSuspended()) return { pushed: 0, pulled }
+      if (!await context.isCurrent()) continue
+      try {
+        const { useProjectStore } = await import('../shared/stores/projectStore')
+        const cachedProject = useProjectStore.getState().projects[projectId]
+        const metadataChanged = await pullProjectMetadata(projectId, context)
+        if (metadataChanged) {
+          const snapshot = await context.api.projects.findById(projectId)
+          if (snapshot) {
+            const { discoverRemoteMemberships } = await import('./SyncService')
+            await discoverRemoteMemberships(userId, context, snapshot)
+          }
+          await reconcileProjectSubscriptions(context, true, new Set([projectId]))
+        }
+        const project = await context.api.projects.findById(projectId)
+        if (!project || project.deleted_at || (project.owner_id !== userId && !(await context.api.projects.getMembers(projectId)).some(member => member.user_id === userId))) {
+          const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
+          await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
+          continue
+        }
+        if (!await context.isCurrent()) continue
+        context.assertCurrent()
+        useProjectStore.setState((state) => state.projects[projectId] === cachedProject ? { projects: { ...state.projects, [projectId]: project } } : {})
+        if (project.is_archived === 1) {
+          await refreshEventTaskLabels(projectId, ids, context)
+          if (cachedProject?.is_archived !== project.is_archived || cachedProject?.archive_updated_at !== project.archive_updated_at || ids.size) {
+            const [{ useTaskStore }, { useSavedViewStore }] = await Promise.all([import('../shared/stores/taskStore'), import('../shared/stores/savedViewStore')])
+            await useTaskStore.getState().hydrateAllForProject(projectId, context)
+            await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
+          }
+          continue
+        }
+        pulled += await pullNewTasks(projectId, context, true, ids)
+        pulled += await pullActivityLogForProject(projectId, userId, context)
+        await refreshProjectLabels(projectId, context)
+        const [{ useTaskStore }, { useStatusStore }] = await Promise.all([
+          import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
+        ])
+        await Promise.all([useTaskStore.getState().hydrateAllForProject(projectId, context), useStatusStore.getState().hydrateStatuses(projectId, context)])
+        if (!await context.isCurrent()) continue
+        const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
         await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
-      }
-      continue
+      } catch (error) { await handlePullError(context, 'refreshRemoteProjects', error) }
     }
-    pulled += await pullNewTasks(projectId, context, true, ids)
-    pulled += await pullActivityLogForProject(projectId, userId, context)
-    await refreshProjectLabels(projectId, context)
-    const [{ useTaskStore }, { useStatusStore }] = await Promise.all([
-      import('../shared/stores/taskStore'), import('../shared/stores/statusStore')
-    ])
-    await Promise.all([useTaskStore.getState().hydrateAllForProject(projectId, context), useStatusStore.getState().hydrateStatuses(projectId, context)])
-    if (!await context.isCurrent()) continue
-    const { useSavedViewStore } = await import('../shared/stores/savedViewStore')
-    await useSavedViewStore.getState().hydrateCounts(userId, projectId, context)
   }
   return { pushed: 0, pulled }
 }

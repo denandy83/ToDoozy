@@ -29,30 +29,30 @@ export async function refreshProjectLabels(projectId: string, context?: SyncCont
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
-const pendingProjects = new Map<string, { projectId: string; context: SyncContext; taskIds: Set<string> }>()
+const pendingProjects = new Map<SyncContext, Map<string, { context: SyncContext; taskIds: Set<string> }>>()
 
-export function scheduleRemoteProjectRefresh(projectId: string, context: SyncContext, taskIds: Iterable<string> = []): void {
-  const key = `${context.scope}:${projectId}`
-  const pending = pendingProjects.get(key)
-  pendingProjects.set(key, { projectId, context, taskIds: new Set([...(pending?.taskIds ?? []), ...taskIds]) })
+export function scheduleRemoteProjectRefresh(projectId: string, origin: SyncContext, taskIds: Iterable<string> = []): void {
+  let projects = pendingProjects.get(origin)
+  if (!projects) {
+    projects = new Map()
+    pendingProjects.set(origin, projects)
+  }
+  let pending = projects.get(projectId)
+  try { pending?.context.assertCurrent() } catch { pending = undefined }
+  const context = pending?.context ?? { ...origin, ...hydrationContext(origin, projectId) }
+  projects.set(projectId, { context, taskIds: new Set([...(pending?.taskIds ?? []), ...taskIds]) })
   if (timer) clearTimeout(timer)
   timer = setTimeout(async () => {
     timer = null
-    const pending = [...pendingProjects.values()]
+    const pending = [...pendingProjects.values()].flatMap(projects => [...projects].map(([projectId, request]) => ({ projectId, ...request })))
     pendingProjects.clear()
-    try {
-      const groups = new Map<string, { context: SyncContext; ids: string[]; taskIds: Map<string, Set<string>> }>()
-      for (const { projectId, context, taskIds } of pending) {
-        if (!await context.isCurrent()) continue
-        const group = groups.get(context.scope) ?? { context, ids: new Array<string>(), taskIds: new Map<string, Set<string>>() }
-        group.ids.push(projectId)
-        group.taskIds.set(projectId, taskIds)
-        groups.set(context.scope, group)
+    const { requestProjectRefresh } = await import('./PersonalSyncService')
+    await Promise.all(pending.map(async ({ projectId, context, taskIds }) => {
+      try {
+        await requestProjectRefresh(context, [projectId], new Map([[projectId, taskIds]]))
+      } catch (error) {
+        if (await context.isCurrent()) logEvent('error', 'sync', 'Remote project refresh failed', String(error))
       }
-      const { requestProjectRefresh } = await import('./PersonalSyncService')
-      for (const { context, ids, taskIds } of groups.values()) await requestProjectRefresh(context, ids, taskIds)
-    } catch (error) {
-      logEvent('error', 'sync', 'Remote project refresh failed', String(error))
-    }
+    }))
   }, 250)
 }

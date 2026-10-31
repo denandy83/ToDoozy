@@ -100,8 +100,8 @@ const api: TodoozyAPI = {
     findMaxUpdatedAt: (ownerId) => ipcRenderer.invoke('projects:findMaxUpdatedAt', ownerId),
     applyRemote: (project) => ipcRenderer.invoke('projects:applyRemote', project),
     list: (userId) => ipcRenderer.invoke('projects:list', userId),
-    addMember: (projectId, userId, role, invitedBy) =>
-      ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy),
+    addMember: (projectId, userId, role, invitedBy, joinedAt) =>
+      ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy, joinedAt),
     removeMember: (projectId, userId) =>
       ipcRenderer.invoke('projects:removeMember', projectId, userId),
     updateMember: (projectId, userId, updates) =>
