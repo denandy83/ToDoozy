@@ -632,10 +632,25 @@ export const useTaskStore = createWithEqualityFn<TaskStore>((set, get) => ({
     const batch = captureSyncProducer()
     const origins = taskIds.map(id => ({ id, origin: captureProjectProducer(get().tasks[id]?.project_id) }))
     try {
-      await batch.api.tasks.reorder(taskIds)
-      await requireProducerCurrent(batch)
-      await Promise.all(origins.map(async ({ id, origin }) => {
+      const eligible = await Promise.all(origins.map(async ({ id, origin }) => {
         try {
+          const task = get().tasks[id] ?? await origin.api.tasks.findById(id)
+          if (!task) return false
+          origin.includeProject(task.project_id)
+          await requireProducerCurrent(origin)
+          return true
+        } catch (error) {
+          if (await origin.isCurrent()) throw error
+          return false
+        }
+      }))
+      const current = origins.filter((_, index) => eligible[index])
+      if (!current.length) return
+      await batch.api.tasks.reorder(current.map(({ id }) => id))
+      await requireProducerCurrent(batch)
+      await Promise.all(current.map(async ({ id, origin }) => {
+        try {
+          await requireProducerCurrent(origin)
           const task = await origin.api.tasks.findById(id)
           if (!task) return
           origin.includeProject(task.project_id)

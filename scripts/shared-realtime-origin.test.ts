@@ -16,13 +16,15 @@ async function setup(){
   const h=await makeHarness({projectCount:1,shared:1,connected:false,sharedHook:true})
   h.repo.tasks.create({id:'t',owner_id:'u',project_id:'p0',status_id:'s0',title:'CURRENT TASK'})
   h.repo.users.update('other',{email:'shared-user+other@local'})
-  let profile='BASE MEMBER',holdProfile=false
+  let profile='BASE MEMBER',holdProfile=false,profileError=false
   const pause=gate()
   const fetch=h.sandbox.fetch
   h.sandbox.fetch=async(url:string,init:RequestInit)=>{
     if(new URL(url).pathname.endsWith('/rpc/get_user_profiles')){
       const rows=JSON.parse(String(init.body)).p_user_ids.map((id:string)=>({id,email:id+'@example.invalid',display_name:profile,avatar_url:null}))
+      const failed=profileError
       if(holdProfile){holdProfile=false;pause.enter();await pause.wait}
+      if(failed)return new Response(JSON.stringify({message:'PRIVATE LATE ERROR'}),{status:500,headers:{'Content-Type':'application/json'}})
       return new Response(JSON.stringify(rows),{headers:{'Content-Type':'application/json'}})
     }
     return fetch(url,init)
@@ -32,7 +34,7 @@ async function setup(){
   await act(async()=>{root.render(createElement(Screen));await h.untilIdle()})
   const channel=h.channels.find((row:{topic:string;closed:boolean})=>row.topic==='project:p0'&&!row.closed)
   expect(channel).toBeDefined()
-  return {h,root,host,channel,pause,arm:()=>{profile='PRIVATE LATE PROFILE';holdProfile=true},current:()=>{profile='CURRENT MEMBER'}}
+  return {h,root,host,channel,pause,arm:()=>{profile='PRIVATE LATE PROFILE';holdProfile=true},failProfiles:(failed:boolean)=>{profileError=failed},current:()=>{profile='CURRENT MEMBER';profileError=false}}
 }
 it.each(['activity','member'].flatMap(table=>['account','generation','teardown','eviction'].map(change=>({table,change}))))('rejects retained $table bridge after $change',async({table,change})=>{
   const f=await setup(),owner=f.h.stores.useAuthStore.getState().currentUser
@@ -58,10 +60,7 @@ it.each(['profile','user update','member update','activity native'].flatMap(poin
       const original=f.h.repo[ns][method].bind(f.h.repo[ns]);let held=false
       f.h.repo[ns][method]=async(...args:unknown[])=>{const value=original(...args);if(!held){held=true;pause.enter();await pause.wait;if(fail)throw Error('PRIVATE LATE ERROR')}return value}
     }
-    if(point==='profile'&&fail){
-      const fetch=f.h.sandbox.fetch
-      f.h.sandbox.fetch=async(url:string,init:RequestInit)=>{const result=await fetch(url,init);if(new URL(url).pathname.endsWith('/rpc/get_user_profiles'))return new Response(JSON.stringify({message:'PRIVATE LATE ERROR'}),{status:403,headers:{'Content-Type':'application/json'}});return result}
-    }
+    if(point==='profile'&&fail)f.failProfiles(true)
     const table=point==='activity native'?'activity_log':'project_members'
     await act(async()=>{f.channel.emit(table,'INSERT',{id:'held-event',task_id:'t',project_id:'p0',user_id:'other',action:'PRIVATE ACTION',old_value:'PRIVATE VALUE',created_at:'2030-01-01T00:00:00.000Z'});await f.h.untilIdle()})
     await pause.entered;f.current()
@@ -89,5 +88,23 @@ it('preserves normal current shared member and activity application',async()=>{
   await act(async()=>{await f.h.untilIdle()})
   expect(f.h.repo.activityLog.findByTaskId('t')[0]).toMatchObject({old_value:'Before',new_value:'After'})
   expect(f.h.stores.useTaskStore.getState().activityRefresh.t).toBe(1)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it('refreshes the authoritative member list from local profiles when profile lookup fails',async()=>{
+  const f=await setup()
+  f.h.repo.users.create({id:'third',email:'third@example.invalid',display_name:'Third member',avatar_url:null})
+  f.h.repo.projects.addMember('p0','third','member')
+  f.h.remote.project_members.push({...f.h.repo.projects.getMembers('p0').find((member:{user_id:string})=>member.user_id==='third')})
+  await act(async()=>{f.channel.emit('project_members','INSERT',{project_id:'p0',user_id:'third'});await f.h.untilIdle()})
+  expect(JSON.parse(f.host.textContent??'[]')).toHaveLength(3)
+  f.h.remote.project_members=f.h.remote.project_members.filter((member:{user_id:string})=>member.user_id!=='third')
+  f.h.repo.projects.removeMember('p0','third')
+  f.failProfiles(true)
+  await act(async()=>{f.channel.emit('project_members','DELETE',{project_id:'p0',user_id:'third'});await f.h.untilIdle()})
+  const members=JSON.parse(f.host.textContent??'[]')
+  expect(members).toHaveLength(2)
+  expect(members.map((member:{user_id:string})=>member.user_id).sort()).toEqual(['other','u'])
+  expect(members.every((member:{email:string})=>member.email.endsWith('@example.invalid'))).toBe(true)
   expect(f.h.fixtureErrors).toEqual([])
 })

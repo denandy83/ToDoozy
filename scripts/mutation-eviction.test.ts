@@ -121,3 +121,19 @@ it('cancels a newly created project result after its own revocation without retu
   expect(h.stores.useProjectStore.getState().projects.created).toBeUndefined()
   expect(h.repo.projects.findById('created')).toBeDefined()
 })
+
+it('captures an uncached reordered task project before mutation and preserves unrelated reorder work',async()=>{
+  const h=await setup(),pause=gate(),original=h.repo.tasks.reorder.bind(h.repo.tasks)
+  h.stores.useTaskStore.setState((state:{tasks:Record<string,unknown>})=>({tasks:Object.fromEntries(Object.entries(state.tasks).filter(([id])=>id!=='t'))}))
+  h.repo.tasks.reorder=async(ids:string[])=>{const value=original(ids);pause.enter();await pause.wait;return value}
+  const reordered=h.stores.useTaskStore.getState().reorderTasks(['t','q'])
+  await pause.entered;await revoke(h)
+  const calls=h.nativeCalls.length
+  pause.release();await reordered;await h.untilIdle()
+  expect(h.nativeCalls.slice(calls).some((call:{namespace:string;method:string;args:unknown[]})=>call.namespace==='tasks'&&call.method==='findById'&&call.args[0]==='t')).toBe(false)
+  expect(h.stores.useTaskStore.getState().tasks.t).toBeUndefined()
+  expect(h.stores.useTaskStore.getState().tasks.q.order_index).toBe(1)
+  expect(h.remote.tasks.find((task:{id:string})=>task.id==='q').order_index).toBe(1)
+  expect(h.repo.tasks.findById('t')).toBeDefined()
+  expect(h.fixtureErrors).toEqual([])
+})

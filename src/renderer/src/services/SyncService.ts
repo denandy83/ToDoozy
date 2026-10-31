@@ -1407,9 +1407,10 @@ export async function getSharedProjectMembers(projectId: string, origin: SyncCon
   const { data: profiles, error: profileError } = await context.client.rpc('get_user_profiles', { p_user_ids: data.map(member => member.user_id) })
   if (!await context.isCurrent()) throw new Error('Shared project context changed')
   context.assertCurrent()
-  if (profileError) throw new Error(profileError.message)
   const profileMap = new Map<string, { email: string; display_name: string | null }>()
-  for (const profile of profiles ?? []) profileMap.set(profile.id, { email: profile.email, display_name: profile.display_name ?? null })
+  // The membership snapshot remains authoritative when profile lookup fails.
+  // Enrich its current members from the original database below.
+  for (const profile of profileError ? [] : profiles ?? []) profileMap.set(profile.id, { email: profile.email, display_name: profile.display_name ?? null })
 
   const members: Array<{
     user_id: string
