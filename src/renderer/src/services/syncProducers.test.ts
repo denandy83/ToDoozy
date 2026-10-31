@@ -322,6 +322,11 @@ it.each(['online', 'offline', 'failure', 'removed'].flatMap((mode) => ['single',
     const chain: Record<string, unknown> = {}
     for (const method of ['select', 'order', 'limit', 'or', 'ilike']) chain[method] = () => chain
     chain.or = () => { afterCursor = true; return chain }
+    chain.filter = (key: string, operator: string, pattern: string) => {
+      expect(operator).toBe('imatch')
+      filters.push((row) => new RegExp(pattern, 'i').test(String(row[key])))
+      return chain
+    }
     chain.eq = (key: string, value: unknown) => { filters.push((row)=>row[key]===value); return chain }
     chain.is = (key: string, value: unknown) => { filters.push((row)=>(row[key]??null)===value); return chain }
     chain.in = (key: string, values: unknown[]) => { filters.push((row)=>values.includes(row[key])); return chain }

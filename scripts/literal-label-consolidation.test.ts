@@ -308,3 +308,48 @@ it.each(['main','mcp'])('keeps the database directional nonmatch for ASCII I ver
   expect((await pg.query('SELECT * FROM project_labels WHERE label_id=$1',[canonicalId])).rows).toEqual([])
   expect(h.fixtureErrors).toEqual([])
 },15000)
+
+it.each(['push','reconcile'].flatMap(path => ['rename','pending','delete','current'].map(state => ({path,state}))))('preserves native canonical intent through $path consolidation ($state)', async ({path,state}) => {
+  const h = await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,connected:false})
+  const pg = await makeLabelAuthorizationDatabase(); opened.push({h,pg})
+  const timestamp = '2026-01-01T00:00:00.000Z'
+  const renamed = state==='rename' || state==='pending'
+  const name = renamed ? 'X' : 'ı', canonicalName = renamed ? 'X' : 'I'
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color,order_index,created_at,updated_at) VALUES($1,$2,$3,$4,0,$5,$5)',[sourceId,labelId(2),'FOREIGN','#444444',timestamp])
+  await pg.query('INSERT INTO user_labels(id,user_id,name,color,order_index,created_at,updated_at) VALUES($1,$2,$3,$4,0,$5,$5)',[canonicalId,labelId(1),canonicalName,'#00AA11',timestamp])
+  const source = h.repo.labels.create({id:sourceId,user_id:'u',project_id:'p0',name,color:'#444444'})
+  h.repo.tasks.create({id:'pending-canonical-task',project_id:'p0',owner_id:'u',status_id:'s0',title:'TASK'})
+  h.repo.tasks.addLabel('pending-canonical-task',sourceId)
+  h.repo.syncQueue.enqueue('user_labels',sourceId,'UPDATE',JSON.stringify(source))
+  h.repo.labels.applyRemote({id:canonicalId,user_id:'u',name:renamed?'Y':canonicalName,color:renamed?'#ABCDEF':'#00AA11',order_index:0,created_at:timestamp,updated_at:state==='current'?timestamp:state==='pending'?'2025-01-01T00:00:00.000Z':'2099-01-01T00:00:00.000Z',deleted_at:state==='delete'?'2099-01-01T00:00:00.000Z':null})
+  const canonical = h.repo.labels.findById(canonicalId)
+  if (state!=='current') h.repo.syncQueue.enqueue('user_labels',canonicalId,state==='delete'?'DELETE':'UPDATE',JSON.stringify(canonical))
+  const queueBefore = h.repo.syncQueue.findAll(), taskBefore = h.repo.tasks.getLabelState('pending-canonical-task')
+  const fallback = h.sandbox.fetch, transport = labelTransport(pg,'authenticated')
+  h.sandbox.fetch = (url:string,init?:RequestInit) => ['user_labels','project_labels','project_members'].includes(new URL(String(url)).pathname.split('/').pop()!) ? transport(url,init) : fallback(url,init)
+  if (path==='push') {
+    const result = await h.services.personal.pushLabel(source,'u',h.producer())
+    if (state==='current') expect(result).toBe(canonicalId); else expect(result).not.toBe(canonicalId)
+  } else {
+    const pending = h.services.syncTables.SYNC_TABLES.labels.remoteUpsert(source,await h.context())
+    if (state==='current') await pending; else await expect(pending).rejects.toMatchObject({code:'42501'})
+  }
+  if (state==='current') {
+    expect(h.repo.labels.findById(sourceId)).toBeUndefined()
+    expect(h.repo.tasks.getLabels('pending-canonical-task').map((row:{label_id:string})=>row.label_id)).toEqual([canonicalId])
+  } else {
+    expect(h.repo.labels.findById(sourceId)).toEqual(source)
+    expect(h.repo.labels.findById(canonicalId)).toEqual(canonical)
+    expect(h.repo.tasks.getLabelState('pending-canonical-task')).toEqual(taskBefore)
+    expect(h.repo.labels.findByProjectId('p0').map((row:{id:string})=>row.id)).toEqual([sourceId])
+    for (const command of queueBefore) expect(h.repo.syncQueue.findAll()).toContainEqual(command)
+    await h.services.shared.processSyncQueue(await h.context())
+    const delivered = (await pg.query<{name:string;deleted_at:string|null}>('SELECT name,deleted_at FROM user_labels WHERE id=$1',[canonicalId])).rows[0]
+    const deliveredIntent = delivered.name === canonical.name && (state!=='delete' || delivered.deleted_at !== null)
+    const command = queueBefore.find((entry: {table_name:string;row_id:string}) => entry.table_name==='user_labels' && entry.row_id===canonicalId)
+    const retainedIntent = h.repo.syncQueue.findAll().some((entry: unknown) => JSON.stringify(entry)===JSON.stringify(command))
+    expect(deliveredIntent || retainedIntent).toBe(true)
+    expect(h.repo.labels.findById(canonicalId)).toEqual(canonical)
+  }
+  expect(h.fixtureErrors).toEqual([])
+},20000)

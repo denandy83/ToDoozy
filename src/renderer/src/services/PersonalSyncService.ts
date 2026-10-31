@@ -777,7 +777,6 @@ export async function pushTheme(theme: { id: string }, producer?: SyncProducer):
     const payload = descriptor.toRemote(local)
     if (!(await hasLiveSession(origin, 'pushTheme', `id=${local.id}`))) return
     try {
-      const supabase = (await origin.client())!
       await descriptor.remoteUpsert(local, await syncContextFromProducer(origin))
       await markSynced(origin)
       logEvent('info', 'sync', `Pushed theme "${local.name}"`, `id=${local.id} mode=${local.mode}`)
@@ -799,7 +798,6 @@ export async function deleteThemeFromSupabase(themeId: string, producer?: SyncPr
     const descriptor = SYNC_TABLES.themes!
     if (!(await hasLiveSession(origin, 'deleteTheme', `id=${themeId}`))) return
     try {
-      const client = (await origin.client())!
       await descriptor.remoteUpsert(local, await syncContextFromProducer(origin))
       await markSynced(origin)
     } catch (error) {
@@ -2747,8 +2745,10 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
       try { context.assertCurrent() } catch { return }
       void requestProjectRefresh(context, [projectId]).catch((error) => handlePullError(context, 'Project label refresh', error))
     })
+  state.channel = channel
   channel.subscribe((status, err) => {
-      if (state.cancelled) return
+      if (state.cancelled || state.channel !== channel) return
+      try { context.assertCurrent() } catch { return }
       const pName = projectNameCache.get(projectId) ?? projectId
       console.log(`[Realtime] ${pName}: ${status}`, err ?? '')
       // Instrumentation: capture channel internal state + server error payload to diagnose loop
@@ -2768,15 +2768,15 @@ async function createPersonalChannel(projectId: string, state: PersonalChannelSt
         useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
         logEvent(level, 'realtime', `Channel ${status} on personal project`, `${pName} topic=${subTopic} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
-        schedulePersonalReconnect(projectId)
+        schedulePersonalReconnect(projectId, state, context)
       }
     })
-  state.channel = channel
 }
 
-function schedulePersonalReconnect(projectId: string): void {
-  const state = personalChannelStates.get(projectId)
-  if (!state || state.cancelled || state.reconnectTimer) return
+function schedulePersonalReconnect(projectId: string, state: PersonalChannelState, context: SyncContext): void {
+  if (state.cancelled || state.reconnectTimer) return
+  try { context.assertCurrent() } catch { return }
+  const channel = state.channel
   const pName = projectNameCache.get(projectId) ?? projectId
 
   // Don't burn cycles while system is suspended or browser is offline.
@@ -2803,16 +2803,18 @@ function schedulePersonalReconnect(projectId: string): void {
   useSyncStore.getState().setNextReconnectAt(Date.now() + delay)
 
   state.reconnectTimer = setTimeout(async () => {
+    if (state.cancelled || state.channel !== channel) return
+    try { context.assertCurrent() } catch { return }
     state.reconnectTimer = null
     useSyncStore.getState().setNextReconnectAt(null)
-    if (state.cancelled) return
     if (isSuspended() || !navigator.onLine) {
       logEvent('info', 'realtime', `Reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`, pName)
       return
     }
     try {
       const supabase = await getSupabase()
-      if (!await (await state.context).isCurrent() || state.cancelled) return
+      if (!await context.isCurrent() || state.cancelled || state.channel !== channel) return
+      context.assertCurrent()
       if (state.channel) {
         // If supabase-js auto-rejoined the channel under us, tearing it down here would
         // trigger a clean phx_close → CLOSED → another reconnect → infinite 2s loop.
@@ -2821,13 +2823,17 @@ function schedulePersonalReconnect(projectId: string): void {
         if (ch.state === 'joined') {
           state.attempt = 0
           useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
-          void state.context.then((context) => { if (!state.cancelled) return requestProjectRefresh(context, [projectId]); return undefined }).catch(() => {})
+          void requestProjectRefresh(context, [projectId]).catch(() => {})
           logEvent('info', 'realtime', `Reconnect skipped — channel auto-rejoined`, pName)
           return
         }
-        await supabase.removeChannel(state.channel)
+        const previous = state.channel
+        state.channel = null
+        await supabase.removeChannel(previous)
       }
     } catch { /* channel may already be dead */ }
+    if (state.cancelled || state.channel !== null || !await context.isCurrent()) return
+    context.assertCurrent()
     try { await createPersonalChannel(projectId, state) } catch (error) { if (!state.cancelled) throw error }
   }, delay)
 }
@@ -2861,11 +2867,15 @@ export function pauseReconnectsForSuspend(): void {
 export async function forceReconnectAllPersonal(): Promise<void> {
   if (!navigator.onLine || isSuspended()) return
   const context = await captureSyncContext()
+  context.assertCurrent()
   useSyncStore.getState().setConnectionLost(false)
   const supabase = await getSupabase()
   for (const [projectId, state] of personalChannelStates.entries()) {
     if (!await context.isCurrent() || isSuspended() || !navigator.onLine) return
-    if (state.cancelled) continue
+    const origin = await state.context
+    if (state.cancelled || !await origin.isCurrent()) continue
+    context.assertCurrent()
+    origin.assertCurrent()
     state.attempt = 0
     if (state.reconnectTimer) {
       clearTimeout(state.reconnectTimer)
@@ -2877,7 +2887,9 @@ export async function forceReconnectAllPersonal(): Promise<void> {
         useSyncStore.getState().setChannelHealth(`personal:${projectId}`, true)
         continue
       }
-      try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+      const previous = state.channel
+      state.channel = null
+      try { await supabase.removeChannel(previous) } catch { /* ignore */ }
     }
     if (state.cancelled || !await context.isCurrent()) continue
     await createPersonalChannel(projectId, state)
@@ -2953,9 +2965,11 @@ export async function subscribeToPersonalProject(
     reconnectTimer: null
   }
   personalChannelStates.set(projectId, state)
-  useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
   try {
-    await Promise.all([removal, state.context])
+    const [, origin] = await Promise.all([removal, state.context])
+    if (state.cancelled) return
+    origin.assertCurrent()
+    useSyncStore.getState().setChannelHealth(`personal:${projectId}`, false)
     await createPersonalChannel(projectId, state)
   } catch (error) {
     if (personalChannelStates.get(projectId) === state) await unsubscribePersonalProject(projectId)

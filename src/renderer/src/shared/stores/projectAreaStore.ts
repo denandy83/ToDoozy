@@ -64,16 +64,26 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
 
   async updateArea(id: string, updates: { name?: string; color?: string; is_collapsed?: number }): Promise<void> {
     const origin = captureSyncProducer()
-    const result = await origin.api.projectAreas.update(id, updates)
-    await requireProducerCurrent(origin)
-    if (result) {
-      set((state) => ({
-        areas: state.areas.map((a) => (a.id === id ? result : a))
-      }))
-      // Push to Supabase
-      import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-        pushProjectArea({ ...result, user_id: result.user_id }, origin).catch(() => {})
-      })
+    origin.assertCurrent()
+    const previous = useProjectAreaStore.getState().areas.find((area) => area.id === id)
+    const pending = previous ? { ...previous, ...updates } : undefined
+    if (pending) set((state) => ({ areas: state.areas.map((area) => area === previous ? pending : area) }))
+    try {
+      const result = await origin.api.projectAreas.update(id, updates)
+      await requireProducerCurrent(origin)
+      if (result && useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
+        set((state) => ({ areas: state.areas.map((area) => area === pending ? result : area) }))
+        import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
+          if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === result) {
+            pushProjectArea({ ...result, user_id: result.user_id }, origin).catch(() => {})
+          }
+        })
+      }
+    } catch (error) {
+      if (await origin.isCurrent() && previous) {
+        set((state) => ({ areas: state.areas.map((area) => area === pending ? previous : area) }))
+      }
+      throw error
     }
   },
 

@@ -281,6 +281,15 @@ export class LabelRepository {
     const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
     const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
 
+    const existing = this.findById(toId)
+    if (existing && fromId !== toId) {
+      const pending = this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(toId)
+      const differs = existing.name !== nameParam || existing.color !== colorParam || toCanonicalIso(existing.deleted_at ?? null) !== deletedAtParam
+      if (existing.user_id !== userIdParam || isRemoteNewer(updatedAtParam, existing.updated_at)
+        || (differs && (pending || !isRemoteNewer(existing.updated_at, updatedAtParam)))
+        || (pending && existing.order_index !== orderIndexParam)) throw new Error('Canonical label has local changes')
+    }
+
     let taskRemaps = 0
     let projectRemaps = 0
 

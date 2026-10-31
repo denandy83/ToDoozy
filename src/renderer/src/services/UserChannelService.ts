@@ -155,8 +155,10 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
         void handleUserTableChange('user_project_areas', payload.eventType, row, state).catch(() => {})
       }
     )
-    .subscribe((status, err) => {
-      if (state.cancelled) return
+  state.channel = channel
+  channel.subscribe((status, err) => {
+      if (state.cancelled || state.channel !== channel) return
+      try { context.assertCurrent() } catch { return }
       const ch = channel as unknown as { state?: string; subTopic?: string }
       const chState = ch.state ?? '(unknown)'
       const errMsg = err
@@ -171,15 +173,15 @@ async function createUserChannel(state: UserChannelState): Promise<void> {
         useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
         const level: 'warn' | 'error' = status === 'CHANNEL_ERROR' ? 'error' : 'warn'
         logEvent(level, 'realtime', `Channel ${status} on user channel`, `user=${userId.slice(0, 8)} chState=${chState} err=${errMsg} attempt=${state.attempt}`)
-        scheduleUserChannelReconnect()
+        scheduleUserChannelReconnect(state, context)
       }
     })
-  state.channel = channel
 }
 
-function scheduleUserChannelReconnect(): void {
-  const state = userChannelState
-  if (!state || state.cancelled || state.reconnectTimer) return
+function scheduleUserChannelReconnect(state: UserChannelState, context: SyncContext): void {
+  if (state.cancelled || state.reconnectTimer) return
+  try { context.assertCurrent() } catch { return }
+  const channel = state.channel
 
   if (isSuspended()) {
     logEvent('info', 'realtime', 'User-channel reconnect deferred — system suspended')
@@ -203,16 +205,18 @@ function scheduleUserChannelReconnect(): void {
   useSyncStore.getState().setNextReconnectAt(Date.now() + delay)
 
   state.reconnectTimer = setTimeout(async () => {
+    if (state.cancelled || state.channel !== channel) return
+    try { context.assertCurrent() } catch { return }
     state.reconnectTimer = null
     useSyncStore.getState().setNextReconnectAt(null)
-    if (state.cancelled) return
     if (isSuspended() || !navigator.onLine) {
       logEvent('info', 'realtime', `User-channel reconnect aborted — ${isSuspended() ? 'suspended' : 'offline'}`)
       return
     }
     try {
       const supabase = await getSupabase()
-      if (!await (await state.context).isCurrent() || state.cancelled) return
+      if (!await context.isCurrent() || state.cancelled || state.channel !== channel) return
+      context.assertCurrent()
       if (state.channel) {
         // Same auto-rejoin guard as the project channels: tearing down a
         // channel supabase-js already rejoined triggers a CLOSED → reconnect
@@ -220,13 +224,17 @@ function scheduleUserChannelReconnect(): void {
         const ch = state.channel as unknown as { state?: string }
         if (ch.state === 'joined') {
           state.attempt = 0
-          void state.context.then((context) => { if (!state.cancelled) return requestSyncCatchUp(context); return undefined }).catch(() => {})
+          void requestSyncCatchUp(context).catch(() => {})
           logEvent('info', 'realtime', 'User-channel reconnect skipped — channel auto-rejoined')
           return
         }
-        await supabase.removeChannel(state.channel)
+        const previous = state.channel
+        state.channel = null
+        await supabase.removeChannel(previous)
       }
     } catch { /* channel may already be dead */ }
+    if (state.cancelled || state.channel !== null || !await context.isCurrent()) return
+    context.assertCurrent()
     try { await createUserChannel(state) } catch (error) { if (!state.cancelled) throw error }
   }, delay)
 }
@@ -262,7 +270,12 @@ export async function forceReconnectUserChannel(): Promise<void> {
     const ch = state.channel as unknown as { state?: string }
     if (ch.state === 'joined') return
     const supabase = await getSupabase()
-    try { await supabase.removeChannel(state.channel) } catch { /* ignore */ }
+    if (state.cancelled || !await context.isCurrent() || !await origin.isCurrent()) return
+    context.assertCurrent()
+    origin.assertCurrent()
+    const previous = state.channel
+    state.channel = null
+    if (previous) try { await supabase.removeChannel(previous) } catch { /* ignore */ }
   }
   await createUserChannel(state)
 }
@@ -294,9 +307,11 @@ export async function subscribeToUserChannel(
     reconnectTimer: null
   }
   userChannelState = state
-  useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
   try {
-    await Promise.all([removal, state.context])
+    const [, origin] = await Promise.all([removal, state.context])
+    if (state.cancelled) return
+    origin.assertCurrent()
+    useSyncStore.getState().setChannelHealth(`user:${userId}`, false)
     await createUserChannel(state)
   } catch (error) {
     if (userChannelState === state) await unsubscribeUserChannel()

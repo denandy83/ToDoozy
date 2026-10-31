@@ -214,7 +214,12 @@ export function channelSyncContext(parent: SyncContext, active: () => boolean, p
     get(target, key) {
       const method = Reflect.get(target, key)
       if (key !== 'from' && key !== 'rpc') return typeof method === 'function' ? method.bind(target) : method
-      return (...args: unknown[]) => { assertCurrent(); return guardQuery(Reflect.apply(method, target, args)) }
+      return (...args: unknown[]) => {
+        assertCurrent()
+        const result: unknown = Reflect.apply(method, target, args)
+        if (!result || typeof result !== 'object') throw new Error('Invalid sync query')
+        return guardQuery(result)
+      }
     }
   })
   return { ...origin, ...hydrationContext(origin, projectId), client, subscriptionSource: parent.subscriptionSource ?? parent }
