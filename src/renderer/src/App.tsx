@@ -15,7 +15,7 @@ import { logEvent } from './shared/stores/logStore'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { AppLayout } from './AppLayout'
 import { InviteDialog } from './features/collaboration/InviteDialog'
-import { validateInviteToken, acceptInvite, declineInvite, subscribeToProject, checkPendingInvites, subscribeToInvites } from './services/SyncService'
+import { useProjectInvitations } from './features/collaboration/useProjectInvitations'
 import { initPowerListener, isSuspended } from './services/powerState'
 import { useViewStore } from './shared/stores/viewStore'
 import { flushAll as flushBatchedTaskEdits } from './services/TaskBatchSyncManager'
@@ -313,134 +313,7 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [isAuthenticated])
 
-  // ── Invite deep link handling ─────────────────────────────────────
-  const [inviteState, setInviteState] = useState<{
-    token: string
-    projectName: string
-    ownerName: string
-    expired: boolean
-  } | null>(null)
-
-  const inviteShowingRef = useRef(false)
-
-  // Queue for multiple pending invites
-  const [pendingInviteQueue, setPendingInviteQueue] = useState<Array<{
-    token: string
-    projectName: string
-    ownerName: string
-  }>>([])
-
-  useEffect(() => {
-    if (!isAuthenticated || !currentUser) return
-    const unsub = window.api.onInviteReceived(async (token) => {
-      try {
-        const result = await validateInviteToken(token)
-        if (!result) {
-          setInviteState({ token, projectName: '', ownerName: '', expired: true })
-          return
-        }
-        setInviteState({
-          token,
-          projectName: result.projectName,
-          ownerName: result.ownerName,
-          expired: !result.valid
-        })
-      } catch (err) {
-        console.error('Failed to validate invite:', err)
-      }
-    })
-    return unsub
-  }, [isAuthenticated, currentUser])
-
-  // Check for pending email-based invites on login + subscribe to new ones in real-time
-  useEffect(() => {
-    if (!isAuthenticated || !currentUser?.email) return
-
-    const handleNewInvite = async (token: string, projectName: string, ownerEmail: string): Promise<void> => {
-      inviteShowingRef.current = true
-      setInviteState({
-        token,
-        projectName,
-        ownerName: ownerEmail,
-        expired: false
-      })
-    }
-
-    // Check existing pending invites on login
-    const check = async (): Promise<void> => {
-      try {
-        const invites = await checkPendingInvites(currentUser.email)
-        if (invites.length > 0) {
-          const [first, ...rest] = invites
-          handleNewInvite(first.token, first.projectName, first.ownerEmail)
-          setPendingInviteQueue(rest.map((i) => ({
-            token: i.token,
-            projectName: i.projectName,
-            ownerName: i.ownerEmail
-          })))
-        }
-      } catch (err) {
-        console.error('Failed to check pending invites:', err)
-      }
-    }
-    check()
-
-    // Subscribe to real-time invite notifications (retries on failure)
-    let unsubscribe: (() => void) | undefined
-    subscribeToInvites(currentUser.email, async (invite) => {
-      const result = await validateInviteToken(invite.token)
-      if (result && result.valid) {
-        handleNewInvite(invite.token, result.projectName, result.ownerName)
-      }
-    }).then((unsub) => {
-      unsubscribe = unsub
-    })
-
-    return () => {
-      unsubscribe?.()
-    }
-  }, [isAuthenticated, currentUser?.email])
-
-  const showNextInvite = (): void => {
-    if (pendingInviteQueue.length > 0) {
-      const [next, ...rest] = pendingInviteQueue
-      setInviteState({ ...next, expired: false })
-      setPendingInviteQueue(rest)
-    } else {
-      setInviteState(null)
-      inviteShowingRef.current = false
-    }
-  }
-
-  const handleDeclineInvite = async (): Promise<void> => {
-    if (inviteState) {
-      await declineInvite(inviteState.token).catch((err) =>
-        console.error('Failed to decline invite:', err)
-      )
-    }
-    showNextInvite()
-  }
-
-  const handleAcceptInvite = async (): Promise<void> => {
-    if (!inviteState || !currentUser) return
-    try {
-      console.log('[Invite] Accepting invite:', inviteState.token)
-      const projectId = await acceptInvite(inviteState.token, currentUser.id)
-      console.log('[Invite] Accepted, project ID:', projectId)
-      await hydrateProjects(currentUser.id)
-      console.log('[Invite] Projects hydrated')
-      await subscribeToProject(projectId)
-      // Navigate to the newly joined project
-      useViewStore.setState({ currentView: 'project', selectedProjectId: projectId })
-      showNextInvite()
-    } catch (err) {
-      console.error('Failed to accept invite:', err)
-      // Show error — don't silently dismiss
-      setInviteState((prev) => prev ? { ...prev, expired: false } : null)
-      alert(`Failed to join project: ${err instanceof Error ? err.message : 'Unknown error'}. Try logging out and back in.`)
-      showNextInvite()
-    }
-  }
+  const invitations = useProjectInvitations()
 
   if (loading) {
     return <SplashScreen />
@@ -453,13 +326,15 @@ function App(): React.JSX.Element {
   return (
     <>
       <AppLayout />
-      {inviteState && (
+      {invitations.invite && (
         <InviteDialog
-          projectName={inviteState.projectName}
-          ownerName={inviteState.ownerName}
-          expired={inviteState.expired}
-          onAccept={handleAcceptInvite}
-          onDecline={handleDeclineInvite}
+          projectName={invitations.invite.projectName}
+          ownerName={invitations.invite.ownerName}
+          expired={invitations.invite.expired}
+          busy={invitations.busy}
+          error={invitations.error}
+          onAccept={invitations.accept}
+          onDecline={invitations.decline}
         />
       )}
     </>

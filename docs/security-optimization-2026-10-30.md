@@ -10,7 +10,7 @@ Do not equate a local benchmark with production disk I/O.
 | Audit references | Change |
 | --- | --- |
 | NAV-01 | Trusted-document preload and IPC checks, navigation/redirect/popup guards, sanitized timer descriptions. |
-| DB-01–06 | Owner-bound sharing; confirmed-email invitation lookup/acceptance and recipient notification reads; scoped invitation policies and profile reads; explicit named API grants. Ordinary members can update appearance columns only, preventing role escalation. |
+| DB-01–06 | Owner-bound sharing; confirmed-email invitation lookup/acceptance/decline and recipient notification reads; scoped invitation policies and profile reads; explicit named API grants. Ordinary members can update appearance columns only, preventing role escalation. |
 | TASK-01–05 | Recursive copies preserve references and completion; native copies roll back on failure. Parent validation rejects cycles and cross-project graphs. Native and remote deletions tombstone the subtree; duplicate/template/recurrence copies publish all descendants and labels in ancestor order; prospective SQL triggers protect remote writes and ancestor-first restores. |
 | VIEW-01–02 | Saved-view counts apply due-date and assignee filters; the renderer applies included/excluded assignees. |
 | DATE-01–03 | Monthly day/ordinal recurrence, local calendar date keys, local-day UTC boundaries, and local statistics grouping. |
@@ -33,6 +33,31 @@ old clients can recreate those links. Neither is a synthetic test or an automati
 bulk data repair in this change. User-retired reports and `later` features remain
 outside this work. No paid compute, Broadcast migration, or new cloud telemetry
 table is required for these fixes.
+
+## Invitation response lifecycle
+
+Invitation state and queued dialogs belong to their authenticated user. Reads,
+validation, acceptance, decline, local hydration, navigation and subscriptions
+retain their original account/database producer. Late replies cannot render old
+private project/owner fields, clear another account's cache, change its view or
+advance a newer invitation. Effect cleanup also closes a subscription whose
+unsubscriber arrives late. A known same-account database replacement cancels the
+old operation and rebinds the controller, rather than leaving a busy dialog stuck.
+
+The security migration adds `decline_invite(uuid)`. A targeted decline requires
+the caller's confirmed stored email, locks the invitation row like acceptance,
+changes only its status and returns an explicit acknowledgement. Repeating an
+acknowledged decline is safe. Wrong recipients and anonymous/unconfirmed callers
+cannot consume it. Dismissing an untargeted public link returns `dismissed` without
+revoking the reusable link. An expired-dialog OK action is local only. Backend
+errors or ambiguous acknowledgements leave the current dialog available to retry;
+stale errors never appear in another user's dialog. Invitation bearer tokens are
+not logged in these response paths. Deploy the matching SQL before the new client.
+
+The paired benchmark below covers the two App sync startup effects, not every
+application startup effect: invitation discovery and updater/release-note work
+are outside that cohort. Invitation lifecycle regressions separately exercise
+actual service/SDK/native and rendered controller paths with synthetic users.
 
 ## Benchmarks
 

@@ -79,9 +79,13 @@ export async function withSyncProducer(operation: (origin: SyncProducer) => Prom
 }
 
 export async function captureSyncContext(active?: () => boolean): Promise<SyncContext> {
-  const origin = captureSyncProducer(active)
+  return syncContextFromProducer(captureSyncProducer(active))
+}
+
+export async function syncContextFromProducer(origin: SyncProducer): Promise<SyncContext> {
   const client = await origin.client()
   if (!client) throw new Error('Sync signed out')
+  await requireProducerCurrent(origin)
   return { api: origin.api, client, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
 }
 

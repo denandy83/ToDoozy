@@ -7,6 +7,8 @@ interface InviteDialogProps {
   projectName: string
   ownerName: string
   expired: boolean
+  busy?: boolean
+  error?: string | null
   onAccept: () => void
   onDecline: () => void
 }
@@ -15,6 +17,8 @@ export function InviteDialog({
   projectName,
   ownerName,
   expired,
+  busy = false,
+  error,
   onAccept,
   onDecline
 }: InviteDialogProps): React.JSX.Element {
@@ -47,15 +51,18 @@ export function InviteDialog({
               <span className="font-medium text-foreground">{ownerName}</span> invited you to join{' '}
               <span className="font-medium text-foreground">{projectName}</span>.
             </p>
+            {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={onDecline}
+                disabled={busy}
                 className="rounded-md px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-muted transition-colors hover:bg-foreground/6 hover:text-foreground"
               >
                 Decline
               </button>
               <button
                 onClick={onAccept}
+                disabled={busy}
                 className="rounded-md bg-accent px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-accent/90"
               >
                 Accept

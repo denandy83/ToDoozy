@@ -19,7 +19,7 @@ interface ProjectState {
 }
 
 interface ProjectActions {
-  hydrateProjects(userId: string): Promise<void>
+  hydrateProjects(userId: string, origin?: SyncProducer): Promise<void>
   hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   createProject(input: CreateProjectInput): Promise<Project>
   updateProject(id: string, input: UpdateProjectInput): Promise<Project | null>
@@ -41,8 +41,9 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   loading: false,
   error: null,
 
-  async hydrateProjects(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateProjects(userId: string, origin?: SyncProducer): Promise<void> {
+    if (origin && origin.userId !== userId) throw new Error('Sync account changed')
+    const { api, isCurrent } = origin ?? hydrationContext()
     const initialIds = Object.keys(get().projects)
     set({ loading: true, error: null })
     try {

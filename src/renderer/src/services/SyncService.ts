@@ -4,7 +4,7 @@ import { markSynced, refreshProducerPending, reportPushFailure } from './syncFee
 import { remoteTaskOrder } from './remoteTaskOrder'
 import { readAll, readAllIn } from './readAll'
 import { useAuthStore } from '../shared/stores/authStore'
-import { captureSyncContext, captureSyncProducer, requireProducerCurrent, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
+import { captureSyncContext, captureSyncProducer, requireProducerCurrent, syncContextFromProducer, withSyncProducer, type SyncProducer, type SyncContext } from './syncContext'
 import { replaySpecialEntry, specialEntryIntent } from './syncQueueReplay'
 import { scheduleRemoteProjectRefresh } from './remoteProjectRefresh'
 /**
@@ -740,21 +740,20 @@ export async function generateInviteLink(
 /**
  * Check if the current user has any pending email-based invites.
  */
-export async function checkPendingInvites(userEmail: string): Promise<Array<{
+export async function checkPendingInvites(userEmail: string, origin = captureSyncProducer()): Promise<Array<{
   token: string
   projectId: string
   projectName: string
   ownerEmail: string
   expiresAt: string
 }>> {
-  const supabase = await getSupabase()
-
-  const { data, error } = await supabase.rpc('get_pending_invites_for_email', {
+  const { client } = await syncContextFromProducer(origin)
+  const { data, error } = await client.rpc('get_pending_invites_for_email', {
     user_email: userEmail.toLowerCase().trim()
   })
-
-  if (error || !data) return []
-
+  await requireProducerCurrent(origin)
+  if (error) throw new Error(error.message)
+  if (!Array.isArray(data)) throw new Error('Invalid invitation response')
   return data.map((invite: Record<string, unknown>) => ({
     token: invite.token as string,
     projectId: invite.project_id as string,
@@ -764,69 +763,63 @@ export async function checkPendingInvites(userEmail: string): Promise<Array<{
   }))
 }
 
-/**
- * Validate an invite token and return invite details.
- */
-/**
- * Subscribe to real-time invite notifications for a specific email.
- */
+/** Use the existing realtime connection, but never deliver a canceled scope. */
 export async function subscribeToInvites(
   email: string,
-  onInvite: (invite: { token: string }) => void
+  onInvite: (invite: { token: string }) => void | Promise<void>,
+  origin = captureSyncProducer()
 ): Promise<() => void> {
   const supabase = await getSupabase()
+  await requireProducerCurrent(origin)
   let channel: RealtimeChannel | null = null
   let retryTimeout: ReturnType<typeof setTimeout> | null = null
   let cancelled = false
-
-  const createChannel = (): RealtimeChannel => {
-    return supabase
-      .channel(`invites:${email}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'project_invites',
-          filter: `target_email=eq.${email.toLowerCase().trim()}`
-        },
-        (payload) => {
-          const invite = payload.new as { token: string; status: string }
-          if (invite.status === 'pending') {
-            onInvite({ token: invite.token })
-          }
-        }
-      )
+  const stop = (): void => {
+    cancelled = true
+    if (retryTimeout) clearTimeout(retryTimeout)
+    retryTimeout = null
+    if (channel) void supabase.removeChannel(channel)
+    channel = null
   }
-
-  const subscribe = (attempt: number): void => {
+  const subscribe = async (attempt: number): Promise<void> => {
     if (cancelled) return
-    channel = createChannel()
+    if (!await origin.isCurrent()) { stop(); return }
+    origin.assertCurrent()
+    if (cancelled) return
+    channel = supabase.channel('invites:' + email.toLowerCase().trim())
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'project_invites',
+        filter: 'target_email=eq.' + email.toLowerCase().trim()
+      }, (payload) => {
+        const invite = payload.new as { token: string; status: string }
+        if (cancelled || invite.status !== 'pending') return
+        void (async () => {
+          if (cancelled || !await origin.isCurrent()) { stop(); return }
+          origin.assertCurrent()
+          if (!cancelled) await onInvite({ token: invite.token })
+        })().catch(() => {
+          if (!cancelled) logEvent('warn', 'realtime', 'Invitation notification could not be refreshed')
+        })
+      })
     channel.subscribe((status) => {
+      if (cancelled) return
       if (status === 'SUBSCRIBED') {
-        console.log('[Invites] Realtime subscription connected')
         logEvent('info', 'realtime', 'Subscribed to invites channel')
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.warn(`[Invites] Subscription failed (attempt ${attempt}):`, status)
-        logEvent('warn', 'realtime', `Invites channel ${status} (attempt ${attempt})`)
-        if (channel) supabase.removeChannel(channel)
-        if (!cancelled && attempt < 5) {
-          retryTimeout = setTimeout(() => subscribe(attempt + 1), 3000 * attempt)
-        }
+        if (channel) void supabase.removeChannel(channel)
+        channel = null
+        if (attempt < 5) retryTimeout = setTimeout(() => {
+          retryTimeout = null
+          void subscribe(attempt + 1).catch(stop)
+        }, 3000 * attempt)
       }
     })
   }
-
-  subscribe(1)
-
-  return () => {
-    cancelled = true
-    if (retryTimeout) clearTimeout(retryTimeout)
-    if (channel) supabase.removeChannel(channel)
-  }
+  await subscribe(1)
+  return stop
 }
 
-export async function validateInviteToken(token: string): Promise<{
+export async function validateInviteToken(token: string, origin = captureSyncProducer()): Promise<{
   valid: boolean
   expired: boolean
   projectName: string
@@ -834,61 +827,41 @@ export async function validateInviteToken(token: string): Promise<{
   projectId: string
   inviteId: string
 } | null> {
-  const supabase = await getSupabase()
-
-  // Use SECURITY DEFINER function to bypass RLS — the invitee isn't a member yet
-  const { data, error } = await supabase.rpc('validate_invite', {
-    invite_token: token
-  })
-
-  if (error || !data || data.length === 0) return null
-
+  const { client } = await syncContextFromProducer(origin)
+  const { data, error } = await client.rpc('validate_invite', { invite_token: token })
+  await requireProducerCurrent(origin)
+  if (error) throw new Error(error.message)
+  if (!Array.isArray(data)) throw new Error('Invalid invitation response')
+  if (!data.length) return null
   const invite = data[0]
   const expired = new Date(invite.expires_at) < new Date() || invite.status === 'expired'
-
   return {
-    valid: !expired && invite.status === 'pending',
-    expired,
-    projectName: invite.project_name,
-    ownerName: invite.owner_email,
-    projectId: invite.project_id,
-    inviteId: invite.token
+    valid: !expired && invite.status === 'pending', expired,
+    projectName: invite.project_name, ownerName: invite.owner_email,
+    projectId: invite.project_id, inviteId: invite.token
   }
 }
 
-/**
- * Accept an invite — adds user to project_members and syncs data down.
- */
-export async function acceptInvite(token: string, userId: string): Promise<string> {
-  const supabase = await getSupabase()
-
-  console.log('[SyncService] Accepting invite token:', token)
-  // Use server-side function that validates the invite and adds the member atomically
-  const { data: projectId, error } = await supabase.rpc('accept_invite', {
-    invite_token: token
-  })
-
-  console.log('[SyncService] accept_invite result:', { projectId, error })
+/** Accept remotely and download only into the originating local database. */
+export async function acceptInvite(token: string, userId: string, origin = captureSyncProducer()): Promise<string> {
+  if (origin.userId !== userId) throw new Error('Sync account changed')
+  const context = await syncContextFromProducer(origin)
+  const { data: projectId, error } = await context.client.rpc('accept_invite', { invite_token: token })
+  await requireProducerCurrent(origin)
   if (error) throw new Error(error.message)
-  if (!projectId) throw new Error('Failed to accept invite')
-
-  // Sync project data down to local
-  console.log('[SyncService] Syncing project down:', projectId)
-  await syncProjectDown(projectId, userId)
-  console.log('[SyncService] Project synced successfully')
-
+  if (typeof projectId !== 'string' || !projectId) throw new Error('Failed to accept invite')
+  await syncProjectDown(projectId, userId, context)
+  await requireProducerCurrent(origin)
   return projectId
 }
 
-/**
- * Decline an invite — marks it so it won't show again.
- */
-export async function declineInvite(token: string): Promise<void> {
-  const supabase = await getSupabase()
-  await supabase
-    .from('project_invites')
-    .update({ status: 'declined' })
-    .eq('token', token)
+/** Acknowledged targeted decline, or local dismissal of a reusable public link. */
+export async function declineInvite(token: string, origin = captureSyncProducer()): Promise<void> {
+  const { client } = await syncContextFromProducer(origin)
+  const { data, error } = await client.rpc('decline_invite', { invite_token: token })
+  await requireProducerCurrent(origin)
+  if (error) throw new Error(error.message)
+  if (data !== 'declined' && data !== 'dismissed') throw new Error('Invitation decline was not acknowledged')
 }
 
 /**

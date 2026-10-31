@@ -20,7 +20,18 @@ vi.mock('./powerState',()=>({isSuspended:vi.fn(()=>false)}))
 vi.mock('./sessionRecovery',()=>({requireSession:vi.fn(async()=>({user:{id:'u'},access_token:'synthetic'}))}))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
-vi.mock('./syncContext', async(importOriginal) => ({ ...await importOriginal<typeof import('./syncContext')>(), captureSyncContext: vi.fn(async () => context) }))
+vi.mock('./syncContext', async(importOriginal) => {
+  const actual = await importOriginal<typeof import('./syncContext')>()
+  return {
+    ...actual, captureSyncContext: vi.fn(async () => context),
+    // This suite's cloud endpoint is the capped fluent fixture above. Keep
+    // the real producer/native fence when invitation acceptance supplies it.
+    syncContextFromProducer: vi.fn(async (origin: import('./syncContext').SyncProducer) => {
+      await actual.requireProducerCurrent(origin)
+      return { ...context, api: origin.api, assertCurrent: origin.assertCurrent, isCurrent: origin.isCurrent, scope: await origin.scope() }
+    })
+  }
+})
 vi.mock('../shared/stores/labelStore', () => ({ useLabelStore: { getState: () => ({ hydrateAllLabels: async () => {}, hydrateLabels: async () => {} }) } }))
 vi.mock('../shared/stores/taskStore', () => ({ useTaskStore: { getState: () => ({ hydrateAllTaskLabels: async () => {}, hydrateAllForUser: async () => {}, hydrateAllForProject: async () => {} }) } }))
 

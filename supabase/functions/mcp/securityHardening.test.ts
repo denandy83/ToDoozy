@@ -226,3 +226,61 @@ it('authorizes live invite reads only for owners and the confirmed stored recipi
   expect((await visible()).rows).toEqual([])
   expect((await as('anon',null,()=>db.query('SELECT token FROM project_invites'))).rows).toEqual([])
 },15000)
+
+it('lets only the confirmed recipient decline, with an idempotent acknowledgement', async () => {
+  await db.query("INSERT INTO project_invites VALUES($1,$2,' ALICE@example.invalid ','pending',now()+interval '1 day',NULL)", [id(60),id(10)])
+  await harden()
+  const before = (await db.query('SELECT project_id,target_email,expires_at,accepted_by FROM project_invites WHERE token=$1',[id(60)])).rows
+  const decline = () => as('authenticated',id(1),()=>db.query('SELECT decline_invite($1) AS result',[id(60)]))
+  expect((await decline()).rows).toEqual([{result:'declined'}])
+  expect((await decline()).rows).toEqual([{result:'declined'}])
+  expect((await db.query('SELECT status FROM project_invites WHERE token=$1',[id(60)])).rows).toEqual([{status:'declined'}])
+  expect((await db.query('SELECT project_id,target_email,expires_at,accepted_by FROM project_invites WHERE token=$1',[id(60)])).rows).toEqual(before)
+  expect((await db.query('SELECT user_id FROM project_members WHERE user_id=$1',[id(1)])).rows).toEqual([])
+  expect((await as('authenticated',id(1),()=>db.query('SELECT * FROM get_pending_invites_for_email($1)',['alice@example.invalid']))).rows).toEqual([])
+},15000)
+
+it('denies anonymous, wrong-recipient and unconfirmed declines without consuming invitations', async () => {
+  await db.query("INSERT INTO project_invites VALUES($1,$2,'alice@example.invalid','pending',now()+interval '1 day',NULL)",[id(61),id(10)])
+  await harden()
+  await expect(as('anon',null,()=>db.query('SELECT decline_invite($1)',[id(61)]))).rejects.toThrow(/permission denied/)
+  await expect(as('authenticated',id(2),()=>db.query('SELECT decline_invite($1)',[id(61)]))).rejects.toThrow(/another user/)
+  await db.query('UPDATE auth.users SET email_confirmed_at=NULL WHERE id=$1',[id(1)])
+  await db.query("SELECT set_config('request.jwt.claim.email','alice@example.invalid',false)")
+  await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(61)]))).rejects.toThrow(/another user/)
+  expect((await db.query('SELECT status,accepted_by FROM project_invites WHERE token=$1',[id(61)])).rows).toEqual([{status:'pending',accepted_by:null}])
+},15000)
+
+it('dismisses reusable public links without revoking them and rejects unavailable transitions', async () => {
+  await db.query("INSERT INTO project_invites VALUES($1,$3,NULL,'pending',now()+interval '1 day',NULL),($2,$3,'alice@example.invalid','pending',now()-interval '1 day',NULL)",[id(62),id(63),id(10)])
+  await harden()
+  for (const user of [id(1),id(2)]) {
+    expect((await as('authenticated',user,()=>db.query('SELECT decline_invite($1) AS result',[id(62)]))).rows).toEqual([{result:'dismissed'}])
+  }
+  expect((await db.query('SELECT status FROM project_invites WHERE token=$1',[id(62)])).rows).toEqual([{status:'pending'}])
+  await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(63)]))).rejects.toThrow(/unavailable or expired/)
+  await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(999)]))).rejects.toThrow(/unavailable/)
+  await db.query("UPDATE project_invites SET status='revoked' WHERE token=$1",[id(63)])
+  await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(63)]))).rejects.toThrow(/unavailable/)
+},15000)
+
+it('cannot accept a declined invitation or decline an accepted invitation', async () => {
+  await db.query("INSERT INTO project_invites VALUES($1,$3,'alice@example.invalid','pending',now()+interval '1 day',NULL),($2,$3,'alice@example.invalid','pending',now()+interval '1 day',NULL)",[id(64),id(65),id(10)])
+  await harden()
+  await as('authenticated',id(1),()=>db.query('SELECT accept_invite($1)',[id(64)]))
+  await expect(as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(64)]))).rejects.toThrow(/unavailable/)
+  await as('authenticated',id(1),()=>db.query('SELECT decline_invite($1)',[id(65)]))
+  await expect(as('authenticated',id(1),()=>db.query('SELECT accept_invite($1)',[id(65)]))).rejects.toThrow(/unavailable/)
+  expect((await db.query('SELECT status,accepted_by FROM project_invites WHERE token=$1',[id(64)])).rows).toEqual([{status:'accepted',accepted_by:id(1)}])
+  expect((await db.query('SELECT status,accepted_by FROM project_invites WHERE token=$1',[id(65)])).rows).toEqual([{status:'declined',accepted_by:null}])
+},15000)
+
+it.each(['status','expires_at'])('fails closed for an invitation with missing %s', async column => {
+  await db.query("INSERT INTO project_invites VALUES($1,$2,'alice@example.invalid','pending',now()+interval '1 day',NULL)",[id(66),id(10)])
+  await db.exec('UPDATE project_invites SET ' + column + '=NULL')
+  await harden()
+  for (const operation of ['accept_invite','decline_invite']) {
+    await expect(as('authenticated',id(1),()=>db.query('SELECT ' + operation + '($1)',[id(66)]))).rejects.toThrow(/unavailable/)
+  }
+  expect((await db.query('SELECT user_id FROM project_members WHERE user_id=$1',[id(1)])).rows).toEqual([])
+},15000)

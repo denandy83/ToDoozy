@@ -62,7 +62,7 @@ DECLARE invitation public.project_invites%ROWTYPE; caller uuid:=auth.uid(); call
 BEGIN
   IF caller IS NULL THEN RAISE EXCEPTION 'Sign in to accept an invitation' USING ERRCODE='42501'; END IF;
   SELECT * INTO invitation FROM public.project_invites WHERE token=invite_token FOR UPDATE;
-  IF NOT FOUND OR invitation.status <> 'pending' OR invitation.expires_at<=now() THEN
+  IF NOT FOUND OR invitation.status IS DISTINCT FROM 'pending' OR invitation.expires_at IS NULL OR invitation.expires_at<=now() THEN
     RAISE EXCEPTION 'Invitation is unavailable or expired';
   END IF;
   SELECT lower(btrim(u.email)) INTO caller_email FROM auth.users u WHERE u.id=caller AND u.email_confirmed_at IS NOT NULL;
@@ -77,6 +77,36 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.accept_invite(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.accept_invite(uuid) TO authenticated;
+
+-- A recipient may consume only their own targeted invitation. Public links are
+-- dismissed locally: declining one must not revoke it for other recipients.
+CREATE OR REPLACE FUNCTION public.decline_invite(invite_token uuid)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE invitation public.project_invites%ROWTYPE; caller uuid := auth.uid(); caller_email text;
+BEGIN
+  IF caller IS NULL THEN
+    RAISE EXCEPTION 'Sign in to respond to an invitation' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO invitation FROM public.project_invites WHERE token=invite_token FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invitation is unavailable'; END IF;
+  IF invitation.target_email IS NOT NULL THEN
+    SELECT lower(btrim(u.email)) INTO caller_email FROM auth.users u
+      WHERE u.id=caller AND u.email_confirmed_at IS NOT NULL;
+    IF caller_email IS NULL OR lower(btrim(invitation.target_email)) IS DISTINCT FROM caller_email THEN
+      RAISE EXCEPTION 'Invitation is addressed to another user' USING ERRCODE='42501';
+    END IF;
+    IF invitation.status='declined' THEN RETURN 'declined'; END IF;
+  END IF;
+  IF invitation.status IS DISTINCT FROM 'pending' OR invitation.expires_at IS NULL OR invitation.expires_at<=now() THEN
+    RAISE EXCEPTION 'Invitation is unavailable or expired';
+  END IF;
+  IF invitation.target_email IS NULL THEN RETURN 'dismissed'; END IF;
+  UPDATE public.project_invites SET status='declined' WHERE token=invite_token;
+  RETURN 'declined';
+END;
+$$;
+REVOKE ALL ON FUNCTION public.decline_invite(uuid) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.decline_invite(uuid) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.get_user_profiles(p_user_ids uuid[])
 RETURNS TABLE(id uuid,email text,display_name text,avatar_url text)
