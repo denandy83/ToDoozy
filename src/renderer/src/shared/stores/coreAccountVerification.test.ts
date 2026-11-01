@@ -27,9 +27,10 @@ beforeEach(()=>{
   vi.clearAllMocks()
   generation=1
   vi.stubGlobal('window',{api:{ activityLog:{create:vi.fn().mockResolvedValue({})},timer:{clearTimer:vi.fn(),updateTimer:vi.fn(),minimizeToTray:vi.fn()},sync:{
-    captureContext:async()=>({generation,userId:useAuthStore.getState().currentUser?.id}),
-    invokeContext:async(origin:{generation:number},channel:string,args:unknown[])=>{
-      if(origin.generation!==generation)throw Error('Database changed')
+    currentContext:()=>JSON.stringify([useAuthStore.getState().currentUser?.id??null,generation]),
+    captureContext:async()=>({generation,userId:useAuthStore.getState().currentUser?.id??null}),
+    invokeContext:async(origin:{generation:number;userId:string|null},channel:string,args:unknown[])=>{
+      if(origin.generation!==generation||origin.userId!==(useAuthStore.getState().currentUser?.id??null))throw Error('Database changed')
       const [namespace,method]=channel.split(':')
       const api=window.api as unknown as Record<string,Record<string,(...args:unknown[])=>unknown>>
       return api[namespace][method](...args)
@@ -57,10 +58,21 @@ it.each([
   expect(state()).toEqual([])
 })
 
+function installAttachmentAdmission(taskIds: string[]) {
+  const findTask=vi.fn(async(id:string)=>taskIds.includes(id)?{id,project_id:'attachment-project',owner_id:'a',deleted_at:null}:null)
+  const findProjects=vi.fn(async(userId:string,projectId?:string)=>userId==='a'&&projectId==='attachment-project'?[{id:projectId,owner_id:userId,deleted_at:null}]:[])
+  Object.assign(window.api,{tasks:{findById:findTask},projects:{getProjectsForUser:findProjects}})
+  return {findTask,findProjects}
+}
+
 it('keeps task B attachments when A responds later',async()=>{
   let finish!:(value:unknown)=>void
-  Object.assign(window.api,{attachments:{findByTaskId:(taskId:string)=>taskId==='a'?new Promise(r=>{finish=r}):Promise.resolve([{id:'b-file',task_id:'b'}])}})
+  let entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  installAttachmentAdmission(['a','b'])
+  Object.assign(window.api,{attachments:{findByTaskId:(taskId:string)=>{if(taskId==='a'){entered();return new Promise(r=>{finish=r})}return Promise.resolve([{id:'b-file',task_id:'b'}])}}})
   const old=useAttachmentStore.getState().hydrateAttachments('a')
+  await started
   await useAttachmentStore.getState().hydrateAttachments('b')
   finish([{id:'a-file',task_id:'a'}]);await old
   expect(Object.keys(useAttachmentStore.getState().attachments)).toEqual(['b-file'])
@@ -79,22 +91,28 @@ it('clears old account private tasks, timer context and notifications synchronou
 
 it('does not republish notifications from a deferred old-account hydration',async()=>{
   let finish!:(value:unknown)=>void
-  Object.assign(window.api,{notifications:{findAll:()=>new Promise(r=>{finish=r}),getUnreadCount:async()=>1}})
+  let entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  Object.assign(window.api,{notifications:{findAll:()=>{entered();return new Promise(r=>{finish=r})},getUnreadCount:async()=>1}})
   const pending=useNotificationStore.getState().hydrate()
-  await Promise.resolve();await Promise.resolve()
+  const cancelled=expect(pending).rejects.toThrow('Hydration account changed')
+  await started
   generation++;useAuthStore.setState({currentUser:{id:'b'} as never})
-  finish([{id:'n',message:'Private A notification'}]);await pending
+  finish([{id:'n',message:'Private A notification'}]);await cancelled
   expect(useNotificationStore.getState().notifications).toEqual([])
   expect(useNotificationStore.getState().unreadCount).toBe(0)
 })
 
 it.each(['area','template'])('does not republish a late old-account %s creation',async(kind)=>{
   let finish!:(value:unknown)=>void
-  Object.assign(window.api,{projectAreas:{create:()=>new Promise(r=>{finish=r})},projectTemplates:{create:()=>new Promise(r=>{finish=r})}})
+  let entered!:()=>void
+  const started=new Promise<void>(resolve=>{entered=resolve})
+  const create=()=>{entered();return new Promise(resolve=>{finish=resolve})}
+  Object.assign(window.api,{projectAreas:{create},projectTemplates:{create}})
   const pending=kind==='area'?useProjectAreaStore.getState().createArea('a','Private A')
     :useTemplateStore.getState().createProjectTemplate({id:'private',owner_id:'a',name:'Private A',color:'#fff',data:'{}'})
-  const cancelled=expect(pending).rejects.toThrow('Sync account or database changed')
-  await Promise.resolve();await Promise.resolve()
+  const cancelled=expect(pending).rejects.toThrow('Sync account changed or signed out')
+  await started
   generation++;useAuthStore.setState({currentUser:{id:'b'} as never})
   finish({id:'private',user_id:'a',owner_id:'a',name:'Private A'});await cancelled
   expect(useProjectAreaStore.getState().areas).toEqual([])
@@ -131,12 +149,15 @@ it.each([
   let entered!:()=>void
   const started=new Promise<void>(resolve=>{entered=resolve})
   const findProject=vi.fn().mockResolvedValue({id:'shared-id',owner_id:'b'})
+  const findProjects=vi.fn(async(userId:string,projectId?:string)=>userId==='a'&&projectId==='shared-id'?[{id:projectId,owner_id:userId,deleted_at:null}]:[])
   Object.assign(window.api,{
     [namespace]:{[method]:()=>{entered();return new Promise(resolve=>{finish=resolve})}},
-    projects:{findById:findProject}
+    projects:{findById:findProject,getProjectsForUser:findProjects}
   })
   const pending=run()
-  const cancelled=expect(pending).rejects.toThrow(/(?:Sync account (?:or database changed|changed or signed out)|Database changed)/)
+  const cancelled=method==='assignProject'
+    ?expect(pending).rejects.toThrow('Hydration account changed')
+    :expect(pending).rejects.toThrow(/(?:Sync account (?:or database changed|changed or signed out)|Database changed)/)
   await started
   generation++
   useAuthStore.setState({currentUser:{id:'b'} as never})
@@ -156,6 +177,7 @@ it.each([
   expect(useSavedViewStore.getState().views).toEqual([currentView])
   expect(useSavedViewStore.getState().viewCounts).toEqual({'shared-id':3})
   expect(findProject).not.toHaveBeenCalled()
+  if(method==='assignProject')expect(findProjects).toHaveBeenCalledExactlyOnceWith('a','shared-id')
   for(const publish of Object.values(personalSync))expect(publish).not.toHaveBeenCalled()
 })
 
@@ -232,7 +254,7 @@ it.each([
   {namespace:'themes',method:'create',run:()=>useSettingsStore.getState().createTheme({id:'shared',name:'Private A',mode:'dark',config:'{}'})},
   {namespace:'themes',method:'update',run:()=>useSettingsStore.getState().updateTheme('shared',{name:'Private A'})},
   {namespace:'themes',method:'delete',run:()=>useSettingsStore.getState().deleteTheme('shared')}
-])('fences late $namespace.$method replies and every sync continuation',async({namespace,method,run})=>{
+])('fences late $namespace $method replies and every sync continuation',async({namespace,method,run})=>{
   let finish!:(value:unknown)=>void
   let entered!:()=>void
   const started=new Promise<void>(resolve=>{entered=resolve})
@@ -240,7 +262,7 @@ it.each([
   Object.assign(window.api,{settings:{get},themes:{list},[namespace]:{get,list,[method]:()=>{entered();return new Promise(resolve=>{finish=resolve})}}})
   useSettingsStore.getState().setUserId('a')
   const pending=run()
-  const cancelled=expect(pending).rejects.toThrow(/Sync account or database changed/)
+  const cancelled=expect(pending).rejects.toThrow('Sync account changed or signed out')
   await started
   generation++
   useAuthStore.setState({currentUser:{id:'b'} as never})
@@ -277,12 +299,16 @@ it('preserves current-account settings/theme mutation and refresh behavior',asyn
 })
 
 it('rejects stale attachment additions on a database-only replacement',async()=>{
+  const admission=installAttachmentAdmission(['shared'])
   const origin=hydrationContext()
   generation++
   await useAttachmentStore.getState().addAttachment({id:'old-file',task_id:'shared'} as never,origin)
   expect(useAttachmentStore.getState().attachments).toEqual({})
+  expect(admission.findTask).not.toHaveBeenCalled();expect(admission.findProjects).not.toHaveBeenCalled()
   await useAttachmentStore.getState().addAttachment({id:'current-file',task_id:'shared'} as never,hydrationContext())
   expect(Object.keys(useAttachmentStore.getState().attachments)).toEqual(['current-file'])
+  expect(admission.findTask).toHaveBeenCalledWith('shared')
+  expect(admission.findProjects).toHaveBeenCalledWith('a','attachment-project')
 })
 
 it('stops database operations at the captured lifecycle boundary and resumes ordinary operations with a fresh context',async()=>{

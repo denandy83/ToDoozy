@@ -113,7 +113,7 @@ See the [security and sync rollout guide](docs/security-optimization-2026-10-30.
 | **MCP server** | AI integration via stdio — full CRUD tools for all entities |
 | **Telegram Bot** | Manage tasks from Telegram — add, list, complete, with per-project routing |
 | **iOS Shortcut integration** | Create tasks from iPhone/iPad via iOS Shortcuts using the API endpoint |
-| **iCloud attachments** | File attachments synced to iCloud Drive with local-first offline support |
+| **File attachments** | Attach files from your Mac; see [storage and Undo](HELP.md#file-attachments) |
 | **Supabase auth** | Email/password + Google OAuth, encrypted session storage, auto-login |
 | **Focus management** | Full keyboard navigation, focus traps in overlays, Tab cycles through detail fields |
 | **Due dates in rows** | Due dates display inline on task rows with overdue styling |

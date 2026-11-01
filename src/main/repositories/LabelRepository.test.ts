@@ -439,7 +439,7 @@ describe('LabelRepository — consolidate', () => {
   it('refreshes an existing canonical row via ON CONFLICT update', () => {
     repo.create({ id: 'L_local', user_id: userId, name: 'bug' })
     // Pre-existing local row at canonical ID with a stale name (e.g., placeholder)
-    const now = new Date().toISOString()
+    const now = '2020-01-01T00:00:00.000Z' // genuinely older than the incoming canonical row
     db.prepare(
       `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
        VALUES ('L_remote', ?, '__stale__', '#888888', 0, ?, ?)`
@@ -456,7 +456,7 @@ describe('LabelRepository — consolidate', () => {
     repo.create({ id: 'L_local', user_id: userId, name: 'bug' })
     db.prepare('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)').run('t1', 'L_local')
     // Pre-existing canonical row + link
-    const now = new Date().toISOString()
+    const now = '2020-01-01T00:00:00.000Z' // genuinely older than the incoming canonical row
     db.prepare(
       `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at)
        VALUES ('L_remote', ?, '__placeholder__', '#000000', 0, ?, ?)`
@@ -721,5 +721,26 @@ it.each(['source','target'].flatMap((newest)=>['add','remove'].map((choice)=>({n
       if(choice==='remove') expect(command).toMatchObject({deletedAt:latest.deleted_at,expectedLink:merged})
       else expect(command.expectedLink.deleted_at).toBe(older.deleted_at)
     }
+  } finally {db.close()}
+})
+
+
+it.each(['equal-clock','pending-edit'])('rejects canonical %s conflicts atomically while retaining pending label intent', mode => {
+  const db=createTestDb()
+  try {
+    const {userId,projectId}=seedFixtures(db),labels=new LabelRepository(db)
+    seedTask(db,'protected-task',projectId,userId)
+    const source=labels.create({id:'protected-source',user_id:userId,name:'Bug'})
+    db.prepare('INSERT INTO task_labels(task_id,label_id) VALUES(?,?)').run('protected-task',source.id)
+    db.prepare('INSERT INTO labels(id,user_id,name,color,order_index,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
+      .run('protected-canonical',userId,'Private pending name','#AA2233',0,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')
+    const local=labels.findById('protected-canonical')!
+    if(mode==='pending-edit')new SyncQueueRepository(db).enqueue('user_labels',local.id,'UPDATE',JSON.stringify(local))
+    const incoming={...local,name:'Bug',color:'#000000',updated_at:mode==='equal-clock'?local.updated_at:'2021-01-01T00:00:00.000Z'}
+    const snapshot=()=>({labels:db.prepare('SELECT * FROM labels ORDER BY id').all(),links:db.prepare('SELECT * FROM task_labels ORDER BY task_id,label_id').all(),queue:new SyncQueueRepository(db).findAll()})
+    const before=snapshot()
+    expect(()=>labels.consolidate(source.id,incoming)).toThrow('Canonical label has local changes')
+    expect(snapshot()).toEqual(before)
+    if(mode==='pending-edit')expect(new SyncQueueRepository(db).findAll().some(entry=>entry.row_id===local.id&&JSON.parse(entry.payload).name==='Private pending name')).toBe(true)
   } finally {db.close()}
 })

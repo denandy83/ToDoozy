@@ -60,8 +60,25 @@ const fixture = require('./benchmark-sync.cjs') as {
   behaviorScenarios(): Promise<Array<{ name: string; passed: boolean; error?: string }>>
 }
 const opened: Harness[] = []
+const observedProjectAccess = new WeakMap<Harness['nativeCalls'][number], string[]>()
+function expectScopedProjectAccess(h: Harness): void {
+  for (const call of h.nativeCalls.filter(call => call.namespace === 'projects' && call.method === 'getProjectsForUser')) {
+    expect(call.args).toEqual(['u','p0'])
+    const returnedIds = observedProjectAccess.get(call)
+    expect(returnedIds).toBeDefined()
+    expect(returnedIds!.length).toBeLessThanOrEqual(1)
+    expect(returnedIds!.every(id => id === 'p0')).toBe(true)
+  }
+}
 async function make(options: Parameters<typeof fixture.makeHarness>[0]): Promise<Harness> {
   const harness = await fixture.makeHarness(options)
+  const projectAccess = harness.repo.projects.getProjectsForUser.bind(harness.repo.projects)
+  harness.repo.projects.getProjectsForUser = (user, projectId) => {
+    const rows = projectAccess(user, projectId)
+    const call = harness.nativeCalls.at(-1)
+    if (call?.namespace === 'projects' && call.method === 'getProjectsForUser') observedProjectAccess.set(call, rows.map(row => row.id))
+    return rows
+  }
   opened.push(harness)
   return harness
 }
@@ -501,7 +518,8 @@ it.each([false, true])('hydrates only the affected project after actual healthy 
     expect(h.stores.useStatusStore.getState().statuses.s1).toBe(unrelated.status)
     expect(h.stores.useProjectStore.getState().projects.p1).toBe(unrelated.project)
     const calls = h.nativeCalls.filter(call => ['projects','tasks','statuses','labels','settings','themes','savedViews','projectAreas','projectTemplates'].includes(call.namespace))
-    expect(calls.some(call => ['getProjectsForUser','findAll','findAllTemplates','findByUserId','getAll','getAllForUser'].includes(call.method)), JSON.stringify(calls)).toBe(false)
+    expect(calls.some(call => ['findAll','findAllTemplates','findByUserId','getAll','getAllForUser'].includes(call.method) || (call.method === 'getProjectsForUser' && (call.args[0] !== 'u' || call.args[1] !== 'p0'))), JSON.stringify(calls)).toBe(false)
+    expectScopedProjectAccess(h)
     expect(calls.filter(call => ['settings','themes','projectAreas','projectTemplates'].includes(call.namespace))).toEqual([])
     for (const call of calls.filter(call => ['findByProjectId','findAllByProject','findTaskLabelsByProject','getMembers'].includes(call.method))) expect(call.args[0]).toBe('p0')
     expect(calls.filter(call => call.namespace === 'savedViews').every(call => call.method === 'countMatching' && String(call.args[0]).includes('p0'))).toBe(true)
@@ -603,7 +621,8 @@ it.each([false, true])('keeps metadata rename and archive/restore callbacks scop
     }
     expect(h.stores.useTaskStore.getState().tasks['metadata-1']).toBe(unrelatedTask)
     expect(unaffected.closed).toBe(false)
-    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser' && (call.args[0] !== 'u' || call.args[1] !== 'p0'))).toBe(false)
+    expectScopedProjectAccess(h)
     for (const call of h.nativeCalls.filter(call => ['findByProjectId','findAllByProject','findTaskLabelsByProject','getMembers'].includes(call.method))) expect(call.args[0]).toBe('p0')
     const late = active(h, topic)
     cleanup(); await h.untilIdle()
@@ -642,7 +661,8 @@ it('reclassifies owner projects and channel bindings from scoped metadata member
     expect(h.stores.useProjectStore.getState().projects.p0.is_shared).toBe(0)
     expect(h.stores.useProjectStore.getState().members.p0.map(member => member.user_id)).toEqual(['u'])
     expect(unrelated.closed).toBe(false)
-    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser' && (call.args[0] !== 'u' || call.args[1] !== 'p0'))).toBe(false)
+    expectScopedProjectAccess(h)
     for (const request of h.requests.filter(row => row.table === 'project_members')) expect(new URL(request.url).searchParams.get('project_id')).toBe('eq.p0')
   } finally { cleanup() }
 })
@@ -663,7 +683,8 @@ it.each([false, true])('removes a remotely tombstoned project from scoped caches
     expect(h.stores.useTaskStore.getState().tasks[task.id]).toBeUndefined()
     expect(h.repo.projects.findById('p0')?.deleted_at).toBe(stamp)
     expect(h.repo.tasks.findById(task.id)).toBeDefined()
-    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser')).toBe(false)
+    expect(h.nativeCalls.some(call => call.method === 'getProjectsForUser' && (call.args[0] !== 'u' || call.args[1] !== 'p0'))).toBe(false)
+    expectScopedProjectAccess(h)
     expect(h.stores.useProjectStore.getState().projects.p1).toBeDefined()
   } finally { cleanup() }
 })

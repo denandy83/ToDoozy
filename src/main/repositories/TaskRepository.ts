@@ -405,8 +405,8 @@ export class TaskRepository {
   }
 
   /**
-   * Soft-delete: marks the row tombstoned. Idempotent — a re-delete on an
-   * already-tombstoned row is a no-op (and returns false).
+   * Soft-delete the active subtree with a timestamp newer than every descendant.
+   * Re-deleting an already-tombstoned root is a no-op (and returns false).
    */
   delete(id: string): boolean {
     const existing = this.findById(id)
@@ -428,8 +428,8 @@ export class TaskRepository {
   }
 
   /**
-   * Hard delete — physically removes the row. ONLY used by the 30-day purge job.
-   * UI/sync paths must use delete() (soft).
+   * Physical removal for authoritative remote DELETE events. User deletions
+   * must use delete(); retention cleanup follows PurgeService's dependency guards.
    */
   hardDelete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)

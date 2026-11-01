@@ -25,7 +25,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 ### Task Fields
 - Title (autosave 1s), Status (dynamic from project), Priority (5 levels), Labels, Due date + optional time, Reference URL, Smart Recurrence (structured picker with validation + preview), Snooze presets
 - `is_in_my_day`, `is_archived`, `is_template`, `parent_id`, `sort_order` flags
-- `completed_date` auto-set; `snoozed_until` for snooze feature
+- `completed_date` auto-set; due-date rescheduling follows [Snooze](HELP.md#snooze)
 - **Status:** Complete
 
 ### Bulk Selection
@@ -142,13 +142,9 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - 1s autosave debounce
 - **Status:** Complete
 
-### File Attachments (iCloud Drive)
-- Attach files via toolbar paperclip button (enabled when iCloud is configured)
-- File bytes are stored in the local SQLite attachment table; see [AttachmentRepository](src/main/repositories/AttachmentRepository.ts).
+### File Attachments
+- Setup, storage, opening, removal and Undo: see [File Attachments](HELP.md#file-attachments).
 - Attachment cards below description: file type icon + truncated filename
-- Removal, opening and Undo: see [File Attachments](HELP.md#file-attachments).
-- Limits: 10 MB per file, 10 attachments per task; duplicate filename suffix
-- Requires iCloud Drive toggle in Settings > iCloud
 - Local byte retention and task-deletion cleanup follow [PurgeService](src/main/services/PurgeService.ts).
 - **Status:** Complete (2026-03-22)
 
@@ -171,8 +167,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 - **Status:** Complete (2026-03-31)
 
 ### Snooze
-- Presets: Later today, Tomorrow, Next week, Custom
-- Sets `snoozed_until`; snoozed tasks hidden until that date
+- Presets and due-date behavior: see [Snooze](HELP.md#snooze).
 - **Status:** Complete
 
 ### Task Reference URL
@@ -476,8 +471,7 @@ Complete feature inventory grouped by category. Each entry covers what it does, 
 
 ### Telegram Bot
 - Standalone bot (Node.js, runs separately from the Electron app) for managing tasks via Telegram
-- Commands: `/` — list projects or tasks; `.list` — list all projects; `.default` — set default project; `.prefix` — set command prefix; `.settings` — interactive settings menu; `/done` — show recently completed tasks; `/recent` — show recently added open tasks
-- Slash prefix (`/`) checks project names first, then falls back to built-in commands; dot prefix (`.`) always runs built-in commands
+- Commands, project routing, and partial creation recovery: see [Telegram Bot](HELP.md#telegram-bot).
 - Task list persists after completing a task — checkmark replaces the done item inline
 - Bot commands registered with Telegram for autocomplete suggestion menu
 - PID file lock prevents duplicate bot instances

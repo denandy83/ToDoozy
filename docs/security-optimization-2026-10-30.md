@@ -15,7 +15,7 @@ Do not equate a local benchmark with production disk I/O.
 | VIEW-01–02 | Saved-view counts apply due-date and assignee filters; the renderer applies included/excluded assignees. |
 | DATE-01–03 | Monthly day/ordinal recurrence, local calendar date keys, local-day UTC boundaries, and local statistics grouping. |
 | SYNC-01 | Queued tombstones, FK prerequisites and cascade ancestors survive age-based cleanup until acknowledgment. |
-| STATE-01–03 | Account-owned caches/timers reset; stale hydration/mutation replies are fenced by account and database generation; settings/themes and file-dialog/create continuations share that boundary; attachment requests are ordered. |
+| STATE-01–03 | Account-owned caches/timers reset; stale hydration/mutation replies are fenced by account and database generation; settings/themes and file-dialog/create continuations share that boundary; attachment requests are ordered. Native tray and Quick Add follow the [sign-out boundary](../HELP.md#menu-bar-tray). |
 | TIMER-01 | Interval updates subtract elapsed time, including delayed callbacks and automatic phase transitions. |
 | MCP-01–04 | Stable complete pagination, query failures propagate, rejected/zero-row reorders fail, and release-note writes require a server administrator allowlist. |
 | BOT-01–03 | Explicit service-role membership/owner scope, active-row filters, pagination, bounded recent queries and useful partial creation errors when label writes fail. |
@@ -74,7 +74,7 @@ actual service/SDK/native and rendered controller paths with synthetic users.
 Run the paired sync benchmark against the last merged source:
 
 ```sh
-node scripts/benchmark-sync.cjs --baseline dea910d34d3a47de01e6398e4145377ae964d548 --output /private/path/sync-comparison.json
+node scripts/benchmark-sync.cjs --baseline dea910d34d3a47de01e6398e4145377ae964d548 --output ./sync-comparison.json
 ```
 
 The benchmark bundles the real App Realtime effect, sync services and repositories
@@ -86,9 +86,11 @@ without stubbing reconciliation. Both real App effects execute at each revision,
 shared/init/reconcile startup path. Only its intentional two-second timer wait is
 advanced; no catch-up implementation is stubbed. Release-note IPC traffic is
 outside the Supabase transport boundary.
-The fixture records request counts, declared synthetic response bytes, concurrency,
-source hashes and timings with a fixed 1 ms request delay. It measures neither
-physical cloud disk I/O nor production throughput.
+The fixture records request counts, UTF-8 request URL/body bytes, synthetic
+serialized-response bytes, concurrency and source hashes. Byte totals exclude
+headers, framing, compression and TLS overhead. Latency cohorts use a fixed 1 ms
+request delay and seven paired repetitions with p50/p95 summaries. These are
+neither physical cloud disk I/O nor production throughput measurements.
 
 Earlier saved observations used the previous project-only fixture. They do not
 describe the expanded membership/user catch-up workload.
@@ -98,7 +100,10 @@ among 20 projects and records HTTP bytes/counts plus local and remote writes.
 No production workload or host metric collection is performed by the benchmark.
 
 Automatic startup, resume, channel rejoin, health recovery and debounced project
-refreshes share one serialized/coalesced scheduler. Routine events pull only their
+refreshes share one serialized/coalesced scheduler. Channel health is tracked
+individually; the aggregate is healthy only with at least one registered channel
+and all registered channels healthy. The 120-second fallback is scheduled while
+the aggregate is unhealthy. Routine events pull only their
 affected projects; account-wide recovery retains authoritative membership and
 user-table coverage. Canceled account/database jobs cannot abandon pending work
 for a new context, and closed channel metadata callbacks cannot recreate channels. Authoritative memberships are
@@ -146,7 +151,7 @@ delete the retained journal, whose recent entries return on restart.
    your chosen private item name, run:
 
    ```sh
-   python3 scripts/supabase_metrics.py --project-ref PROJECT_REF --output-dir '/path/to/userData/host-metrics' --keychain-service PRIVATE_ITEM_NAME
+   python3 scripts/supabase_metrics.py --project-ref PROJECT_REF --output-dir '/path/to/userData/host-metrics' --keychain-service PRIVATE_ITEM_NAME --samples 2
    ```
 
    Alternatively use `--env-file /private/server.env`, with
@@ -155,7 +160,9 @@ delete the retained journal, whose recent entries return on restart.
 4. Take at least two successful samples, 60 seconds apart. The first counter
    sample has unknown rates. Inspect `host-latest.json` and the app's Logs view
    for timestamped summaries. Missing/reset counters remain unknown; scrape
-   failures and samples older than three minutes are marked unavailable/stale.
+   failures and samples older than three minutes are marked unavailable/stale;
+   timestamps over one minute in the future are also marked stale. After the
+   initial two-sample check succeeds, omit `--samples` for continuous collection.
 5. For before/after measurement, preserve the timestamped SQLite sample history
    privately, record client versions and workload windows, deploy the reviewed
    candidate, and compare equally long observation windows. Do not load test
@@ -163,8 +170,8 @@ delete the retained journal, whose recent entries return on restart.
    budget chart separately when needed.
 
 The collector accepts only selected numeric series and approved device/CPU labels,
-disables HTTP redirects, bounds responses/timeouts, enforces a finite interval
-of at least 60 seconds, takes an exclusive lock and retains at most seven days /
+disables HTTP redirects, bounds responses/timeouts, samples on a fixed 60-second
+cadence, takes an exclusive lock and retains at most seven days /
 10,080 samples. Whole-disk inventory is required to report physical disk rates;
 partition counters are not added again. Credentials never cross into the app.
 Install a background job only after the first real authenticated scrape succeeds.

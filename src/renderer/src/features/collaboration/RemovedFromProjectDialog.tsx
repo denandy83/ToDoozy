@@ -16,8 +16,7 @@ interface RemovedFromProjectDialogProps {
 
 /**
  * Dialog shown when the current user is removed from (or unshared out of) a
- * shared project via Realtime. Offers to keep a full local copy of the project
- * or delete it. Extracted verbatim from AppLayout (Story #107).
+ * shared project via Realtime. Recovery-copy semantics belong to recoverProject.
  */
 export function RemovedFromProjectDialog({
   removedFromProject,
@@ -34,12 +33,13 @@ export function RemovedFromProjectDialog({
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const closing = useRef<() => boolean>(() => false)
   const surface = useDismissibleSurface(() => { if (closing.current()) finishClose() })
+  const closeSurface = surface.close
   const onClose = useCallback(() => {
     const closingId = removedFromProject.id
     const ownerId = currentUser?.id
     closing.current = () => active.current && removedRef.current.id === closingId && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === ownerId
-    surface.close()
-  }, [surface.close, removedFromProject, currentUser?.id, initialScope])
+    closeSurface()
+  }, [closeSurface, removedFromProject, currentUser?.id, initialScope])
 
   const { addToast } = useToast()
 

@@ -74,12 +74,13 @@ export function DeployProjectTemplateWizard({
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const closing = useRef<() => boolean>(() => false)
   const surface = useDismissibleSurface(() => { if (closing.current()) finishClose() })
+  const closeSurface = surface.close
   const onClose = useCallback(() => {
     const closingTemplate = template
     const ownerId = currentUser.id
     closing.current = () => active.current && templateRef.current === closingTemplate && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === ownerId
-    surface.close()
-  }, [surface.close, template, currentUser.id, initialScope])
+    closeSurface()
+  }, [closeSurface, template, currentUser.id, initialScope])
 
   const data: ProjectTemplateData = JSON.parse(template.data)
   const wizardRef = useRef<HTMLDivElement>(null)

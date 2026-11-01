@@ -9,7 +9,7 @@ import { SettingsRepository } from '../../../main/repositories/SettingsRepositor
 import { ThemeRepository } from '../../../main/repositories/ThemeRepository'
 import { BUILTIN_THEMES, builtinThemeId, canSyncTheme } from '../../../shared/themeCatalog'
 import type { Setting, SyncQueueEntry, Theme } from '../../../shared/types'
-import type { SyncContext } from './syncContext'
+import { captureSyncProducer, syncContextFromProducer, type SyncContext } from './syncContext'
 
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 const ipc = vi.hoisted(() => ({ handlers: new Map<string, (...args: unknown[]) => unknown>(), database: null as unknown as DatabaseSync }))
@@ -209,7 +209,19 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
     const current = throughIpc ? ipc.handlers.get('sync:captureContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }) as typeof capturedDatabase : null
     return useAuthStore.getState().currentUser?.id === userId && window.api === pinnedApi && (!capturedDatabase || (current?.userId === capturedDatabase.userId && current?.generation === capturedDatabase.generation))
   }
-  return { queue, context: { api: pinnedApi, client: server.client, assertCurrent: () => { if (!isCurrent()) throw new Error('Synthetic account changed') }, isCurrent: async () => isCurrent(), scope: 'synthetic' } }
+  // Private mechanical control: keep install synchronous and retain the fixture's pinned
+  // database/window guard, but resolve queue contexts with the actual product factories.
+  const captured = captureSyncProducer()
+  const accountContext = async (): Promise<SyncContext> => {
+    const actual = await syncContextFromProducer(captured)
+    const assertCurrent = (): void => { actual.assertCurrent(); if (!isCurrent()) throw new Error('Synthetic account changed') }
+    const apiFor: NonNullable<SyncContext['apiFor']> = (guard) => actual.apiFor!(() => { assertCurrent(); guard() })
+    const clientFor: NonNullable<SyncContext['clientFor']> = (guard, after = guard) => actual.clientFor!(() => { assertCurrent(); guard() }, () => { assertCurrent(); after() })
+    return { ...actual, api: apiFor(assertCurrent), apiFor, client: clientFor(assertCurrent), clientFor,
+      accountContext, assertCurrent, isCurrent: async () => isCurrent() && await actual.isCurrent() }
+  }
+  return { queue, context: { api: pinnedApi, client: server.client, accountContext,
+    assertCurrent: () => { if (!isCurrent()) throw new Error('Synthetic account changed') }, isCurrent: async () => isCurrent(), scope: 'synthetic' } }
 }
 beforeEach(() => {
   network.token = null
@@ -1108,6 +1120,8 @@ describe('theme selection intent ordering', () => {
     expect(queue).toHaveLength(1)
     expect(JSON.parse(queue[0].payload)).toMatchObject(selection(canonical, older))
     server.put(selection('named-custom', newer))
+    // Session recovery precedes an authenticated queue retry.
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: userId }, access_token: 'synthetic-restored' } as Session)
     expect(await processSyncQueue(context)).toBe(1)
     expect(queue).toHaveLength(0)
     expect(server.get()).toMatchObject(selection('named-custom', newer))
