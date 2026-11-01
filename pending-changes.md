@@ -46,4 +46,4 @@ Working file — entries written here during a session are processed into perman
 
 
 ## 2026-10-26 — Backlog audit
-See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes and [scope.md](scope.md#2026-10-26--archive-activation-requires-a-coordinated-writer-upgrade) for the release and backend activation requirements.
+See [CHANGELOG.md](CHANGELOG.md) for the changes and the [rollout guide](docs/security-optimization-2026-10-30.md#deployment-and-verification) for release status and backend activation requirements.

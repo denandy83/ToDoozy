@@ -4,6 +4,14 @@ All bug fixes and changes to ToDoozy. Most recent first.
 
 ---
 
+## v1.11.1
+
+- **Safer sharing and invitations** — Access checks protect shared projects and invitation responses; members cannot promote their own roles.
+- **More reliable sync** — Recovery handles reconnects, account changes and queued changes more safely, with fewer idle fallback requests.
+- **Tasks and labels** — Subtask copies, deletion, recovery and label assignments retain their relationships more reliably. Shared-project owners can archive and restore projects.
+- **Local diagnostics** — The Logs view can show bounded Supabase request aggregates and host metrics when a private collector is configured.
+- **Additional fixes** — Improved saved-view filters, recurring dates, timers, attachment handling and security around desktop navigation.
+
 ## v1.11.0
 
 - **Consistent motion** — Shared fades and movement for menus, pickers, popups, dialogs, panels and notifications, with immediate keyboard navigation and reduced-motion support. Dragging uses readable ghosts and consistent settling feedback.
