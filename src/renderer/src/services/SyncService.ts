@@ -1085,8 +1085,8 @@ export async function discoverRemoteMemberships(userId: string, context?: SyncCo
     if (!owner) await api.users.create({ id: project.owner_id, email: placeholderEmail(project.owner_id), display_name: null, avatar_url: null })
     if (!scopedProject) await api.projects.applyRemote({ ...local, ...project })
     const isShared = project.owner_id !== userId || (counts.get(project.id) ?? 0) > 1 ? 1 : 0
-    if ((await api.projects.findById(project.id))?.is_shared !== isShared) await api.projects.update(project.id, { is_shared: isShared })
     await syncMembersDown(project.id, current, members.filter((member) => member.project_id === project.id) as ProjectMember[])
+    if ((await api.projects.findById(project.id))?.is_shared !== isShared) await api.projects.update(project.id, { is_shared: isShared })
     {
       const snapshot = await api.projects.getMembers(project.id)
       const { useProjectStore } = await import('../shared/stores/projectStore')

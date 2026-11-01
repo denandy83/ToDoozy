@@ -10,7 +10,7 @@ import type {
 } from '../../shared/types'
 
 export class ProjectRepository {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: DatabaseSync, private userId: string | null = null) {}
 
   // Raw — sync layer needs to see tombstones to compare timestamps.
   findById(id: string): Project | undefined {
@@ -135,8 +135,10 @@ export class ProjectRepository {
     }
 
     values.push(id)
-    this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-    return this.findById(id)
+    const result = this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL
+      AND ($user IS NULL OR owner_id = $user OR EXISTS (SELECT 1 FROM project_members WHERE project_id = projects.id AND user_id = $user))`)
+      .run({ user: this.userId }, ...values)
+    return result.changes ? this.findById(id) : undefined
   }
 
   archiveWithTasks(id: string): Project | undefined {
@@ -336,11 +338,9 @@ export class ProjectRepository {
   }
 
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): void {
-    const stmt = this.db.prepare('UPDATE projects SET sidebar_order = ?, updated_at = ? WHERE id = ?')
-    const now = new Date().toISOString()
     withTransaction(this.db, () => {
       for (const u of updates) {
-        stmt.run(u.sidebar_order, now, u.id)
+        this.update(u.id, { sidebar_order: u.sidebar_order })
       }
     })
   }

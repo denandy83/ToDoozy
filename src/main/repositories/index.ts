@@ -36,7 +36,7 @@ export interface Repositories {
 export function createRepositories(db: DatabaseSync, userId: string | null = null): Repositories {
   return {
     users: new UserRepository(db),
-    projects: new ProjectRepository(db),
+    projects: new ProjectRepository(db, userId),
     statuses: new StatusRepository(db),
     tasks: new TaskRepository(db, userId),
     labels: new LabelRepository(db),

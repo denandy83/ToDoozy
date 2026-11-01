@@ -1,4 +1,4 @@
-import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer } from '../../services/syncContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -11,7 +11,7 @@ interface ProjectAreaState {
 
 interface ProjectAreaActions {
   hydrate(userId: string, origin?: HydrationOrigin): Promise<void>
-  createArea(userId: string, name: string, color?: string): Promise<ProjectArea>
+  createArea(userId: string, name: string, color?: string, producer?: SyncProducer): Promise<ProjectArea>
   updateArea(id: string, updates: { name?: string; color?: string; is_collapsed?: number }): Promise<void>
   deleteArea(id: string): Promise<void>
   reorderAreas(areaIds: string[]): Promise<void>
@@ -43,8 +43,9 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
     }
   },
 
-  async createArea(userId: string, name: string, color?: string): Promise<ProjectArea> {
-    const origin = captureSyncProducer()
+  async createArea(userId: string, name: string, color?: string, producer?: SyncProducer): Promise<ProjectArea> {
+    const origin = producer ?? captureSyncProducer()
+    if (origin.userId !== userId) throw new Error('Sync account changed')
     const input: CreateProjectAreaInput = {
       id: crypto.randomUUID(),
       user_id: userId,

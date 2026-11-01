@@ -25,7 +25,7 @@ interface ProjectActions {
   hydrateProjects(userId: string, origin?: SyncProducer): Promise<void>
   hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   createProject(input: CreateProjectInput, producer?: ProjectProducer): Promise<Project>
-  updateProject(id: string, input: UpdateProjectInput): Promise<Project | null>
+  updateProject(id: string, input: UpdateProjectInput, producer?: ProjectProducer): Promise<Project | null>
   deleteProject(id: string): Promise<boolean>
   archiveProject(id: string): Promise<Project | null>
   unarchiveProject(id: string): Promise<Project | null>
@@ -141,10 +141,12 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
     }
   },
 
-  async updateProject(id: string, input: UpdateProjectInput): Promise<Project | null> {
-    const origin = captureProjectProducer(id)
+  async updateProject(id: string, input: UpdateProjectInput, producer?: ProjectProducer): Promise<Project | null> {
+    const origin = producer ?? captureProjectProducer(id)
     try {
-      const project = await origin.api.projects.update(id, input)
+      origin.includeProject(id)
+      const context = hydrationContext(origin, id, origin.userId)
+      const project = await context.api.projects.update(id, input)
       await requireProducerCurrent(origin)
       if (project) {
         set((state) => ({
@@ -162,6 +164,7 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
       await requireProducerCurrent(origin)
       return project
     } catch (err) {
+      if (producer && !await origin.isCurrent()) return null
       await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to update project'
       set({ error: message })
