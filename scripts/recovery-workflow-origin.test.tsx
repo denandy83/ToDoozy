@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import type { ProjectTemplate, User } from '../src/shared/types'
 import { migrations } from '../src/main/database/migrations'
 import { createRepositories } from '../src/main/repositories'
 import { createRequire } from 'node:module'
@@ -16,8 +17,8 @@ const { makeHarness } = require('./benchmark-sync.cjs')
 type Harness = Awaited<ReturnType<typeof makeHarness>>
 const opened: Array<{ h: Harness; root: Root; host: HTMLElement; replacements: DatabaseSync[] }> = []
 afterEach(async () => { for (const f of opened.splice(0)) { await act(async () => f.root.unmount()); f.host.remove(); await f.h.stop(); for (const db of f.replacements) db.close() } })
-function gate() { let enter!: () => void, release!: () => void; return { entered: new Promise<void>(r => { enter = r }), wait: new Promise<void>(r => { release = r }), enter: () => enter(), release: () => release() } }
-async function setup() {
+function gate(): { entered: Promise<void>; wait: Promise<void>; enter: () => void; release: () => void } { let enter!: () => void, release!: () => void; return { entered: new Promise<void>(r => { enter = r }), wait: new Promise<void>(r => { release = r }), enter: () => enter(), release: () => release() } }
+async function setup(): Promise<(typeof opened)[number] & { user: User | null; template: ProjectTemplate }> {
   const h = await makeHarness({ ref: process.env.REVIEW_BASE_REF, projectCount: 1, shared: 1, sharedHook: true, connected: true })
   h.sandbox.document = document
   h.sandbox.requestAnimationFrame = (callback: () => void) => setImmediate(callback)

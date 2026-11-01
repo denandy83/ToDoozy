@@ -3,6 +3,7 @@ import { afterEach, expect, it } from 'vitest'
 const require = createRequire(import.meta.url)
 const { makeHarness } = require('./benchmark-sync.cjs')
 type Harness = Awaited<ReturnType<typeof makeHarness>>
+type FixtureChannel = { closed: boolean; emit(table: string, event: string, row: Record<string, unknown>): void }
 const opened: Harness[] = []
 afterEach(async () => { for (const h of opened.splice(0)) await h.stop() })
 function gate() { let enter!: () => void, release!: () => void; return { entered: new Promise<void>(r => { enter = r }), wait: new Promise<void>(r => { release = r }), enter: () => enter(), release: () => release() } }
@@ -24,17 +25,17 @@ async function setup(shared: boolean, own = true): Promise<Harness> {
   return h
 }
 async function drain(h: Harness): Promise<void> { await h.untilIdle(); await h.runTimers(); await h.untilIdle() }
-function channel(h: Harness, shared: boolean, id = 'p0'): any { return h.channels.findLast((c: { topic: string; closed: boolean }) => c.topic === (shared ? 'project:' : 'personal:')+id && !c.closed) }
+function channel(h: Harness, shared: boolean, id = 'p0'): FixtureChannel | undefined { return h.channels.findLast((c: { topic: string; closed: boolean }) => c.topic === (shared ? 'project:' : 'personal:')+id && !c.closed) }
 function classify(h: Harness, shared: boolean): void {
   h.remote.project_members = h.remote.project_members.filter((m: { project_id: string; user_id: string }) => m.project_id !== 'p0' || m.user_id !== 'other')
   if (shared) h.remote.project_members.push({ project_id: 'p0', user_id: 'other', role: 'member', joined_at: '2026-01-01' })
   Object.assign(h.remote.projects[0], { name: 'CLASSIFIED', updated_at: '2030-01-01T00:00:00.000Z' })
 }
 it.each([false, true])('completes actual metadata handoff from shared=%s with live replacement', async fromShared => {
-  const h = await setup(fromShared), old = channel(h, fromShared)
+  const h = await setup(fromShared), old = channel(h, fromShared)!
   classify(h, !fromShared)
   old.emit('projects', 'UPDATE', h.remote.projects[0]); await drain(h)
-  const fresh = channel(h, !fromShared)
+  const fresh = channel(h, !fromShared)!
   expect(fresh).toBeDefined(); expect(old.closed).toBe(true)
   expect(h.channels.filter((c: { closed: boolean; topic: string }) => !c.closed && ['project:p0', 'personal:p0'].includes(c.topic))).toHaveLength(1)
   expect(h.stores.useProjectStore.getState().projects.p0).toMatchObject({ name: 'CLASSIFIED', is_shared: fromShared ? 0 : 1 })
@@ -49,13 +50,13 @@ it.each([false, true])('completes actual metadata handoff from shared=%s with li
   old.emit('tasks', 'UPDATE', h.remote.tasks[0]); await drain(h)
   expect(h.requests.length).toBe(mark)
   Object.assign(h.remote.tasks[1], { title: 'FRESH Q', updated_at: '2031-01-01' })
-  channel(h, false, 'p1').emit('tasks', 'UPDATE', h.remote.tasks[1]); await drain(h)
+  channel(h, false, 'p1')!.emit('tasks', 'UPDATE', h.remote.tasks[1]); await drain(h)
   expect(h.repo.tasks.findById('task1').title).toBe('FRESH Q')
   expect(h.stores.useTaskStore.getState().tasks.task1.title).toBe('FRESH Q')
   expect(h.maxConcurrent()).toBe(1); expect(h.fixtureErrors).toEqual([])
 })
 it.each(['account', 'database', 'project', 'cancel'])('rejects held handoff after original %s invalidation', async kind => {
-  const h = await setup(false), old = channel(h, false), pause = gate()
+  const h = await setup(false), old = channel(h, false)!, pause = gate()
   classify(h, true)
   h.beforeRequest(async () => { pause.enter(); await pause.wait })
   old.emit('projects', 'UPDATE', h.remote.projects[0]); await pause.entered
@@ -70,7 +71,7 @@ it.each(['account', 'database', 'project', 'cancel'])('rejects held handoff afte
   expect(h.fixtureErrors).toEqual([])
 })
 it.each(['access-loss', 'deleted', 'normal'])('completes authoritative %s cleanup from its own channel', async kind => {
-  const h = await setup(true, false), old = channel(h, true)
+  const h = await setup(true, false), old = channel(h, true)!
   h.stores.useTaskStore.setState({ selectedTaskIds: new Set(['task0']), lastSelectedTaskId: 'task0', showDetailPanel: true })
   if (kind === 'access-loss') h.remote.project_members = h.remote.project_members.filter((m: { project_id: string; user_id: string }) => m.project_id !== 'p0' || m.user_id !== 'u')
   Object.assign(h.remote.projects[0], { name: 'AUTHORITATIVE', updated_at: '2030-01-01', deleted_at: kind === 'deleted' ? '2030-01-01' : null })

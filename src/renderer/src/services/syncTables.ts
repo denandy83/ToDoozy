@@ -432,13 +432,14 @@ async function consolidateLocalLabel(
     // Fetch the canonical remote row in full — we need its data to insert
     // into local labels before the FK-bound junction remap can run.
     const namePattern = `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
-    let { data: remote, error: lookupErr } = await supabase
+    const { data: candidate, error: lookupErr } = await supabase
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
       .filter('name', 'imatch', namePattern)
       .limit(1)
       .maybeSingle()
+    let remote = candidate
     if (lookupErr || !remote || remote.id === localId) return false
     if (typeof remote.id !== 'string' || typeof remote.name !== 'string') return false
     const { data: verified, error: verificationError } = await supabase.from('user_labels').select('*')

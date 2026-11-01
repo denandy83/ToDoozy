@@ -355,13 +355,14 @@ async function consolidateLabelOnRemote(localLabel: Label, userId: string, origi
     // Need the full row — consolidate has to insert it locally before the
     // junction remap can run (FK to labels.id).
     const namePattern = `^${localLabel.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
-    let { data: remote, error: lookupError } = await supabase
+    const { data: candidate, error: lookupError } = await supabase
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
       .filter('name', 'imatch', namePattern)
       .limit(1)
       .maybeSingle()
+    let remote = candidate
     if (lookupError) throw lookupError
     if (!remote || remote.id === localLabel.id) return false
     if (typeof remote.id !== 'string' || typeof remote.name !== 'string') throw new Error('Invalid label candidate')

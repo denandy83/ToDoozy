@@ -86,7 +86,7 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
           const confirmed = await origin.api.projectAreas.findById(id)
           await requireProducerCurrent(origin)
           set((state) => ({ areas: state.areas.flatMap((area) => area !== pending ? [area] : confirmed ? [confirmed] : []) }))
-        } catch { }
+        } catch { throw error }
       }
       throw error
     }

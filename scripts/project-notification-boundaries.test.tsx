@@ -11,16 +11,24 @@ const { nativeUiFixture } = require('./native-ui-scope-fixture.cjs')
 const { makeHarness } = require('./benchmark-sync.cjs')
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://127.0.0.1/' })
 vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document)
-vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} })
-Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} })
-Object.assign(dom.window, { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) })
+vi.stubGlobal('ResizeObserver', class { observe(): void { return undefined } unobserve(): void { return undefined } disconnect(): void { return undefined } })
+Object.assign(dom.window.HTMLElement.prototype, { attachEvent() { return undefined }, detachEvent() { return undefined } })
+Object.assign(dom.window, { matchMedia: () => ({ matches: true, addEventListener() { return undefined }, removeEventListener() { return undefined } }) })
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const opened: Array<{ h: Awaited<ReturnType<typeof nativeUiFixture>>; root: Root; host: HTMLDivElement; directory: string; transport?: Awaited<ReturnType<typeof makeHarness>> }> = []
 afterEach(async () => { for (const f of opened.splice(0)) { await act(async () => f.root.unmount()); f.host.remove(); f.h.stop(); await f.transport?.stop(); rmSync(f.directory, { recursive: true, force: true }) } })
 afterAll(() => { dom.window.close(); vi.unstubAllGlobals() })
 const settle = async (): Promise<void> => { for (let i = 0; i < 15; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-function gate() { let enter!: () => void, release!: () => void; return { entered: new Promise<void>(r => { enter = r }), wait: new Promise<void>(r => { release = r }), enter: () => enter(), release: () => release() } }
-async function setup(online = false) {
+function gate(): { entered: Promise<void>; wait: Promise<void>; enter: () => void; release: () => void } { let enter!: () => void, release!: () => void; return { entered: new Promise<void>(r => { enter = r }), wait: new Promise<void>(r => { release = r }), enter: () => enter(), release: () => release() } }
+type BoundaryFixture = (typeof opened)[number] & {
+  file: string
+  bytes: Buffer
+  repo: ReturnType<typeof import('../src/main/repositories').createRepositories>
+  db: import('node:sqlite').DatabaseSync
+  s: Awaited<ReturnType<typeof nativeUiFixture>>['services']
+  api: Window['api']
+}
+async function setup(online = false): Promise<BoundaryFixture> {
   const h = await nativeUiFixture({ ui: true, sync: online }); h.switchTo('a')
   const api = h.apiFor(h.runtime.mainWindow)
   h.sandbox.window = Object.assign(dom.window, { api }); h.sandbox.document = document

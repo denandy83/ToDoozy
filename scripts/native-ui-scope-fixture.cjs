@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/explicit-function-return-type */
 const path = require('node:path');
 const fs = require('node:fs');
 const cp = require('node:child_process');
@@ -15,7 +16,7 @@ async function nativeUiFixture({ ui = false, sync = false } = {}) {
         for (const listener of runtime.contexts) listener();
       }
     }
-    setWindowOpenHandler() {}
+    setWindowOpenHandler() { return undefined; }
   }
   class Window extends EventEmitter {
     constructor() { super(); this.webContents = new Contents(); this.destroyed = false; this.shown = 0; runtime.windows.push(this); }
@@ -23,12 +24,12 @@ async function nativeUiFixture({ ui = false, sync = false } = {}) {
     isDestroyed() { return this.destroyed; }
     destroy() { if (!this.destroyed) { this.destroyed = true; this.emit('closed'); } }
     show() { this.shown++; }
-    focus() {}
-    hide() {}
-    loadFile() {}
-    loadURL() {}
+    focus() { return undefined; }
+    hide() { return undefined; }
+    loadFile() { return undefined; }
+    loadURL() { return undefined; }
     getSize() { return [500, 300]; }
-    setPosition() {}
+    setPosition() { return undefined; }
   }
   const ipcMain = new EventEmitter();
   ipcMain.handle = (channel, listener) => runtime.handlers.set(channel, listener);
@@ -41,11 +42,11 @@ async function nativeUiFixture({ ui = false, sync = false } = {}) {
       setToolTip(value) { runtime.tooltip = value; }
       closeContextMenu() { runtime.menu = []; }
       popUpContextMenu(menu) { runtime.menu = menu; }
-      destroy() {}
+      destroy() { return undefined; }
     },
     Menu: { buildFromTemplate: rows => rows },
-    nativeImage: { createFromPath: () => ({ setTemplateImage() {} }) },
-    app: { isPackaged: false, getPath: () => '/synthetic-unused', getVersion: () => 'synthetic', quit() {} },
+    nativeImage: { createFromPath: () => ({ setTemplateImage() { return undefined; } }) },
+    app: { isPackaged: false, getPath: () => '/synthetic-unused', getVersion: () => 'synthetic', quit() { return undefined; } },
     safeStorage: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
     dialog: {}, shell: { openExternal: async () => {} },
     screen: { getCursorScreenPoint: () => ({x:0,y:0}), getDisplayNearestPoint: () => ({workArea:{x:0,y:0,width:1000,height:800}}) }

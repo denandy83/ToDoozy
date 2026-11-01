@@ -25,7 +25,7 @@ const cases = [
   { name: 'ırmak', unrelated: 'ırmak extra', canonical: 'IRMAK' },
   { name: 'οσ', unrelated: 'οσ extra', canonical: 'ΟΣ' },
   { name: 'ος', unrelated: 'ος extra', canonical: 'ΟΣ' },
-  { name: 'Name \"quoted\",value', unrelated: 'Name quoted,value', canonical: 'NAME \"QUOTED\",VALUE' },
+  { name: 'Name "quoted",value', unrelated: 'Name quoted,value', canonical: 'NAME "QUOTED",VALUE' },
   { name: 'Étiquette', unrelated: 'Étiquette extra', canonical: 'éTIQUETTE' },
   { name: 'Literal Name', unrelated: 'Literal Name extra', canonical: 'LITERAL NAME' }
 ]

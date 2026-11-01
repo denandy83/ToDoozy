@@ -7,7 +7,7 @@ const harness = vi.hoisted(() => ({
 }))
 vi.mock('electron', () => ({
   ipcMain: { handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => harness.handlers.set(channel, handler) },
-  Tray: class { setTitle = harness.title; setToolTip(): void {} closeContextMenu(): void {} on(event: string, callback: () => void): void { harness.callbacks.set(event, callback) } destroy(): void {} popUpContextMenu(): void {} },
+  Tray: class { setTitle = harness.title; setToolTip(): void { return undefined } closeContextMenu(): void { return undefined } on(event: string, callback: () => void): void { harness.callbacks.set(event, callback) } destroy(): void { return undefined } popUpContextMenu(): void { return undefined } },
   Menu: { buildFromTemplate: (rows: Array<{ label?: string }>) => { harness.menu = rows; return rows } },
   nativeImage: { createFromPath: () => ({ setTemplateImage: vi.fn() }) },
   app: { isPackaged: false, getPath: () => '.', getVersion: () => 'synthetic' },
