@@ -12,6 +12,7 @@
 // created via MCP therefore never got a junction row and stayed invisible
 // in the app (no chips, no FilterBar, no LabelPicker, no Settings entry).
 
+import { readAll } from './query.ts'
 /** Resolved shape of a PostgREST mutation — only the error channel matters here. */
 export interface PostgrestMutationResult {
   error: { message: string } | null
@@ -36,6 +37,9 @@ export interface ProjectLabelFilterBuilder extends PromiseLike<PostgrestRowsResu
   eq(column: string, value: string): ProjectLabelFilterBuilder
   is(column: string, value: null): ProjectLabelFilterBuilder
   in(column: string, values: string[]): ProjectLabelFilterBuilder
+  order(column: string): ProjectLabelFilterBuilder
+  limit(count: number): ProjectLabelFilterBuilder
+  or(filter: string): ProjectLabelFilterBuilder
 }
 
 /** Minimal table builder surface needed for project-label reads/writes. */
@@ -88,18 +92,23 @@ export async function fetchProjectLabels(
   client: ProjectLabelClient,
   projectId: string
 ): Promise<UserLabelRow[]> {
-  const { data: links, error: linkError } = await client
+  let links: Array<Record<string, unknown>>
+  try { ({ data: links } = await readAll(() => client
     .from('project_labels')
-    .select('label_id')
+    .select('project_id, label_id')
     .eq('project_id', projectId)
-    .is('deleted_at', null)
-  if (linkError) throw new Error(`Failed to read project labels: ${linkError.message}`)
+    .is('deleted_at', null), ['project_id','label_id'])) }
+  catch (error) { throw new Error(`Failed to read project labels: ${error instanceof Error ? error.message : String(error)}`) }
   if (!links || links.length === 0) return []
   const labelIds = links.map((l) => l.label_id as string)
-  const { data: labels, error: labelError } = await client
+  const labels: UserLabelRow[] = []
+  for (let i=0; i<labelIds.length; i+=200) {
+  try { const { data } = await readAll(() => client
     .from('user_labels')
     .select('*')
-    .in('id', labelIds)
-  if (labelError) throw new Error(`Failed to read labels: ${labelError.message}`)
-  return (labels ?? []) as UserLabelRow[]
+    .in('id', labelIds.slice(i,i+200)).is('deleted_at', null))
+    labels.push(...data as UserLabelRow[]) }
+  catch (error) { throw new Error(`Failed to read labels: ${error instanceof Error ? error.message : String(error)}`) }
+  }
+  return labels
 }

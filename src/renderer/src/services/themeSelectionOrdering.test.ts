@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
+import { trustedRendererUrl } from '../../../main/navigation-security'
 import { PostgrestClient } from '@supabase/postgrest-js'
 import type { SupabaseClient, Session } from '@supabase/supabase-js'
 import { migrations } from '../../../main/database/migrations'
@@ -8,7 +9,7 @@ import { SettingsRepository } from '../../../main/repositories/SettingsRepositor
 import { ThemeRepository } from '../../../main/repositories/ThemeRepository'
 import { BUILTIN_THEMES, builtinThemeId, canSyncTheme } from '../../../shared/themeCatalog'
 import type { Setting, SyncQueueEntry, Theme } from '../../../shared/types'
-import type { SyncContext } from './syncContext'
+import { captureSyncProducer, syncContextFromProducer, type SyncContext } from './syncContext'
 
 const network = vi.hoisted(() => ({ client: null as unknown, token: null as null | (() => Promise<string>) }))
 const ipc = vi.hoisted(() => ({ handlers: new Map<string, (...args: unknown[]) => unknown>(), database: null as unknown as DatabaseSync }))
@@ -22,7 +23,7 @@ vi.mock('../../../main/tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.f
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { network.token = options.accessToken; return network.client }) }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn(async () => network.client), safeRefresh: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn(async () => ({ user: { id: 'user-1' } }) as Session) }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 import { fullPull, fullUpload, pushSetting, pushTheme, deleteThemeFromSupabase, deleteSettingFromSupabase } from './PersonalSyncService'
 import { processSyncQueue, setOnlineStatus } from './SyncService'
 import { requireSession } from './sessionRecovery'
@@ -187,9 +188,9 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
     ipc.database = device.db
     ipc.handlers.clear()
     registerIpcHandlers()
-    ipc.handlers.get('auth:switchDatabase')!({}, userId)
-    const database = ipc.handlers.get('sync:captureContext')!({}) as { userId: string; generation: number }
-    api.sync.captureContext = async () => ipc.handlers.get('sync:captureContext')!({}) as typeof database
+    ipc.handlers.get('auth:switchDatabase')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, userId)
+    const database = ipc.handlers.get('sync:captureContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }) as { userId: string; generation: number }
+    api.sync.captureContext = async () => ipc.handlers.get('sync:captureContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }) as typeof database
     api.sync.invokeContext = async (context, channel, args) => {
       const current = await api.sync.captureContext()
       if (current.generation !== context.generation) throw new Error('Synthetic database changed')
@@ -197,18 +198,30 @@ function install(device: ReturnType<typeof database>, server: ReturnType<typeof 
       return (api as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>)[namespace][method](...args)
     }
     for (const namespace of ['settings', 'themes'] as const) {
-      api[namespace] = new Proxy(api[namespace], { get: (_, method: string) => async (...args: unknown[]) => ipc.handlers.get('sync:invokeContext')!({}, database, `${namespace}:${method}`, args) }) as typeof api.settings & typeof api.themes
+      api[namespace] = new Proxy(api[namespace], { get: (_, method: string) => async (...args: unknown[]) => ipc.handlers.get('sync:invokeContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, database, `${namespace}:${method}`, args) }) as typeof api.settings & typeof api.themes
     }
   }
   vi.stubGlobal('window', { api })
   network.client = server.client
   const pinnedApi = window.api
-  const capturedDatabase = throughIpc ? ipc.handlers.get('sync:captureContext')!({}) as { userId: string; generation: number } : null
+  const capturedDatabase = throughIpc ? ipc.handlers.get('sync:captureContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }) as { userId: string; generation: number } : null
   const isCurrent = (): boolean => {
-    const current = throughIpc ? ipc.handlers.get('sync:captureContext')!({}) as typeof capturedDatabase : null
+    const current = throughIpc ? ipc.handlers.get('sync:captureContext')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }) as typeof capturedDatabase : null
     return useAuthStore.getState().currentUser?.id === userId && window.api === pinnedApi && (!capturedDatabase || (current?.userId === capturedDatabase.userId && current?.generation === capturedDatabase.generation))
   }
-  return { queue, context: { api: pinnedApi, client: server.client, assertCurrent: () => { if (!isCurrent()) throw new Error('Synthetic account changed') }, isCurrent: async () => isCurrent(), scope: 'synthetic' } }
+  // Private mechanical control: keep install synchronous and retain the fixture's pinned
+  // database/window guard, but resolve queue contexts with the actual product factories.
+  const captured = captureSyncProducer()
+  const accountContext = async (): Promise<SyncContext> => {
+    const actual = await syncContextFromProducer(captured)
+    const assertCurrent = (): void => { actual.assertCurrent(); if (!isCurrent()) throw new Error('Synthetic account changed') }
+    const apiFor: NonNullable<SyncContext['apiFor']> = (guard) => actual.apiFor!(() => { assertCurrent(); guard() })
+    const clientFor: NonNullable<SyncContext['clientFor']> = (guard, after = guard) => actual.clientFor!(() => { assertCurrent(); guard() }, () => { assertCurrent(); after() })
+    return { ...actual, api: apiFor(assertCurrent), apiFor, client: clientFor(assertCurrent), clientFor,
+      accountContext, assertCurrent, isCurrent: async () => isCurrent() && await actual.isCurrent() }
+  }
+  return { queue, context: { api: pinnedApi, client: server.client, accountContext,
+    assertCurrent: () => { if (!isCurrent()) throw new Error('Synthetic account changed') }, isCurrent: async () => isCurrent(), scope: 'synthetic' } }
 }
 beforeEach(() => {
   network.token = null
@@ -556,7 +569,7 @@ describe('accepted theme state in the renderer', () => {
     const nextTheme = other.themes.findById(builtinThemeId('Ocean Blue Dark'))!
     other.settings.applyRemote({ ...selection(nextTheme.id, newer), user_id: nextUser })
     ipc.database = other.db
-    ipc.handlers.get('auth:switchDatabase')!({}, nextUser)
+    ipc.handlers.get('auth:switchDatabase')!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, nextUser)
     useAuthStore.setState({ currentUser: { id: nextUser } as never })
     const nextState = { userId: nextUser, currentThemeId: nextTheme.id, themes: { [nextTheme.id]: nextTheme }, settings: { theme_id: nextTheme.id, unrelated: 'new account' } }
     useSettingsStore.setState(nextState)
@@ -1107,6 +1120,8 @@ describe('theme selection intent ordering', () => {
     expect(queue).toHaveLength(1)
     expect(JSON.parse(queue[0].payload)).toMatchObject(selection(canonical, older))
     server.put(selection('named-custom', newer))
+    // Session recovery precedes an authenticated queue retry.
+    vi.mocked(requireSession).mockResolvedValue({ user: { id: userId }, access_token: 'synthetic-restored' } as Session)
     expect(await processSyncQueue(context)).toBe(1)
     expect(queue).toHaveLength(0)
     expect(server.get()).toMatchObject(selection('named-custom', newer))

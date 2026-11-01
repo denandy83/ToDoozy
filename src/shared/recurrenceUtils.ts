@@ -199,6 +199,7 @@ export function getNextOccurrence(rule: string, fromDate: Date): Date | null {
     case 'months': {
       if (config.monthOrdinal) {
         // Move to next applicable month
+        next.setDate(1)
         next.setMonth(next.getMonth() + config.interval)
         // Find the nth weekday of that month
         const targetDay = WEEK_DAYS.indexOf(config.monthOrdinal.day as typeof WEEK_DAYS[number])
@@ -223,10 +224,10 @@ export function getNextOccurrence(rule: string, fromDate: Date): Date | null {
         const targetMonth = next.getMonth() + config.interval
         next.setDate(1)
         next.setMonth(targetMonth)
-        if (config.monthDay !== undefined) {
+        {
           // Clamp to last day of month
           const lastDayOfMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
-          next.setDate(Math.min(config.monthDay, lastDayOfMonth))
+          next.setDate(Math.min(config.monthDay ?? fromDate.getDate(), lastDayOfMonth))
         }
       }
       break

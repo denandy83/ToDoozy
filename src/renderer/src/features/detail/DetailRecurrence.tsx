@@ -1,3 +1,4 @@
+import { calendarDateKey } from '../../../../shared/localDate'
 import { useCallback, useMemo, useState } from 'react'
 import {
   parseRecurrence,
@@ -324,7 +325,7 @@ function RecurrencePicker({ config, onChange }: RecurrencePickerProps): React.JS
             value={config.untilDate}
             onChange={(val) => {
               if (val) {
-                onChange({ ...config, untilDate: val.split('T')[0] })
+                onChange({ ...config, untilDate: calendarDateKey(val) })
               } else {
                 const updated = { ...config }
                 delete updated.untilDate

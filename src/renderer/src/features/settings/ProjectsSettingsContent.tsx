@@ -1,3 +1,4 @@
+import { captureProjectProducer, captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
 import { ArchivedProjectsList } from './ArchivedProjectsList'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Pencil, X, Check, FolderOpen, Plus, Trash2 } from 'lucide-react'
@@ -53,29 +54,6 @@ export function ProjectsSettingsContent({
   const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   const sensors = useSensors(pointerSensor)
 
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event
-      if (!over || active.id === over.id) return
-      const oldIndex = sortedProjects.findIndex((p) => p.id === active.id)
-      const newIndex = sortedProjects.findIndex((p) => p.id === over.id)
-      if (oldIndex === -1 || newIndex === -1) return
-      const reordered = [...sortedProjects]
-      const [moved] = reordered.splice(oldIndex, 1)
-      reordered.splice(newIndex, 0, moved)
-      const updates = reordered.map((p, i) => ({ id: p.id, sidebar_order: i }))
-      await window.api.projects.updateSidebarOrder(updates)
-      for (const u of updates) {
-        const proj = useProjectStore.getState().projects[u.id]
-        if (proj) {
-          useProjectStore.setState((state) => ({
-            projects: { ...state.projects, [u.id]: { ...proj, sidebar_order: u.sidebar_order } }
-          }))
-        }
-      }
-    },
-    [sortedProjects]
-  )
 
   useEffect(() => {
     if (addingProject) newProjectInputRef.current?.focus()
@@ -272,7 +250,6 @@ export function ProjectsSettingsContent({
           selectedProjectId={selectedProjectId}
           onProjectChange={onProjectChange}
           sensors={sensors}
-          handleDragEnd={handleDragEnd}
         />
       )}
 
@@ -331,15 +308,15 @@ const AddProjectForm = ({ name, color, onNameChange, onColorChange, onSubmit, on
 type DropIntent = 'above' | 'below' | 'inside'
 interface SidebarDropIndicator { targetId: string; intent: DropIntent }
 
-function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sensors, handleDragEnd: handleProjectDragEnd }: {
+function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sensors }: {
   projects: Project[]
   selectedProjectId: string | null
   onProjectChange: (id: string) => void
   sensors: ReturnType<typeof useSensors>
-  handleDragEnd: (event: DragEndEvent) => void
 }): React.JSX.Element {
   const areas = useProjectAreaStore(selectProjectAreas)
   const { assignProject, createArea, deleteArea, updateArea } = useProjectAreaStore()
+  const { addToast } = useToast()
   const currentUser = useAuthStore((s) => s.currentUser)
   const sortedAreas = useMemo(() => [...areas].sort((a, b) => a.sidebar_order - b.sidebar_order), [areas])
   const ungrouped = useMemo(() => projects.filter((p) => !p.area_id), [projects])
@@ -362,20 +339,31 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
   const handleCreateFolder = useCallback(async () => {
     const name = newFolderName.trim()
     if (!name || !currentUser) return
-    // Bump all existing top-level items down by 1 to make room at position 0
-    for (const p of projects.filter((p) => !p.area_id)) {
-      await updateProject(p.id, { sidebar_order: p.sidebar_order + 1 })
+    const origin = captureSyncProducer()
+    const origins = new Map(projects.map(project => [project.id, captureProjectProducer(project.id)]))
+    let incomplete = false
+    try {
+      for (const p of projects.filter((p) => !p.area_id)) {
+        await requireProducerCurrent(origin)
+        const projectOrigin = origins.get(p.id)!
+        if (!await projectOrigin.isCurrent()) { incomplete = true; continue }
+        if (!await updateProject(p.id, { sidebar_order: p.sidebar_order + 1 }, projectOrigin)) incomplete = true
+      }
+      for (const a of sortedAreas) {
+        await origin.api.projectAreas.update(a.id, { sidebar_order: a.sidebar_order + 1 })
+      }
+      await requireProducerCurrent(origin)
+      const area = await createArea(currentUser.id, name, undefined, origin)
+      await origin.api.projectAreas.update(area.id, { sidebar_order: 0 })
+      await useProjectAreaStore.getState().hydrate(currentUser.id, origin)
+      await requireProducerCurrent(origin)
+      setNewFolderName('')
+      setShowNewFolder(false)
+      if (incomplete) addToast({ message: 'Some sidebar order changes could not be saved.', variant: 'danger' })
+    } catch {
+      if (await origin.isCurrent()) addToast({ message: 'Could not finish creating the folder. Some order changes may be saved.', variant: 'danger' })
     }
-    for (const a of sortedAreas) {
-      await window.api.projectAreas.update(a.id, { sidebar_order: a.sidebar_order + 1 })
-    }
-    const area = await createArea(currentUser.id, name)
-    await window.api.projectAreas.update(area.id, { sidebar_order: 0 })
-    // Re-hydrate to pick up the updated order
-    await useProjectAreaStore.getState().hydrate(currentUser.id)
-    setNewFolderName('')
-    setShowNewFolder(false)
-  }, [newFolderName, currentUser, createArea, projects, sortedAreas, updateProject])
+  }, [newFolderName, currentUser, createArea, projects, sortedAreas, updateProject, addToast])
 
   useEffect(() => {
     if (editingAreaId) requestAnimationFrame(() => editInputRef.current?.focus())
@@ -462,62 +450,82 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
   }, [activeItemId, getTargetAreaId, isPointerIndented])
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    const { active, over } = event
-    const saved = dropIndicatorRef.current
-    cleanupPointer()
-    setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null; lastOverIdRef.current = null
+    const isArea = String(event.active.id).startsWith('area:')
+    const origin = isArea ? captureSyncProducer() : captureProjectProducer(String(event.active.id))
+    const origins = new Map(projects.map(project => [project.id, captureProjectProducer(project.id)]))
+    let incomplete = false
+    try {
+      const { active, over } = event
+      const saved = dropIndicatorRef.current
+      cleanupPointer()
+      setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null; lastOverIdRef.current = null
 
-    if (!over || active.id === over.id) return
-    const activeId = String(active.id)
-    const overId = String(over.id)
-    const intent = saved?.targetId === overId ? saved.intent : 'above'
+      if (!over || active.id === over.id) return
+      const activeId = String(active.id)
+      const overId = String(over.id)
+      const intent = saved?.targetId === overId ? saved.intent : 'above'
 
-    // 'inside' intent → assign project to the target's folder
-    if (!activeId.startsWith('area:') && intent === 'inside') {
-      const targetAreaId = getTargetAreaId(overId)
-      if (targetAreaId) {
-        await assignProject(activeId, targetAreaId)
-        return
+      // 'inside' intent → assign project to the target's folder
+      if (!activeId.startsWith('area:') && intent === 'inside') {
+        const targetAreaId = getTargetAreaId(overId)
+        if (targetAreaId) {
+          await assignProject(activeId, targetAreaId)
+          await requireProducerCurrent(origin)
+          return
+        }
       }
+
+      // Build current top-level order
+      const topLevel: Array<{ id: string; isArea: boolean }> = []
+      for (const p of projects.filter((p) => !p.area_id).sort((a, b) => a.sidebar_order - b.sidebar_order)) topLevel.push({ id: p.id, isArea: false })
+      for (const a of sortedAreas) topLevel.push({ id: `area:${a.id}`, isArea: true })
+      topLevel.sort((a, b) => {
+        const oA = a.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === a.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === a.id)?.sidebar_order ?? 0)
+        const oB = b.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === b.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === b.id)?.sidebar_order ?? 0)
+        return oA - oB
+      })
+
+      // Grouped project dragged with non-inside intent → unassign (pull out of folder)
+      const draggedProject = projects.find((p) => p.id === activeId)
+      if (draggedProject?.area_id && intent !== 'inside') {
+        await assignProject(activeId, null)
+        await requireProducerCurrent(origin)
+        if (!topLevel.find((t) => t.id === activeId)) topLevel.push({ id: activeId, isArea: false })
+      }
+
+      // Reorder top-level (find positions using overId — for grouped targets, use the area header)
+      let reorderOverId = overId
+      if (!overId.startsWith('area:')) {
+        const target = projects.find((p) => p.id === overId)
+        if (target?.area_id) reorderOverId = `area:${target.area_id}`
+      }
+
+      const oldIdx = topLevel.findIndex((t) => t.id === activeId)
+      const overIdx = topLevel.findIndex((t) => t.id === reorderOverId)
+      if (oldIdx === -1 || overIdx === -1) return
+      const reordered = topLevel.filter((t) => t.id !== topLevel[oldIdx].id)
+      const insertAt = intent === 'below' ? Math.min(overIdx, reordered.length) : Math.max(0, overIdx > oldIdx ? overIdx - 1 : overIdx)
+      reordered.splice(insertAt, 0, topLevel[oldIdx])
+
+      for (let i = 0; i < reordered.length; i++) {
+        const item = reordered[i]
+        await requireProducerCurrent(origin)
+        if (item.isArea) await origin.api.projectAreas.update(item.id.slice(5), { sidebar_order: i })
+        else {
+          const projectOrigin = origins.get(item.id)!
+          if (!await projectOrigin.isCurrent()) { incomplete = true; continue }
+          if (!await updateProject(item.id, { sidebar_order: i }, projectOrigin)) incomplete = true
+        }
+        await requireProducerCurrent(origin)
+      }
+      if (incomplete) throw new Error('Sidebar reorder incomplete')
+    } catch {
+      if (await origin.isCurrent()) addToast({
+        message: isArea ? 'Could not finish reordering the sidebar. Some changes may be saved.' : 'Could not move project',
+        variant: 'danger'
+      })
     }
-
-    // Build current top-level order
-    const topLevel: Array<{ id: string; isArea: boolean }> = []
-    for (const p of projects.filter((p) => !p.area_id).sort((a, b) => a.sidebar_order - b.sidebar_order)) topLevel.push({ id: p.id, isArea: false })
-    for (const a of sortedAreas) topLevel.push({ id: `area:${a.id}`, isArea: true })
-    topLevel.sort((a, b) => {
-      const oA = a.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === a.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === a.id)?.sidebar_order ?? 0)
-      const oB = b.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === b.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === b.id)?.sidebar_order ?? 0)
-      return oA - oB
-    })
-
-    // Grouped project dragged with non-inside intent → unassign (pull out of folder)
-    const draggedProject = projects.find((p) => p.id === activeId)
-    if (draggedProject?.area_id && intent !== 'inside') {
-      await assignProject(activeId, null)
-      if (!topLevel.find((t) => t.id === activeId)) topLevel.push({ id: activeId, isArea: false })
-    }
-
-    // Reorder top-level (find positions using overId — for grouped targets, use the area header)
-    let reorderOverId = overId
-    if (!overId.startsWith('area:')) {
-      const target = projects.find((p) => p.id === overId)
-      if (target?.area_id) reorderOverId = `area:${target.area_id}`
-    }
-
-    const oldIdx = topLevel.findIndex((t) => t.id === (activeId.startsWith('area:') ? activeId : activeId))
-    const overIdx = topLevel.findIndex((t) => t.id === reorderOverId)
-    if (oldIdx === -1 || overIdx === -1) return
-    const reordered = topLevel.filter((t) => t.id !== topLevel[oldIdx].id)
-    const insertAt = intent === 'below' ? Math.min(overIdx, reordered.length) : Math.max(0, overIdx > oldIdx ? overIdx - 1 : overIdx)
-    reordered.splice(insertAt, 0, topLevel[oldIdx])
-
-    for (let i = 0; i < reordered.length; i++) {
-      const item = reordered[i]
-      if (item.isArea) await window.api.projectAreas.update(item.id.slice(5), { sidebar_order: i })
-      else await updateProject(item.id, { sidebar_order: i })
-    }
-  }, [sortedAreas, assignProject, projects, cleanupPointer, handleProjectDragEnd, updateProject, getTargetAreaId])
+  }, [sortedAreas, assignProject, projects, cleanupPointer, updateProject, getTargetAreaId, addToast])
 
   const handleDragCancel = useCallback(() => {
     cleanupPointer(); setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null

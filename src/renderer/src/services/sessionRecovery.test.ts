@@ -12,7 +12,8 @@ vi.mock('../lib/supabase', () => ({
     safeSetSessionMock(tokens)
 }))
 
-vi.mock('../shared/stores/logStore', () => ({
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../shared/stores/logStore')>(),
   logEvent: vi.fn()
 }))
 

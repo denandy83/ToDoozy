@@ -1,3 +1,4 @@
+import { isDueDateOverdue } from '../../shared/utils/dueDateFilter'
 import type { usePresence } from '../../shared/motion/usePresence'
 import { isTabHandledLocally } from '../../shared/utils/tabNavigation'
 import { useCallback, useRef, useEffect, useState } from 'react'
@@ -23,7 +24,7 @@ import { AssigneePicker } from '../collaboration/AssigneePicker'
 import { DatePicker } from '../../shared/components/DatePicker'
 import type { DetailPanelPosition } from '../../shared/stores/viewStore'
 import { useSyncStore, selectSyncStatus } from '../../shared/stores/syncStore'
-import { formatDate } from '../../shared/utils/dateFormat'
+import { formatDate, formatTime } from '../../shared/utils/dateFormat'
 import { flushAll as flushBatchedTaskEdits } from '../../services/TaskBatchSyncManager'
 
 export function DetailPanel({ motionProps }: { motionProps?: ReturnType<typeof usePresence>['props'] } = {}): React.JSX.Element | null {
@@ -516,7 +517,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
     </Section>,
     !isTemplate ? (
       <Section key="due" label="Due Date" fieldIndex={5}
-        labelIcon={task.due_date && !task.completed_date && task.due_date.split('T')[0] < new Date().toISOString().split('T')[0]
+        labelIcon={task.due_date && !task.completed_date && isDueDateOverdue(task.due_date)
           ? <AlertTriangle size={10} className="text-danger" />
           : undefined
         }
@@ -528,7 +529,7 @@ function DetailPanelBody(props: Omit<DetailPanelContentProps, 'onClose' | 'onTog
       <Section key="completed" label="Completed">
         <span className="text-sm font-light text-success">
           {formatDate(task.completed_date, undefined, { omitCurrentYear: true })}
-          {task.completed_date.includes('T') ? ` ${task.completed_date.split('T')[1].slice(0, 5)}` : ''}
+          {task.completed_date.includes('T') ? ` ${formatTime(task.completed_date)}` : ''}
         </span>
       </Section>
     ) : null,

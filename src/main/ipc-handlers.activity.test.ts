@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { migrations } from './database/migrations'
+import { trustedRendererUrl } from './navigation-security'
 import { createRepositories } from './repositories'
 import type { TodoozyAPI } from '../preload/index.d'
 
@@ -11,13 +12,14 @@ const harness = vi.hoisted(() => ({
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, fn: (...args: unknown[]) => unknown) => harness.handlers.set(channel, fn) }, safeStorage: {}, BrowserWindow: {}, dialog: {}, shell: {}, app: {} }))
 vi.mock('keytar', () => ({ default: {} }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
-vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), getDatabasePath: vi.fn() }))
+vi.mock('./database', () => ({ getDatabase: () => harness.database, switchDatabase: vi.fn(), clearDatabaseUserId: vi.fn(), getDatabasePath: vi.fn() }))
 vi.mock('./quick-add', () => ({ hideQuickAddWindow: vi.fn() }))
 vi.mock('./index', () => ({ registerQuickAddShortcut: vi.fn(), registerAppToggleShortcut: vi.fn(), getMainWindow: vi.fn() }))
 vi.mock('./tray', () => ({ setTrayUserId: vi.fn(), refreshTray: vi.fn(), setTimerState: vi.fn(), clearTimerState: vi.fn() }))
 vi.mock('../renderer/src/services/PersonalSyncService', () => ({ pushTask: vi.fn(), deleteTaskFromSupabase: vi.fn(), pushProjectLabel: vi.fn(), pushRemoveLabelFromProject: vi.fn() }))
 vi.mock('../renderer/src/shared/stores/savedViewStore', () => ({ useSavedViewStore: { getState: () => ({ scheduleRecount: vi.fn() }) } }))
 import { registerIpcHandlers } from './ipc-handlers'
+import { getMainWindow } from './index'
 import { useTaskStore } from '../renderer/src/shared/stores/taskStore'
 import { useLabelStore } from '../renderer/src/shared/stores/labelStore'
 import { useAuthStore } from '../renderer/src/shared/stores/authStore'
@@ -25,8 +27,21 @@ import { captureSyncProducer } from '../renderer/src/services/syncContext'
 
 let databases: DatabaseSync[]
 let repositories: ReturnType<typeof createRepositories>[]
-const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({}, ...args)
+let nativeContext: { generation: number; userId: string | null } | null
+const contextListeners = new Set<() => void>()
+function updateNativeContext(context: NonNullable<typeof nativeContext>): void {
+  if (nativeContext && context.generation <= nativeContext.generation) return
+  nativeContext = context
+  for (const listener of contextListeners) listener()
+}
+function contextAnnouncement(channel: string, context: NonNullable<typeof nativeContext>): void {
+  if (channel === 'sync:context-changed') updateNativeContext(context)
+}
+const invoke = async (channel: string, ...args: unknown[]) => harness.handlers.get(channel)!({ senderFrame: { parent: null, url: trustedRendererUrl() } }, ...args)
 beforeEach(async () => {
+  nativeContext = null
+  contextListeners.clear()
+  vi.mocked(getMainWindow).mockReturnValue({ webContents: { send: contextAnnouncement } } as never)
   databases = [new DatabaseSync(':memory:'), new DatabaseSync(':memory:')]
   repositories = databases.map((db) => {
     db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY)')
@@ -43,7 +58,16 @@ beforeEach(async () => {
   harness.handlers.clear()
   registerIpcHandlers()
   await invoke('auth:switchDatabase', 'a')
-  const api = new Proxy({}, { get: (_, namespace: string) => new Proxy({}, { get: (_, method: string) => (...args: unknown[]) => invoke(`${namespace}:${method}`, ...args) }) })
+  const api = new Proxy({}, { get: (_, namespace: string) => new Proxy({}, { get: (_, method: string) => {
+    if (namespace === 'sync' && method === 'currentContext') return () => nativeContext ? JSON.stringify([nativeContext.userId, nativeContext.generation]) : null
+    if (namespace === 'sync' && method === 'onContextChanged') return (listener: () => void) => { contextListeners.add(listener); return () => { contextListeners.delete(listener) } }
+    if (namespace === 'sync' && method === 'captureContext') return async () => {
+      const context = await invoke('sync:captureContext') as NonNullable<typeof nativeContext>
+      updateNativeContext(context)
+      return context
+    }
+    return (...args: unknown[]) => invoke(`${namespace}:${method}`, ...args)
+  } }) })
   vi.stubGlobal('window', { api: api as TodoozyAPI })
   useAuthStore.setState({ currentUser: { id: 'a' } as never })
   useTaskStore.setState({ tasks: {}, taskLabels: {}, showDetailPanel: false })
@@ -100,4 +124,72 @@ it('project label removal preserves chips and associations cached for another pr
   expect(repo.tasks.getLabelState(q.id)).toEqual(before)
   expect(repo.labels.findByProjectId('q')).toEqual([label])
   expect(repo.labels.findById('l')).toEqual(label)
+})
+
+it.each(['a','b'])('announces the current native scope on a switch to %s before guarded reads',async userId=>{
+  const send=vi.fn(contextAnnouncement)
+  vi.mocked(getMainWindow).mockReturnValue({webContents:{send}} as never)
+  try {
+    const old=await invoke('sync:captureContext') as {generation:number;userId:string}
+    await invoke('auth:switchDatabase',userId)
+    const current=await invoke('sync:captureContext')
+    expect(send).toHaveBeenCalledExactlyOnceWith('sync:context-changed',current)
+    expect(current).toEqual({generation:old.generation+1,userId})
+    await expect(invoke('sync:invokeContext',old,'projects:getMembers',['p'])).rejects.toThrow('database changed')
+  } finally {vi.mocked(getMainWindow).mockReset()}
+})
+
+it('projects fresh native junction reads while retaining cohort and unfiltered IPC compatibility',async()=>{
+  const repo=repositories[0]
+  repo.projects.create({id:'q',owner_id:'a',name:'Q'})
+  repo.projects.create({id:'shared',owner_id:'a',name:'SHARED'})
+  repo.projects.update('shared',{is_shared:1})
+  for(const project of ['p','q','shared']) {
+    repo.labels.create({id:'link-'+project,user_id:'a',name:'LINK '+project,project_id:project})
+    repo.labels.removeFromProject(project,'link-'+project)
+  }
+  const origin=captureSyncProducer()
+  const personal=await origin.api.labels.getProjectLabelsForOwner('a')
+  expect(personal.map(row=>row.project_id).sort()).toEqual(['p','q'])
+  expect(await origin.api.labels.getProjectLabelsForOwner('a','p')).toEqual(personal.filter(row=>row.project_id==='p'))
+  expect(await origin.api.labels.getProjectLabelsForOwner('a','shared')).toEqual([])
+  expect(await origin.api.labels.getProjectLabelsForOwner('other','p')).toEqual([])
+  const shared=await origin.api.labels.getProjectLabelsForSharedProjects()
+  expect(shared).toHaveLength(1);expect(shared[0]).toMatchObject({project_id:'shared',label_id:'link-shared',deleted_at:expect.any(String)})
+  expect(await origin.api.labels.getProjectLabelsForSharedProjects('shared')).toEqual(shared)
+  expect(await origin.api.labels.getProjectLabelsForSharedProjects('q')).toEqual([])
+  repo.labels.applyRemoteProjectLabel({project_id:'p',label_id:'link-p',created_at:'2030-01-01T00:00:00.000Z',deleted_at:null})
+  expect((await origin.api.labels.getProjectLabelsForOwner('a','p'))[0]).toMatchObject({created_at:'2030-01-01T00:00:00.000Z',deleted_at:null})
+})
+
+it('bulk-resolves native task IDs and rejects moved-task label imports atomically through IPC',async()=>{
+  const repo=repositories[0]
+  repo.projects.create({id:'q',owner_id:'a',name:'Q'})
+  repo.statuses.create({id:'qs',project_id:'q',name:'OPEN'})
+  repo.tasks.create({id:'t',project_id:'p',owner_id:'a',status_id:'s',title:'T'})
+  repo.tasks.create({id:'qt',project_id:'q',owner_id:'a',status_id:'qs',title:'Q'})
+  const origin=captureSyncProducer()
+  expect((await origin.api.tasks.findByIds(['qt','missing','t','qt'])).map(row=>row.id)).toEqual(['qt','t','qt'])
+  expect(await origin.api.tasks.findByIds([])).toEqual([])
+  repo.tasks.update('t',{project_id:'q',status_id:'qs'})
+  expect(await origin.api.tasks.applyRemoteTaskLabels('t',['l'],[],'p')).toBe(0)
+  expect(repo.tasks.getLabels('t')).toEqual([])
+  expect(repo.labels.findByProjectId('q')).toEqual([])
+  expect(await origin.api.tasks.applyRemoteTaskLabels('t',['l'],[],'q')).toBe(1)
+  expect(repo.tasks.getLabels('t').map(row=>row.label_id)).toEqual(['l'])
+})
+
+it('filters native hydration access to one project while retaining unfiltered callers and recovery rows',async()=>{
+  const repo=repositories[0]
+  repo.users.create({id:'b',email:'b@example.invalid'})
+  repo.projects.create({id:'q',owner_id:'b',name:'RECOVERY Q'})
+  expect((await invoke('projects:getProjectsForUser','a','p') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  expect(await invoke('projects:getProjectsForUser','a','q')).toEqual([])
+  expect((await invoke('projects:getProjectsForUser','a') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  repo.projects.addMember('p','b','member')
+  expect((await invoke('projects:getProjectsForUser','b','p') as Array<{id:string}>).map(row=>row.id)).toEqual(['p'])
+  repo.projects.removeMember('p','b')
+  expect(await invoke('projects:getProjectsForUser','b','p')).toEqual([])
+  expect(repo.projects.findById('p')?.name).toBe('Project')
+  expect(repo.projects.findById('q')?.name).toBe('RECOVERY Q')
 })

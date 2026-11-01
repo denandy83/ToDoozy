@@ -7,7 +7,7 @@ const pinned = vi.hoisted(() => ({ client: null as unknown, token: null as null 
 vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn((_url, _key, options) => { pinned.token = options.accessToken; return pinned.client }) }))
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
 vi.mock('./sessionRecovery', () => ({ requireSession: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 import { getSupabase } from '../lib/supabase'
 import { requireSession } from './sessionRecovery'
 import { processSyncQueue, setOnlineStatus } from './SyncService'
@@ -21,11 +21,11 @@ function clientMock(failure: string | null = null, rows: unknown[] = [{ id: 'p' 
   const writes: Array<{ table: string; operation: string; payload: unknown }> = []
   const filters: Array<unknown[]> = []
   const client = { from(table: string) {
-    let operation = 'select'
+    let operation = 'select', afterCursor = false
     const chain: Record<string, unknown> = {}
-    for (const method of ['select', 'eq', 'is', 'in', 'lte', 'order', 'limit', 'or']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); return chain }
+    for (const method of ['select', 'eq', 'is', 'in', 'lte', 'order', 'limit', 'or']) chain[method] = (...args: unknown[]) => { filters.push([method, ...args]); if (method === 'or') afterCursor = true; return chain }
     for (const method of ['upsert', 'update', 'delete']) chain[method] = (payload: unknown) => { operation = method; writes.push({ table, operation, payload }); return chain }
-    chain.then = (resolve: (result: unknown) => unknown) => resolve({ data: rows, error: operation !== 'select' && failure ? { message: failure } : null })
+    chain.then = (resolve: (result: unknown) => unknown) => resolve({ data: afterCursor && operation === 'select' ? [] : rows, error: operation !== 'select' && failure ? { message: failure } : null })
     return chain
   } } as unknown as SupabaseClient
   pinned.client = client
@@ -44,7 +44,7 @@ beforeEach(() => {
     sync: { captureContext: async () => ({ userId: 'u', generation: 1 }), invokeContext: async (_context: unknown, channel: string, args: unknown[]) => { const [ns, method] = channel.split(':'); return (window.api as never as Record<string, Record<string, (...args: unknown[]) => unknown>>)[ns][method](...args) }, getQueue: vi.fn(async () => [...queue]), count: vi.fn(async () => queue.length), dequeue: vi.fn(async (id) => { const exists=queue.some((row)=>row.id===id);queue = queue.filter((row) => row.id !== id);return exists }) },
     settings: { findAllByUser: vi.fn(async () => [{ user_id: 'u', key: 'theme', value: 'dark', updated_at: '2026-10-25T12:00:00Z', deleted_at: null }]) },
     tasks: { findAllByProject: vi.fn(async () => []), findById: vi.fn(async () => local), getLabels: vi.fn(async () => []), getLabelState: vi.fn(async()=>[]), acknowledgeLabelState:vi.fn(async()=>undefined) },
-    projects: { findById: vi.fn(async () => ({ id: 'p', is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z', updated_at: '2026-10-25T13:00:00Z' })) }
+    projects: { findById: vi.fn(async () => ({ id: 'p', owner_id: 'u', is_archived: 0, archive_updated_at: '2026-10-25T13:00:00Z', updated_at: '2026-10-25T13:00:00Z' })) }
   } })
   useSyncStore.setState({ status: 'synced', pendingCount: 0, errorMessage: null })
   setOnlineStatus(true)
@@ -86,8 +86,7 @@ describe('durable sync retries', () => {
     const mock = clientMock()
     vi.mocked(getSupabase).mockResolvedValue(mock.client)
     const a = processSyncQueue(), b = processSyncQueue()
-    expect(a).toBe(b)
-    expect(await a).toBe(2)
+    expect(await Promise.all([a, b])).toEqual([2, 2])
     expect(mock.writes).toEqual([{ table: 'tasks', operation: 'upsert', payload: [local] }])
     expect(queue).toHaveLength(0)
     expect(useSyncStore.getState().status).toBe('synced')
@@ -173,17 +172,18 @@ describe('queue integration with isolated account databases', () => {
     remote = {}
     requests = 0
     const client = { from(table: string) {
-      let operation = 'select'
+      let operation = 'select', afterCursor = false
       let payload: unknown
       const chain: Record<string, unknown> = {}
       for (const method of ['select', 'eq', 'in', 'is', 'lte', 'order', 'limit', 'or']) chain[method] = () => chain
+      chain.or = () => { afterCursor = true; return chain }
       for (const method of ['upsert', 'update', 'delete']) chain[method] = (value: unknown) => { operation = method; payload = value; return chain }
       chain.then = (resolve: (result: unknown) => unknown, reject: (error: unknown) => unknown) => (async () => {
         await pinned.token?.()
         requests++
         if (hold) { hold = false; started.resolve(); await pause.promise }
         if (operation !== 'select') remote[table] = structuredClone(payload)
-        return { data: table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : table === 'tasks' ? [{ id: 't' }] : [], error: null }
+        return { data: afterCursor && operation === 'select' ? [] : table === 'project_labels' ? [{ project_id: 'p', label_id: 'l' }] : table === 'projects' ? [{ id: 'p' }] : table === 'tasks' ? [{ id: 't' }] : [], error: null }
       })().then(resolve, reject)
       return chain
     } } as unknown as SupabaseClient

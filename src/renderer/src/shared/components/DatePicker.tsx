@@ -4,6 +4,7 @@ import { enGB } from 'date-fns/locale/en-GB'
 import { enUS } from 'date-fns/locale/en-US'
 import { parse, isValid } from 'date-fns'
 import 'react-datepicker/dist/react-datepicker.css'
+import { calendarDateKey } from '../../../../shared/localDate'
 import { Clock, X } from 'lucide-react'
 import { useDateFormat, type DateFormatType } from '../utils/dateFormat'
 import { pushPopup } from '../utils/popupStack'
@@ -185,7 +186,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
     if (showTime) {
       // Remove time
       if (value && value.includes('T')) {
-        onChange(value.split('T')[0])
+        onChange(calendarDateKey(value))
       }
       setShowTime(false)
     } else {
@@ -210,7 +211,7 @@ export function DatePicker({ value, onChange }: DatePickerProps): React.JSX.Elem
       if (showTime) {
         // Remove time only
         if (value && value.includes('T')) {
-          onChange(value.split('T')[0])
+          onChange(calendarDateKey(value))
         }
         setShowTime(false)
       } else {

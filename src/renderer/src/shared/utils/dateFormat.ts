@@ -1,3 +1,4 @@
+import { calendarDateKey } from '../../../../shared/localDate'
 import { useSettingsStore } from '../stores/settingsStore'
 
 export type DateFormatType = 'dd/mm/yyyy' | 'mm/dd/yyyy' | 'yyyy/mm/dd'
@@ -7,7 +8,7 @@ export type DateFormatType = 'dd/mm/yyyy' | 'mm/dd/yyyy' | 'yyyy/mm/dd'
  */
 export function formatDate(isoDate: string, format?: DateFormatType, options?: { omitCurrentYear?: boolean }): string {
   const fmt = format ?? (useSettingsStore.getState().settings['date_format'] as DateFormatType | null) ?? 'dd/mm/yyyy'
-  const parts = isoDate.split('T')[0].split('-')
+  const parts = calendarDateKey(isoDate).split('-')
   if (parts.length < 3) return isoDate
   const [y, m, d] = parts
 
@@ -31,4 +32,10 @@ export function formatDate(isoDate: string, format?: DateFormatType, options?: {
 export function useDateFormat(): DateFormatType {
   const fmt = useSettingsStore((s) => s.settings['date_format'])
   return (fmt as DateFormatType) ?? 'dd/mm/yyyy'
+}
+
+export function formatTime(value: string): string {
+  if (!value.includes('T')) return ''
+  const date = new Date(value)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }

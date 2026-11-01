@@ -1,4 +1,5 @@
-import { captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
+import { useAuthStore } from './authStore'
+import { captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 import { hydrationContext } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
@@ -12,7 +13,7 @@ interface StatusState {
 }
 
 interface StatusActions {
-  hydrateStatuses(projectId: string): Promise<void>
+  hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
   createStatus(input: CreateStatusInput): Promise<Status>
   updateStatus(id: string, input: UpdateStatusInput): Promise<Status | null>
   deleteStatus(id: string): Promise<boolean>
@@ -27,32 +28,37 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   loading: false,
   error: null,
 
-  async hydrateStatuses(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true, error: null })
+  async hydrateStatuses(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
+    const initial = useStatusStore.getState().statuses
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const statuses = await api.statuses.findByProjectId(projectId)
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         // Remove old statuses for this project, then add new ones
         const updated: Record<string, Status> = {}
         for (const [id, s] of Object.entries(state.statuses)) {
-          if (s.project_id !== projectId) updated[id] = s
+          if (s.project_id !== projectId || s !== initial[id]) updated[id] = s
         }
         for (const status of statuses) {
-          updated[status.id] = status
+          if (state.statuses[status.id] === initial[status.id]) updated[status.id] = status
         }
         return { statuses: updated, loading: false }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load statuses'
       set({ error: message, loading: false })
     }
   },
 
   async createStatus(input: CreateStatusInput): Promise<Status> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(input.project_id)
     const api = origin.api
     try {
       const status = await api.statuses.create(input)
@@ -62,6 +68,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
       }))
       const { pushStatus } = await import('../../services/PersonalSyncService')
       await pushStatus(status, origin)
+      await requireProducerCurrent(origin)
       return status
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create status'
@@ -72,9 +79,11 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   },
 
   async updateStatus(id: string, input: UpdateStatusInput): Promise<Status | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer()
     const api = origin.api
     try {
+      const source = useStatusStore.getState().statuses[id] ?? await api.statuses.findById(id)
+      if (source) origin.includeProject(source.project_id)
       const status = await api.statuses.update(id, input)
       if (status) {
         await requireProducerCurrent(origin)
@@ -84,6 +93,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         const { pushStatus } = await import('../../services/PersonalSyncService')
         await pushStatus(status, origin)
       }
+      await requireProducerCurrent(origin)
       return status
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update status'
@@ -94,11 +104,12 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   },
 
   async deleteStatus(id: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer()
     const api = origin.api
     try {
       const source = await api.statuses.findById(id)
       if (!source) return false
+      origin.includeProject(source.project_id)
       const project = await api.projects.findById(source.project_id)
       if (project?.owner_id !== origin.userId) throw new Error('Only the project owner can manage statuses')
       const result = await api.statuses.delete(id)
@@ -111,6 +122,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         const { deleteStatusFromSupabase } = await import('../../services/PersonalSyncService')
         await deleteStatusFromSupabase(id, origin)
       }
+      await requireProducerCurrent(origin)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete status'
@@ -121,11 +133,12 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
   },
 
   async reassignAndDelete(statusId: string, targetStatusId: string): Promise<boolean> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer()
     const api = origin.api
     try {
       const source = await api.statuses.findById(statusId)
       if (!source) return false
+      origin.includeProject(source.project_id)
       const project = await api.projects.findById(source.project_id)
       if (project?.owner_id !== origin.userId) throw new Error('Only the project owner can manage statuses')
       const result = await api.statuses.reassignAndDelete(statusId, targetStatusId)
@@ -138,6 +151,7 @@ export const useStatusStore = createWithEqualityFn<StatusStore>((set) => ({
         const { deleteStatusFromSupabase } = await import('../../services/PersonalSyncService')
         await deleteStatusFromSupabase(statusId, origin)
       }
+      await requireProducerCurrent(origin)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to reassign and delete status'

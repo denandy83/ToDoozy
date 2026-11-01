@@ -1,3 +1,4 @@
+import { formatTimerSeconds } from '../shared/timerDisplay'
 import { Tray, Menu, nativeImage, app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { getDatabase } from './database'
@@ -19,7 +20,7 @@ function getMyDayTrayData(): { tasks: TrayTask[]; totalNonDone: number } {
   if (!currentUserId) return { tasks: [], totalNonDone: 0 }
 
   const db = getDatabase()
-  const taskRepo = new TaskRepository(db)
+  const taskRepo = new TaskRepository(db, currentUserId)
   const statusRepo = new StatusRepository(db)
 
   const allMyDayTasks = taskRepo.findMyDay(currentUserId)
@@ -53,20 +54,6 @@ function navigateToTask(taskId: string): void {
   }
 }
 
-function formatTimerDisplay(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-function formatCookieDisplay(seconds: number): string {
-  const abs = Math.abs(Math.floor(seconds))
-  const m = Math.floor(abs / 60)
-  const s = abs % 60
-  const prefix = seconds < 0 ? '-' : ''
-  return `${prefix}${m}:${s.toString().padStart(2, '0')}`
-}
-
 function sendToRenderer(channel: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -91,19 +78,19 @@ function buildTimerMenu(): Menu {
   if (timerState.isCookieBreakPhase) {
     // Currently on cookie break — show pool (draining) and offer to go back to work
     menuItems.push({
-      label: `🍪 Cookie Time: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      label: `🍪 Cookie Time: ${formatTimerSeconds(timerState.cookiePoolSeconds, true)}`,
       click: (): void => { sendToRenderer('timer:backToWork') }
     })
   } else if (timerState.isFlowtime && timerState.cookiePoolSeconds > 0) {
     // Working with cookie pool available — offer to take a cookie break
     menuItems.push({
-      label: `🍪 Cookie Time: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      label: `🍪 Cookie Time: ${formatTimerSeconds(timerState.cookiePoolSeconds, true)}`,
       click: (): void => { sendToRenderer('timer:cookieBreak') }
     })
   } else if (timerState.isFlowtime) {
     // Flowtime but no pool yet
     menuItems.push({
-      label: `🍪 Cookies: ${formatCookieDisplay(timerState.cookiePoolSeconds)}`,
+      label: `🍪 Cookies: ${formatTimerSeconds(timerState.cookiePoolSeconds, true)}`,
       enabled: false
     })
   }
@@ -281,8 +268,8 @@ export function updateTrayBadge(): void {
       phaseIcon = '\u23f1' // ⏱
     }
     const timeStr = timerState.isCookieBreakPhase
-      ? formatCookieDisplay(displaySeconds)
-      : formatTimerDisplay(displaySeconds)
+      ? formatTimerSeconds(displaySeconds, true)
+      : formatTimerSeconds(displaySeconds)
     const repStr = timerState.isPerpetual
       ? ` ${timerState.currentRep}`
       : timerState.totalReps > 1
@@ -299,7 +286,11 @@ export function updateTrayBadge(): void {
   }
 }
 
-export function setTrayUserId(userId: string): void {
+export function setTrayUserId(userId: string | null): void {
+  if (currentUserId !== userId || userId === null) {
+    timerState = null
+    tray?.closeContextMenu()
+  }
   currentUserId = userId
   updateTrayBadge()
 }

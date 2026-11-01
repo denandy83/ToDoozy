@@ -1,12 +1,14 @@
-/** Add days to today, preserving the time portion of the base due date if present */
+import { localDateKey } from '../../../../shared/localDate'
+/** Add local calendar days, preserving an existing timestamp's local clock time. */
 export function addDaysPreservingTime(baseDueDate: string | null | undefined, days: number): string {
   const target = new Date()
   target.setDate(target.getDate() + days)
   if (baseDueDate && baseDueDate.includes('T')) {
-    const timePart = baseDueDate.split('T')[1]
-    return target.toISOString().split('T')[0] + 'T' + timePart
+    const parsed = new Date(baseDueDate)
+    target.setHours(parsed.getHours(), parsed.getMinutes(), parsed.getSeconds(), parsed.getMilliseconds())
+    return target.toISOString()
   }
-  return target.toISOString().split('T')[0]
+  return localDateKey(target)
 }
 
 /** Snooze to 3 hours from now */

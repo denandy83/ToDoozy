@@ -1,15 +1,13 @@
+import { hydrationContext } from '../shared/stores/hydrationContext'
 import { readAll, readAllIn } from './readAll'
 import { captureSyncContext, type SyncContext } from './syncContext'
-import { useProjectStore } from '../shared/stores/projectStore'
-import { useAuthStore } from '../shared/stores/authStore'
-import { useTaskStore } from '../shared/stores/taskStore'
-import { useStatusStore } from '../shared/stores/statusStore'
 import { useLabelStore } from '../shared/stores/labelStore'
 import { logEvent } from '../shared/stores/logStore'
 
 /** Fetch definitions before junctions: a brand-new remote label has a local FK. */
 export async function refreshProjectLabels(projectId: string, context?: SyncContext): Promise<void> {
   context ??= await captureSyncContext()
+  context = { ...context, ...hydrationContext(context, projectId) }
   const api = context.api
   const client = context.client
   const { data: links, error } = await readAll(() => client.from('project_labels').select('*').eq('project_id', projectId), ['project_id', 'label_id'])
@@ -27,55 +25,34 @@ export async function refreshProjectLabels(projectId: string, context?: SyncCont
     if (link.deleted_at) await api.labels.softDeleteTaskLabelsForProjectLabel(projectId, link.label_id)
   }
   context.assertCurrent()
-  await useLabelStore.getState().hydrateLabels(projectId)
-  context.assertCurrent()
-  await useTaskStore.getState().hydrateAllTaskLabels(projectId)
+  await useLabelStore.getState().hydrateLabels(projectId, context)
 }
 
-const timers = new Map<string, ReturnType<typeof setTimeout>>()
-const running = new Set<string>()
-const pending = new Set<string>()
-const touchedTasks = new Map<string, Set<string>>()
+let timer: ReturnType<typeof setTimeout> | null = null
+const pendingProjects = new Map<SyncContext, Map<string, { context: SyncContext; taskIds: Set<string> }>>()
 
-/** Every subscribed shared project updates SQLite + stores, including unopened ones. */
-export function scheduleRemoteProjectRefresh(projectId: string, taskId?: string): void {
-  if (taskId) {
-    const ids = touchedTasks.get(projectId) ?? new Set<string>()
-    ids.add(taskId)
-    touchedTasks.set(projectId, ids)
+export function scheduleRemoteProjectRefresh(projectId: string, origin: SyncContext, taskIds: Iterable<string> = []): void {
+  let projects = pendingProjects.get(origin)
+  if (!projects) {
+    projects = new Map()
+    pendingProjects.set(origin, projects)
   }
-  const origin = captureSyncContext().catch(() => null)
-  pending.add(projectId)
-  if (running.has(projectId)) return
-  clearTimeout(timers.get(projectId))
-  timers.set(projectId, setTimeout(async () => {
-    timers.delete(projectId)
-    pending.delete(projectId)
-    running.add(projectId)
-    const userId = useAuthStore.getState().currentUser?.id
-    try {
-      const context = await origin
-      if (!context) return
-      context.assertCurrent()
-      if (!userId) return
-      const { pullNewTasks, pullProjectMetadata, pullTaskLabelsForTasks } = await import('./PersonalSyncService')
-      await pullProjectMetadata(projectId, context)
-      await pullNewTasks(projectId, context)
-      await refreshProjectLabels(projectId, context)
-      const ids = [...(touchedTasks.get(projectId) ?? [])]
-      touchedTasks.delete(projectId)
-      if (ids.length) await pullTaskLabelsForTasks(ids, userId, context)
-      if (useAuthStore.getState().currentUser?.id !== userId) return
-      await useProjectStore.getState().hydrateProjects(userId)
-      context.assertCurrent()
-      await useStatusStore.getState().hydrateStatuses(projectId)
-      context.assertCurrent()
-      await useTaskStore.getState().hydrateAllForUser(userId)
-    } catch (error) {
-      logEvent('error', 'sync', 'Remote project refresh failed', String(error))
-    } finally {
-      running.delete(projectId)
-      if (pending.has(projectId)) scheduleRemoteProjectRefresh(projectId)
-    }
-  }, 250))
+  let pending = projects.get(projectId)
+  try { pending?.context.assertCurrent() } catch { pending = undefined }
+  const context = pending?.context ?? { ...origin, ...hydrationContext(origin, projectId) }
+  projects.set(projectId, { context, taskIds: new Set([...(pending?.taskIds ?? []), ...taskIds]) })
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(async () => {
+    timer = null
+    const pending = [...pendingProjects].flatMap(([origin, projects]) => [...projects].map(([projectId, request]) => ({ origin, projectId, ...request })))
+    pendingProjects.clear()
+    const { requestProjectRefresh } = await import('./PersonalSyncService')
+    await Promise.all(pending.map(async ({ origin, projectId, context, taskIds }) => {
+      try {
+        await requestProjectRefresh(context, [projectId], new Map([[projectId, taskIds]]), origin)
+      } catch (error) {
+        if (await context.isCurrent()) logEvent('error', 'sync', 'Remote project refresh failed', String(error))
+      }
+    }))
+  }, 250)
 }

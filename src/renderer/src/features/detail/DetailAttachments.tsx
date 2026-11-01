@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { Plus, X, FileText, FileImage, FileArchive, FileAudio, FileVideo, File, FileCode } from 'lucide-react'
 import { useAttachmentStore, useAttachmentsByTaskId } from '../../shared/stores'
 import { useAttachFiles } from '../../shared/hooks/useAttachFiles'
+import { attachmentContext } from '../../shared/stores/attachmentStore'
 import { useToast } from '../../shared/components/Toast'
 import type { Attachment } from '../../../../shared/types'
 
@@ -25,31 +26,48 @@ export function DetailAttachments({ taskId }: DetailAttachmentsProps): React.JSX
 
   const handleRemove = useCallback(
     async (attachment: Attachment) => {
-      await removeAttachment(attachment.id)
-      addToast({
-        message: `Removed ${attachment.filename}`,
-        actions: [
-          {
-            label: 'Undo',
-            variant: 'accent',
-            onClick: async () => {
-              addToast({ message: 'Cannot undo attachment removal', variant: 'danger' })
+      const origin = await attachmentContext(taskId).catch(() => null)
+      if (!origin) return
+      try {
+        if (!await removeAttachment(attachment.id, origin) || !await origin.isCurrent()) return
+        addToast({
+          message: `Removed ${attachment.filename}`,
+          actions: [
+            {
+              label: 'Undo',
+              variant: 'accent',
+              onClick: async () => {
+                try {
+                  if (!await origin.isCurrent()) return
+                  const restored = await origin.api.attachments.restore(attachment.id)
+                  if (!await origin.isCurrent()) return
+                  if (!restored) throw new Error('Attachment is no longer available')
+                  await addAttachment(restored, origin)
+                } catch {
+                  if (await origin.isCurrent()) addToast({ message: 'Could not restore attachment', variant: 'danger' })
+                }
+              }
             }
-          }
-        ]
-      })
+          ]
+        })
+      } catch {
+        if (await origin.isCurrent()) addToast({ message: 'Could not remove attachment', variant: 'danger' })
+      }
     },
-    [removeAttachment, addAttachment, addToast]
+    [taskId, removeAttachment, addAttachment, addToast]
   )
 
   const handleOpen = useCallback(async (attachment: Attachment) => {
+    const origin = await attachmentContext(taskId).catch(() => null)
+    if (!origin || !await origin.isCurrent()) return
     try {
-      await window.api.attachments.open(attachment.id)
+      await origin.api.attachments.open(attachment.id)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to open attachment:', err)
       addToast({ message: 'Failed to open file', variant: 'danger' })
     }
-  }, [addToast])
+  }, [taskId, addToast])
 
   // Arrow key navigation between attachment cards and the Add button
   const handleRowKeyDown = useCallback((e: React.KeyboardEvent) => {

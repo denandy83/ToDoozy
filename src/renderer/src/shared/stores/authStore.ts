@@ -12,6 +12,7 @@ import {
   isPermanentlyDead
 } from '../../services/sessionRecovery'
 import { logEvent } from './logStore'
+import { resetAccountStores } from './accountReset'
 
 let pendingPasswordSave: { email: string; password: string } | null = null
 export function takePendingPasswordSave(): { email: string; password: string } | null {
@@ -40,6 +41,7 @@ function authTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 interface AuthState {
+  databaseScope: string | null
   currentUser: User | null
   isAuthenticated: boolean
   loading: boolean
@@ -193,6 +195,7 @@ async function finishSessionRecovery(
 }
 
 export const useAuthStore = createWithEqualityFn<AuthStore>((set, get) => ({
+  databaseScope: null,
   currentUser: null,
   isAuthenticated: false,
   loading: false,
@@ -702,3 +705,28 @@ export const selectIsAuthenticated = (state: AuthState): boolean => state.isAuth
 export const selectUserId = (state: AuthState): string | null => state.currentUser?.id ?? null
 export const selectIsOffline = (state: AuthState): boolean => state.isOffline
 export const selectIsTokenPermanentlyDead = (state: AuthState): boolean => state.isTokenPermanentlyDead
+
+// Includes direct auth restoration and account switches, not only UI logout.
+useAuthStore.subscribe((state, previous) => {
+  if (state.currentUser?.id !== previous.currentUser?.id || (previous.databaseScope !== null && state.databaseScope !== previous.databaseScope)) {
+    resetAccountStores()
+    if (state.isOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) useSyncStore.getState().setStatus('offline')
+  }
+})
+
+let scopeApi: typeof window.api | undefined
+let stopScope: (() => void) | undefined
+export function observeDatabaseScope(): string | null {
+  const api = window.api
+  const update = (): void => {
+    const databaseScope = api.sync.currentContext()
+    if (databaseScope !== useAuthStore.getState().databaseScope) useAuthStore.setState({ databaseScope })
+  }
+  if (scopeApi !== api) {
+    stopScope?.()
+    scopeApi = api
+    stopScope = api.sync.onContextChanged(update)
+  }
+  update()
+  return useAuthStore.getState().databaseScope
+}

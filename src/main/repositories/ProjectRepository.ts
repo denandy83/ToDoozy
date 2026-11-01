@@ -10,7 +10,7 @@ import type {
 } from '../../shared/types'
 
 export class ProjectRepository {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: DatabaseSync, private userId: string | null = null) {}
 
   // Raw — sync layer needs to see tombstones to compare timestamps.
   findById(id: string): Project | undefined {
@@ -135,8 +135,10 @@ export class ProjectRepository {
     }
 
     values.push(id)
-    this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-    return this.findById(id)
+    const result = this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL
+      AND ($user IS NULL OR owner_id = $user OR EXISTS (SELECT 1 FROM project_members WHERE project_id = projects.id AND user_id = $user))`)
+      .run({ user: this.userId }, ...values)
+    return result.changes ? this.findById(id) : undefined
   }
 
   archiveWithTasks(id: string): Project | undefined {
@@ -173,7 +175,9 @@ export class ProjectRepository {
       const archiveNewer = !!remote.archive_updated_at && (!existing?.archive_updated_at || Date.parse(remote.archive_updated_at) >= Date.parse(existing.archive_updated_at))
       if (archiveNewer && !remote.deleted_at) {
         this.db.prepare(`UPDATE tasks SET is_archived=?, archive_updated_at=? WHERE project_id=? AND deleted_at IS NULL
-          AND (archive_updated_at IS NULL OR julianday(archive_updated_at) <= julianday(?))`).run(remote.is_archived, remote.archive_updated_at!, remote.id, remote.archive_updated_at!)
+          AND (archive_updated_at IS NULL OR julianday(archive_updated_at) <= julianday(?))
+          AND (is_archived IS NOT ? OR archive_updated_at IS NULL OR julianday(archive_updated_at) IS NOT julianday(?))`)
+          .run(remote.is_archived, remote.archive_updated_at!, remote.id, remote.archive_updated_at!, remote.is_archived, remote.archive_updated_at!)
       }
       if (!metadataNewer && (!archiveNewer || (Date.parse(remote.archive_updated_at!) === Date.parse(existing?.archive_updated_at ?? '') && remote.is_archived === existing?.is_archived))) return existing!
       const archive = archiveNewer ? remote : existing?.archive_updated_at ? existing : remote
@@ -289,13 +293,13 @@ export class ProjectRepository {
   }
 
   // Project members
-  addMember(projectId: string, userId: string, role: string, invitedBy?: string): void {
+  addMember(projectId: string, userId: string, role: string, invitedBy?: string, joinedAt?: string): void {
     this.db
       .prepare(
         `INSERT INTO project_members (project_id, user_id, role, invited_by, joined_at)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(projectId, userId, role, invitedBy ?? null, new Date().toISOString())
+      .run(projectId, userId, role, invitedBy ?? null, joinedAt ?? new Date().toISOString())
   }
 
   updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): void {
@@ -304,7 +308,8 @@ export class ProjectRepository {
     if (updates.display_color !== undefined) { sets.push('display_color = ?'); values.push(updates.display_color) }
     if (updates.display_initials !== undefined) { sets.push('display_initials = ?'); values.push(updates.display_initials) }
     if (sets.length === 0) return
-    this.db.prepare(`UPDATE project_members SET ${sets.join(', ')} WHERE project_id = ? AND user_id = ?`).run(...values, projectId, userId)
+    const result = this.db.prepare(`UPDATE project_members SET ${sets.join(', ')} WHERE project_id = ? AND user_id = ?`).run(...values, projectId, userId)
+    if (!result.changes) throw new Error('Project member not found')
   }
 
   removeMember(projectId: string, userId: string): boolean {
@@ -320,23 +325,22 @@ export class ProjectRepository {
       .all(projectId) as unknown as ProjectMember[]
   }
 
-  getProjectsForUser(userId: string): Project[] {
+  getProjectsForUser(userId: string, projectId?: string): Project[] {
     return this.db
       .prepare(
         `SELECT p.* FROM projects p
-         INNER JOIN project_members pm ON pm.project_id = p.id
-         WHERE pm.user_id = ? AND p.deleted_at IS NULL
+         WHERE p.deleted_at IS NULL AND (p.owner_id = ? OR EXISTS (
+           SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?))
+         ${projectId === undefined ? '' : 'AND p.id = ?'}
          ORDER BY p.sidebar_order ASC, p.created_at ASC`
       )
-      .all(userId) as unknown as Project[]
+      .all(...(projectId === undefined ? [userId, userId] : [userId, userId, projectId])) as unknown as Project[]
   }
 
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): void {
-    const stmt = this.db.prepare('UPDATE projects SET sidebar_order = ?, updated_at = ? WHERE id = ?')
-    const now = new Date().toISOString()
     withTransaction(this.db, () => {
       for (const u of updates) {
-        stmt.run(u.sidebar_order, now, u.id)
+        this.update(u.id, { sidebar_order: u.sidebar_order })
       }
     })
   }

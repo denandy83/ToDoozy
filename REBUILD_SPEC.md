@@ -427,18 +427,8 @@ Settable via detail panel and context menu flyout.
 ---
 
 ## 12. Snooze
-Snooze **always sets the due date**. No dual action. One click = task moves to the future.
 
-**Presets** (in context menu flyout and detail panel):
-- **Later Today** → today at 5pm or +3 hours (whichever is later)
-- **Tomorrow** → tomorrow 9am
-- **Next Week** → next Monday 9am
-- **In 3 Days** → +3 days at 9am
-- **Pick Date...** → inline mini date picker
-
-If the task is in My Day and snoozed to a future date, it is **automatically removed from My Day**. It returns when the due date arrives (via the "due today" filter).
-
-Snooze presets are configurable in Settings > Snooze.
+See [Snooze](HELP.md#snooze) for the current presets, local-calendar time preservation, and due-date behavior.
 
 ---
 
@@ -759,12 +749,7 @@ These views show tasks from the **active project** only.
 ## 33. Collaboration
 
 ### Inviting Members
-From Project Settings > Members:
-1. Enter an email address
-2. Select a role (Admin, Member, Viewer)
-3. Click "Invite"
-
-If the email belongs to an existing ToDoozy user, they see the project in their project switcher immediately. If not, an invitation email is sent via Supabase Edge Function with a sign-up link.
+See [Sharing Projects](HELP.md#sharing-projects) for the invitation workflow and [Invitation response lifecycle](docs/security-optimization-2026-10-30.md#invitation-response-lifecycle) for the account/database and confirmed-recipient contracts.
 
 ### Roles & Permissions
 

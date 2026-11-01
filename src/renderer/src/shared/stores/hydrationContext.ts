@@ -1,25 +1,88 @@
 import type { TodoozyAPI } from '../../../../preload/index.d'
+import type { SyncProducer } from '../../services/syncContext'
+import { captureProjectScope } from './projectScope'
+export { invalidateProjectHydration } from './projectScope'
 import { useAuthStore } from './authStore'
 
-export function hydrationContext(): { api: TodoozyAPI; isCurrent(): Promise<boolean> } {
+export type HydrationOrigin = Pick<SyncProducer, 'api' | 'isCurrent'> & Partial<Pick<SyncProducer, 'assertCurrent'>>
+
+export function hydrationContext(origin?: HydrationOrigin, projectId?: string, requestedUserId?: string): {
+  api: TodoozyAPI
+  isCurrent(): Promise<boolean>
+  assertCurrent(): void
+  isProjectCurrent(id: string): boolean
+} {
+  const isProjectCurrent = captureProjectScope()
   const user = useAuthStore.getState().currentUser
-  const origin = window.api.sync.captureContext()
-  const sameUser = (): boolean => useAuthStore.getState().currentUser === user
+  const readDatabaseScope = (): string | null => {
+    const value = typeof window === 'undefined' ? null : window.api.sync?.currentContext?.()
+    return typeof value === 'string' ? value : null
+  }
+  let databaseScope = readDatabaseScope()
+  const database = origin ? null : window.api.sync.captureContext().then(context => {
+    if (typeof window.api.sync.currentContext === 'function') databaseScope ??= JSON.stringify([context.userId, context.generation])
+    return context
+  })
+  void database?.catch(() => {})
+  const sameUser = (): boolean => useAuthStore.getState().currentUser?.id === user?.id
+  const assertCurrent = (): void => {
+    if (!sameUser() || (requestedUserId !== undefined && requestedUserId !== user?.id)) throw new Error('Hydration account changed')
+    if (databaseScope !== null && readDatabaseScope() !== databaseScope) throw new Error('Hydration database changed')
+    origin?.assertCurrent?.()
+    if (projectId && !isProjectCurrent(projectId)) throw new Error('Project hydration invalidated')
+  }
+  const invoke = async (namespace: string, method: string, args: unknown[]): Promise<unknown> => {
+    assertCurrent()
+    try {
+      if (origin) {
+        const target = Reflect.get(origin.api, namespace)
+        const result = await Reflect.apply(Reflect.get(target, method), target, args)
+        assertCurrent()
+        return result
+      }
+      const context = await database!
+      assertCurrent()
+      if (context.userId !== (user?.id ?? null)) throw new Error('Hydration database changed')
+      const result = await window.api.sync.invokeContext(context, `${namespace}:${method}`, args)
+      assertCurrent()
+      return result
+    } catch (error) { assertCurrent(); throw error }
+  }
+  let access: Promise<boolean> | undefined
+  const requireAccess = async (): Promise<void> => {
+    assertCurrent()
+    if (projectId && requestedUserId !== undefined) {
+      access ??= invoke('projects', 'getProjectsForUser', [requestedUserId, projectId]).then((rows) =>
+        Array.isArray(rows) && rows.some((row) => row.id === projectId))
+      if (!await access) throw new Error('Project hydration access changed')
+      assertCurrent()
+    }
+  }
   const api = new Proxy({} as TodoozyAPI, {
     get: (_, namespace: string) => new Proxy({}, {
       get: (_, method: string) => async (...args: unknown[]) => {
-        const database = await origin
-        if (!sameUser()) throw new Error('Hydration account changed')
-        return window.api.sync.invokeContext(database, `${namespace}:${method}`, args)
+        await requireAccess()
+        return invoke(namespace, method, args)
       }
     })
   })
   const isCurrent = async (): Promise<boolean> => {
-    if (!sameUser()) return false
-    const database = await origin
-    const current = await window.api.sync.captureContext()
-    return sameUser() && current.generation === database.generation && current.userId === database.userId
-      && database.userId === (user?.id ?? null)
+    try {
+      assertCurrent()
+      if (origin) {
+        if (!await origin.isCurrent()) return false
+      } else {
+        const initial = await database!
+        assertCurrent()
+        const current = await window.api.sync.captureContext()
+        assertCurrent()
+        if (current.generation !== initial.generation || current.userId !== initial.userId
+          || initial.userId !== (user?.id ?? null)) return false
+      }
+      await requireAccess()
+      assertCurrent()
+      return true
+    } catch { return false }
   }
-  return { api, isCurrent }
+  return { api, isCurrent, assertCurrent, isProjectCurrent }
 }

@@ -43,6 +43,14 @@ describe('labelStore.createLabel — pushes project_labels junction (#77)', () =
     vi.stubGlobal('window', {
       ...globalThis.window,
       api: {
+        sync: {
+          captureContext: async () => ({ userId: 'user-1', generation: 1 }),
+          invokeContext: async (_context: unknown, channel: string, args: unknown[]) => {
+            const [, method] = channel.split(':')
+            const labels = window.api.labels as unknown as Record<string, (...values: unknown[]) => unknown>
+            return labels[method](...args)
+          }
+        },
         labels: {
           create: vi.fn().mockResolvedValue(created),
           findAll: vi.fn().mockResolvedValue([created])
@@ -67,7 +75,7 @@ describe('labelStore.createLabel — pushes project_labels junction (#77)', () =
 
     // The push happens in a fire-and-forget dynamic-import .then() callback.
     await vi.waitFor(() => expect(pushProjectLabelMock).toHaveBeenCalled())
-    expect(pushProjectLabelMock).toHaveBeenCalledWith('project-9', 'label-1', null)
+    expect(pushProjectLabelMock).toHaveBeenCalledWith('project-9', 'label-1', null, expect.objectContaining({ userId: 'user-1' }))
     expect(pushLabelMock).toHaveBeenCalled()
   })
 

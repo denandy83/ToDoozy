@@ -22,6 +22,7 @@ function makeClient(
     from(table: string) {
       const call = { table, eqs: [] as Array<[string, string]> }
       calls.push(call)
+      let advanced = false
       const builder = {
         select(_columns: string) {
           return this
@@ -30,10 +31,13 @@ function makeClient(
           call.eqs.push([column, value])
           return this
         },
+        order() { return this },
+        limit() { return this },
+        or() { advanced=true; return this },
         then<T>(resolve: (r: ScopeRowsResult) => T) {
           const result: ScopeRowsResult = errorMessage
             ? { data: null, error: { message: errorMessage } }
-            : { data: rows, error: null }
+            : { data: advanced ? [] : rows, error: null }
           return Promise.resolve(resolve(result))
         }
       }
@@ -48,7 +52,7 @@ describe('loadMemberProjectIds', () => {
     const { client, calls } = makeClient([{ project_id: 'p1' }, { project_id: 'p2' }])
     const ids = await loadMemberProjectIds(client, 'user-1')
     expect(ids).toEqual(new Set(['p1', 'p2']))
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
     expect(calls[0].table).toBe('project_members')
     expect(calls[0].eqs).toEqual([['user_id', 'user-1']])
   })
@@ -116,8 +120,8 @@ describe('ProjectScope', () => {
     expect(await scope.isMember('p2')).toBe(true)
     expect(await scope.isMember('p3')).toBe(false)
     expect(await scope.idArray()).toEqual(['p1', 'p2'])
-    // Exactly one project_members round-trip despite four membership questions.
-    expect(calls).toHaveLength(1)
+    // Exactly one paged load (data + terminal empty page) despite four questions.
+    expect(calls).toHaveLength(2)
   })
 
   it('denies membership for null/foreign ids', async () => {

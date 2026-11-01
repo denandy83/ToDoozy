@@ -16,7 +16,8 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
       INSERT INTO tasks(id,project_id,is_archived,updated_at,deleted_at) VALUES ('t','p',0,'2026-01-01T00:00:00Z',NULL);`)
     await db.exec(readFileSync(new URL('../../migrations/20261030052303_project_archive_version.sql', import.meta.url), 'utf8'))
     const client = { from(table: string) {
-      let patch: Record<string, unknown> | null = null, columns = '*'
+      let patch: Record<string, unknown> | null = null, columns = '*', limit: number | undefined
+      const orders: string[] = []
       const filters: Array<[string, unknown, string]> = []
       const chain = {
         update(value: Record<string, unknown>) { patch = value; return chain }, select(value = '*') { columns = value; return chain },
@@ -24,8 +25,10 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
         is(key: string, value: unknown) { filters.push([key, value, 'IS']); return chain },
         lte(key: string, value: unknown) { filters.push([key, value, '<=']); return chain },
         in(key: string, value: unknown) { filters.push([key, value, '=ANY']); return chain },
-        order() { return chain }, limit() { return chain },
+        order(key: string) { orders.push(key); return chain }, limit(value: number) { limit = value; return chain },
         or(value: string) {
+          const cursor = value.match(/^([a-z_]+)\.gt\.(.+)$/)
+          if (cursor) { filters.push([cursor[1], JSON.parse(cursor[2]), '>']); return chain }
           const match = value.match(/^([a-z_]+)\.is\.null,\1\.lte\.(.+)$/)
           if (!match || !Number.isFinite(Date.parse(match[2]))) throw new Error('Invalid archive filter')
           filters.push([match[1], match[2], 'NULL_OR_LTE'])
@@ -38,7 +41,9 @@ it('supports the exact v1.9 action, fences metadata and equal-version conflicts,
             const quote = (key: string) => { if (!/^[a-z_]+$/.test(key)) throw new Error('Invalid fixture column'); return `"${key}"` }
             const sets = patch ? Object.entries(patch).map(([key, value]) => `${quote(key)}=${bind(value)}`).join(',') : ''
             const where = filters.map(([key, value, operator]) => operator === 'NULL_OR_LTE' ? `(${quote(key)} IS NULL OR ${quote(key)}<=${bind(value)})` : operator === 'IS' ? `${quote(key)} IS NULL` : operator === '=ANY' ? `${quote(key)}=ANY(${bind(value)})` : `${quote(key)}${operator}${bind(value)}`).join(' AND ')
-            const query = patch ? `UPDATE ${quote(table)} SET ${sets} WHERE ${where} RETURNING *` : `SELECT ${columns} FROM ${quote(table)} WHERE ${where}`
+            const ordering = orders.length ? ` ORDER BY ${orders.map(quote).join(',')}` : ''
+            const paging = limit === undefined ? '' : ` LIMIT ${bind(limit)}`
+            const query = patch ? `UPDATE ${quote(table)} SET ${sets} WHERE ${where} RETURNING *` : `SELECT ${columns} FROM ${quote(table)} WHERE ${where}${ordering}${paging}`
             requests.push(table)
             try { return { data: (await db.query(query, params)).rows, error: null } } catch (error) { return { data: null, error: { message: String(error) } } }
           })().then(resolve, reject)

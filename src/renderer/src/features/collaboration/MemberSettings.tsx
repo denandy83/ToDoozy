@@ -1,12 +1,16 @@
+import { recoverProject } from '../../services/projectRecovery'
+import { membershipSnapshot } from '../../services/membershipSnapshot'
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
+import { captureProjectProducer, captureSyncProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
 /**
  * Members section for project settings — shows member list, invite button,
  * remove/leave/unshare actions.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { UserPlus, LogOut, Unlink, Trash2, Check } from 'lucide-react'
 import { useAuthStore } from '../../shared/stores/authStore'
 import { useProjectStore } from '../../shared/stores/projectStore'
-import type { Project } from '../../../../shared/types'
+import type { Project, ProjectMember } from '../../../../shared/types'
 import { getAvatarColor, getAvatarInitials, AVATAR_PALETTE } from '../../../../shared/avatarUtils'
 import { invalidateMemberDisplay } from '../../shared/hooks/useMemberDisplay'
 import { isPlaceholderEmail } from '../../../../shared/placeholderUser'
@@ -43,11 +47,27 @@ interface MemberDisplay {
   display_initials: string | null
 }
 
-export function MemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
+export function MemberSettings(props: MemberSettingsProps): React.JSX.Element {
+  const scope = useDatabaseScope()
+  const userId = useAuthStore(state => state.currentUser?.id)
+  return <ScopedMemberSettings key={JSON.stringify([scope, userId, props.project.id])} {...props} onToast={message => {
+    if (scope === window.api.sync.currentContext() && userId === useAuthStore.getState().currentUser?.id) props.onToast(message)
+  }} />
+}
+
+function ScopedMemberSettings({ project, onToast }: MemberSettingsProps): React.JSX.Element {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const [members, setMembers] = useState<MemberDisplay[]>([])
-  const [loading, setLoading] = useState(true)
+  const authoritativeMembers = useProjectStore(s => s.members[project.id])
+  const [memberState, setMemberState] = useState<{ ownerId: string | undefined; projectId: string; snapshot: ProjectMember[] | undefined; rows: MemberDisplay[] }>({ ownerId: currentUser?.id, projectId: project.id, snapshot: authoritativeMembers, rows: [] })
+  const currentRows = memberState.ownerId === currentUser?.id && memberState.projectId === project.id && memberState.snapshot === authoritativeMembers
+  const members = currentRows ? memberState.rows : []
+  const [isLoading, setLoading] = useState(true)
+  const loading = isLoading || !currentRows
+  const loadSequence = useRef(0)
+  const active = useRef(true)
+  const leaving = useRef(false)
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const [copiedLink, setCopiedLink] = useState(false)
   const [confirmUnshare, setConfirmUnshare] = useState(false)
   const [emailInviteValue, setEmailInviteValue] = useState('')
@@ -60,65 +80,83 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
   const handleSaveMemberDisplay = async (userId: string): Promise<void> => {
     const color = editColor || null
     const initials = editInitials.trim() || null
-    // Save locally
-    await window.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
-    // Sync to Supabase so all members see the change
-    if (project.is_shared === 1) {
-      await updateSharedMemberDisplay(project.id, userId, color, initials).catch((err) =>
-        console.warn('Failed to sync member display to Supabase:', err)
-      )
+    const origin = captureProjectProducer(project.id)
+    try {
+      if (project.is_shared === 1) await updateSharedMemberDisplay(project.id, userId, color, initials, origin)
+      await requireProducerCurrent(origin)
+      await origin.api.projects.updateMember(project.id, userId, { display_color: color, display_initials: initials })
+      await requireProducerCurrent(origin)
+      setMemberState(previous => ({ ...previous, rows: previous.rows.map(member => member.user_id === userId ? { ...member, display_color: color, display_initials: initials } : member) }))
+      invalidateMemberDisplay(project.id, origin)
+      setEditingMemberId(null)
+      onToast('Member appearance updated')
+    } catch {
+      if (await origin.isCurrent()) onToast('Failed to update member appearance')
     }
-    setMembers((prev) => prev.map((m) => m.user_id === userId ? { ...m, display_color: color, display_initials: initials } : m))
-    invalidateMemberDisplay(project.id)
-    setEditingMemberId(null)
-    onToast('Member appearance updated')
   }
 
   const isOwner = project.owner_id === currentUser?.id
   const isShared = project.is_shared === 1
 
   const loadMembers = useCallback(async () => {
+    const request = ++loadSequence.current
     if (!isShared) {
       setLoading(false)
       return
     }
+    const producer = captureProjectProducer(project.id)
+    let origin: SyncProducer | undefined
+    setLoading(true)
     try {
-      const data = await getSharedProjectMembers(project.id)
+      origin = await membershipSnapshot({ readOnly: true })(project.id, producer)
+      if (currentUser?.id !== producer.userId) return
+      const data = await getSharedProjectMembers(project.id, origin)
       // Enrich with local display overrides
-      const localMembers = await window.api.projects.getMembers(project.id)
+      const localMembers = await origin.api.projects.getMembers(project.id)
+      await requireProducerCurrent(origin)
+      if (request !== loadSequence.current) return
       const localMap = new Map(localMembers.map((lm) => [lm.user_id, lm]))
-      setMembers(data.map((m) => ({
+      setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: data.map((m) => ({
         ...m,
         joined_at: m.joined_at,
         display_color: localMap.get(m.user_id)?.display_color ?? null,
         display_initials: localMap.get(m.user_id)?.display_initials ?? null
-      })))
+      })) })
     } catch (err) {
-      console.error('Failed to load members:', err)
+      if (origin && request === loadSequence.current && await origin.isCurrent()) {
+        setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: [] })
+        console.error('Failed to load members:', err)
+      }
     } finally {
-      setLoading(false)
+      if (request === loadSequence.current) setLoading(false)
     }
-  }, [project.id, isShared])
+  }, [project.id, isShared, currentUser?.id])
 
   useEffect(() => {
-    loadMembers()
-  }, [loadMembers])
+    void loadMembers()
+    return () => { loadSequence.current += 1 }
+  }, [loadMembers, authoritativeMembers])
 
   const handleGenerateInvite = async (): Promise<void> => {
     if (!currentUser) return
+    const origin = captureProjectProducer(project.id)
     try {
       const link = await generateInviteLink(project.id, currentUser.id)
+      await requireProducerCurrent(origin)
       await navigator.clipboard.writeText(link)
+      await requireProducerCurrent(origin)
       setCopiedLink(true)
       onToast('Invite link copied to clipboard (expires in 15 minutes)')
       setTimeout(() => setCopiedLink(false), 3000)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to generate invite:', err)
       onToast('Failed to generate invite link')
     }
   }
 
   const handleEmailInvite = async (): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     if (!currentUser || !emailInviteValue.trim()) return
     const email = emailInviteValue.trim().toLowerCase()
     // Basic email validation
@@ -134,129 +172,70 @@ export function MemberSettings({ project, onToast }: MemberSettingsProps): React
     setSendingEmailInvite(true)
     try {
       await generateInviteLink(project.id, currentUser.id, email)
+      await requireProducerCurrent(origin)
       setEmailInviteValue('')
       onToast(`Invite sent to ${email}. They'll see it when they open ToDoozy.`)
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to send email invite:', err)
       onToast('Failed to send invite')
     } finally {
-      setSendingEmailInvite(false)
+      if (await origin.isCurrent()) setSendingEmailInvite(false)
     }
   }
 
   const handleRemoveMember = async (userId: string): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     try {
-      await removeSharedMember(project.id, userId)
-      setMembers((prev) => prev.filter((m) => m.user_id !== userId))
+      await removeSharedMember(project.id, userId, origin)
+      await requireProducerCurrent(origin)
+      setMemberState(previous => ({ ...previous, rows: previous.rows.filter(member => member.user_id !== userId) }))
       onToast('Member removed')
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to remove member:', err)
       onToast('Failed to remove member')
     }
   }
 
   const handleLeaveProject = async (keepLocal: boolean): Promise<void> => {
-    if (!currentUser) return
+    if (!currentUser || leaving.current) return
+    leaving.current = true
+    const origin = captureSyncProducer()
+    const projectOrigin = captureProjectProducer(project.id)
+    const uiScope = window.api.sync.currentContext()
+    const uiCurrent = (): boolean => active.current && uiScope === window.api.sync.currentContext() && currentUser.id === useAuthStore.getState().currentUser?.id
     try {
-      await removeSharedMember(project.id, currentUser.id)
-      await unsubscribeFromProject(project.id)
-      if (keepLocal) {
-        // Create a new local project with a fresh UUID so it can't collide with the shared original
-        const newId = crypto.randomUUID()
-        await window.api.projects.create({
-          id: newId,
-          name: `${project.name} (local copy)`,
-          description: project.description,
-          color: project.color,
-          icon: project.icon,
-          owner_id: currentUser.id,
-          is_default: 0
-        })
-        await window.api.projects.addMember(newId, currentUser.id, 'owner')
-        // Copy statuses to new project
-        const statuses = await window.api.statuses.findByProjectId(project.id)
-        const statusIdMap: Record<string, string> = {}
-        for (const s of statuses) {
-          const newStatusId = crypto.randomUUID()
-          statusIdMap[s.id] = newStatusId
-          await window.api.statuses.create({
-            id: newStatusId,
-            project_id: newId,
-            name: s.name,
-            color: s.color,
-            icon: s.icon,
-            order_index: s.order_index,
-            is_done: s.is_done,
-            is_default: s.is_default
-          })
-        }
-        // Copy labels to new project
-        const oldLabels = await window.api.labels.findByProjectId(project.id)
-        for (const l of oldLabels) {
-          await window.api.labels.addToProject(newId, l.id).catch(() => {})
-        }
-        // Copy tasks to new project (remap status IDs and parent IDs)
-        const tasks = await window.api.tasks.findByProjectId(project.id)
-        const taskIdMap: Record<string, string> = {}
-        // First pass: create all tasks without parent_id
-        for (const t of tasks) {
-          const newTaskId = crypto.randomUUID()
-          taskIdMap[t.id] = newTaskId
-          await window.api.tasks.create({
-            id: newTaskId,
-            project_id: newId,
-            owner_id: currentUser.id,
-            title: t.title,
-            description: t.description,
-            status_id: statusIdMap[t.status_id] ?? t.status_id,
-            priority: t.priority,
-            due_date: t.due_date,
-            parent_id: null,
-            order_index: t.order_index,
-            assigned_to: null,
-            is_template: t.is_template,
-            is_archived: t.is_archived,
-            completed_date: t.completed_date,
-            recurrence_rule: t.recurrence_rule,
-            reference_url: t.reference_url
-          })
-          // Copy labels
-          const labels = await window.api.tasks.getLabels(t.id)
-          for (const l of labels) {
-            await window.api.tasks.addLabel(newTaskId, l.label_id).catch(() => {})
-          }
-        }
-        // Second pass: set parent_id for subtasks
-        for (const t of tasks) {
-          if (t.parent_id && taskIdMap[t.parent_id]) {
-            await window.api.tasks.update(taskIdMap[t.id], { parent_id: taskIdMap[t.parent_id] })
-          }
-        }
-        // Delete the old shared project locally
-        await window.api.projects.delete(project.id)
-        onToast('You left the project. A local copy has been kept.')
-      } else {
-        await window.api.projects.delete(project.id)
-        onToast('You left the project.')
-      }
-      const { hydrateProjects } = useProjectStore.getState()
-      await hydrateProjects(currentUser.id)
+      const completed = await recoverProject(project.id, keepLocal, origin, async () => {
+        await removeSharedMember(project.id, currentUser.id, projectOrigin)
+        await requireProducerCurrent(origin)
+        await unsubscribeFromProject(project.id)
+      })
+      if (!completed || !uiCurrent()) return
+      onToast(keepLocal ? 'You left the project. A local copy has been kept.' : 'You left the project.')
       setShowLeaveConfirm(false)
     } catch (err) {
-      console.error('Failed to leave project:', err)
-      onToast('Failed to leave project')
-    }
+      if (await origin.isCurrent() && uiCurrent()) {
+        console.error('Failed to leave project:', err)
+        onToast('Failed to leave project')
+      }
+    } finally { leaving.current = false }
   }
 
   const handleUnshare = async (): Promise<void> => {
+    const origin = captureProjectProducer(project.id)
     try {
-      await removeProjectFromSupabase(project.id)
+      await removeProjectFromSupabase(project.id, origin)
+      await requireProducerCurrent(origin)
       await unsubscribeFromProject(project.id)
+      await requireProducerCurrent(origin)
       await updateProject(project.id, { is_shared: 0 })
-      setMembers([])
+      await requireProducerCurrent(origin)
+      setMemberState({ ownerId: origin.userId, projectId: project.id, snapshot: useProjectStore.getState().members[project.id], rows: [] })
       setConfirmUnshare(false)
       onToast('Project unshared. All members have been notified.')
     } catch (err) {
+      if (!await origin.isCurrent()) return
       console.error('Failed to unshare:', err)
       onToast('Failed to unshare project')
     }

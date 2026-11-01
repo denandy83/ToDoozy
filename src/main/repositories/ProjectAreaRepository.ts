@@ -1,12 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { ProjectArea, CreateProjectAreaInput, UpdateProjectAreaInput } from '../../shared/types'
 import { withTransaction } from '../database/transaction'
+import { SyncQueueRepository } from './SyncQueueRepository'
 import { isRemoteNewer, toCanonicalIso } from './lww'
 
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed'] as const
 
 export class ProjectAreaRepository {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: DatabaseSync, private userId: string | null = null) {}
 
   /**
    * Raw lookup — returns tombstones too (sync layer needs them).
@@ -44,25 +45,29 @@ export class ProjectAreaRepository {
   }
 
   update(id: string, input: UpdateProjectAreaInput): ProjectArea | null {
-    const sets: string[] = []
-    const params: (string | number | null)[] = []
+    const apply = (): ProjectArea | null => {
+      const sets: string[] = []
+      const params: (string | number | null)[] = []
 
-    for (const col of UPDATABLE_COLUMNS) {
-      const val = (input as Record<string, unknown>)[col]
-      if (val !== undefined) {
-        sets.push(`${col} = ?`)
-        params.push(val as string | number | null)
+      for (const col of UPDATABLE_COLUMNS) {
+        const val = (input as Record<string, unknown>)[col]
+        if (val !== undefined) {
+          sets.push(`${col} = ?`)
+          params.push(val as string | number | null)
+        }
       }
+
+      if (sets.length === 0) return this.findById(id) ?? null
+
+      sets.push('updated_at = ?')
+      params.push(new Date().toISOString())
+      params.push(id)
+
+      const result = this.db.prepare(`UPDATE project_areas SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+      if (result.changes) new SyncQueueRepository(this.db).enqueue('user_project_areas', id, 'UPDATE', JSON.stringify({ id }))
+      return this.findById(id) ?? null
     }
-
-    if (sets.length === 0) return this.findById(id) ?? null
-
-    sets.push('updated_at = ?')
-    params.push(new Date().toISOString())
-    params.push(id)
-
-    this.db.prepare(`UPDATE project_areas SET ${sets.join(', ')} WHERE id = ?`).run(...params)
-    return this.findById(id) ?? null
+    return this.db.isTransaction ? apply() : withTransaction(this.db, apply)
   }
 
   /**
@@ -116,9 +121,12 @@ export class ProjectAreaRepository {
 
   assignProject(projectId: string, areaId: string | null): void {
     const now = new Date().toISOString()
-    this.db
-      .prepare('UPDATE projects SET area_id = ?, updated_at = ? WHERE id = ?')
-      .run(areaId, now, projectId)
+    const result = this.db
+      .prepare(`UPDATE projects SET area_id = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
+        AND ($user IS NULL OR owner_id = $user OR EXISTS (SELECT 1 FROM project_members WHERE project_id = projects.id AND user_id = $user))
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM project_areas WHERE id = ? AND deleted_at IS NULL AND ($user IS NULL OR user_id = $user)))`)
+      .run({ user: this.userId }, areaId, now, projectId, areaId, areaId)
+    if (!result.changes) throw new Error('Project or area unavailable')
   }
 
   /**

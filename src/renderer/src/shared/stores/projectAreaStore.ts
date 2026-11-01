@@ -1,3 +1,5 @@
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer, type SyncProducer } from '../../services/syncContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type { ProjectArea, CreateProjectAreaInput } from '../../../../shared/types'
@@ -8,8 +10,8 @@ interface ProjectAreaState {
 }
 
 interface ProjectAreaActions {
-  hydrate(userId: string): Promise<void>
-  createArea(userId: string, name: string, color?: string): Promise<ProjectArea>
+  hydrate(userId: string, origin?: HydrationOrigin): Promise<void>
+  createArea(userId: string, name: string, color?: string, producer?: SyncProducer): Promise<ProjectArea>
   updateArea(id: string, updates: { name?: string; color?: string; is_collapsed?: number }): Promise<void>
   deleteArea(id: string): Promise<void>
   reorderAreas(areaIds: string[]): Promise<void>
@@ -23,17 +25,27 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
   areas: [],
   loading: false,
 
-  async hydrate(userId: string): Promise<void> {
-    set({ loading: true })
+  async hydrate(userId: string, origin?: HydrationOrigin): Promise<void> {
+    const context = hydrationContext(origin, undefined, userId)
+    const { api, isCurrent, assertCurrent } = context
     try {
-      const areas = await window.api.projectAreas.findByUserId(userId)
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true })
+      const areas = await api.projectAreas.findByUserId(userId)
+      if (!await isCurrent()) return
+      assertCurrent()
       set({ areas, loading: false })
     } catch {
+      if (!await isCurrent()) return
+      assertCurrent()
       set({ loading: false })
     }
   },
 
-  async createArea(userId: string, name: string, color?: string): Promise<ProjectArea> {
+  async createArea(userId: string, name: string, color?: string, producer?: SyncProducer): Promise<ProjectArea> {
+    const origin = producer ?? captureSyncProducer()
+    if (origin.userId !== userId) throw new Error('Sync account changed')
     const input: CreateProjectAreaInput = {
       id: crypto.randomUUID(),
       user_id: userId,
@@ -41,39 +53,60 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
       color: color ?? '#888888',
       sidebar_order: useProjectAreaStore.getState().areas.length
     }
-    const area = await window.api.projectAreas.create(input)
+    const area = await origin.api.projectAreas.create(input)
+    await requireProducerCurrent(origin)
     set((state) => ({ areas: [...state.areas, area] }))
     // Push to Supabase
     import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-      pushProjectArea({ ...area, user_id: userId }).catch(() => {})
+      pushProjectArea({ ...area, user_id: userId }, origin).catch(() => {})
     })
     return area
   },
 
   async updateArea(id: string, updates: { name?: string; color?: string; is_collapsed?: number }): Promise<void> {
-    const result = await window.api.projectAreas.update(id, updates)
-    if (result) {
-      set((state) => ({
-        areas: state.areas.map((a) => (a.id === id ? result : a))
-      }))
-      // Push to Supabase
-      import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-        pushProjectArea({ ...result, user_id: result.user_id }).catch(() => {})
-      })
+    const origin = captureSyncProducer()
+    origin.assertCurrent()
+    const previous = useProjectAreaStore.getState().areas.find((area) => area.id === id)
+    const pending = previous ? { ...previous, ...updates } : undefined
+    if (pending) set((state) => ({ areas: state.areas.map((area) => area === previous ? pending : area) }))
+    try {
+      const result = await origin.api.projectAreas.update(id, updates)
+      await requireProducerCurrent(origin)
+      if (result) {
+        if (useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
+          set((state) => ({ areas: state.areas.map((area) => area === pending ? result : area) }))
+        }
+        void import('../../services/SyncService').then(async ({ processSyncQueue }) => {
+          await processSyncQueue(await syncContextFromProducer(origin))
+        }).catch(() => {})
+      }
+    } catch (error) {
+      if (await origin.isCurrent() && useProjectAreaStore.getState().areas.find((area) => area.id === id) === pending) {
+        try {
+          const confirmed = await origin.api.projectAreas.findById(id)
+          await requireProducerCurrent(origin)
+          set((state) => ({ areas: state.areas.flatMap((area) => area !== pending ? [area] : confirmed ? [confirmed] : []) }))
+        } catch { throw error }
+      }
+      throw error
     }
   },
 
   async deleteArea(id: string): Promise<void> {
-    await window.api.projectAreas.delete(id)
+    const origin = captureSyncProducer()
+    await origin.api.projectAreas.delete(id)
+    await requireProducerCurrent(origin)
     set((state) => ({ areas: state.areas.filter((a) => a.id !== id) }))
     // Delete from Supabase
     import('../../services/PersonalSyncService').then(({ deleteProjectAreaFromSupabase }) => {
-      deleteProjectAreaFromSupabase(id).catch(() => {})
+      deleteProjectAreaFromSupabase(id, origin).catch(() => {})
     })
   },
 
   async reorderAreas(areaIds: string[]): Promise<void> {
-    await window.api.projectAreas.reorder(areaIds)
+    const origin = captureSyncProducer()
+    await origin.api.projectAreas.reorder(areaIds)
+    await requireProducerCurrent(origin)
     set((state) => {
       const updated = areaIds
         .map((id, i) => {
@@ -84,7 +117,7 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
       // Push reordered areas to Supabase
       import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
         for (const area of updated) {
-          pushProjectArea({ ...area, user_id: area.user_id }).catch(() => {})
+          pushProjectArea({ ...area, user_id: area.user_id }, origin).catch(() => {})
         }
       })
       return { areas: updated }
@@ -92,31 +125,24 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
   },
 
   async assignProject(projectId: string, areaId: string | null): Promise<void> {
-    await window.api.projectAreas.assignProject(projectId, areaId)
+    const origin = captureProjectProducer(projectId)
+    const context = hydrationContext(origin, projectId, origin.userId)
+    await context.api.projectAreas.assignProject(projectId, areaId)
     // Sync the updated project to Supabase (area_id changed)
-    const project = await window.api.projects.findById(projectId)
+    const project = await context.api.projects.findById(projectId)
+    await requireProducerCurrent(origin)
     if (project) {
-      import('../../services/PersonalSyncService').then(({ pushProject }) => {
-        pushProject(project).catch((err) => console.error('[ProjectAreaStore] pushProject failed:', err))
-      })
+      void import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
+        if (!await origin.isCurrent()) return
+        await pushProject(project, origin)
+      }).catch(() => {})
     }
   },
 
   toggleCollapsed(id: string): void {
-    set((state) => {
-      const areas = state.areas.map((a) => {
-        if (a.id !== id) return a
-        const newCollapsed = a.is_collapsed === 1 ? 0 : 1
-        // Persist to DB
-        window.api.projectAreas.update(id, { is_collapsed: newCollapsed })
-        // Push to Supabase
-        import('../../services/PersonalSyncService').then(({ pushProjectArea }) => {
-          pushProjectArea({ ...a, is_collapsed: newCollapsed, user_id: a.user_id }).catch(() => {})
-        })
-        return { ...a, is_collapsed: newCollapsed }
-      })
-      return { areas }
-    })
+    const area = useProjectAreaStore.getState().areas.find((item) => item.id === id)
+    if (!area) return
+    void useProjectAreaStore.getState().updateArea(id, { is_collapsed: area.is_collapsed === 1 ? 0 : 1 }).catch(() => {})
   }
 }), shallow)
 

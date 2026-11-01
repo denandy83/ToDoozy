@@ -17,11 +17,13 @@ beforeEach(() => {
   useStatusStore.setState({ statuses: {}, error: null })
   useTaskStore.setState({ tasks: {}, taskLabels: {}, error: null })
   started = new Promise((resolve) => { entered = resolve })
+  const pending = new Promise((resolve) => { finish = resolve })
   vi.stubGlobal('window', { api: { sync: {
     captureContext: async () => ({ generation, userId: useAuthStore.getState().currentUser?.id }),
-    invokeContext: async (origin: { generation: number }) => {
+    invokeContext: async (origin: { generation: number }, channel: string, args: unknown[]) => {
       if (origin.generation !== generation) throw new Error('Sync database changed')
-      entered(); return new Promise((resolve) => { finish = resolve })
+      if (channel === 'projects:getProjectsForUser' && args[1] === 'p') return [{ id: 'p' }]
+      entered(); return pending
     }
   } } })
 })
@@ -38,7 +40,7 @@ const hydrations = [
   () => useTaskStore.getState().hydrateTemplates('p'),
   () => useTaskStore.getState().hydrateTaskLabels('t'),
   () => useTaskStore.getState().hydrateAllTaskLabels('p'),
-  () => useTaskStore.getState().hydrateAllForProject('p', 'a'),
+  () => useTaskStore.getState().hydrateAllForProject('p'),
   () => useTaskStore.getState().hydrateAllForUser('a')
 ]
 
@@ -68,4 +70,13 @@ it('publishes ordinary current-account label hydration', async () => {
   await operation
   expect(useLabelStore.getState().labels.l.name).toBe('Label')
   expect(useLabelStore.getState().projectLabels.p).toEqual(new Set(['l']))
+})
+
+it('retains a current hydration across same-account same-database User object replacement',async()=>{
+  const operation=useLabelStore.getState().hydrateLabels('p')
+  await started
+  useAuthStore.setState({currentUser:{...useAuthStore.getState().currentUser!}})
+  finish([{id:'current-label',name:'Current label'}])
+  await operation
+  expect(useLabelStore.getState().labels['current-label'].name).toBe('Current label')
 })

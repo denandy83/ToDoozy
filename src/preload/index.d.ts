@@ -1,4 +1,6 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { TrafficSummary } from '../shared/supabaseTelemetry'
+import type { HostMetricsSample } from '../shared/hostMetrics'
 import type {
   Task,
   CreateTaskInput,
@@ -44,6 +46,7 @@ import type {
 } from '../shared/types'
 
 export interface TasksAPI {
+  findByIds(ids: string[]): Promise<Task[]>
   findById(id: string): Promise<Task | null>
   findByProjectId(projectId: string): Promise<Task[]>
   findByStatusId(statusId: string): Promise<Task[]>
@@ -67,7 +70,7 @@ export interface TasksAPI {
   reorder(taskIds: string[]): Promise<void>
   addLabel(taskId: string, labelId: string): Promise<void>
   removeLabel(taskId: string, labelId: string): Promise<boolean>
-  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[]): Promise<number>
+  applyRemoteTaskLabels(taskId: string, labelIds: string[], baseline?: TaskLabelSyncState[], projectId?: string): Promise<number>
   getLabelState(taskId: string): Promise<TaskLabelSyncState[]>
   acknowledgeLabelState(taskId: string, delivered: Array<{label_id:string;local_version:number}>): Promise<void>
   getLabels(taskId: string): Promise<TaskLabel[]>
@@ -86,6 +89,7 @@ export interface LabelsAPI {
   findByProjectId(projectId: string): Promise<Label[]>
   findByName(userId: string, name: string): Promise<Label | null>
   adopt(userId: string, foreignLabel: Label): Promise<Label>
+  snapshotOwned(userId: string, id: string): Promise<Label>
   create(input: CreateLabelInput): Promise<Label>
   update(id: string, input: UpdateLabelInput): Promise<Label | null>
   delete(id: string): Promise<boolean>
@@ -96,10 +100,11 @@ export interface LabelsAPI {
   ): Promise<Label[]>
   findMaxUpdatedAt(userId: string): Promise<string | null>
   applyRemote(label: Label): Promise<Label>
+  assertCanConsolidate(fromId: string, canonical: Label): Promise<void>
   consolidate(fromId: string, canonical: Label): Promise<{ taskRemaps: number; projectRemaps: number }>
   removeFromProject(projectId: string, labelId: string): Promise<boolean>
   addToProject(projectId: string, labelId: string): Promise<void>
-  getProjectLabelsForOwner(userId: string): Promise<
+  getProjectLabelsForOwner(userId: string, projectId?: string): Promise<
     Array<{
       project_id: string
       label_id: string
@@ -107,7 +112,7 @@ export interface LabelsAPI {
       deleted_at: string | null
     }>
   >
-  getProjectLabelsForSharedProjects(): Promise<
+  getProjectLabelsForSharedProjects(projectId?: string): Promise<
     Array<{
       project_id: string
       label_id: string
@@ -145,11 +150,11 @@ export interface ProjectsAPI {
   findMaxUpdatedAt(ownerId: string): Promise<string | null>
   applyRemote(project: Project): Promise<Project>
   list(userId: string): Promise<Project[]>
-  addMember(projectId: string, userId: string, role: string, invitedBy?: string): Promise<void>
+  addMember(projectId: string, userId: string, role: string, invitedBy?: string, joinedAt?: string): Promise<void>
   removeMember(projectId: string, userId: string): Promise<boolean>
   updateMember(projectId: string, userId: string, updates: { display_color?: string | null; display_initials?: string | null }): Promise<void>
   getMembers(projectId: string): Promise<ProjectMember[]>
-  getProjectsForUser(userId: string): Promise<Project[]>
+  getProjectsForUser(userId: string, projectId?: string): Promise<Project[]>
   updateSidebarOrder(updates: Array<{ id: string; sidebar_order: number }>): Promise<void>
   archiveWithTasks(id: string): Promise<Project | undefined>
   unarchiveWithTasks(id: string): Promise<Project | undefined>
@@ -248,6 +253,7 @@ export interface ProjectTemplatesAPI {
 }
 
 export interface AttachmentsAPI {
+  restore(id: string): Promise<Attachment | undefined>
   findByTaskId(taskId: string): Promise<Attachment[]>
   createFromFile(taskId: string, filePath: string): Promise<Attachment>
   open(id: string): Promise<void>
@@ -321,8 +327,8 @@ export interface TimerTrayState {
 }
 
 export interface TimerAPI {
-  updateTimer(state: TimerTrayState): Promise<void>
-  clearTimer(): Promise<void>
+  updateTimer(state: TimerTrayState, scope: string | null): Promise<void>
+  clearTimer(scope: string | null): Promise<void>
   minimizeToTray(): Promise<void>
   navigateToTask(taskId: string): Promise<void>
   onPause(callback: () => void): () => void
@@ -352,6 +358,9 @@ export interface NotificationsAPI {
 }
 
 export interface SyncAPI {
+  /** Synchronous JSON [userId, generation] key; null until a native scope is known. */
+  currentContext(): string | null
+  onContextChanged(listener: () => void): () => void
   captureContext(): Promise<{ generation: number; userId: string | null }>
   invokeContext(context: { generation: number; userId: string | null }, channel: string, args: unknown[]): Promise<unknown>
   getQueue(): Promise<SyncQueueEntry[]>
@@ -505,6 +514,11 @@ export interface SavedViewsAPI {
 }
 
 export interface TodoozyAPI {
+  diagnostics: {
+    append(summary: TrafficSummary): Promise<void>
+    recent(): Promise<TrafficSummary[]>
+    hostRecent(): Promise<HostMetricsSample[]>
+  }
   tasks: TasksAPI
   labels: LabelsAPI
   projects: ProjectsAPI

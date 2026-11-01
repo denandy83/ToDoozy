@@ -16,6 +16,7 @@ import { SyncQueueRepository } from './SyncQueueRepository'
 import { SavedViewRepository } from './SavedViewRepository'
 import { ProjectAreaRepository } from './ProjectAreaRepository'
 import { createRepositories } from './index'
+import { localDateKey } from '../../shared/localDate'
 
 function createTestDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:')
@@ -897,9 +898,15 @@ describe('TaskRepository', () => {
   })
 
   describe('autoAddMyDayTasks', () => {
-    const today = new Date().toISOString().slice(0, 10)
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+    let today: string, yesterday: string, tomorrow: string
+    beforeEach(() => {
+      const day = new Date()
+      today = localDateKey(day)
+      day.setDate(day.getDate() - 1)
+      yesterday = localDateKey(day)
+      day.setDate(day.getDate() + 2)
+      tomorrow = localDateKey(day)
+    })
 
     it('returns empty array when mode is off', () => {
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Due today', status_id: statusId, due_date: today })
@@ -1008,7 +1015,7 @@ describe('TaskRepository', () => {
 
   describe('findMyDay', () => {
     it('only returns tasks with is_in_my_day = 1', () => {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = localDateKey()
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'In My Day', status_id: statusId, is_in_my_day: 1 })
       repo.create({ id: randomUUID(), project_id: projectId, owner_id: userId, title: 'Due today but not in My Day', status_id: statusId, due_date: today })
       const results = repo.findMyDay(userId)

@@ -1,5 +1,10 @@
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
+import { hydrationContext } from '../../shared/stores/hydrationContext'
+import { captureProjectProducer } from '../../services/syncContext'
+import { projectScopeRevision, subscribeProjectScope } from '../../shared/stores/projectScope'
+import { localDateKey, localDayBounds, calendarDateKey } from '../../../../shared/localDate'
 import { MotionPresence } from '../../shared/motion/MotionPresence'
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -36,6 +41,13 @@ const PRIORITY_COLORS: Record<number, string> = {
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function StatsView(): React.JSX.Element {
+  const scope = useDatabaseScope()
+  const userId = useAuthStore(state => state.currentUser?.id)
+  const projectRevision = useSyncExternalStore(subscribeProjectScope, projectScopeRevision)
+  return <ScopedStatsView key={JSON.stringify([scope, userId, projectRevision])} />
+}
+
+function ScopedStatsView(): React.JSX.Element {
   const userId = useAuthStore((s) => s.currentUser)?.id ?? ''
   const allProjects = useProjectStore(selectAllProjects)
   const weekStartSetting = useSetting('week_start') ?? 'monday'
@@ -57,44 +69,57 @@ export function StatsView(): React.JSX.Element {
   const [drillDown, setDrillDown] = useState<{ filter: StatsFilter; label: string } | null>(null)
   const [drillTasks, setDrillTasks] = useState<StatsTask[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
-
-  const projectIds = projectFilter ? [projectFilter] : null
+  const [drillError, setDrillError] = useState<string | null>(null)
+  const drillRequest = useRef(0)
+  useEffect(() => () => { drillRequest.current += 1 }, [])
+  const closeDrillDown = useCallback(() => {
+    drillRequest.current += 1
+    setDrillDown(null)
+    setDrillLoading(false)
+    setDrillTasks([])
+    setDrillError(null)
+  }, [])
 
   const { startDate, endDate } = useMemo(() => {
     const end = new Date()
     const start = new Date()
     start.setDate(start.getDate() - timeRange)
     return {
-      startDate: start.toISOString().slice(0, 10),
-      endDate: end.toISOString().slice(0, 10) + 'T23:59:59'
+      startDate: localDayBounds(start, end).start,
+      endDate: localDayBounds(start, end).end
     }
   }, [timeRange])
 
   const heatmapRange = useMemo(() => {
     const end = new Date()
     const start = new Date(end.getFullYear(), end.getMonth() - 2, 1) // 1st of 3 months ago
-    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) + 'T23:59:59' }
+    return localDayBounds(start, end)
   }, [])
 
   const { monthStart, monthEnd } = useMemo(() => {
     const now = new Date()
     const ms = new Date(now.getFullYear(), now.getMonth(), 1)
-    return { monthStart: ms.toISOString().slice(0, 10), monthEnd: now.toISOString().slice(0, 10) + 'T23:59:59' }
+    const bounds = localDayBounds(ms, now)
+    return { monthStart: bounds.start, monthEnd: bounds.end }
   }, [])
 
   useEffect(() => {
     if (!userId) return
+    let disposed = false
+    const origin = hydrationContext()
     const load = async (): Promise<void> => {
+      const projectIds = projectFilter ? [projectFilter] : null
       const [comp, focus, heat, str, sum, prio, dow, proj] = await Promise.all([
-        window.api.stats.completions(userId, projectIds, startDate, endDate),
-        window.api.stats.focus(userId, projectIds, startDate, endDate),
-        window.api.stats.heatmap(userId, heatmapRange.start, heatmapRange.end),
-        window.api.stats.streaks(userId),
-        window.api.stats.summary(userId, projectIds),
-        window.api.stats.priorityBreakdown(userId, projectIds),
-        window.api.stats.completionsByDayOfWeek(userId, projectIds, startDate, endDate),
-        window.api.stats.projectBreakdown(userId)
+        origin.api.stats.completions(userId, projectIds, startDate, endDate),
+        origin.api.stats.focus(userId, projectIds, startDate, endDate),
+        origin.api.stats.heatmap(userId, heatmapRange.start, heatmapRange.end),
+        origin.api.stats.streaks(userId),
+        origin.api.stats.summary(userId, projectIds),
+        origin.api.stats.priorityBreakdown(userId, projectIds),
+        origin.api.stats.completionsByDayOfWeek(userId, projectIds, startDate, endDate),
+        origin.api.stats.projectBreakdown(userId)
       ])
+      if (disposed || !await origin.isCurrent()) return
       setCompletions(comp)
       setFocusData(focus)
       setHeatmapData(heat)
@@ -104,44 +129,48 @@ export function StatsView(): React.JSX.Element {
       setDayOfWeekData(dow)
       setProjectData(proj)
     }
-    load()
+    void load().catch(() => {})
+    return () => { disposed = true }
   }, [userId, projectFilter, startDate, endDate, heatmapRange])
 
   // Cookie balance stats
   useEffect(() => {
     if (!userId) return
+    let disposed = false
+    const origin = hydrationContext()
     const loadCookie = async (): Promise<void> => {
-      const todayStr = new Date().toISOString().slice(0, 10)
-      const todayEnd = todayStr + 'T23:59:59'
+      const { start: todayStr, end: todayEnd } = localDayBounds(new Date())
       const d = new Date()
-      d.setDate(d.getDate() - d.getDay())
-      const ws = d.toISOString().slice(0, 10)
+      d.setDate(d.getDate() - (d.getDay() - weekStartDay + 7) % 7)
+      const ws = localDayBounds(d).start
       const [ct, cw, cm] = await Promise.all([
-        window.api.stats.cookieBalance(userId, todayStr, todayEnd),
-        window.api.stats.cookieBalance(userId, ws, todayEnd),
-        window.api.stats.cookieBalance(userId, monthStart, monthEnd)
+        origin.api.stats.cookieBalance(userId, todayStr, todayEnd),
+        origin.api.stats.cookieBalance(userId, ws, todayEnd),
+        origin.api.stats.cookieBalance(userId, monthStart, monthEnd)
       ])
+      if (disposed || !await origin.isCurrent()) return
       setCookieToday(ct)
       setCookieWeek(cw)
       setCookieMonth(cm)
     }
-    loadCookie()
-  }, [userId, monthStart, monthEnd])
+    void loadCookie().catch(() => {})
+    return () => { disposed = true }
+  }, [userId, monthStart, monthEnd, weekStartDay])
 
   // Compute overview numbers from completions
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const todayStr = useMemo(() => localDateKey(), [])
   const weekStart = useMemo(() => {
     const d = new Date()
-    d.setDate(d.getDate() - d.getDay())
-    return d.toISOString().slice(0, 10)
-  }, [])
+    d.setDate(d.getDate() - (d.getDay() - weekStartDay + 7) % 7)
+    return localDateKey(d)
+  }, [weekStartDay])
 
   const todayCount = completions.filter((c) => c.date === todayStr).reduce((s, c) => s + c.count, 0)
   const weekCount = completions.filter((c) => c.date >= weekStart).reduce((s, c) => s + c.count, 0)
   const totalRange = completions.reduce((s, c) => s + c.count, 0)
   const todayFocus = focusData.filter((f) => f.date === todayStr).reduce((s, f) => s + f.minutes, 0)
   const weekFocus = focusData.filter((f) => f.date >= weekStart).reduce((s, f) => s + f.minutes, 0)
-  const monthFocus = focusData.filter((f) => f.date >= monthStart).reduce((s, f) => s + f.minutes, 0)
+  const monthFocus = focusData.filter((f) => f.date >= calendarDateKey(monthStart)).reduce((s, f) => s + f.minutes, 0)
 
   const cookieTodayBalance = cookieToday.earnedSeconds - cookieToday.spentSeconds
   const cookieWeekBalance = cookieWeek.earnedSeconds - cookieWeek.spentSeconds
@@ -152,7 +181,7 @@ export function StatsView(): React.JSX.Element {
   const completionChart = useMemo(() => {
     const map = new Map(completions.map((c) => [c.date, c.count]))
     const result: Array<{ date: string; count: number }> = []
-    const d = new Date(startDate + 'T12:00:00')
+    const d = new Date(calendarDateKey(startDate) + 'T12:00:00')
     const endDay = todayStr
     while (true) {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -166,7 +195,7 @@ export function StatsView(): React.JSX.Element {
   const focusChart = useMemo(() => {
     const map = new Map(focusData.map((f) => [f.date, f.minutes]))
     const result: Array<{ date: string; minutes: number }> = []
-    const d = new Date(startDate + 'T12:00:00')
+    const d = new Date(calendarDateKey(startDate) + 'T12:00:00')
     const endDay = todayStr
     while (true) {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -194,24 +223,32 @@ export function StatsView(): React.JSX.Element {
 
   const openDrillDown = useCallback(async (filter: StatsFilter, label: string) => {
     if (!userId) return
+    const request = ++drillRequest.current
+    const projectIds = projectFilter ? [projectFilter] : null
     setDrillDown({ filter, label })
     setDrillLoading(true)
+    setDrillTasks([])
+    setDrillError(null)
     try {
+      const origin = hydrationContext()
+      const current = async (): Promise<boolean> => request === drillRequest.current && await origin.isCurrent() && request === drillRequest.current
       if (filter === 'focus_today' || filter === 'focus_week') {
-        const focusStart = filter === 'focus_today' ? todayStr : weekStart
-        const focusEnd = todayStr + 'T23:59:59'
-        const tasks = await window.api.stats.focusTaskList(userId, focusStart, focusEnd, projectIds)
-        setDrillTasks(tasks)
+        const bounds = localDayBounds(new Date((filter === 'focus_today' ? todayStr : weekStart) + 'T12:00:00'),new Date(todayStr + 'T12:00:00'))
+        const focusStart = bounds.start, focusEnd = bounds.end
+        const tasks = await origin.api.stats.focusTaskList(userId, focusStart, focusEnd, projectIds)
+        if (await current()) setDrillTasks(tasks)
       } else {
-        const tasks = await window.api.stats.taskList(
-          userId, filter, projectIds,
-          filter === 'completed_range' ? startDate : undefined,
-          filter === 'completed_range' ? endDate : undefined
+        const tasks = await origin.api.stats.taskList(
+          userId, filter === 'completed_week' ? 'completed_range' : filter, projectIds,
+          filter === 'completed_week' ? localDayBounds(new Date(weekStart + 'T12:00:00')).start : filter === 'completed_range' ? startDate : undefined,
+          filter === 'completed_week' ? localDayBounds(new Date()).end : filter === 'completed_range' ? endDate : undefined
         )
-        setDrillTasks(tasks)
+        if (await current()) setDrillTasks(tasks)
       }
+    } catch {
+      if (request === drillRequest.current) setDrillError('Could not load these tasks. Please try again.')
     } finally {
-      setDrillLoading(false)
+      if (request === drillRequest.current) setDrillLoading(false)
     }
   }, [userId, projectFilter, startDate, endDate, todayStr, weekStart])
 
@@ -352,9 +389,16 @@ export function StatsView(): React.JSX.Element {
       </div>
 
       {/* Drill-down modal */}
-      <Modal open={drillDown !== null} onClose={() => setDrillDown(null)} title={drillDown?.label} size="large">
+      <Modal open={drillDown !== null} onClose={closeDrillDown} title={drillDown?.label} size="large">
         {drillLoading ? (
           <div className="flex h-32 items-center justify-center text-[11px] text-muted">Loading...</div>
+        ) : drillError ? (
+          <div className="space-y-3 py-8 text-center text-[11px]">
+            <p role="alert" className="text-danger">{drillError}</p>
+            <button className="rounded border border-border px-3 py-1 text-foreground" onClick={() => {
+              if (drillDown) void openDrillDown(drillDown.filter, drillDown.label)
+            }}>Retry</button>
+          </div>
         ) : drillTasks.length === 0 ? (
           <div className="flex h-32 items-center justify-center text-[11px] text-muted">No tasks</div>
         ) : (
@@ -362,12 +406,25 @@ export function StatsView(): React.JSX.Element {
             <div className="space-y-0.5">
               {drillTasks.map((task) => (
                 <StatsTaskRow key={task.id} task={task} onNavigate={(taskId, projectId) => {
-                  setDrillDown(null)
+                  const origin = captureProjectProducer(projectId)
+                  const later = (action: () => void, milliseconds: number): void => {
+                    setTimeout(() => {
+                      void (async () => {
+                        if (!await origin.isCurrent()) return
+                        origin.assertCurrent()
+                        action()
+                      })().catch(async () => {
+                        if (await origin.isCurrent()) console.error('Could not open the statistics task')
+                      })
+                    }, milliseconds)
+                  }
+                  closeDrillDown()
+                  origin.assertCurrent()
                   useViewStore.getState().setSelectedProject(projectId)
                   // Wait for project hydration, then select task
-                  setTimeout(() => {
+                  later(() => {
                     useTaskStore.getState().selectTask(taskId, { openPanel: true })
-                    setTimeout(() => {
+                    later(() => {
                       // Re-select after any hydration-triggered clearSelection
                       useTaskStore.getState().selectTask(taskId, { openPanel: true })
                       document.querySelector(`[data-task-id="${taskId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -600,7 +657,7 @@ function ActivityHeatmap({ data, weekStartDay = 1 }: ActivityHeatmapProps): Reac
 
     while (d <= today) {
       const dayOfWeek = (d.getDay() - weekStartDay + 7) % 7 // 0 = first day of week
-      const dateStr = d.toISOString().slice(0, 10)
+      const dateStr = localDateKey(d)
 
       // Track month boundaries — trigger on first day of a new month
       if (d.getMonth() !== lastMonth) {

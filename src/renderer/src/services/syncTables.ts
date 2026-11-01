@@ -1,3 +1,4 @@
+import { captureProjectScope } from '../shared/stores/projectScope'
 import type { SyncTableName } from '../../../preload/index.d'
 import type { PostgrestMaybeSingleResponse } from '@supabase/supabase-js'
 import type {
@@ -12,8 +13,9 @@ import type {
   ProjectArea,
   ProjectTemplate
 } from '../../../shared/types'
-import { captureSyncContext, type SyncContext } from './syncContext'
+import { projectSyncContext, captureSyncContext, type SyncContext } from './syncContext'
 import { readAll } from './readAll'
+import { remoteTaskOrder } from './remoteTaskOrder'
 import { getSupabase } from '../lib/supabase'
 import { placeholderEmail } from '../../../shared/placeholderUser'
 import { isSettingSyncExcluded } from './settingsSyncPolicy'
@@ -214,10 +216,7 @@ const tasksDescriptor: SyncTableDescriptor<Task, Task> = {
   },
 
   pullOrder(remotes) {
-    // Apply parents before children so parent_id FK is satisfied.
-    const parents = remotes.filter((t) => !t.parent_id)
-    const children = remotes.filter((t) => t.parent_id)
-    return [...parents, ...children]
+    return remoteTaskOrder(remotes)
   }
 }
 
@@ -432,29 +431,34 @@ async function consolidateLocalLabel(
     const supabase = context?.client ?? await getSupabase()
     // Fetch the canonical remote row in full — we need its data to insert
     // into local labels before the FK-bound junction remap can run.
-    const { data: remote, error: lookupErr } = await supabase
+    const namePattern = `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
+    const { data: candidate, error: lookupErr } = await supabase
       .from('user_labels')
       .select('*')
       .eq('user_id', userId)
-      .ilike('name', name)
+      .filter('name', 'imatch', namePattern)
       .limit(1)
       .maybeSingle()
-    if (lookupErr || !remote) return false
-    if ((remote.id as string) === localId) return false
+    let remote = candidate
+    if (lookupErr || !remote || remote.id === localId) return false
+    if (typeof remote.id !== 'string' || typeof remote.name !== 'string') return false
+    const { data: verified, error: verificationError } = await supabase.from('user_labels').select('*')
+      .eq('user_id', userId).eq('id', remote.id).eq('name', remote.name).filter('name', 'imatch', namePattern).maybeSingle()
+    if (verificationError || !verified || verified.id !== remote.id || verified.name !== remote.name || verified.user_id !== userId) return false
+    remote = verified
     // If the canonical remote is tombstoned, revive it before remapping —
     // otherwise our local junctions would point at a deleted row.
     if (remote.deleted_at) {
-      const { error: reviveErr } = await supabase
-        .from('user_labels')
-        .update({ deleted_at: null, updated_at: new Date().toISOString() })
-        .eq('id', remote.id as string)
-      if (reviveErr) return false
-      remote.deleted_at = null
+      const revival = { ...remote, deleted_at: null, updated_at: new Date().toISOString() }
+      await (context?.api ?? window.api).labels.assertCanConsolidate(localId, revival as Label)
+      const { data: revived, error: reviveError } = await supabase.from('user_labels')
+        .update({ deleted_at: revival.deleted_at, updated_at: revival.updated_at })
+        .eq('user_id', userId).eq('id', remote.id).eq('name', remote.name)
+        .eq('updated_at', remote.updated_at).eq('deleted_at', remote.deleted_at).select('*').single()
+      if (reviveError || !revived) throw new Error(reviveError?.message ?? 'Label revival was not acknowledged')
+      if (revived.id !== remote.id || revived.user_id !== userId || revived.name !== remote.name || revived.deleted_at !== null) throw new Error('Label changed during revival')
+      remote = revived
     }
-    // Plain-object clone — supabase-js results can carry non-cloneable
-    // handlers/getters that confuse Electron's structured clone or leave
-    // properties as undefined on the receiving side. JSON-roundtrip
-    // guarantees a vanilla object with primitive values.
     const r = remote as Record<string, unknown>
     const canonicalLabel: Label = {
       id: String(r.id),
@@ -1295,7 +1299,9 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   userId: string,
   context?: SyncContext
 ): Promise<ReconcileStats> {
+  const projectCurrent = captureProjectScope()
   context ??= await captureSyncContext()
+  if (desc.scope === 'project') context = projectSyncContext(context, scopeId, projectCurrent)
   const api = context.api
   const stats: ReconcileStats = {
     pushed: 0,
@@ -1349,65 +1355,55 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
   for (const row of localRows) {
     localById.set(desc.toRemote(row).id, row)
   }
-  const remoteById = new Map<string, TRemote>()
-  for (const row of remoteRows) {
-    remoteById.set(row.id, row)
-  }
+  const remoteIds = new Set(remoteRows.map((row) => row.id))
 
-  // Sort remote-only IDs by descriptor's pullOrder if provided (parents-first
-  // for tasks).
-  const remoteOnlyIds = [...remoteById.keys()].filter((id) => !localById.has(id))
-  let remoteOnlyRows = remoteOnlyIds.map((id) => remoteById.get(id)!)
-  if (desc.pullOrder) {
-    remoteOnlyRows = desc.pullOrder(remoteOnlyRows)
-  }
+  const incomingRows = desc.pullOrder ? desc.pullOrder(remoteRows) : remoteRows
 
   // Local-only: push to remote
   for (const id of localById.keys()) {
-    if (remoteById.has(id)) continue
+    if (remoteIds.has(id)) continue
     const local = localById.get(id)!
+    const current = desc.name === 'projects' ? projectSyncContext(context, id, projectCurrent) : context
     try {
-      await desc.remoteUpsert(local, context)
+      await desc.remoteUpsert(local, current)
       stats.pushed++
     } catch {
       stats.failed++
     }
   }
 
-  // Remote-only: pull
-  for (const remote of remoteOnlyRows) {
-    try {
-      if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
-      await desc.localApplyRemote(remote, api, context)
-      stats.pulled++
-    } catch {
-      stats.failed++
+  for (const remote of incomingRows) {
+    const id = remote.id
+    const current = desc.name === 'projects' ? projectSyncContext(context, id, projectCurrent) : context
+    const api = current.api
+    if (!localById.has(id)) {
+      try {
+        if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
+        await desc.localApplyRemote(remote, api, current)
+        stats.pulled++
+      } catch {
+        stats.failed++
+      }
+      continue
     }
-  }
-
-  // Both sides — LWW. Numeric compare via Date.parse so `…Z` and `…+00:00`
-  // for the same instant are treated as equal (see tsMs comment above).
-  for (const id of localById.keys()) {
-    if (!remoteById.has(id)) continue
     let local = localById.get(id)!
-    const remote = remoteById.get(id)!
     if (desc.name === 'themes') {
       try {
-        await desc.localApplyRemote(remote, api, context)
-        const current = await desc.localGetById(id, api)
-        if (current) await desc.remoteUpsert(current, context)
+        await desc.localApplyRemote(remote, api, current)
+        const row = await desc.localGetById(id, api)
+        if (row) await desc.remoteUpsert(row, current)
         stats.inSync++
       } catch { stats.failed++ }
       continue
     }
     if (desc.name === 'projects' || desc.name === 'tasks') {
       try {
-        await desc.localApplyRemote(remote, api, context)
+        await desc.localApplyRemote(remote, api, current)
         local = (await desc.localGetById(id, api))!
         const merged = desc.toRemote(local) as unknown as Project
         const original = remote as unknown as Project
         if (Date.parse(merged.archive_updated_at ?? '') > Date.parse(original.archive_updated_at ?? '1970-01-01')) {
-          await desc.remoteUpsert(local, context)
+          await desc.remoteUpsert(local, current)
           stats.pushed++
           continue
         }
@@ -1420,7 +1416,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     if (localMs === remoteMs) {
       if (desc.name === 'settings' && 'key' in localRemote && localRemote.key === 'theme_id' && 'value' in localRemote && 'value' in remote) {
         try {
-          if (localRemote.value !== remote.value) await desc.remoteUpsert(local, context)
+          if (localRemote.value !== remote.value) await desc.remoteUpsert(local, current)
           else await refreshSyncedTheme(scopeId, context)
         } catch { stats.failed++; continue }
       }
@@ -1429,7 +1425,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     }
     if (localMs > remoteMs) {
       try {
-        await desc.remoteUpsert(local, context)
+        await desc.remoteUpsert(local, current)
         stats.pushed++
       } catch {
         stats.failed++
@@ -1437,7 +1433,7 @@ export async function reconcileTable<TLocal, TRemote extends { id: string; updat
     } else {
       try {
         if (desc.preparePullRow) await desc.preparePullRow(remote, api).catch(() => {})
-        await desc.localApplyRemote(remote, api, context)
+        await desc.localApplyRemote(remote, api, current)
         stats.pulled++
       } catch {
         stats.failed++
@@ -1498,7 +1494,9 @@ export async function pullActivityLogForProject(
   userId: string,
   context?: SyncContext
 ): Promise<number> {
+  const projectCurrent = captureProjectScope()
   context ??= await captureSyncContext()
+  context = projectSyncContext(context, projectId, projectCurrent)
   const api = context.api
   const supabase = context.client
   const tsMs = (s: string | null | undefined): number => (s ? Date.parse(s) : NaN)

@@ -6,7 +6,7 @@ vi.mock('./syncContext', () => ({ captureSyncContext: vi.fn(async () => {
 }) }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../lib/supabase', () => ({ getSupabase: vi.fn() }))
-vi.mock('../shared/stores/logStore', () => ({ logEvent: vi.fn() }))
+vi.mock('../shared/stores/logStore', async (importOriginal) => ({ ...await importOriginal<typeof import('../shared/stores/logStore')>(), logEvent: vi.fn() }))
 vi.mock('./PersonalSyncService', () => ({ pullTaskLabelsForTasks: vi.fn(async () => 0) }))
 import { getSupabase } from '../lib/supabase'
 import { useAuthStore } from '../shared/stores/authStore'

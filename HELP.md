@@ -28,7 +28,7 @@ The app has three areas:
 - `r:https://...` — attaches a reference URL to the task
 
 **From anywhere on your Mac:**
-- Press **Cmd+Shift+Space** to open the quick-add window (works even when ToDoozy is hidden)
+- While signed in, press **Cmd+Shift+Space** to open the quick-add window (works even when ToDoozy is hidden or you're using your account offline)
 - Type your task and press Enter — it goes straight into My Day
 
 ---
@@ -110,10 +110,10 @@ Click any task to open the detail panel on the right (or bottom — configurable
 - **Labels** — click "+ Add" to pick or create labels
 - **Due date** — click the date field; optionally set a time
 - **Recurrence** — repeat daily, weekly, monthly, or custom schedule (see Recurrence section below)
-- **Snooze** — hide the task until later (see Snooze section below)
+- **Snooze** — reschedule the due date (see [Snooze](#snooze))
 - **Reference URL** — attach a web link or a `file:///` URL. Bare domains receive `https://`; explicit schemes are preserved. Clicking a file reference reveals its existing local target in Finder on this Mac.
 - **Description** — full rich text editor (see below)
-- **Attachments** — attach files from your Mac (requires iCloud setup)
+- **Attachments** — attach files from your Mac (see [File Attachments](#file-attachments))
 - **Subtasks** — add, check off, and reorder subtasks
 - **Activity** — see a history of all changes to this task
 
@@ -207,6 +207,8 @@ Views (and project views) support multi-sort. Click the sort dropdown to add sta
 
 Click **Stats** in the sidebar (or press **⌘3**) to see your productivity metrics.
 
+Daily totals and date ranges use this Mac's local calendar, including daylight-saving changes.
+
 ### Overview cards
 - Tasks completed today, this week, and this month
 - Focus time today and this week
@@ -288,6 +290,8 @@ Click the **Calendar** icon in the sidebar to see all tasks with due dates acros
 - Click any day to see its tasks
 - Drag tasks between days to change their due date
 - Tasks without due dates do not appear in the calendar
+
+Date-only deadlines stay on their chosen date. Deadlines with a timezone are grouped by this Mac's local date.
 
 ---
 
@@ -379,6 +383,8 @@ Open the task detail panel → click the **Recurrence** field to set a repeating
 
 **Custom schedules:** Create advanced patterns like "every 2 weeks on Monday" or "every 3rd of the month." You can set an end date or an "after N occurrences" limit.
 
+Monthly day-of-month schedules use the last day of a shorter month when the chosen day is unavailable.
+
 **After-completion mode:** Choose "after completion" to count from when you actually finish the task rather than the original due date. Useful for tasks that slip.
 
 When you complete a recurring task, a new occurrence is created automatically with the next due date. The completed task stays in your history.
@@ -387,15 +393,14 @@ When you complete a recurring task, a new occurrence is created automatically wi
 
 ## Snooze
 
-Right-click a task → **Snooze**, or use the snooze button in the detail panel. The task disappears from your list until the snooze time arrives.
+Right-click a task → **Snooze**, or use the snooze presets in the detail panel to change its due date. Task visibility follows the current view's filters and My Day pin.
 
 **Preset options:**
-- **Later Today** — 3 hours from now
-- **Tomorrow** — 9 AM tomorrow
-- **Next Week** — Monday at 9 AM
-- **Custom** — pick any date and time
 
-When a snoozed task wakes up, it reappears in your task list and shows a notification. If it was pinned to My Day, it returns there too.
+- **Later Today** — 3 hours from now in the detail panel; the context menu opens a time picker
+- **Tomorrow**, **In 3 Days**, **Next Week** — 1, 3, or 7 local calendar days from today
+
+For a single task, the day presets preserve an existing deadline's local clock time, including midnight. A date-only deadline stays date-only. For another date or time, edit the task's **Due date** field. Timed deadlines follow [Due Date Notifications](#due-date-notifications).
 
 ---
 
@@ -403,7 +408,9 @@ When a snoozed task wakes up, it reappears in your task list and shows a notific
 
 Open project settings → **Share** to invite other users by email.
 
-Shared projects sync in real-time — all members see task changes, status updates, and member avatars instantly. Each member can customize their avatar color and initials in project settings.
+Email invitations must be accepted or declined while signed in with the confirmed address they were sent to. If a response fails, the dialog stays open with an error so you can retry. After acceptance is acknowledged, a retry finishes local setup without accepting the invitation again. Declining a public invitation link dismisses your dialog without revoking the link for others.
+
+Shared projects sync in real-time — all members see task changes, status updates, and member avatars instantly. Project members can customize member avatar colors and initials in project settings.
 
 ---
 
@@ -430,14 +437,14 @@ Go to **Settings → Timer** to configure presets, work duration, short break, l
 ## File Attachments
 
 To attach files to a task:
-1. Go to **Settings → About → Integrations** and enable iCloud Drive sync
-2. Open the task detail panel
-3. Click the paperclip icon in the editor toolbar
-4. Select one or more files (max 10 MB each, max 10 attachments per task)
 
-Files appear as cards below the description. Click to open in the default app. Hover to reveal a remove button.
+1. Open the task detail panel
+2. Click **Add** in the **Attachments** section below the description
+3. Select one or more files
 
-Files are stored locally and synced to iCloud Drive for access from other devices.
+Files appear as cards below the description. Click to open in the default app. Hover to reveal a remove button. After removal, click **Undo** in the toast to restore the original file. Undo remains bound to the account and database where you removed it.
+
+File bytes are stored in this account's local SQLite database. Attachments are available on this Mac; they are not uploaded to Supabase or synced through iCloud Drive. Local retention follows [PurgeService](src/main/services/PurgeService.ts).
 
 ---
 
@@ -485,6 +492,8 @@ ToDoozy lives in your menu bar even when the main window is closed.
 - **Right-click** — quick access to: Quick Add, Open ToDoozy, Settings, Quit
 
 Closing the main window does not quit the app — it stays in the menu bar.
+
+Signing out or switching accounts or databases clears private task titles and timer details from the menu bar and closes Quick Add, including a window still loading. Sign in again to use Quick Add. Your saved local data and queued sync work remain available for recovery.
 
 ---
 
@@ -550,6 +559,11 @@ Account data syncs automatically to Supabase in the background. SQLite is the lo
 ### New device setup
 Log in on a new device to pull down your synced data automatically. No manual import needed.
 
+### Recovery and diagnostics
+Use **Settings → General → Reconcile** to repair drift between local data and Supabase. **Force Full Sync** re-uploads local data and pulls shared projects. See the [sync scheduling contract](docs/security-optimization-2026-10-30.md#benchmarks) for automatic recovery and archived-project coverage.
+
+Open **Settings → Logs** for connection events and Supabase traffic summaries. See [Persistent diagnostics](docs/security-optimization-2026-10-30.md#persistent-diagnostics) for retained data, privacy limits, and optional host metrics setup.
+
 ### Offline support
 - **Personal projects** — fully usable offline. Create, edit, and complete tasks without internet. Changes sync when you reconnect.
 - **Shared projects** — become read-only when offline to prevent conflicts. Full functionality resumes when connected.
@@ -567,17 +581,24 @@ The Model Context Protocol lets Claude (or any MCP-compatible AI) manage your ta
 
 ### Telegram Bot
 Add tasks from Telegram using smart input syntax:
+
 - Send a message to create a task (supports @label, p:priority, d:date syntax)
-- `/project` — list projects and complete tasks with inline buttons
+- `/projectname` — list a project's open tasks and complete them with inline buttons
+- `/list` — list your projects
 - `/myday` — see today's tasks
-- `/done` — complete a task by keyword
+- `/done` — see recently completed tasks; `/done text` completes a task by keyword
+- `/recent` — see recently added open tasks
 - `/default` — set default project for new tasks
+
+Slash commands check project names first. Prefix a built-in command with `.` (for example `.done`) to resolve a name collision.
+
+The bot lists active projects you belong to and excludes deleted, archived, and template tasks. My Day shows your own pinned or due/overdue tasks. If it reports that a task was created but labels failed, open that task to retry the labels; sending the task again creates a duplicate.
 
 ### Default project per integration
 In **Settings → About → Integrations**, set a default project separately for Telegram and iOS Shortcuts. New tasks from each integration go to their respective default project. iOS Shortcuts can optionally follow the Telegram default.
 
-### iCloud Drive
-Link iCloud Drive in **Settings → About → Integrations** to enable file attachments on tasks. Files sync across your devices via iCloud.
+### File attachments
+See [File Attachments](#file-attachments) for local storage, opening, removal, and Undo.
 
 ---
 
@@ -586,8 +607,8 @@ Link iCloud Drive in **Settings → About → Integrations** to enable file atta
 **How do I make a task repeat?**
 Open the task detail panel → click the Recurrence field → choose Daily, Weekly, Monthly, or Custom. When you complete the task, the next occurrence is created automatically.
 
-**How do I hide a task I don't want to think about yet?**
-Right-click the task → Snooze → choose a time (Later today, Tomorrow, Next week, or a custom date). The task disappears until that time.
+**How do I postpone a task?**
+Use [Snooze](#snooze) to reschedule its due date.
 
 **Can I use ToDoozy offline?**
 Yes. All tasks are stored locally in SQLite. You can create, edit, and complete tasks without an internet connection. Changes sync to Supabase when you reconnect.

@@ -9,6 +9,15 @@ import { markLocalWrite, isMutatingExec } from './writeTracker'
 let db: DatabaseSync | null = null
 let wrappedDb: DatabaseSync | null = null
 let currentDbPath: string | null = null
+let currentUserId: string | null = null
+
+export function clearDatabaseUserId(): void {
+  currentUserId = null
+}
+
+export function getDatabaseUserId(): string | null {
+  return currentUserId
+}
 
 /**
  * Wrap a StatementSync so `.run()` (always a mutation in this codebase — reads
@@ -96,6 +105,7 @@ function openDatabase(dbPath: string): DatabaseSync {
 }
 
 export function initDatabase(): DatabaseSync {
+  currentUserId = null
   wrappedDb = null
   if (process.env.TODOOZY_DEV_DB) {
     db = openDatabase(process.env.TODOOZY_DEV_DB)
@@ -116,6 +126,7 @@ export function initDatabase(): DatabaseSync {
  * todoozy-{userId}.db, running migrations if needed.
  */
 export function switchDatabase(userId: string, email?: string): DatabaseSync {
+  currentUserId = userId
   // If dev DB is set, don't switch — always use the dev DB
   if (process.env.TODOOZY_DEV_DB) return getDatabase()
 
@@ -241,6 +252,7 @@ function getCurrentVersion(database: DatabaseSync): number {
 export { withTransaction } from './transaction'
 
 export function closeDatabase(): void {
+  currentUserId = null
   if (db) {
     db.close()
     db = null

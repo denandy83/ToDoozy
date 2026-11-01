@@ -1,5 +1,5 @@
 import { TiptapEditor } from './editor/TiptapEditor'
-import { formatDate } from '../../shared/utils/dateFormat'
+import { formatDate, formatTime } from '../../shared/utils/dateFormat'
 
 interface DetailDescriptionProps {
   description: string | null
@@ -21,7 +21,7 @@ export function DetailDescription({
       <TiptapEditor key={taskId} content={description} taskId={taskId} onChange={onDescriptionChange} readOnly={readOnly} />
       {updatedAt && (
         <span className="text-[9px] font-bold uppercase tracking-wider text-muted">
-          Last updated {formatDate(updatedAt, undefined, { omitCurrentYear: true })}{updatedAt.includes('T') ? ` ${updatedAt.split('T')[1].slice(0, 5)}` : ''}
+          Last updated {formatDate(updatedAt, undefined, { omitCurrentYear: true })}{updatedAt.includes('T') ? ` ${formatTime(updatedAt)}` : ''}
         </span>
       )}
     </div>

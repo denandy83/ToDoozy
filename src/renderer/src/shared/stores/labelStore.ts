@@ -1,4 +1,5 @@
-import { hydrationContext } from './hydrationContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer } from '../../services/syncContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { useMemo, useRef } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -45,8 +46,8 @@ interface LabelState {
 }
 
 interface LabelActions {
-  hydrateLabels(projectId: string): Promise<void>
-  hydrateAllLabels(): Promise<void>
+  hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
+  hydrateAllLabels(origin?: HydrationOrigin): Promise<void>
   createLabel(input: CreateLabelInput): Promise<Label>
   updateLabel(id: string, input: UpdateLabelInput): Promise<Label | null>
   deleteLabel(id: string): Promise<boolean>
@@ -112,61 +113,77 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   loading: false,
   error: null,
 
-  async hydrateLabels(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true, error: null })
+  async hydrateLabels(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
+    const initial = useLabelStore.getState()
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const labels = await api.labels.findByProjectId(projectId)
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         const updated = { ...state.labels }
         const labelIdSet = new Set<string>()
         for (const label of labels) {
-          updated[label.id] = label
+          if (state.labels[label.id] === initial.labels[label.id]) updated[label.id] = label
           labelIdSet.add(label.id)
         }
         return {
           labels: updated,
-          projectLabels: { ...state.projectLabels, [projectId]: labelIdSet },
+          projectLabels: state.projectLabels[projectId] === initial.projectLabels[projectId]
+            ? { ...state.projectLabels, [projectId]: labelIdSet } : state.projectLabels,
           loading: false
         }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load labels'
       set({ error: message, loading: false })
     }
   },
 
-  async hydrateAllLabels(): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateAllLabels(origin?: HydrationOrigin): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin)
+    const userId = getUserId()
+    const initial = useLabelStore.getState().labels
     try {
-      const labels = await api.labels.findAll(getUserId())
+      if (!await isCurrent()) return
+      assertCurrent()
+      const labels = await api.labels.findAll(userId)
       // Merge into existing labels rather than replace. Other users' labels
       // pulled by hydrateLabels(projectId) for shared projects must survive
       // this call — replacing the map wipes them and breaks the chip remap
       // (current user's same-name label disappears, chip falls back to the
       // other user's color).
       if (!await isCurrent()) return
+      assertCurrent()
       set((state) => {
         const merged = { ...state.labels }
         for (const l of labels) {
-          merged[l.id] = l
+          if (state.labels[l.id] === initial[l.id]) merged[l.id] = l
         }
         return { ...state, labels: merged }
       })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load all labels'
       set({ error: message })
     }
   },
 
   async createLabel(input: CreateLabelInput): Promise<Label> {
+    const origin = input.project_id ? captureProjectProducer(input.project_id) : captureSyncProducer()
+    const api = origin.api
     try {
-      const label = await window.api.labels.create(input)
+      const label = await api.labels.create(input)
+      await requireProducerCurrent(origin)
       // Re-hydrate all labels to get fresh order_index values
-      const allLabels = await window.api.labels.findAll(getUserId())
+      const allLabels = await api.labels.findAll(origin.userId ?? '')
+      await requireProducerCurrent(origin)
       const labelMap: Record<string, Label> = {}
       for (const l of allLabels) {
         labelMap[l.id] = l
@@ -186,13 +203,15 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       // never reaches other devices, so the label is missing from that project's
       // FilterBar/LabelPicker after a reconcile or on a second device (#77).
       import('../../services/PersonalSyncService').then(({ pushLabel, pushProjectLabel }) => {
-        pushLabel(label, getUserId()).catch(() => {})
+        pushLabel(label, origin.userId ?? '', origin).catch(() => {})
         if (input.project_id) {
-          void pushProjectLabel(input.project_id, label.id, null)
+          void pushProjectLabel(input.project_id, label.id, null, origin)
         }
       })
+      await requireProducerCurrent(origin)
       return label
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to create label'
       set({ error: message })
       throw err
@@ -200,19 +219,23 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async updateLabel(id: string, input: UpdateLabelInput): Promise<Label | null> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const label = await window.api.labels.update(id, input)
+      const label = await api.labels.update(id, input)
+      await requireProducerCurrent(origin)
       if (label) {
         set((state) => ({
           labels: { ...state.labels, [label.id]: label }
         }))
         // Push to Supabase
         import('../../services/PersonalSyncService').then(({ pushLabel }) => {
-          pushLabel(label, getUserId()).catch(() => {})
+          pushLabel(label, origin.userId ?? '', origin).catch(() => {})
         })
       }
       return label
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to update label'
       set({ error: message })
       throw err
@@ -220,8 +243,11 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async deleteLabel(id: string): Promise<boolean> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      const result = await window.api.labels.delete(id)
+      const result = await api.labels.delete(id)
+      await requireProducerCurrent(origin)
       if (result) {
         set((state) => {
           const deletedLabel = state.labels[id]
@@ -244,6 +270,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         })
         // Remove deleted label from task labels in the task store
         const { useTaskStore } = await import('./taskStore')
+        await requireProducerCurrent(origin)
         useTaskStore.setState((state) => {
           const updated: Record<string, Label[]> = {}
           for (const [taskId, labels] of Object.entries(state.taskLabels)) {
@@ -253,11 +280,12 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         })
         // Delete from Supabase
         import('../../services/PersonalSyncService').then(({ deleteLabelFromSupabase }) => {
-          deleteLabelFromSupabase(id).catch(() => {})
+          deleteLabelFromSupabase(id, origin).catch(() => {})
         })
       }
       return result
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to delete label'
       set({ error: message })
       throw err
@@ -265,6 +293,8 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async removeFromProject(projectId: string, labelId: string): Promise<boolean> {
+    const origin = captureProjectProducer(projectId)
+    const api = origin.api
     try {
       // Resolve the name of the label being unlinked. In shared projects,
       // the labelId may be the viewer's remapped label (their own
@@ -276,7 +306,8 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       const state = useLabelStore.getState()
       let passedLabel: Label | undefined = state.labels[labelId]
       if (!passedLabel) {
-        const fetched = await window.api.labels.findById(labelId).catch(() => null)
+        const fetched = await api.labels.findById(labelId).catch(() => null)
+        await requireProducerCurrent(origin)
         if (fetched) passedLabel = fetched
       }
       const targetName = passedLabel?.name.toLowerCase() ?? null
@@ -294,7 +325,8 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
 
       let anyRemoved = false
       for (const id of idsToUnlink) {
-        const result = await window.api.labels.removeFromProject(projectId, id)
+        const result = await api.labels.removeFromProject(projectId, id)
+        await requireProducerCurrent(origin)
         if (result) anyRemoved = true
       }
       if (anyRemoved) {
@@ -308,6 +340,7 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         // Strip every same-name label from the task store immediately so
         // chips disappear before the realtime/reconcile catches up.
         const { useTaskStore } = await import('./taskStore')
+        await requireProducerCurrent(origin)
         useTaskStore.setState((s) => {
           const updated: Record<string, Label[]> = {}
           for (const [taskId, labels] of Object.entries(s.taskLabels)) {
@@ -323,12 +356,15 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
         // from the shared project; we need to push the tombstone for User
         // A's labelId since that's what's in the remote junction.
         const { pushRemoveLabelFromProject } = await import('../../services/PersonalSyncService')
+        await requireProducerCurrent(origin)
         for (const id of idsToUnlink) {
-          void pushRemoveLabelFromProject(projectId, id)
+          void pushRemoveLabelFromProject(projectId, id, origin)
         }
       }
+      await requireProducerCurrent(origin)
       return anyRemoved
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to remove label from project'
       set({ error: message })
       throw err
@@ -336,8 +372,11 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async addToProject(projectId: string, labelId: string): Promise<void> {
+    const origin = captureProjectProducer(projectId)
+    const api = origin.api
     try {
-      await window.api.labels.addToProject(projectId, labelId)
+      await api.labels.addToProject(projectId, labelId)
+      await requireProducerCurrent(origin)
       set((state) => {
         const updatedProjectLabels = { ...state.projectLabels }
         const existing = new Set(updatedProjectLabels[projectId] ?? [])
@@ -347,8 +386,10 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
       })
       // Push the junction row to Supabase so other devices see the link.
       const { pushProjectLabel } = await import('../../services/PersonalSyncService')
-      void pushProjectLabel(projectId, labelId, null)
+      await requireProducerCurrent(origin)
+      void pushProjectLabel(projectId, labelId, null, origin)
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to add label to project'
       set({ error: message })
       throw err
@@ -356,8 +397,11 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
   },
 
   async reorderLabels(labelIds: string[]): Promise<void> {
+    const origin = captureSyncProducer()
+    const api = origin.api
     try {
-      await window.api.labels.reorder(labelIds)
+      await api.labels.reorder(labelIds)
+      await requireProducerCurrent(origin)
       set((state) => {
         const updated = { ...state.labels }
         for (let i = 0; i < labelIds.length; i++) {
@@ -366,19 +410,14 @@ export const useLabelStore = createWithEqualityFn<LabelStore>((set) => ({
             updated[labelIds[i]] = { ...label, order_index: i }
           }
         }
-        // Push reordered labels to Supabase
-        const userId = getUserId()
-        if (userId) {
-          import('../../services/PersonalSyncService').then(({ pushLabel }) => {
-            for (const id of labelIds) {
-              const label = updated[id]
-              if (label) pushLabel(label, userId).catch(() => {})
-            }
-          })
-        }
         return { labels: updated }
       })
+      const labels = labelIds.map((id) => useLabelStore.getState().labels[id]).filter((label): label is Label => !!label)
+      const { pushLabel } = await import('../../services/PersonalSyncService')
+      await requireProducerCurrent(origin)
+      for (const label of labels) void pushLabel(label, origin.userId ?? '', origin).catch(() => {})
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to reorder labels'
       set({ error: message })
       throw err

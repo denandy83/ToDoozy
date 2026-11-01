@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-vi.mock('./syncContext', () => ({ captureSyncContext: async () => ({ api: window.api, client: supabaseHolder.client, assertCurrent: () => undefined, isCurrent: async () => true, scope: 'synthetic' }) }))
+vi.mock('./syncContext', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./syncContext')>(),
+  captureSyncContext: async () => ({
+    api: window.api,
+    apiFor: (guard: () => void) => new Proxy(window.api, { get: (target, ns) => new Proxy(Reflect.get(target, ns), { get: (methods, key) => async (...args: unknown[]) => { guard(); const result = await Reflect.apply(Reflect.get(methods, key), methods, args); guard(); return result } }) }),
+    client: supabaseHolder.client, clientFor: () => supabaseHolder.client,
+    assertCurrent: () => undefined, isCurrent: async () => true, scope: 'synthetic'
+  })
+}))
 import type { SyncTableDescriptor, RemoteActivityRow } from './syncTables'
 import { PostgrestClient } from '@supabase/postgrest-js'
 import { BUILTIN_THEMES, presetForTheme } from '../../../shared/themeCatalog'
@@ -294,7 +302,7 @@ interface FakeActivityQuery {
   order(col: string, opts?: { ascending: boolean }): FakeActivityQuery
   limit(n: number): FakeActivityQuery
   maybeSingle(): Promise<{ data: { created_at: string } | null; error: null }>
-  then(resolve: (v: { data: RemoteActivityRow[]; error: null }) => void): void
+  then(resolve: (v: { data: RemoteActivityRow[]; error: null }) => void): Promise<void>
 }
 
 function makeFakeActivitySupabase(opts: {
@@ -319,7 +327,7 @@ function makeFakeActivitySupabase(opts: {
         }),
         then: (resolve) => {
           const rows = since ? opts.rows.filter((r) => r.created_at > since!) : opts.rows
-          resolve({ data: rows, error: null })
+          return Promise.resolve({ data: rows, error: null }).then(resolve)
         }
       }
       return builder

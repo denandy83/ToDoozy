@@ -1,9 +1,27 @@
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { isTrustedAppUrl } from '../shared/trustedAppUrl'
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { TodoozyAPI, UpdateStatus } from './index.d'
 
+let databaseContext: { generation: number; userId: string | null } | null = null
+const contextListeners = new Set<() => void>()
+function updateDatabaseContext(context: { generation: number; userId: string | null }): void {
+  if (databaseContext && context.generation <= databaseContext.generation) return
+  databaseContext = context
+  for (const listener of contextListeners) listener()
+}
+ipcRenderer.on('sync:context-changed', (_event, context) => updateDatabaseContext(context))
+
 const api: TodoozyAPI = {
+  diagnostics: {
+    append: (summary) => ipcRenderer.invoke('diagnostics:append', summary),
+    recent: () => ipcRenderer.invoke('diagnostics:recent'),
+    hostRecent: () => ipcRenderer.invoke('diagnostics:hostRecent')
+  },
   tasks: {
+    findByIds: (ids: string[]) => ipcRenderer.invoke('tasks:findByIds', ids),
     findById: (id) => ipcRenderer.invoke('tasks:findById', id),
     findByProjectId: (projectId) => ipcRenderer.invoke('tasks:findByProjectId', projectId),
     findByStatusId: (statusId) => ipcRenderer.invoke('tasks:findByStatusId', statusId),
@@ -25,8 +43,8 @@ const api: TodoozyAPI = {
     reorder: (taskIds) => ipcRenderer.invoke('tasks:reorder', taskIds),
     addLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:addLabel', taskId, labelId),
     removeLabel: (taskId, labelId) => ipcRenderer.invoke('tasks:removeLabel', taskId, labelId),
-    applyRemoteTaskLabels: (taskId, labelIds, baseline) =>
-      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline),
+    applyRemoteTaskLabels: (taskId, labelIds, baseline, projectId) =>
+      ipcRenderer.invoke('tasks:applyRemoteTaskLabels', taskId, labelIds, baseline, projectId),
     getLabelState: (taskId) => ipcRenderer.invoke('tasks:getLabelState',taskId),
     acknowledgeLabelState: (taskId,delivered) => ipcRenderer.invoke('tasks:acknowledgeLabelState',taskId,delivered),
     getLabels: (taskId) => ipcRenderer.invoke('tasks:getLabels', taskId),
@@ -46,6 +64,7 @@ const api: TodoozyAPI = {
     findByProjectId: (projectId) => ipcRenderer.invoke('labels:findByProjectId', projectId),
     findByName: (userId, name) => ipcRenderer.invoke('labels:findByName', userId, name),
     adopt: (userId, foreignLabel) => ipcRenderer.invoke('labels:adopt', userId, foreignLabel),
+    snapshotOwned: (userId, id) => ipcRenderer.invoke('labels:snapshotOwned', userId, id),
     create: (input) => ipcRenderer.invoke('labels:create', input),
     update: (id, input) => ipcRenderer.invoke('labels:update', id, input),
     delete: (id) => ipcRenderer.invoke('labels:delete', id),
@@ -54,16 +73,17 @@ const api: TodoozyAPI = {
       ipcRenderer.invoke('labels:findAllByUser', userId, options),
     findMaxUpdatedAt: (userId) => ipcRenderer.invoke('labels:findMaxUpdatedAt', userId),
     applyRemote: (label) => ipcRenderer.invoke('labels:applyRemote', label),
+    assertCanConsolidate: (fromId, canonical) => ipcRenderer.invoke('labels:assertCanConsolidate', fromId, canonical),
     consolidate: (fromId, canonical) =>
       ipcRenderer.invoke('labels:consolidate', fromId, canonical),
     removeFromProject: (projectId, labelId) =>
       ipcRenderer.invoke('labels:removeFromProject', projectId, labelId),
     addToProject: (projectId, labelId) =>
       ipcRenderer.invoke('labels:addToProject', projectId, labelId),
-    getProjectLabelsForOwner: (userId) =>
-      ipcRenderer.invoke('labels:getProjectLabelsForOwner', userId),
-    getProjectLabelsForSharedProjects: () =>
-      ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects'),
+    getProjectLabelsForOwner: (userId, projectId) =>
+      ipcRenderer.invoke('labels:getProjectLabelsForOwner', userId, projectId),
+    getProjectLabelsForSharedProjects: (projectId) =>
+      ipcRenderer.invoke('labels:getProjectLabelsForSharedProjects', projectId),
     applyRemoteProjectLabel: (remote) =>
       ipcRenderer.invoke('labels:applyRemoteProjectLabel', remote),
     softDeleteTaskLabelsForProjectLabel: (projectId, labelId) =>
@@ -92,14 +112,14 @@ const api: TodoozyAPI = {
     findMaxUpdatedAt: (ownerId) => ipcRenderer.invoke('projects:findMaxUpdatedAt', ownerId),
     applyRemote: (project) => ipcRenderer.invoke('projects:applyRemote', project),
     list: (userId) => ipcRenderer.invoke('projects:list', userId),
-    addMember: (projectId, userId, role, invitedBy) =>
-      ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy),
+    addMember: (projectId, userId, role, invitedBy, joinedAt) =>
+      ipcRenderer.invoke('projects:addMember', projectId, userId, role, invitedBy, joinedAt),
     removeMember: (projectId, userId) =>
       ipcRenderer.invoke('projects:removeMember', projectId, userId),
     updateMember: (projectId, userId, updates) =>
       ipcRenderer.invoke('projects:updateMember', projectId, userId, updates),
     getMembers: (projectId) => ipcRenderer.invoke('projects:getMembers', projectId),
-    getProjectsForUser: (userId) => ipcRenderer.invoke('projects:getProjectsForUser', userId),
+    getProjectsForUser: (userId, projectId) => ipcRenderer.invoke('projects:getProjectsForUser', userId, projectId),
     updateSidebarOrder: (updates) =>
       ipcRenderer.invoke('projects:updateSidebarOrder', updates),
     archiveWithTasks: (id) => ipcRenderer.invoke('projects:archiveWithTasks', id),
@@ -189,6 +209,7 @@ const api: TodoozyAPI = {
   },
 
   attachments: {
+    restore: (id) => ipcRenderer.invoke('attachments:restore', id),
     findByTaskId: (taskId) => ipcRenderer.invoke('attachments:findByTaskId', taskId),
     createFromFile: (taskId, filePath) => ipcRenderer.invoke('attachments:createFromFile', taskId, filePath),
     open: (id) => ipcRenderer.invoke('attachments:open', id),
@@ -233,10 +254,10 @@ const api: TodoozyAPI = {
   },
 
   timer: {
-    updateTimer: (state) => ipcRenderer.invoke('timer:updateTimer', state),
-    clearTimer: () => ipcRenderer.invoke('timer:clearTimer'),
-    minimizeToTray: () => ipcRenderer.invoke('timer:minimizeToTray'),
-    navigateToTask: (taskId) => ipcRenderer.invoke('timer:navigateToTask', taskId),
+    updateTimer: (state, scope) => ipcRenderer.invoke('timer:updateTimer', state, scope),
+    clearTimer: (scope) => ipcRenderer.invoke('timer:clearTimer', scope),
+    minimizeToTray: () => ipcRenderer.invoke('timer:minimizeToTray', api.sync.currentContext()),
+    navigateToTask: (taskId) => ipcRenderer.invoke('timer:navigateToTask', taskId, api.sync.currentContext()),
     onPause: (callback) => {
       ipcRenderer.on('timer:pause', callback)
       return () => { ipcRenderer.removeListener('timer:pause', callback) }
@@ -297,7 +318,16 @@ const api: TodoozyAPI = {
   },
 
   sync: {
-    captureContext: () => ipcRenderer.invoke('sync:captureContext'),
+    currentContext: () => databaseContext ? JSON.stringify([databaseContext.userId, databaseContext.generation]) : null,
+    onContextChanged: (listener) => {
+      contextListeners.add(listener)
+      return () => { contextListeners.delete(listener) }
+    },
+    captureContext: async () => {
+      const context = await ipcRenderer.invoke('sync:captureContext')
+      updateDatabaseContext(context)
+      return context
+    },
     invokeContext: (context, channel, args) => ipcRenderer.invoke('sync:invokeContext', context, channel, args),
     getQueue: () => ipcRenderer.invoke('sync:getQueue'),
     enqueue: (tableName, rowId, operation, payload) =>
@@ -456,14 +486,16 @@ const api: TodoozyAPI = {
   }
 }
 
-if (process.contextIsolated) {
+const trustedUrl = process.env.ELECTRON_RENDERER_URL ?? pathToFileURL(join(__dirname, '../renderer/index.html')).href
+const trustedDocument = typeof location !== 'undefined' && isTrustedAppUrl(location.href, trustedUrl) && process.isMainFrame !== false
+if (trustedDocument && process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error('Failed to expose API via contextBridge:', error)
   }
-} else {
+} else if (trustedDocument) {
   ;(globalThis as Record<string, unknown>).electron = electronAPI
   ;(globalThis as Record<string, unknown>).api = api
 }

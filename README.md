@@ -81,6 +81,8 @@ Copy `.env.example` to `.env` and set the project's URL and public publishable k
 
 GitHub CI runs type checking, tests, lint and a production build on pull requests and main. Set the repository Actions variables `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same public client settings; no signing credentials are needed for these checks.
 
+See the [security and sync rollout guide](docs/security-optimization-2026-10-30.md) for backend activation, paired benchmarks, and the optional host metrics collector.
+
 ---
 
 ## Features
@@ -111,7 +113,7 @@ GitHub CI runs type checking, tests, lint and a production build on pull request
 | **MCP server** | AI integration via stdio — full CRUD tools for all entities |
 | **Telegram Bot** | Manage tasks from Telegram — add, list, complete, with per-project routing |
 | **iOS Shortcut integration** | Create tasks from iPhone/iPad via iOS Shortcuts using the API endpoint |
-| **iCloud attachments** | File attachments synced to iCloud Drive with local-first offline support |
+| **File attachments** | Attach files from your Mac; see [storage and Undo](HELP.md#file-attachments) |
 | **Supabase auth** | Email/password + Google OAuth, encrypted session storage, auto-login |
 | **Focus management** | Full keyboard navigation, focus traps in overlays, Tab cycles through detail fields |
 | **Due dates in rows** | Due dates display inline on task rows with overdue styling |

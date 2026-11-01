@@ -1,0 +1,533 @@
+import { createRequire } from 'node:module'
+import { runInContext } from 'node:vm'
+import { act, createElement, useLayoutEffect, type ReactElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterAll, afterEach, expect, it, vi } from 'vitest'
+import { JSDOM } from 'jsdom'
+import type { User } from '../src/shared/types'
+
+const dom = new JSDOM('<!doctype html><html><body></body></html>',{url:'http://127.0.0.1/'})
+vi.stubGlobal('window',dom.window)
+vi.stubGlobal('document',dom.window.document)
+afterAll(()=>{dom.window.close();vi.unstubAllGlobals()})
+const require = createRequire(import.meta.url)
+const { makeHarness } = require('./benchmark-sync.cjs')
+const opened: Array<{h: Awaited<ReturnType<typeof makeHarness>>; root:Root; host:HTMLDivElement}> = []
+const response = (data: unknown, status=200): Response => new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}})
+const invite = (token: string): {token:string;project_id:string;project_name:string;owner_email:string;status:string;expires_at:string} => ({token,project_id:'joined',project_name:token,owner_email:'OWNER '+token,status:'pending',expires_at:'2099-01-01T00:00:00Z'})
+interface Gate { entered:Promise<void>; wait:Promise<void>; enter():void; release():void }
+function gate(): Gate {
+  let enter!: () => void, release!: () => void
+  return {entered:new Promise<void>(resolve => {enter=resolve}),wait:new Promise<void>(resolve => {release=resolve}),enter:()=>enter(),release:()=>release()}
+}
+type Point = 'pending'|'deep-link'|'realtime'|'accept'|'decline'|'sync-down'|'membership'|'classification'|'hydration'|'project-subscription'|'invite-subscription'
+interface InvitationFixture {
+  h: Awaited<ReturnType<typeof makeHarness>>
+  host: HTMLDivElement
+  pause: Gate
+  mount(): Promise<void>
+  open(token:string): Promise<void>
+  click(label:string): Promise<void>
+  idle(): Promise<void>
+  change(kind:'account'|'database'): Promise<void>
+  layoutSnapshots: string[]
+  arm(): void
+  pendingReads(): number
+  mutations: string[]
+  setPending(tokens:string[]): void
+}
+async function setup(point?:Point, fail=false, nativeUserId?:string): Promise<InvitationFixture> {
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,invitations:true,connected:false,nativeUserId})
+  const host=document.createElement('div'); document.body.append(host)
+  const root=createRoot(host); opened.push({h,root,host})
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true})
+  const user=(id:string):User=>({id,email:id+'@example.invalid',display_name:null,avatar_url:null,created_at:'',updated_at:''})
+  h.stores.useAuthStore.setState({currentUser:user('u'),isAuthenticated:true,isOffline:false})
+  h.stores.useViewStore.setState({currentView:'project',selectedProjectId:'p0'})
+  const joined={...h.repo.projects.findById('p0'),id:'joined',owner_id:'other',name:'PRIVATE JOINED',is_shared:1}
+  h.remote.projects.push(joined)
+  h.remote.project_members.push({project_id:'joined',user_id:'u',role:'member',joined_at:'2026-01-01T00:00:00Z'},{project_id:'joined',user_id:'other',role:'owner',joined_at:'2026-01-01T00:00:00Z'})
+  h.remote.statuses.push({...h.repo.statuses.findByProjectId('p0')[0],id:'joined-status',project_id:'joined'})
+  const pause=gate()
+  const mutations:string[]=[]
+  let pendingReadCount=0
+  let blocked=false,armed=false,pending=[invite('PRIVATE FIRST'),invite('PRIVATE QUEUED')]
+  const hold=async <T,>(value:T):Promise<T> => {
+    if (!armed || blocked) return value
+    blocked=true; pause.enter(); await pause.wait
+    if(fail) throw Error('PRIVATE LATE FAILURE')
+    return value
+  }
+  const originalFetch=h.sandbox.fetch
+  h.sandbox.fetch=async (url: string, init: RequestInit) => {
+    const path=new URL(String(url)).pathname.split('/').pop()
+    if (!String(url).includes('/rpc/')) return originalFetch(url,init)
+    const body=JSON.parse(String(init?.body??'{}'))
+    let result:unknown
+    if(path==='get_pending_invites_for_email') {pendingReadCount++;result=body.user_email === h.stores.useAuthStore.getState().currentUser?.email ? pending : []}
+    else if(path==='validate_invite') result=body.invite_token==='EXPIRED' ? [] : [invite(body.invite_token)]
+    else if(path==='accept_invite') {mutations.push(path);result='joined'}
+    else if(path==='decline_invite') {mutations.push(path);result=body.invite_token==='PUBLIC'?'dismissed':'declined'}
+    else return originalFetch(url,init)
+    if ((point==='pending'&&path==='get_pending_invites_for_email') || ((point==='deep-link'||point==='realtime')&&path==='validate_invite') || (point==='accept'&&path==='accept_invite') || (point==='decline'&&path==='decline_invite')) {
+      try { return response(await hold(result)) } catch { return response({code:'42501',message:'PRIVATE LATE FAILURE'},403) }
+    }
+    return response(result)
+  }
+  const api=h.sandbox.window.api
+  h.sandbox.window.api=new Proxy(api,{get(target,namespace){
+    if(namespace!=='sync') return target[namespace]
+    return new Proxy(target.sync,{get(sync,method){
+      if(method!=='invokeContext') return sync[method]
+      return async (origin:unknown,channel:string,args:unknown[])=>{
+        if(armed&&!blocked&&((point==='sync-down'&&channel==='projects:applyRemote'&&(args[0] as {id:string}).id==='joined') || (point==='hydration'&&channel==='projects:getProjectsForUser'&&h.repo.projects.findById('joined')))) await hold(undefined)
+        if(armed&&!blocked&&args[0]==='joined'&&((point==='membership'&&channel==='projects:addMember') || (point==='classification'&&channel==='projects:update'))) return hold(await sync.invokeContext(origin,channel,args))
+        return sync.invokeContext(origin,channel,args)
+      }
+    }})
+  }})
+  const originalClient=h.sandbox.runtime.getSupabase
+  h.sandbox.runtime.getSupabase=async ()=>{
+    const client=await originalClient()
+    if(point==='invite-subscription' || (point==='project-subscription'&&h.repo.projects.findById('joined'))) return hold(client)
+    return client
+  }
+  const layoutSnapshots:string[]=[]
+  function Screen(): ReactElement {
+    const state=h.stores.useAuthStore()
+    useLayoutEffect(()=>{layoutSnapshots.push(host.textContent??'')},[state.currentUser])
+    return createElement(h.services.InvitationApp)
+  }
+  const idle=async():Promise<void>=>{await act(async()=>{await h.untilIdle()})}
+  const mount=async():Promise<void>=>{await act(async()=>{root.render(createElement(Screen));await h.untilIdle()})}
+  const open=async(token:string):Promise<void>=>{await act(async()=>{void h.emitInvite(token);await h.untilIdle()})}
+  const click=async(label:string):Promise<void>=>{
+    const button=[...host.querySelectorAll('button')].find(node=>node.textContent===label)
+    expect(button,host.textContent??'').toBeDefined()
+    await act(async()=>{button!.click();await h.untilIdle()})
+  }
+  const change=async(kind:'account'|'database'):Promise<void>=>{
+    pending=[invite('CURRENT INVITE')]
+    await act(async()=>{
+      if(kind==='account') {h.setAccount('other');h.stores.useAuthStore.setState({currentUser:user('other')})}
+      else h.replaceDatabase()
+      h.stores.useProjectStore.setState({projects:{p0:{...h.repo.projects.findById('p0'),name:'CURRENT CACHE'}},members:{},currentProjectId:'p0',error:'CURRENT ERROR',loading:false})
+      h.stores.useViewStore.setState({currentView:'project',selectedProjectId:'p0'})
+      await h.untilIdle()
+    })
+  }
+  return {h,host,pause,mount,open,click,idle,change,layoutSnapshots,mutations,pendingReads:()=>pendingReadCount,arm:()=>{armed=true},setPending:(tokens:string[])=>{pending=tokens.map(invite)}}
+}
+afterEach(async()=>{
+  for(const {h,root,host} of opened.splice(0)) {
+    await act(async()=>{root.unmount();await h.untilIdle()})
+    host.remove();await h.stop()
+  }
+})
+const points:Point[]=['pending','deep-link','realtime','accept','decline','sync-down','membership','classification','hydration','project-subscription','invite-subscription']
+it.each(points.flatMap(point=>['account','database'].flatMap(kind=>[false,true].map(fail=>({point,kind:kind as 'account'|'database',fail})))))(
+  'executes actual App invitation $point boundary across $kind replacement (late error=$fail)', async({point,kind,fail})=>{
+    const f=await setup(point,fail,['membership','classification'].includes(point)?'u':undefined)
+    if(point==='pending'||point==='invite-subscription') f.arm()
+    if(point==='deep-link'||point==='realtime') f.setPending([])
+    await f.mount()
+    if(point==='deep-link') {f.arm();await f.open('PRIVATE LINK')}
+    else if(point==='realtime') {
+      f.arm()
+      const channel=f.h.channels.find((row:{topic:string;closed:boolean})=>row.topic==='invites:u@example.invalid'&&!row.closed)
+      expect(channel).toBeDefined()
+      await act(async()=>{channel.emit('project_invites','INSERT',{token:'PRIVATE REALTIME',status:'pending'});await f.h.untilIdle()})
+    } else if(['accept','decline','sync-down','membership','classification','hydration','project-subscription'].includes(point)) {
+      expect(f.host.textContent).toContain('PRIVATE FIRST')
+      f.arm();await f.click(point==='decline'?'Decline':'Accept')
+    }
+    await f.pause.entered
+    await f.change(kind)
+    if(kind==='account') expect(f.layoutSnapshots.at(-1)).not.toContain('PRIVATE')
+    const native=f.h.nativeCalls.length
+    await act(async()=>{f.pause.release();await f.h.untilIdle()})
+    await f.idle()
+    expect(f.host.textContent).not.toContain('PRIVATE')
+    expect(f.host.querySelector('[role="alert"]')).toBeNull()
+    expect(f.h.stores.useProjectStore.getState().projects.p0.name).toBe('CURRENT CACHE')
+    expect(f.h.stores.useProjectStore.getState().currentProjectId).toBe('p0')
+    expect(f.h.stores.useProjectStore.getState().error).toBe('CURRENT ERROR')
+    expect(f.h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+    expect(f.h.nativeCalls.slice(native).filter((row:{namespace:string})=>!['log','auth'].includes(row.namespace))).toEqual([])
+    expect(f.h.channels.filter((row:{topic:string;closed:boolean})=>!row.closed&&(row.topic==='project:joined'||row.topic==='invites:u@example.invalid'&&kind==='account'))).toEqual([])
+    expect(JSON.stringify(f.h.logs)).not.toContain('PRIVATE LATE FAILURE')
+    expect(f.h.fixtureErrors).toEqual([])
+    expect(f.h.codeFingerprint).toMatch(/^[a-f0-9]{64}$/)
+  },15000)
+
+it('runs normal queued acceptance, native hydration, subscription and acknowledged decline through actual App wiring',async()=>{
+  const f=await setup();await f.mount()
+  expect(f.host.textContent).toContain('PRIVATE FIRST')
+  await f.click('Accept')
+  expect(f.h.repo.projects.findById('joined').name).toBe('PRIVATE JOINED')
+  expect(f.h.stores.useProjectStore.getState().projects.joined.name).toBe('PRIVATE JOINED')
+  expect(f.h.stores.useViewStore.getState().selectedProjectId).toBe('joined')
+  expect(f.h.channels.some((row:{topic:string;closed:boolean})=>row.topic==='project:joined'&&!row.closed)).toBe(true)
+  expect(f.host.textContent).toContain('PRIVATE QUEUED')
+  await f.click('Decline');expect(f.host.querySelector('button')).toBeNull()
+  expect(f.h.fixtureErrors).toEqual([])
+})
+it.each(['Accept','Decline'])('retains actual SDK %s errors and permits retry',async action=>{
+  const f=await setup(action==='Accept'?'accept':'decline',true);await f.mount();f.arm();await f.click(action)
+  await f.pause.entered;await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('PRIVATE LATE FAILURE')
+  expect(f.host.textContent).toContain('PRIVATE FIRST')
+  await f.click(action);expect(f.host.textContent).toContain('PRIVATE QUEUED')
+})
+it.each(['Accept','Decline'].flatMap(action=>[false,true].map(fail=>({action,fail}))))('keeps a newer token selected after held $action response (failure=$fail)',async({action,fail})=>{
+  const f=await setup(action==='Accept'?'accept':'decline',fail);await f.mount();f.arm();await f.click(action)
+  await f.pause.entered;await f.open('NEWER TOKEN')
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.host.textContent).toContain('NEWER TOKEN')
+  expect(f.host.textContent).not.toContain('PRIVATE FIRST')
+  expect(f.h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+})
+it('dismisses expired and public invitations through the actual dialog and service',async()=>{
+  const f=await setup();f.setPending([]);await f.mount()
+  await f.open('EXPIRED');expect(f.host.textContent).toContain('Invite Expired');await f.click('OK')
+  expect(f.host.querySelector('button')).toBeNull()
+  await f.open('PUBLIC');await f.click('Decline');expect(f.host.querySelector('button')).toBeNull()
+  expect(f.h.repo.projects.findById('joined')).toBeUndefined()
+})
+it('rebinds a known same-user database generation after a stale realtime validation',async()=>{
+  const f=await setup('realtime');f.setPending([]);await f.mount();f.arm()
+  const channel=f.h.channels.find((row:{topic:string})=>row.topic==='invites:u@example.invalid')
+  await act(async()=>{channel.emit('project_invites','INSERT',{token:'PRIVATE REALTIME',status:'pending'});await f.h.untilIdle()})
+  await f.pause.entered;await f.change('database')
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.host.textContent).toContain('CURRENT INVITE')
+  expect(f.h.channels.filter((row:{topic:string;closed:boolean})=>row.topic==='invites:u@example.invalid'&&!row.closed)).toHaveLength(1)
+  expect(channel.closed).toBe(true)
+})
+it('does not loop retries when the native context becomes unavailable',async()=>{
+  const f=await setup();await f.mount()
+  const original=f.h.sandbox.window.api
+  let calls=0
+  f.h.sandbox.window.api=new Proxy(original,{get(target,namespace){
+    if(namespace!=='sync') return target[namespace]
+    return new Proxy(target.sync,{get(sync,method){
+      if(method!=='captureContext') return sync[method]
+      return async()=>{calls++;throw Error('IPC unavailable')}
+    }})
+  }})
+  await f.click('Accept')
+  const before=calls;await f.idle();await f.idle()
+  expect(calls).toBe(before)
+  expect(f.h.channels.filter((row:{topic:string;closed:boolean})=>row.topic==='project:joined'&&!row.closed)).toHaveLength(0)
+  expect(f.host.querySelector('[role="alert"]')).toBeNull()
+})
+it('removes an invitation subscription that resolves after unmount',async()=>{
+  const f=await setup('invite-subscription');f.arm();await f.mount();await f.pause.entered
+  const item=opened.find(item=>item.h===f.h)!
+  await act(async()=>{item.root.unmount()})
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.h.channels.filter((row:{closed:boolean})=>!row.closed)).toHaveLength(0)
+})
+
+it.each([false,true])('preserves newer deep-link validation when the older response settles (failure=%s)',async fail=>{
+  const f=await setup('deep-link',fail);f.setPending([]);await f.mount();f.arm();await f.open('PRIVATE OLD TOKEN')
+  await f.pause.entered;await f.open('NEWER TOKEN')
+  await act(async()=>{f.pause.release();await f.h.untilIdle()})
+  expect(f.host.textContent).toContain('NEWER TOKEN')
+  expect(f.host.textContent).not.toContain('PRIVATE OLD TOKEN')
+  expect(f.host.querySelector('[role="alert"]')).toBeNull()
+})
+it('calls a late-arriving unsubscriber after the actual invitation channel is created',async()=>{
+  const f=await setup();f.setPending([])
+  const item=opened.find(item=>item.h===f.h)!
+  const client=f.h.sandbox.runtime.client,original=client.channel
+  client.channel=(topic:string)=>{
+    const channel=original(topic),subscribe=channel.subscribe
+    channel.subscribe=function(callback:unknown){
+      const result=subscribe.call(this,callback)
+      queueMicrotask(()=>item.root.unmount())
+      return result
+    }
+    return channel
+  }
+  await f.mount();await f.idle()
+  expect(f.h.channels).toHaveLength(1)
+  expect(f.h.channels[0].closed).toBe(true)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it('replaces an already-rendered inbox on a native scope announcement without replacing the User object',async()=>{
+  const f=await setup();await f.mount()
+  const owner=f.h.stores.useAuthStore.getState().currentUser
+  expect(f.host.textContent).toContain('PRIVATE FIRST')
+  f.setPending(['CURRENT WARM INVITE'])
+  const before=f.pendingReads()
+  await act(async()=>{f.h.replaceDatabase();await f.h.untilIdle()})
+  expect(f.h.stores.useAuthStore.getState().currentUser).toBe(owner)
+  expect(f.host.textContent).not.toContain('PRIVATE FIRST')
+  expect(f.host.textContent).not.toContain('PRIVATE QUEUED')
+  expect(f.host.textContent).toContain('CURRENT WARM INVITE')
+  expect(f.pendingReads()-before).toBe(1)
+  expect(f.h.channels.filter((c:{topic:string;closed:boolean})=>c.topic==='invites:u@example.invalid'&&!c.closed)).toHaveLength(1)
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it.each(['Accept','Decline'])('reserves the first %s action before a delayed native probe',async first=>{
+  const f=await setup();await f.mount()
+  const pause=gate(),api=f.h.sandbox.window.api
+  let armed=true,held=false
+  f.h.sandbox.window.api=new Proxy(api,{get(target,namespace){
+    if(namespace!=='sync')return target[namespace]
+    return new Proxy(target.sync,{get(sync,method){
+      if(method!=='captureContext')return sync[method]
+      return async()=>{const result=await sync.captureContext();if(armed&&!held){held=true;pause.enter();await pause.wait}return result}
+    }})
+  }})
+  const calls=f.mutations
+  await f.click(first);await pause.entered
+  await f.click(first==='Accept'?'Decline':'Accept')
+  await f.idle();expect(calls).toEqual([])
+  armed=false;pause.release();await f.idle()
+  expect(calls).toEqual([first==='Accept'?'accept_invite':'decline_invite'])
+  expect(f.h.fixtureErrors).toEqual([])
+})
+
+it.each(['normal','membership-insert','membership-absent','membership-foreign','classification-denied','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before','task-fetch','task-apply','project-label-fetch','label-fetch','label-apply','project-label-probe','project-label-apply','project-label-cleanup','task-label-fetch','task-label-definition-fetch','task-label-definition-apply','task-label-snapshot','task-label-apply','task-cleanup','project-label-unavailable','task-label-unavailable'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
+  const {PGlite}=await import('@electric-sql/pglite')
+  const {readFileSync}=await import('node:fs')
+  const pg=new PGlite()
+  try{
+    const actor='00000000-0000-4000-8000-000000000001',project='00000000-0000-4000-8000-000000000010',token='00000000-0000-4000-8000-000000000020'
+    await pg.exec(`CREATE SCHEMA auth;CREATE ROLE anon;CREATE ROLE authenticated;GRANT USAGE ON SCHEMA public,auth TO authenticated;
+      CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT current_setting('request.jwt.claim.sub',true)::uuid $$;
+      CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz);
+      INSERT INTO auth.users VALUES('${actor}','u@example.invalid',now());
+      CREATE TABLE public.project_members(project_id uuid,user_id uuid,role text,joined_at timestamptz,PRIMARY KEY(project_id,user_id));
+      CREATE TABLE public.project_invites(token uuid PRIMARY KEY,project_id uuid,status text CHECK(status IN('pending','accepted','expired')),target_email text,accepted_by uuid,expires_at timestamptz);
+      INSERT INTO public.project_invites VALUES('${token}','${project}','pending','u@example.invalid',null,'2099-01-01');`)
+    const migration=readFileSync(new URL('../supabase/migrations/20261030213612_security_performance_hardening.sql',import.meta.url),'utf8')
+    await pg.exec(migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION public.accept_invite'),migration.indexOf('-- A recipient may consume')))
+    const f=await setup(undefined,false,'u'),h=f.h
+    const NativeError = runInContext('Error', h.sandbox) as ErrorConstructor
+    for(const row of h.remote.projects)if(row.id==='joined')row.id=project
+    for(const table of ['project_members','statuses'])for(const row of h.remote[table])if(row.project_id==='joined')row.project_id=project
+    const timestamp='2030-01-01T00:00:00.000Z'
+    const joinedTask={id:'joined-task',project_id:project,owner_id:'u',status_id:'joined-status',title:'JOINED TASK',parent_id:null,created_at:timestamp,updated_at:timestamp,deleted_at:null}
+    h.remote.tasks.push(joinedTask)
+    const labels=[
+      {id:'joined-label',user_id:'u',name:'JOINED LABEL',color:'#123456'},
+      {id:'deleted-label',user_id:'u',name:'DELETED LABEL',color:'#654321'},
+      {id:'task-only-label',user_id:'u',name:'TASK ONLY LABEL',color:'#abcdef'}
+    ].map(label=>({...label,order_index:0,created_at:timestamp,updated_at:timestamp,deleted_at:null}))
+    h.remote.user_labels.push(...labels)
+    h.remote.project_labels.push(
+      {project_id:project,label_id:'joined-label',created_at:timestamp,deleted_at:null},
+      {project_id:project,label_id:'deleted-label',created_at:timestamp,deleted_at:timestamp}
+    )
+    h.remote.task_labels.push({task_id:'joined-task',label_id:'joined-label',deleted_at:null},{task_id:'joined-task',label_id:'task-only-label',deleted_at:null})
+    if(mode==='task-cleanup'||mode==='project-label-cleanup'){
+      h.repo.projects.applyRemote(h.remote.projects.find((row:{id:string})=>row.id===project))
+      h.repo.projects.addMember(project,'u','member')
+      h.repo.statuses.applyRemote(h.remote.statuses.find((row:{id:string})=>row.id==='joined-status'))
+      if(mode==='task-cleanup')h.repo.tasks.create({...joinedTask,id:'obsolete-task',title:'OBSOLETE TASK'})
+      else{
+        h.repo.tasks.applyRemoteTask(joinedTask)
+        h.repo.labels.applyRemote(labels[1])
+        h.repo.labels.addToProject(project,'deleted-label')
+        h.repo.tasks.addLabel('joined-task','deleted-label')
+      }
+    }
+    const transport=h.sandbox.fetch
+    let calls=0,sqlCalls=0,failed=false,probePending=false,probeFailures=0
+    let incompleteRoster=['membership-absent','membership-foreign'].includes(mode)
+    const classificationModes=['membership-insert','membership-absent','membership-foreign','classification-denied']
+    if(mode==='membership-insert')h.services.db.exec(`CREATE TRIGGER fail_membership BEFORE INSERT ON project_members WHEN NEW.project_id='${project}' AND NEW.user_id='u' BEGIN SELECT RAISE(ABORT,'Synthetic membership insertion failure'); END`)
+    if(mode==='classification-denied')h.services.db.exec(`CREATE TRIGGER deny_classification BEFORE UPDATE OF is_shared ON projects WHEN NEW.id='${project}' BEGIN SELECT RAISE(IGNORE); END`)
+    const nativeFailures:Record<string,[string,string,(args:unknown[])=>boolean]>={
+      'task-apply':['tasks','applyRemoteTask',args=>(args[0] as {id:string}).id==='joined-task'],
+      'label-apply':['labels','applyRemote',args=>(args[0] as {id:string}).id==='joined-label'],
+      'project-label-apply':['labels','applyRemoteProjectLabel',args=>(args[0] as {label_id:string}).label_id==='joined-label'],
+      'project-label-cleanup':['labels','softDeleteTaskLabelsForProjectLabel',()=>true],
+      'task-label-definition-apply':['labels','applyRemote',args=>(args[0] as {id:string}).id==='task-only-label'],
+      'task-label-snapshot':['tasks','getLabelState',args=>args[0]==='joined-task'],
+      'task-label-apply':['tasks','applyRemoteTaskLabels',args=>args[0]==='joined-task'],
+      'task-cleanup':['tasks','delete',args=>args[0]==='obsolete-task']
+    }
+    const failure=nativeFailures[mode]
+    if(failure){
+      const [namespace,method,matches]=failure,original=h.repo[namespace][method].bind(h.repo[namespace])
+      h.repo[namespace][method]=(...args:unknown[])=>{
+        if(!failed&&matches(args)){failed=true;throw new NativeError('Synthetic '+mode+' failure')}
+        return original(...args)
+      }
+    }
+    const originalApi=h.sandbox.window.api
+    h.sandbox.window.api=new Proxy(originalApi,{get(target,namespace){
+      if(namespace!=='sync')return Reflect.get(target,namespace)
+      return new Proxy(target.sync,{get(sync,method){
+        if(method==='invokeContext')return (origin:unknown,channel:string,args:unknown[])=>{
+          if(mode==='project-label-probe'&&!failed&&channel==='labels:findById'&&args[0]==='joined-label'&&h.repo.labels.findById('joined-label')){
+            failed=true
+            throw new NativeError('Synthetic '+mode+' failure')
+          }
+          return sync.invokeContext(origin,channel,args)
+        }
+        if(method!=='captureContext')return Reflect.get(sync,method)
+        return async()=>{
+          const current=await sync.captureContext()
+          if(probePending){probePending=false;probeFailures++;throw Error('Synthetic same-scope post-accept probe failure')}
+          return current
+        }
+      }})
+    }})
+    h.sandbox.fetch=async(url:string,init:RequestInit)=>{
+      const parsed=new URL(String(url))
+      if(parsed.pathname.endsWith('/rpc/accept_invite')){
+        calls++
+        if((mode==='before-accept'||mode==='offline-before')&&!failed){failed=true;return response({message:'Synthetic pre-commit failure'},503)}
+        await pg.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[actor]);await pg.exec('SET ROLE authenticated')
+        try{
+          sqlCalls++
+          const accepted=(await pg.query<{id:string}>('SELECT public.accept_invite($1) AS id',[token])).rows[0].id
+          const reply=response(accepted)
+          if(mode==='post-probe'&&!failed){
+            failed=true
+            const text=reply.text.bind(reply)
+            reply.text=async()=>{const value=await text();probePending=true;return value}
+          }
+          return reply
+        }
+        catch(error){return response({message:(error as Error).message,code:'P0001'},400)}
+        finally{await pg.exec('RESET ROLE')}
+      }
+      if(parsed.pathname.endsWith('/project_members')&&parsed.searchParams.has('user_id')){
+        const rows=(await pg.query('SELECT user_id FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])).rows.map(()=>({user_id:'u'}))
+        if(mode==='offline-completion'&&!failed){failed=true;h.sandbox.navigator.onLine=false}
+        return response(rows)
+      }
+      if(incompleteRoster&&parsed.pathname.endsWith('/project_members')&&parsed.searchParams.get('project_id')==='eq.'+project){
+        failed=true
+        return response(mode==='membership-absent'||parsed.searchParams.has('or')?[]:h.remote.project_members.filter((row:{project_id:string;user_id:string})=>row.project_id===project&&row.user_id!=='u'))
+      }
+      if(!failed&&parsed.pathname.endsWith('/user_labels')&&(
+        (mode==='project-label-unavailable'&&parsed.searchParams.get('id')?.includes('joined-label'))
+        ||(mode==='task-label-unavailable'&&parsed.searchParams.get('id')?.includes('task-only-label')))){
+        failed=true
+        return response([])
+      }
+      const failureTable:Record<string,string>={'task-fetch':'tasks','project-label-fetch':'project_labels','label-fetch':'user_labels','task-label-fetch':'task_labels','task-label-definition-fetch':'user_labels'}
+      if(!failed&&parsed.pathname.endsWith('/'+failureTable[mode])
+        &&(mode!=='task-label-definition-fetch'||parsed.searchParams.get('id')?.includes('task-only-label'))){
+        failed=true
+        return response({message:'Synthetic '+mode+' failure'},503)
+      }
+      return transport(url,init)
+    }
+    const apply=h.repo.projects.applyRemote.bind(h.repo.projects)
+    h.repo.projects.applyRemote=(row:{id:string})=>{
+      if(['native','revoked','deleted'].includes(mode)&&!failed&&row.id===project){failed=true;throw Error('Synthetic post-accept native failure')}
+      return apply(row)
+    }
+    const getClient=h.sandbox.runtime.getSupabase
+    h.sandbox.runtime.getSupabase=async()=>{
+      if(mode==='channel'&&!failed&&h.repo.projects.findById(project)){failed=true;throw Error('Synthetic post-accept channel failure')}
+      return getClient()
+    }
+    await f.mount()
+    const originalScope=h.sandbox.window.api.sync.currentContext()
+    if(mode==='offline-before')h.sandbox.navigator.onLine=false
+    await f.click('Accept')
+    if(mode!=='normal'){
+      expect(f.host.textContent).toContain('PRIVATE FIRST')
+      expect(f.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+      if(classificationModes.includes(mode)){
+        expect(calls).toBe(1);expect(sqlCalls).toBe(1)
+        expect(f.host.textContent).toContain('Failed to join the project')
+        expect(h.repo.projects.findById(project)?.is_shared).toBe(0)
+        expect(h.repo.projects.getMembers(project).some((member:{user_id:string})=>member.user_id==='u')).toBe(mode==='classification-denied')
+        expect(h.repo.tasks.findByProjectId(project)).toEqual([])
+        expect(h.stores.useProjectStore.getState().projects[project]).toBeUndefined()
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+        expect(h.channels.some((channel:{topic:string})=>channel.topic==='project:'+project)).toBe(false)
+        if(mode==='membership-insert')h.services.db.exec('DROP TRIGGER fail_membership')
+        if(mode==='classification-denied')h.services.db.exec('DROP TRIGGER deny_classification')
+      }
+      if(mode in nativeFailures||['project-label-probe','task-fetch','project-label-fetch','label-fetch','task-label-fetch','task-label-definition-fetch'].includes(mode)){
+        expect(failed).toBe(true)
+        expect(f.host.textContent).toContain('Failed to join the project: Synthetic '+mode+' failure')
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+        expect(h.channels.some((channel:{topic:string})=>channel.topic==='project:'+project)).toBe(false)
+      }
+      if(mode.endsWith('-unavailable')){
+        expect(failed).toBe(true)
+        expect(f.host.textContent).toContain(mode==='project-label-unavailable'?'Project label unavailable':'Task label unavailable')
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+      }
+      if(mode==='post-probe'){expect(probeFailures).toBe(1);expect(h.sandbox.window.api.sync.currentContext()).toBe(originalScope);expect(h.repo.projects.findById(project)).toBeUndefined()}
+      if(mode==='offline-completion')expect(h.repo.projects.findById(project)).toBeUndefined()
+      incompleteRoster=false
+      h.sandbox.navigator.onLine=true
+      if(mode==='revoked')await pg.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])
+      if(mode==='deleted')h.remote.projects.find((row:{id:string})=>row.id===project).deleted_at=new Date().toISOString()
+      await f.click('Accept')
+    }
+    expect(calls).toBe(mode==='before-accept'||mode==='offline-before'?2:1)
+    expect(sqlCalls).toBe(1)
+    if(mode==='revoked'||mode==='deleted'){
+      expect(f.host.textContent).toContain('PRIVATE FIRST')
+      expect(h.repo.projects.findById(project)).toBeUndefined()
+      expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(mode==='deleted'?1:0)
+    }else{
+      expect(f.host.textContent).not.toContain('PRIVATE FIRST')
+      expect(f.host.textContent).toContain('PRIVATE QUEUED')
+      expect(h.repo.projects.findById(project)?.is_shared).toBe(1)
+      expect(h.stores.useProjectStore.getState().projects[project]?.is_shared).toBe(1)
+      expect(h.repo.projects.getMembers(project).map((member:{user_id:string})=>member.user_id).sort()).toEqual(['other','u'])
+      expect(h.stores.useViewStore.getState().selectedProjectId).toBe(project)
+      expect(h.repo.tasks.findByProjectId(project).map((task:{id:string})=>task.id)).toEqual(['joined-task'])
+      expect(h.repo.tasks.getLabels('joined-task').map((link:{label_id:string})=>link.label_id).sort()).toEqual(['joined-label','task-only-label'])
+      expect(h.repo.labels.findByProjectId(project).map((label:{id:string})=>label.id).sort()).toEqual(['joined-label','task-only-label'])
+      if(mode==='task-cleanup')expect(h.repo.tasks.findById('obsolete-task').deleted_at).toBeTruthy()
+      expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(1)
+      if(mode==='normal'||classificationModes.includes(mode)){
+        await h.services.shared.unsubscribeFromProject(project)
+        await h.services.shared.reconcileSharedSubscriptions(Object.values(h.stores.useProjectStore.getState().projects),await h.context(),true)
+        expect(h.channels.filter((channel:{topic:string;closed:boolean})=>channel.topic==='project:'+project&&!channel.closed)).toHaveLength(1)
+        expect(h.channels.filter((channel:{topic:string;closed:boolean})=>channel.topic==='personal:'+project&&!channel.closed)).toEqual([])
+      }
+    }
+    expect((await pg.query<{status:string}>('SELECT status FROM project_invites')).rows[0].status).toBe('accepted')
+    expect(h.fixtureErrors).toEqual([])
+  }finally{await pg.close()}
+},20000)
+
+it.each(['tasks', 'task_labels'].flatMap(table => ['account', 'database', 'project'].flatMap(change => [false, true].map(fail => ({ table, change, fail })))))(
+  'cancels accepted $table hydration after $change invalidation (late failure=$fail)', async ({ table, change, fail }) => {
+    const f = await setup(), h = f.h, pause = gate(), transport = h.sandbox.fetch
+    const timestamp = '2030-01-01T00:00:00.000Z'
+    h.remote.tasks.push({ id: 'held-task', project_id: 'joined', owner_id: 'u', status_id: 'joined-status', title: 'HELD TASK', created_at: timestamp, updated_at: timestamp })
+    h.remote.user_labels.push({ id: 'held-label', user_id: 'u', name: 'HELD LABEL', color: '#123456', created_at: timestamp, updated_at: timestamp })
+    h.remote.task_labels.push({ task_id: 'held-task', label_id: 'held-label', deleted_at: null })
+    let held = false
+    h.sandbox.fetch = async (url: string, init: RequestInit) => {
+      const result = await transport(url, init), parsed = new URL(String(url))
+      if (!held && parsed.pathname.endsWith('/' + table) && (table === 'task_labels' || parsed.searchParams.get('project_id') === 'eq.joined')) {
+        held = true; pause.enter(); await pause.wait
+        if (fail) return response({ message: 'PRIVATE HYDRATION ERROR' }, 403)
+      }
+      return result
+    }
+    await f.mount(); await f.click('Accept'); await pause.entered
+    if (change === 'project') h.services.evictProjectData('joined')
+    else await f.change(change as 'account' | 'database')
+    const native = h.nativeCalls.length
+    pause.release(); await f.idle()
+    expect(h.nativeCalls.slice(native)).toEqual([])
+    expect(f.mutations).toEqual(['accept_invite'])
+    expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+    expect(h.channels.some((channel: { topic: string }) => channel.topic === 'project:joined')).toBe(false)
+    expect(f.host.textContent).not.toContain('PRIVATE HYDRATION ERROR')
+    if (change === 'project') expect(f.host.textContent).toContain('PRIVATE FIRST')
+    else expect(f.host.textContent).toContain('CURRENT INVITE')
+    expect(h.fixtureErrors).toEqual([])
+  }, 15000)

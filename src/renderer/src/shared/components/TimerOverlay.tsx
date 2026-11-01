@@ -3,6 +3,7 @@ import MarkdownIt from 'markdown-it'
 import { useTimerStore, formatTimeRemaining } from '../stores/timerStore'
 import { useTaskStore } from '../stores/taskStore'
 import { Pause, Play, Square, Minimize2, Maximize2 } from 'lucide-react'
+import { sanitizeDescription } from '../utils/sanitizeDescription'
 
 const md = new MarkdownIt({ linkify: true, breaks: true })
 
@@ -293,7 +294,7 @@ export function TimerOverlay(): React.JSX.Element | null {
           <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.3em] text-muted">Description</p>
           <div
             className="text-sm font-light leading-relaxed text-muted [&_h1]:text-base [&_h1]:font-medium [&_h1]:text-foreground/70 [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-medium [&_h2]:text-foreground/70 [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:text-foreground/70 [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:text-xs [&_pre]:rounded-lg [&_pre]:bg-foreground/10 [&_pre]:p-3 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_blockquote]:border-l-2 [&_blockquote]:border-muted/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_p]:my-1 [&_strong]:font-medium [&_strong]:text-foreground/70"
-            dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+            dangerouslySetInnerHTML={{ __html: sanitizeDescription(descriptionHtml) }}
           />
         </div>
       )}

@@ -1,6 +1,8 @@
-import { captureSyncProducer } from '../../services/syncContext'
-import { hydrationContext } from './hydrationContext'
+import { invalidateMembershipSnapshots } from '../../services/membershipSnapshot'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, type SyncProducer, type ProjectProducer } from '../../services/syncContext'
 import { useAuthStore } from './authStore'
+import { hydrationContext } from './hydrationContext'
+import { evictProjectData } from './projectCache'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
 import type {
@@ -13,16 +15,17 @@ import type {
 interface ProjectState {
   projects: Record<string, Project>
   members: Record<string, ProjectMember[]>
+  removal: { id: string; name: string; ownerId: string; scope: string | null } | null
   currentProjectId: string | null
   loading: boolean
   error: string | null
 }
 
 interface ProjectActions {
-  hydrateProjects(userId: string): Promise<void>
-  hydrateMembers(projectId: string): Promise<void>
-  createProject(input: CreateProjectInput): Promise<Project>
-  updateProject(id: string, input: UpdateProjectInput): Promise<Project | null>
+  hydrateProjects(userId: string, origin?: SyncProducer): Promise<void>
+  hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void>
+  createProject(input: CreateProjectInput, producer?: ProjectProducer): Promise<Project>
+  updateProject(id: string, input: UpdateProjectInput, producer?: ProjectProducer): Promise<Project | null>
   deleteProject(id: string): Promise<boolean>
   archiveProject(id: string): Promise<Project | null>
   unarchiveProject(id: string): Promise<Project | null>
@@ -38,98 +41,131 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   projects: {},
   members: {},
   currentProjectId: null,
+  removal: null,
   loading: false,
   error: null,
 
-  async hydrateProjects(userId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
-    set({ loading: true, error: null })
+  async hydrateProjects(userId: string, origin?: SyncProducer): Promise<void> {
+    if (useAuthStore.getState().currentUser?.id !== userId || (origin && origin.userId !== userId)) return
+    const { api, isCurrent, assertCurrent, isProjectCurrent } = hydrationContext(origin, undefined, userId)
+    const initial = get()
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
+      set({ loading: true, error: null })
       const projects = await api.projects.getProjectsForUser(userId)
-      const projectMap: Record<string, Project> = {}
-      for (const project of projects) {
-        projectMap[project.id] = project
-      }
-      // Auto-select default project if none selected
       if (!await isCurrent()) return
-      const currentId = get().currentProjectId
-      if (!currentId || !projectMap[currentId]) {
-        const defaultProject = projects.find((p) => p.is_default === 1) ?? projects[0] ?? null
-        set({
-          projects: projectMap,
-          currentProjectId: defaultProject?.id ?? null,
-          loading: false
-        })
-      } else {
-        set({ projects: projectMap, loading: false })
+      assertCurrent()
+      const snapshotIds = new Set(projects.map(project => project.id))
+      for (const [id, project] of Object.entries(initial.projects)) {
+        if (!snapshotIds.has(id) && isProjectCurrent(id) && get().projects[id] === project) evictProjectData(id)
       }
-      // Hydrate members for all projects (for sidebar shared icon)
-      const membersMap: Record<string, ProjectMember[]> = { ...get().members }
+      set((state) => {
+        const projectMap = Object.fromEntries(projects.filter(project => isProjectCurrent(project.id)).map(project => [project.id, project]))
+        for (const [id, project] of Object.entries(state.projects)) {
+          if (project !== initial.projects[id]) projectMap[id] = project
+        }
+        for (const id of Object.keys(initial.projects)) if (!state.projects[id]) delete projectMap[id]
+        const currentId = state.currentProjectId
+        const available = Object.values(projectMap)
+        const defaultProject = available.find(project => project.is_default === 1) ?? available[0]
+        return { projects: projectMap, currentProjectId: currentId && projectMap[currentId] ? currentId : defaultProject?.id ?? null, loading: false }
+      })
+      const membersMap: Record<string, ProjectMember[]> = {}
       for (const project of projects) {
-        try {
-          membersMap[project.id] = await api.projects.getMembers(project.id)
-        } catch { /* ignore */ }
+        if (!isProjectCurrent(project.id)) continue
+        try { membersMap[project.id] = await api.projects.getMembers(project.id) } catch { /* ignore */ }
       }
       if (!await isCurrent()) return
-      set({ members: membersMap })
+      assertCurrent()
+      set((state) => {
+        const members = { ...state.members }
+        for (const id of Object.keys(initial.members)) {
+          if (!state.projects[id] && state.members[id] === initial.members[id]) delete members[id]
+        }
+        for (const [id, snapshot] of Object.entries(membersMap)) {
+          if (isProjectCurrent(id) && state.projects[id] && state.members[id] === initial.members[id]) members[id] = snapshot
+        }
+        return { members }
+      })
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load projects'
       set({ error: message, loading: false })
     }
   },
 
-  async hydrateMembers(projectId: string): Promise<void> {
-    const { api, isCurrent } = hydrationContext()
+  async hydrateMembers(projectId: string, origin?: Pick<SyncProducer, 'api' | 'isCurrent'>): Promise<void> {
+    const { api, isCurrent, assertCurrent } = hydrationContext(origin, projectId, useAuthStore.getState().currentUser?.id ?? '')
+    const initial = get().members[projectId]
     try {
+      if (!await isCurrent()) return
+      assertCurrent()
       const members = await api.projects.getMembers(projectId)
       if (!await isCurrent()) return
-      set((state) => ({
-        members: { ...state.members, [projectId]: members }
-      }))
+      assertCurrent()
+      set((state) => state.members[projectId] === initial ? { members: { ...state.members, [projectId]: members } } : {})
     } catch (err) {
       if (!await isCurrent()) return
+      assertCurrent()
       const message = err instanceof Error ? err.message : 'Failed to load project members'
       set({ error: message })
     }
   },
 
-  async createProject(input: CreateProjectInput): Promise<Project> {
+  async createProject(input: CreateProjectInput, producer?: ProjectProducer): Promise<Project> {
+    const origin = producer ?? captureProjectProducer(input.id)
     try {
-      const project = await window.api.projects.create(input)
+      const project = await origin.api.projects.create(input)
+      origin.includeProject(project.id)
+      await requireProducerCurrent(origin)
       set((state) => ({
         projects: { ...state.projects, [project.id]: project }
       }))
       // Sync to Supabase
-      import('../../services/PersonalSyncService').then(({ pushProject }) => {
-        pushProject(project).catch((err) => {
+      import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
+        if (!await origin.isCurrent()) return
+        pushProject(project, origin).catch(async (err) => {
+          if (!await origin.isCurrent()) return
           console.error('[ProjectStore] pushProject failed after create:', err)
         })
       })
+      await requireProducerCurrent(origin)
       return project
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to create project'
       set({ error: message })
       throw err
     }
   },
 
-  async updateProject(id: string, input: UpdateProjectInput): Promise<Project | null> {
+  async updateProject(id: string, input: UpdateProjectInput, producer?: ProjectProducer): Promise<Project | null> {
+    const origin = producer ?? captureProjectProducer(id)
     try {
-      const project = await window.api.projects.update(id, input)
+      origin.includeProject(id)
+      const context = hydrationContext(origin, id, origin.userId)
+      const project = await context.api.projects.update(id, input)
+      await requireProducerCurrent(origin)
       if (project) {
         set((state) => ({
           projects: { ...state.projects, [project.id]: project }
         }))
         // Sync to Supabase
-        import('../../services/PersonalSyncService').then(({ pushProject }) => {
-          pushProject(project).catch((err) => {
+        import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
+          if (!await origin.isCurrent()) return
+          pushProject(project, origin).catch(async (err) => {
+          if (!await origin.isCurrent()) return
             console.error('[ProjectStore] pushProject failed after update:', err)
           })
         })
       }
+      await requireProducerCurrent(origin)
       return project
     } catch (err) {
+      if (producer && !await origin.isCurrent()) return null
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to update project'
       set({ error: message })
       throw err
@@ -137,9 +173,13 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async deleteProject(id: string): Promise<boolean> {
+    const origin = captureProjectProducer(id)
+    const deletionOrigin = captureSyncProducer()
     try {
-      const result = await window.api.projects.delete(id)
+      const result = await origin.api.projects.delete(id)
+      await requireProducerCurrent(origin)
       if (result) {
+        evictProjectData(id)
         set((state) => {
           const { [id]: _, ...remaining } = state.projects
           const { [id]: __, ...remainingMembers } = state.members
@@ -154,14 +194,18 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
           }
         })
         // Sync deletion to Supabase
-        import('../../services/PersonalSyncService').then(({ deleteProjectFromSupabase }) => {
-          deleteProjectFromSupabase(id).catch((err) => {
+        import('../../services/PersonalSyncService').then(async ({ deleteProjectFromSupabase }) => {
+          if (!await deletionOrigin.isCurrent()) return
+          deleteProjectFromSupabase(id, deletionOrigin).catch(async (err) => {
+            if (!await deletionOrigin.isCurrent()) return
             console.error('[ProjectStore] deleteProjectFromSupabase failed:', err)
           })
         })
       }
+      await requireProducerCurrent(deletionOrigin)
       return result
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to delete project'
       set({ error: message })
       throw err
@@ -169,10 +213,11 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async archiveProject(id: string): Promise<Project | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
     try {
       const current = get().projects[id] ?? await origin.api.projects.findById(id)
-      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+      await requireProducerCurrent(origin)
+      if (!current || current.owner_id !== origin.userId) {
         throw new Error('Only the project owner can archive or restore this project')
       }
       const project = await origin.api.projects.archiveWithTasks(id)
@@ -180,11 +225,12 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
         if (!await origin.isCurrent()) return null
-        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        await useTaskStore.getState().hydrateAllForProject(id, origin)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
         if (!await origin.isCurrent()) return null
-        await pushProjectArchive()
+        await pushProjectArchive(origin)
       }
+      if (!await origin.isCurrent()) return null
       return project ?? null
     } catch (err) {
       if (!await origin.isCurrent()) return null
@@ -194,10 +240,11 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async unarchiveProject(id: string): Promise<Project | null> {
-    const origin = captureSyncProducer()
+    const origin = captureProjectProducer(id)
     try {
       const current = get().projects[id] ?? await origin.api.projects.findById(id)
-      if (!current || current.owner_id !== useAuthStore.getState().currentUser?.id) {
+      await requireProducerCurrent(origin)
+      if (!current || current.owner_id !== origin.userId) {
         throw new Error('Only the project owner can archive or restore this project')
       }
       const project = await origin.api.projects.unarchiveWithTasks(id)
@@ -205,11 +252,12 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
         set((state) => ({ projects: { ...state.projects, [project.id]: project } }))
         const { useTaskStore } = await import('./taskStore')
         if (!await origin.isCurrent()) return null
-        await useTaskStore.getState().hydrateAllForProject(id, current.owner_id)
+        await useTaskStore.getState().hydrateAllForProject(id, origin)
         const { pushProjectArchive } = await import('../../services/PersonalSyncService')
         if (!await origin.isCurrent()) return null
-        await pushProjectArchive()
+        await pushProjectArchive(origin)
       }
+      if (!await origin.isCurrent()) return null
       return project ?? null
     } catch (err) {
       if (!await origin.isCurrent()) return null
@@ -228,10 +276,16 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
     role: string,
     invitedBy?: string
   ): Promise<void> {
+    const origin = captureProjectProducer(projectId)
     try {
-      await window.api.projects.addMember(projectId, userId, role, invitedBy)
-      await get().hydrateMembers(projectId)
+      await invalidateMembershipSnapshots(projectId, origin)
+      await origin.api.projects.addMember(projectId, userId, role, invitedBy)
+      await invalidateMembershipSnapshots(projectId, origin)
+      await requireProducerCurrent(origin)
+      await get().hydrateMembers(projectId, origin)
+      await requireProducerCurrent(origin)
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to add member'
       set({ error: message })
       throw err
@@ -239,11 +293,17 @@ export const useProjectStore = createWithEqualityFn<ProjectStore>((set, get) => 
   },
 
   async removeMember(projectId: string, userId: string): Promise<boolean> {
+    const origin = captureProjectProducer(projectId)
     try {
-      const result = await window.api.projects.removeMember(projectId, userId)
-      await get().hydrateMembers(projectId)
+      await invalidateMembershipSnapshots(projectId, origin)
+      const result = await origin.api.projects.removeMember(projectId, userId)
+      await invalidateMembershipSnapshots(projectId, origin)
+      await requireProducerCurrent(origin)
+      await get().hydrateMembers(projectId, origin)
+      await requireProducerCurrent(origin)
       return result
     } catch (err) {
+      await requireProducerCurrent(origin)
       const message = err instanceof Error ? err.message : 'Failed to remove member'
       set({ error: message })
       throw err

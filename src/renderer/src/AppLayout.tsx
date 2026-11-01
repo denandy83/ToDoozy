@@ -195,7 +195,7 @@ export function AppLayout(): React.JSX.Element {
   // Hydrate notifications on mount
   const hydrateNotifications = useNotificationStore((s) => s.hydrate)
   useEffect(() => {
-    hydrateNotifications()
+    void hydrateNotifications().catch(() => {})
   }, [hydrateNotifications])
 
   // Show toast when a recurring task clone is created
@@ -889,6 +889,7 @@ export function AppLayout(): React.JSX.Element {
         {/* Removed from shared project dialog */}
         {removedFromProject && (
           <RemovedFromProjectDialog
+            key={`${window.api.sync.currentContext()}:${removedFromProject.id}`}
             removedFromProject={removedFromProject}
             currentUser={currentUser}
             onClose={() => setRemovedFromProject(null)}

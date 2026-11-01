@@ -1,5 +1,9 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { captureSyncProducer } from '../../services/syncContext'
+import { recoverProject } from '../../services/projectRecovery'
+import { useDatabaseScope } from '../../shared/hooks/useDatabaseScope'
+import { useAuthStore } from '../../shared/stores/authStore'
 import { useDismissibleSurface } from '../../shared/motion/useDismissibleSurface'
-import { useProjectStore } from '../../shared/stores'
 import { useToast } from '../../shared/components/Toast'
 import type { User } from '../../../../shared/types'
 import type { RemovedFromProject } from './useSharedProjectRealtime'
@@ -12,19 +16,34 @@ interface RemovedFromProjectDialogProps {
 
 /**
  * Dialog shown when the current user is removed from (or unshared out of) a
- * shared project via Realtime. Offers to keep a full local copy of the project
- * or delete it. Extracted verbatim from AppLayout (Story #107).
+ * shared project via Realtime. Recovery-copy semantics belong to recoverProject.
  */
 export function RemovedFromProjectDialog({
   removedFromProject,
   currentUser,
   onClose: finishClose
-}: RemovedFromProjectDialogProps): React.JSX.Element {
-  const surface = useDismissibleSurface(finishClose)
-  const onClose = surface.close
+}: RemovedFromProjectDialogProps): React.JSX.Element | null {
+  const scope = useDatabaseScope()
+  const initialScope = useRef(scope).current
+  const active = useRef(true)
+  const busy = useRef(false)
+  const [working, setWorking] = useState(false)
+  const removedRef = useRef(removedFromProject)
+  removedRef.current = removedFromProject
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+  const closing = useRef<() => boolean>(() => false)
+  const surface = useDismissibleSurface(() => { if (closing.current()) finishClose() })
+  const closeSurface = surface.close
+  const onClose = useCallback(() => {
+    const closingId = removedFromProject.id
+    const ownerId = currentUser?.id
+    closing.current = () => active.current && removedRef.current.id === closingId && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === ownerId
+    closeSurface()
+  }, [closeSurface, removedFromProject, currentUser?.id, initialScope])
 
   const { addToast } = useToast()
 
+  if (scope !== initialScope || useAuthStore.getState().currentUser?.id !== currentUser?.id) return null
   return (
     <div {...surface.props} className="ui-surface ui-dialog ui-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
       <div className="ui-modal-content w-80 rounded-lg border border-border bg-surface p-5 shadow-xl">
@@ -37,71 +56,48 @@ export function RemovedFromProjectDialog({
         <div className="mt-4 flex gap-2">
           <button
             onClick={async () => {
-              if (!currentUser) return
-              // Keep local copy with new UUID
-              const oldId = removedFromProject.id
-              const project = await window.api.projects.findById(oldId)
-              if (project) {
-                const newId = crypto.randomUUID()
-                await window.api.projects.create({
-                  id: newId,
-                  name: `${project.name} (local copy)`,
-                  description: project.description,
-                  color: project.color,
-                  icon: project.icon,
-                  owner_id: currentUser.id,
-                  is_default: 0
-                })
-                await window.api.projects.addMember(newId, currentUser.id, 'owner')
-                // Copy statuses
-                const statuses = await window.api.statuses.findByProjectId(oldId)
-                const statusMap: Record<string, string> = {}
-                for (const s of statuses) {
-                  const nid = crypto.randomUUID()
-                  statusMap[s.id] = nid
-                  await window.api.statuses.create({ id: nid, project_id: newId, name: s.name, color: s.color, icon: s.icon, order_index: s.order_index, is_done: s.is_done, is_default: s.is_default })
-                }
-                // Copy labels to new project
-                const oldLabels = await window.api.labels.findByProjectId(oldId)
-                for (const l of oldLabels) {
-                  await window.api.labels.addToProject(newId, l.id).catch(() => {})
-                }
-                // Copy tasks
-                const tasks = await window.api.tasks.findByProjectId(oldId)
-                const taskMap: Record<string, string> = {}
-                for (const t of tasks) {
-                  const nid = crypto.randomUUID()
-                  taskMap[t.id] = nid
-                  await window.api.tasks.create({ id: nid, project_id: newId, owner_id: currentUser.id, title: t.title, description: t.description, status_id: statusMap[t.status_id] ?? t.status_id, priority: t.priority, due_date: t.due_date, parent_id: null, order_index: t.order_index, assigned_to: null, is_template: t.is_template, is_archived: t.is_archived, completed_date: t.completed_date, recurrence_rule: t.recurrence_rule, reference_url: t.reference_url })
-                  // Copy task labels
-                  const taskLabels = await window.api.tasks.getLabels(t.id)
-                  for (const tl of taskLabels) {
-                    await window.api.tasks.addLabel(nid, tl.label_id).catch(() => {})
-                  }
-                }
-                for (const t of tasks) {
-                  if (t.parent_id && taskMap[t.parent_id]) {
-                    await window.api.tasks.update(taskMap[t.id], { parent_id: taskMap[t.parent_id] })
-                  }
-                }
-                await window.api.projects.delete(oldId)
+              if (busy.current || scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+              busy.current = true
+              setWorking(true)
+              const origin = captureSyncProducer()
+              const uiCurrent = (): boolean => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === currentUser.id
+              try {
+                if (!await recoverProject(removedFromProject.id, true, origin)) return
+                if (!uiCurrent()) return
+                onClose()
+                addToast({ message: 'A local copy has been kept.' })
+              } catch {
+                if (await origin.isCurrent() && uiCurrent()) addToast({ message: 'Failed to keep project copy', variant: 'danger' })
+              } finally {
+                busy.current = false
+                if (uiCurrent()) setWorking(false)
               }
-              await useProjectStore.getState().hydrateProjects(currentUser.id)
-              onClose()
-              addToast({ message: 'A local copy has been kept.' })
             }}
+            disabled={working}
             className="flex-1 rounded-md border border-border px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-foreground transition-colors hover:bg-foreground/6"
           >
             Keep Copy
           </button>
           <button
             onClick={async () => {
-              if (!currentUser) return
-              await window.api.projects.delete(removedFromProject.id)
-              await useProjectStore.getState().hydrateProjects(currentUser.id)
-              onClose()
-              addToast({ message: 'Project deleted.' })
+              if (busy.current || scope !== initialScope || !currentUser || useAuthStore.getState().currentUser?.id !== currentUser.id) return
+              busy.current = true
+              setWorking(true)
+              const origin = captureSyncProducer()
+              const uiCurrent = (): boolean => active.current && removedRef.current.id === removedFromProject.id && window.api.sync.currentContext() === initialScope && useAuthStore.getState().currentUser?.id === currentUser.id
+              try {
+                if (!await recoverProject(removedFromProject.id, false, origin)) return
+                if (!uiCurrent()) return
+                onClose()
+                addToast({ message: 'Project deleted.' })
+              } catch {
+                if (await origin.isCurrent() && uiCurrent()) addToast({ message: 'Failed to delete project', variant: 'danger' })
+              } finally {
+                busy.current = false
+                if (uiCurrent()) setWorking(false)
+              }
             }}
+            disabled={working}
             className="flex-1 rounded-md bg-danger px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-danger/90"
           >
             Delete

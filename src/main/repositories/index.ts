@@ -33,23 +33,23 @@ export interface Repositories {
   projectAreas: ProjectAreaRepository
 }
 
-export function createRepositories(db: DatabaseSync): Repositories {
+export function createRepositories(db: DatabaseSync, userId: string | null = null): Repositories {
   return {
     users: new UserRepository(db),
-    projects: new ProjectRepository(db),
+    projects: new ProjectRepository(db, userId),
     statuses: new StatusRepository(db),
-    tasks: new TaskRepository(db),
+    tasks: new TaskRepository(db, userId),
     labels: new LabelRepository(db),
     themes: new ThemeRepository(db),
     settings: new SettingsRepository(db),
     activityLog: new ActivityLogRepository(db),
     projectTemplates: new ProjectTemplateRepository(db),
-    attachments: new AttachmentRepository(db),
+    attachments: new AttachmentRepository(db, userId),
     notifications: new NotificationRepository(db),
     syncQueue: new SyncQueueRepository(db),
     syncMeta: new SyncMetaRepository(db),
     savedViews: new SavedViewRepository(db),
-    projectAreas: new ProjectAreaRepository(db)
+    projectAreas: new ProjectAreaRepository(db, userId)
   }
 }
 

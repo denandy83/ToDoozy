@@ -102,6 +102,18 @@ export class LabelRepository {
     return this.create(newLabel)
   }
 
+  snapshotOwned(userId: string, id: string): Label {
+    return withTransaction(this.db, () => {
+      const local = this.findById(id)
+      if (!local || local.user_id !== userId) throw new Error('Owned label unavailable')
+      const now = new Date().toISOString()
+      const label = { ...local, id: crypto.randomUUID(), created_at: now, updated_at: now }
+      this.consolidate(id, label)
+      new SyncQueueRepository(this.db).enqueue('user_labels', label.id, 'UPDATE', JSON.stringify(label))
+      return label
+    })
+  }
+
   /**
    * Sync-layer list. Returns ALL rows for a user, optionally including tombstones.
    */
@@ -194,6 +206,9 @@ export class LabelRepository {
     if (existing && !isRemoteNewer(existing.updated_at, remote.updated_at)) {
       return existing
     }
+    if (existing && this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(remote.id)
+      && (existing.name !== remote.name || existing.color !== remote.color || existing.order_index !== remote.order_index
+        || toCanonicalIso(existing.deleted_at ?? null) !== toCanonicalIso(remote.deleted_at ?? null))) return existing
     // Sticky ownership (LWW guard): a label row's owner never legitimately
     // changes in this app. If a newer remote row carries a DIFFERENT non-null
     // user_id than the local row already has, keep the local owner — only let
@@ -243,6 +258,24 @@ export class LabelRepository {
     }
   }
 
+  assertCanConsolidate(fromId: string, canonical: Label): void {
+    const toId = String(canonical.id)
+    const userIdParam = canonical.user_id ? String(canonical.user_id) : null
+    const nameParam = String(canonical.name ?? '')
+    const colorParam = String(canonical.color ?? '#888888')
+    const orderIndexParam = Number(canonical.order_index ?? 0)
+    const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
+    const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
+    const existing = this.findById(toId)
+    if (existing && fromId !== toId) {
+      const pending = this.db.prepare("SELECT 1 FROM sync_queue WHERE table_name='user_labels' AND row_id=? LIMIT 1").get(toId)
+      const differs = existing.name !== nameParam || existing.color !== colorParam || toCanonicalIso(existing.deleted_at ?? null) !== deletedAtParam
+      if (existing.user_id !== userIdParam || isRemoteNewer(updatedAtParam, existing.updated_at)
+        || (differs && (pending || !isRemoteNewer(existing.updated_at, updatedAtParam)))
+        || (pending && existing.order_index !== orderIndexParam)) throw new Error('Canonical label has local changes')
+    }
+  }
+
   /**
    * Replace all references to `fromId` with `canonical.id` across junction
    * tables, then hard-delete `fromId`. Used by sync when a local label
@@ -256,6 +289,7 @@ export class LabelRepository {
    * insert. Idempotent — safe if `fromId` is already gone.
    */
   consolidate(fromId: string, canonical: Label): { taskRemaps: number; projectRemaps: number } {
+    if (!this.db.isTransaction) return withTransaction(this.db, () => this.consolidate(fromId, canonical))
     // Coerce every field to a primitive node:sqlite accepts (string, number,
     // null). Crossing IPC can leave fields as undefined or non-primitive
     // shapes; node:sqlite throws "Provided value cannot be bound" for those.
@@ -268,122 +302,122 @@ export class LabelRepository {
     const updatedAtParam = toCanonicalIso(String(canonical.updated_at ?? new Date().toISOString()))
     const deletedAtParam = canonical.deleted_at ? toCanonicalIso(String(canonical.deleted_at)) : null
 
-    return withTransaction(this.db, () => {
-      let taskRemaps = 0
-      let projectRemaps = 0
+    this.assertCanConsolidate(fromId, canonical)
 
-      const fromExists = this.db.prepare('SELECT 1 FROM labels WHERE id = ?').get(fromId)
-      if (fromExists) {
-        // Free up the (user_id, lower(name)) unique slot so the canonical row
-        // can land. Use a placeholder name unique-by-id; we delete this row
-        // at the end of the transaction.
-        this.db
-          .prepare('UPDATE labels SET name = ? WHERE id = ?')
-          .run(`__consolidate_tomb_${fromId}`, fromId)
-      }
+    let taskRemaps = 0
+    let projectRemaps = 0
 
-      // Upsert the canonical row so junction-table FKs validate when we
-      // remap. ON CONFLICT(id) refreshes data on existing rows.
+    const fromExists = this.db.prepare('SELECT 1 FROM labels WHERE id = ?').get(fromId)
+    if (fromExists) {
+      // Free up the (user_id, lower(name)) unique slot so the canonical row
+      // can land. Use a placeholder name unique-by-id; we delete this row
+      // at the end of the transaction.
       this.db
-        .prepare(
-          `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             user_id = excluded.user_id,
-             name = excluded.name,
-             color = excluded.color,
-             order_index = excluded.order_index,
-             updated_at = excluded.updated_at,
-             deleted_at = excluded.deleted_at`
-        )
-        .run(
-          toId,
-          userIdParam,
-          nameParam,
-          colorParam,
-          orderIndexParam,
-          createdAtParam,
-          updatedAtParam,
-          deletedAtParam
-        )
+        .prepare('UPDATE labels SET name = ? WHERE id = ?')
+        .run(`__consolidate_tomb_${fromId}`, fromId)
+    }
 
-      // task_labels: if a (task_id, toId) row already exists, drop the
-      // fromId row; otherwise repoint it. Same logic for project_labels.
-      const taskRows = this.db
-        .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
-        .all(fromId) as Array<{ task_id: string }>
-      for (const row of taskRows) {
-        const source = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,fromId) as {deleted_at:string|null;local_version:number;sync_pending:number}
-        const target = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,toId) as typeof source | undefined
-        const winner = !target || source.local_version>target.local_version || (source.local_version===target.local_version && source.sync_pending && !target.sync_pending) ? source : target
-        const needsDelivery = winner===source || !!source.sync_pending || !!target?.sync_pending
-        const version = needsDelivery
-          ? Number((this.db.prepare('SELECT COALESCE(MAX(local_version),0)+1 AS version FROM task_labels').get() as {version:number}).version)
-          : winner.local_version
-        if (target) {
-          this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=?,sync_pending=? WHERE task_id=? AND label_id=?').run(winner.deleted_at,version,needsDelivery?1:0,row.task_id,toId)
-          this.db.prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?').run(row.task_id, fromId)
-        } else {
-          this.db.prepare('UPDATE task_labels SET label_id=?,local_version=?,sync_pending=1 WHERE task_id=? AND label_id=?').run(toId,version,row.task_id,fromId)
-          taskRemaps++
-        }
-        if (needsDelivery) new SyncQueueRepository(this.db).enqueue('task_labels',row.task_id,'UPDATE',JSON.stringify({task_id:row.task_id,assignment_intent:true}))
-      }
+    // Upsert the canonical row so junction-table FKs validate when we
+    // remap. ON CONFLICT(id) refreshes data on existing rows.
+    this.db
+      .prepare(
+        `INSERT INTO labels (id, user_id, name, color, order_index, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           user_id = excluded.user_id,
+           name = excluded.name,
+           color = excluded.color,
+           order_index = excluded.order_index,
+           updated_at = excluded.updated_at,
+           deleted_at = excluded.deleted_at`
+      )
+      .run(
+        toId,
+        userIdParam,
+        nameParam,
+        colorParam,
+        orderIndexParam,
+        createdAtParam,
+        updatedAtParam,
+        deletedAtParam
+      )
 
-      const projectRows = this.db
-        .prepare('SELECT project_id FROM project_labels WHERE label_id = ?')
-        .all(fromId) as Array<{ project_id: string }>
-      for (const row of projectRows) {
-        const sourceLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,fromId) as {created_at:string;deleted_at:string|null}
-        const targetLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as typeof sourceLink | undefined
-        const version = (link: typeof sourceLink): number => {
-          const value = Date.parse(link.deleted_at ?? link.created_at)
-          return Number.isFinite(value) ? value : -Infinity
-        }
-        const winner = !targetLink || version(sourceLink)>version(targetLink) || (version(sourceLink)===version(targetLink) && sourceLink.deleted_at && !targetLink.deleted_at) ? sourceLink : targetLink
-        if (targetLink) {
-          this.db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE project_id=? AND label_id=?').run(winner.created_at,winner.deleted_at,row.project_id,toId)
-          this.db.prepare('DELETE FROM project_labels WHERE project_id=? AND label_id=?').run(row.project_id,fromId)
-        } else {
-          this.db.prepare('UPDATE project_labels SET label_id=? WHERE project_id=? AND label_id=?').run(toId,row.project_id,fromId)
-          projectRemaps++
-        }
-        if (winner.deleted_at) this.softDeleteTaskLabelsForProjectLabel(row.project_id,toId)
-        if (winner===sourceLink) {
-          new SyncQueueRepository(this.db).enqueue(winner.deleted_at?'task_labels':'project_labels',`${row.project_id}::${toId}`,'UPDATE',JSON.stringify({
-            projectId:row.project_id,labelId:toId,labelName:nameParam,
-            ...(winner.deleted_at?{remove_project_label:true,deletedAt:winner.deleted_at,expectedLink:winner}:{addition:true,createdAt:winner.created_at,deletedAt:null})
-          }))
-        }
+    // task_labels: if a (task_id, toId) row already exists, drop the
+    // fromId row; otherwise repoint it. Same logic for project_labels.
+    const taskRows = this.db
+      .prepare('SELECT task_id FROM task_labels WHERE label_id = ?')
+      .all(fromId) as Array<{ task_id: string }>
+    for (const row of taskRows) {
+      const source = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,fromId) as {deleted_at:string|null;local_version:number;sync_pending:number}
+      const target = this.db.prepare('SELECT * FROM task_labels WHERE task_id=? AND label_id=?').get(row.task_id,toId) as typeof source | undefined
+      const winner = !target || source.local_version>target.local_version || (source.local_version===target.local_version && source.sync_pending && !target.sync_pending) ? source : target
+      const needsDelivery = winner===source || !!source.sync_pending || !!target?.sync_pending
+      const version = needsDelivery
+        ? Number((this.db.prepare('SELECT COALESCE(MAX(local_version),0)+1 AS version FROM task_labels').get() as {version:number}).version)
+        : winner.local_version
+      if (target) {
+        this.db.prepare('UPDATE task_labels SET deleted_at=?,local_version=?,sync_pending=? WHERE task_id=? AND label_id=?').run(winner.deleted_at,version,needsDelivery?1:0,row.task_id,toId)
+        this.db.prepare('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?').run(row.task_id, fromId)
+      } else {
+        this.db.prepare('UPDATE task_labels SET label_id=?,local_version=?,sync_pending=1 WHERE task_id=? AND label_id=?').run(toId,version,row.task_id,fromId)
+        taskRemaps++
       }
+      if (needsDelivery) new SyncQueueRepository(this.db).enqueue('task_labels',row.task_id,'UPDATE',JSON.stringify({task_id:row.task_id,assignment_intent:true}))
+    }
 
-      const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ id: string; payload: string }>
-      for (const command of commands) {
-        const payload = JSON.parse(command.payload)
-        if (typeof payload.task_id==='string') {
-          for (const key of ['insert','delete']) if (Array.isArray(payload[key])) payload[key]=[...new Set(payload[key].map((id:string)=>id===fromId?toId:id))]
-          this.db.prepare('UPDATE sync_queue SET payload=? WHERE id=?').run(JSON.stringify(payload),command.id)
-        }
-        if (payload.labelId !== fromId && payload.labelId !== toId) continue
-        payload.labelId = toId
-        if (payload.addition) payload.createdAt = (this.db.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId,toId) as {created_at:string} | undefined)?.created_at ?? payload.createdAt
-        if (Array.isArray(payload.siblingIds) && payload.siblingIds.includes(fromId)) payload.siblingIds = [...new Set([...payload.siblingIds, toId])]
-        if (payload.expectedLink) {
-          const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId, toId) as { created_at: string; deleted_at: string | null } | undefined
-          if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) {
-            payload.expectedLink = link
-            if (link.deleted_at && payload.deletedAt) payload.deletedAt = link.deleted_at
-          }
-        }
-        this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
-          .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
+    const projectRows = this.db
+      .prepare('SELECT project_id FROM project_labels WHERE label_id = ?')
+      .all(fromId) as Array<{ project_id: string }>
+    for (const row of projectRows) {
+      const sourceLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,fromId) as {created_at:string;deleted_at:string|null}
+      const targetLink = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(row.project_id,toId) as typeof sourceLink | undefined
+      const version = (link: typeof sourceLink): number => {
+        const value = Date.parse(link.deleted_at ?? link.created_at)
+        return Number.isFinite(value) ? value : -Infinity
       }
-      this.db.prepare("DELETE FROM sync_queue WHERE table_name='user_labels' AND row_id=?").run(fromId)
-      if (fromExists) {
-        this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
+      const winner = !targetLink || version(sourceLink)>version(targetLink) || (version(sourceLink)===version(targetLink) && sourceLink.deleted_at && !targetLink.deleted_at) ? sourceLink : targetLink
+      if (targetLink) {
+        this.db.prepare('UPDATE project_labels SET created_at=?,deleted_at=? WHERE project_id=? AND label_id=?').run(winner.created_at,winner.deleted_at,row.project_id,toId)
+        this.db.prepare('DELETE FROM project_labels WHERE project_id=? AND label_id=?').run(row.project_id,fromId)
+      } else {
+        this.db.prepare('UPDATE project_labels SET label_id=? WHERE project_id=? AND label_id=?').run(toId,row.project_id,fromId)
+        projectRemaps++
       }
-      return { taskRemaps, projectRemaps }
-    })
+      if (winner.deleted_at) this.softDeleteTaskLabelsForProjectLabel(row.project_id,toId)
+      if (winner===sourceLink) {
+        new SyncQueueRepository(this.db).enqueue(winner.deleted_at?'task_labels':'project_labels',`${row.project_id}::${toId}`,'UPDATE',JSON.stringify({
+          projectId:row.project_id,labelId:toId,labelName:nameParam,
+          ...(winner.deleted_at?{remove_project_label:true,deletedAt:winner.deleted_at,expectedLink:winner}:{addition:true,createdAt:winner.created_at,deletedAt:null})
+        }))
+      }
+    }
+
+    const commands = this.db.prepare("SELECT id, payload FROM sync_queue WHERE table_name IN ('project_labels','task_labels')").all() as Array<{ id: string; payload: string }>
+    for (const command of commands) {
+      const payload = JSON.parse(command.payload)
+      if (typeof payload.task_id==='string') {
+        for (const key of ['insert','delete']) if (Array.isArray(payload[key])) payload[key]=[...new Set(payload[key].map((id:string)=>id===fromId?toId:id))]
+        this.db.prepare('UPDATE sync_queue SET payload=? WHERE id=?').run(JSON.stringify(payload),command.id)
+      }
+      if (payload.labelId !== fromId && payload.labelId !== toId) continue
+      payload.labelId = toId
+      if (payload.addition) payload.createdAt = (this.db.prepare('SELECT created_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId,toId) as {created_at:string} | undefined)?.created_at ?? payload.createdAt
+      if (Array.isArray(payload.siblingIds) && payload.siblingIds.includes(fromId)) payload.siblingIds = [...new Set([...payload.siblingIds, toId])]
+      if (payload.expectedLink) {
+        const link = this.db.prepare('SELECT created_at,deleted_at FROM project_labels WHERE project_id=? AND label_id=?').get(payload.projectId, toId) as { created_at: string; deleted_at: string | null } | undefined
+        if (link && (payload.expectedLink.deleted_at === null) === (link.deleted_at === null)) {
+          payload.expectedLink = link
+          if (link.deleted_at && payload.deletedAt) payload.deletedAt = link.deleted_at
+        }
+      }
+      this.db.prepare('UPDATE sync_queue SET row_id=?, payload=? WHERE id=?')
+        .run(`${payload.projectId}::${toId}`, JSON.stringify(payload), command.id)
+    }
+    this.db.prepare("DELETE FROM sync_queue WHERE table_name='user_labels' AND row_id=?").run(fromId)
+    if (fromExists) {
+      this.db.prepare('DELETE FROM labels WHERE id = ?').run(fromId)
+    }
+    return { taskRemaps, projectRemaps }
   }
 
   /**
@@ -597,7 +631,8 @@ export class LabelRepository {
    * IDs) and get re-pushed every reconcile cycle.
    */
   getProjectLabelsForOwner(
-    userId: string
+    userId: string,
+    projectId?: string
   ): Array<{ project_id: string; label_id: string; created_at: string; deleted_at: string | null }> {
     return this.db
       .prepare(
@@ -605,9 +640,9 @@ export class LabelRepository {
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
          WHERE p.owner_id = ?
-           AND COALESCE(p.is_shared, 0) = 0`
+           AND COALESCE(p.is_shared, 0) = 0${projectId === undefined ? '' : ' AND pl.project_id = ?'}`
       )
-      .all(userId) as unknown as Array<{
+      .all(...(projectId === undefined ? [userId] : [userId, projectId])) as unknown as Array<{
       project_id: string
       label_id: string
       created_at: string
@@ -620,7 +655,7 @@ export class LabelRepository {
    * on any project marked is_shared=1. The user has local access to these
    * projects (they're a member or owner), so all rows here are reconcilable.
    */
-  getProjectLabelsForSharedProjects(): Array<{
+  getProjectLabelsForSharedProjects(projectId?: string): Array<{
     project_id: string
     label_id: string
     created_at: string
@@ -631,9 +666,9 @@ export class LabelRepository {
         `SELECT pl.project_id, pl.label_id, pl.created_at, pl.deleted_at
          FROM project_labels pl
          INNER JOIN projects p ON p.id = pl.project_id
-         WHERE COALESCE(p.is_shared, 0) = 1`
+         WHERE COALESCE(p.is_shared, 0) = 1${projectId === undefined ? '' : ' AND pl.project_id = ?'}`
       )
-      .all() as unknown as Array<{
+      .all(...(projectId === undefined ? [] : [projectId])) as unknown as Array<{
       project_id: string
       label_id: string
       created_at: string
