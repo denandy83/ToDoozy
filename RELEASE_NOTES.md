@@ -4,6 +4,13 @@ User-facing changes by date. Most recent first.
 
 ---
 
+## v1.11.1
+
+- Sharing and invitations have stronger access checks, with safer handling when accounts or projects change.
+- Sync recovers more reliably after reconnecting and makes fewer background requests when connections are healthy.
+- Fixed several cases involving subtasks, task labels, project archives, recurring dates, timers and attachments.
+- The Logs view can show private, locally retained Supabase request summaries and host metrics when monitoring is configured.
+
 ## v1.11.0 — 30 October 2026
 
 - Menus, popups, panels and notifications now share consistent fades and movement. Keyboard actions stay immediate, and dragging has clearer feedback.
