@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { Calendar, X, AlignLeft, Link, RefreshCw } from 'lucide-react'
+import type { TodoozyAPI } from '../../preload/index.d'
 import type { Project, Label, ThemeConfig } from '../../shared/types'
 import { applyThemeConfig } from './shared/hooks/useThemeApplicator'
 import { useSmartInput } from './shared/hooks/useSmartInput'
@@ -17,6 +18,8 @@ import {
 
 
 export default function QuickAddApp(): React.JSX.Element {
+  const scope = useSyncExternalStore(window.api.sync.onContextChanged, window.api.sync.currentContext)
+  const originRef = useRef<{ api: TodoozyAPI; scope: string; current(): boolean } | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [allLabels, setAllLabels] = useState<Label[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -41,13 +44,6 @@ export default function QuickAddApp(): React.JSX.Element {
 
   const targetProjectId = selectedProjectId
 
-  // Load ALL labels across the user's projects — quick-add allows changing project
-  // later, so the picker must show every label, not just the default project's.
-  useEffect(() => {
-    if (!userId) return
-    window.api.labels.findAll(userId).then(setAllLabels).catch(() => setAllLabels([]))
-  }, [userId])
-
   // Dedupe labels by lowercase name so the same name linked to multiple projects
   // only appears once in the picker.
   const uniqueLabels = useMemo(() => {
@@ -64,9 +60,40 @@ export default function QuickAddApp(): React.JSX.Element {
 
   // Initialize: load user, projects, settings, theme
   useEffect(() => {
+    let active = true
+    const invalidate = (): void => {
+      if (!originRef.current || originRef.current.current()) return
+      active = false
+      setReady(false)
+      setProjects([])
+      setAllLabels([])
+      setUserId(null)
+    }
+    const off = window.api.sync.onContextChanged(invalidate)
     async function init(): Promise<void> {
       try {
+        const context = await window.api.sync.captureContext()
+        const captured = JSON.stringify([context.userId, context.generation])
+        const current = (): boolean => active && window.api.sync.currentContext() === captured
+        const assertCurrent = (): void => { if (!current()) throw new Error('Quick-add context changed') }
+        assertCurrent()
+        if (!context.userId) {
+          await window.api.quickadd.hide()
+          return
+        }
+        const api = new Proxy({} as TodoozyAPI, {
+          get: (_, namespace: string) => new Proxy({}, {
+            get: (_, method: string) => async (...args: unknown[]) => {
+              assertCurrent()
+              const result = await window.api.sync.invokeContext(context, `${namespace}:${method}`, args)
+              assertCurrent()
+              return result
+            }
+          })
+        })
+        originRef.current = { api, scope: captured, current }
         const sessionJson = await window.api.auth.getSession()
+        assertCurrent()
         if (!sessionJson) {
           await window.api.quickadd.hide()
           return
@@ -74,41 +101,38 @@ export default function QuickAddApp(): React.JSX.Element {
         const session = JSON.parse(sessionJson) as { access_token: string }
         const payload = JSON.parse(atob(session.access_token.split('.')[1]))
         const uid = payload.sub as string
-        setUserId(uid)
-
-        const userProjects = await window.api.projects.getProjectsForUser(uid)
-        setProjects(userProjects)
-
-        const settings = await window.api.settings.getAll(uid)
+        if (uid !== context.userId) throw new Error('Quick-add account changed')
+        const userProjects = await api.projects.getProjectsForUser(uid)
+        const settings = await api.settings.getAll(uid)
+        // Labels are optional for Quick Add; a read failure must not prevent
+        // creating an otherwise valid task. The scope check below still fences
+        // account changes while the read was in flight.
+        const labels = await api.labels.findAll(uid).catch(() => [] as Label[])
         const settingsMap: Record<string, string | null> = {}
-        for (const s of settings) {
-          settingsMap[s.key] = s.value
+        for (const setting of settings) settingsMap[setting.key] = setting.value
+        const themeId = settingsMap['theme_id']
+        if (themeId) {
+          const config = await api.themes.getConfig(themeId)
+          if (config) applyThemeConfig(config as ThemeConfig)
         }
+        assertCurrent()
+        setUserId(uid)
+        setProjects(userProjects)
+        setAllLabels(labels)
         setNewTaskPosition(settingsMap['new_task_position'] ?? 'top')
         setAddToMyDay((settingsMap['quickadd_default_myday'] ?? 'true') === 'true')
         setDateFormat(settingsMap['date_format'] ?? 'dd/mm/yyyy')
-
-        // Set default project from settings, fallback to is_default project
         const quickAddProject = settingsMap['quickadd_default_project']
         const defaultProj = userProjects.find((p) => quickAddProject ? p.id === quickAddProject : p.is_default === 1) ?? userProjects[0]
         if (defaultProj) setSelectedProjectId(defaultProj.id)
-
-        const themeId = settingsMap['theme_id']
-        if (themeId) {
-          const config = await window.api.themes.getConfig(themeId)
-          if (config) {
-            applyThemeConfig(config as ThemeConfig)
-          }
-        }
-
         setReady(true)
-        // Signal to main process that theme is applied and window can be shown
         window.api.quickadd.signalReady()
       } catch (err) {
-        console.error('Quick-add init failed:', err)
+        if (active && originRef.current?.current()) console.error('Quick-add init failed:', err)
       }
     }
-    init()
+    void init()
+    return () => { active = false; off() }
   }, [])
 
   // Auto-focus when ready
@@ -122,13 +146,15 @@ export default function QuickAddApp(): React.JSX.Element {
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     const { title: trimmed, extractedReferenceUrl, nlpDate, nlpRecurrenceRule } = smart.getSubmitData()
-    if (!trimmed || !userId || !selectedProjectId) return
+    const origin = originRef.current
+    if (!trimmed || !userId || !selectedProjectId || !origin?.current()) return
+    const { api } = origin
 
     try {
-      const defaultStatus = await window.api.statuses.findDefault(selectedProjectId)
+      const defaultStatus = await api.statuses.findDefault(selectedProjectId)
       if (!defaultStatus) return
 
-      const allTasks = await window.api.tasks.findByProjectId(selectedProjectId)
+      const allTasks = await api.tasks.findByProjectId(selectedProjectId)
       const statusTasks = allTasks.filter((t) => t.status_id === defaultStatus.id && t.parent_id === null)
       const orderIndices = statusTasks.map((t) => t.order_index)
       const maxIndex = orderIndices.length > 0 ? Math.max(...orderIndices) : 0
@@ -136,7 +162,7 @@ export default function QuickAddApp(): React.JSX.Element {
       const orderIndex = newTaskPosition === 'bottom' ? maxIndex + 1 : minIndex - 1
 
       const taskId = crypto.randomUUID()
-      await window.api.tasks.create({
+      await api.tasks.create({
         id: taskId,
         project_id: selectedProjectId,
         owner_id: userId,
@@ -154,18 +180,20 @@ export default function QuickAddApp(): React.JSX.Element {
       // Assign labels — ensure each label is linked to the target project first,
       // so cross-project labels picked from the popup get connected to this project.
       for (const label of smart.attachedLabels) {
-        await window.api.labels.addToProject(selectedProjectId, label.id).catch(() => {})
-        await window.api.tasks.addLabel(taskId, label.id)
+        await api.labels.addToProject(selectedProjectId, label.id).catch(() => {})
+        await api.tasks.addLabel(taskId, label.id)
       }
 
+      if (!origin.current()) return
       await window.api.quickadd.notifyTaskCreated()
+      if (!origin.current()) return
 
       smart.reset()
       setDescription('')
       setShowDescription(false)
       await window.api.quickadd.hide()
     } catch (err) {
-      console.error('Failed to create task:', err)
+      if (origin.current()) console.error('Failed to create task:', err)
     }
   }, [smart, userId, selectedProjectId, addToMyDay, newTaskPosition, description])
 
@@ -215,14 +243,16 @@ export default function QuickAddApp(): React.JSX.Element {
       if (data.type === 'label') {
         smart.selectLabel(data.label)
       } else if (data.type === 'label-create') {
-        if (targetProjectId && userId) {
-          window.api.labels
+        const origin = originRef.current
+        if (targetProjectId && userId && origin?.current()) {
+          origin.api.labels
             .create({ id: crypto.randomUUID(), user_id: userId, project_id: targetProjectId, name: data.name, color: data.color })
             .then((created) => {
+              if (!origin.current()) return
               smart.selectLabel(created)
               setAllLabels((prev) => [...prev, created])
             })
-            .catch((err: unknown) => console.error('Failed to create label:', err))
+            .catch((err: unknown) => { if (origin.current()) console.error('Failed to create label:', err) })
         }
         if (smart.popupState?.operator) {
           const newValue =
@@ -241,7 +271,7 @@ export default function QuickAddApp(): React.JSX.Element {
         smart.selectProject(data.project)
       }
     },
-    [smart, targetProjectId]
+    [smart, targetProjectId, userId]
   )
 
   const popupItems = useMemo(() => {
@@ -304,7 +334,7 @@ export default function QuickAddApp(): React.JSX.Element {
 
   const hasChips = smart.attachedLabels.length > 0 || smart.selectedPriority !== null || smart.selectedDate !== null || smart.referenceUrl !== null || (smart.nlpDateResult !== null && !smart.selectedDate)
 
-  if (!ready) {
+  if (!ready || originRef.current?.scope !== scope || !originRef.current?.current()) {
     return <div className="w-screen bg-transparent" />
   }
 

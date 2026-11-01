@@ -286,7 +286,11 @@ export function updateTrayBadge(): void {
   }
 }
 
-export function setTrayUserId(userId: string): void {
+export function setTrayUserId(userId: string | null): void {
+  if (currentUserId !== userId || userId === null) {
+    timerState = null
+    tray?.closeContextMenu()
+  }
   currentUserId = userId
   updateTrayBadge()
 }

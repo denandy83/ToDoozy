@@ -7,7 +7,7 @@ const harness = vi.hoisted(() => ({
 }))
 vi.mock('electron', () => ({
   ipcMain: { handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => harness.handlers.set(channel, handler) },
-  Tray: class { setTitle = harness.title; setToolTip(): void {} on(event: string, callback: () => void): void { harness.callbacks.set(event, callback) } destroy(): void {} popUpContextMenu(): void {} },
+  Tray: class { setTitle = harness.title; setToolTip(): void {} closeContextMenu(): void {} on(event: string, callback: () => void): void { harness.callbacks.set(event, callback) } destroy(): void {} popUpContextMenu(): void {} },
   Menu: { buildFromTemplate: (rows: Array<{ label?: string }>) => { harness.menu = rows; return rows } },
   nativeImage: { createFromPath: () => ({ setTemplateImage: vi.fn() }) },
   app: { isPackaged: false, getPath: () => '.', getVersion: () => 'synthetic' },
@@ -31,11 +31,14 @@ const state: TimerTrayState = { remainingSeconds: 600, elapsedSeconds: 0, phase:
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-01-16T12:00:00Z'))
   registerIpcHandlers(); createTray()
+  harness.handlers.get('auth:switchDatabase')!(trusted, 'u')
   useAuthStore.setState({ currentUser: { id: 'u' } as never })
   useSettingsStore.setState({ settings: { timer_minimize_on_start: 'false' } })
-  vi.stubGlobal('window', { api: { timer: {
-    updateTimer: (value: TimerTrayState) => harness.handlers.get('timer:updateTimer')!(trusted, value),
-    clearTimer: () => harness.handlers.get('timer:clearTimer')!(trusted), minimizeToTray: vi.fn()
+  const context = harness.handlers.get('sync:captureContext')!(trusted) as {userId:string;generation:number}
+  const scope = JSON.stringify([context.userId, context.generation])
+  vi.stubGlobal('window', { api: { sync: { currentContext: () => scope }, timer: {
+    updateTimer: (value: TimerTrayState) => harness.handlers.get('timer:updateTimer')!(trusted, value, scope),
+    clearTimer: () => harness.handlers.get('timer:clearTimer')!(trusted, scope), minimizeToTray: vi.fn()
   } } })
 })
 afterEach(() => { resetTimerForAccount(); clearTimerState(); destroyTray(); vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -53,12 +56,12 @@ it.each([
   { value: -1.2, expected: '0:00' }, { value: NaN, expected: '0:00' }, { value: Infinity, expected: '0:00' }
 ])('normalizes work and break IPC display $value', ({ value, expected }) => {
   for (const phase of ['work', 'break'] as const) {
-    harness.handlers.get('timer:updateTimer')!(trusted, { ...state, phase, remainingSeconds: value })
+    window.api.timer.updateTimer({ ...state, phase, remainingSeconds: value }, window.api.sync.currentContext())
     expect(harness.title.mock.lastCall?.[0]).toBe(`${phase === 'work' ? '⏱' : '☕'} ${expected}`)
   }
 })
 it('keeps signed cookie display consistent in tray title, menu and renderer', () => {
-  harness.handlers.get('timer:updateTimer')!(trusted, { ...state, isFlowtime: true, isCookieBreakPhase: true, cookiePoolSeconds: -0.2 })
+  window.api.timer.updateTimer({ ...state, isFlowtime: true, isCookieBreakPhase: true, cookiePoolSeconds: -0.2 }, window.api.sync.currentContext())
   expect(harness.title.mock.lastCall?.[0]).toBe('🍪 -0:01')
   harness.callbacks.get('click')!(); vi.advanceTimersByTime(150)
   expect(harness.menu.some(row => row.label === '🍪 Cookie Time: -0:01')).toBe(true)

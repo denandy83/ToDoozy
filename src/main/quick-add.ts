@@ -1,12 +1,13 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { guardRendererNavigation } from './navigation-security'
+import { getDatabaseUserId } from './database'
+import { assertTrustedSender, guardRendererNavigation } from './navigation-security'
 
 let quickAddWindow: BrowserWindow | null = null
 
 function createQuickAddWindow(): BrowserWindow {
-  quickAddWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 500,
     height: 300,
     show: false,
@@ -25,35 +26,34 @@ function createQuickAddWindow(): BrowserWindow {
     }
   })
 
-  guardRendererNavigation(quickAddWindow.webContents)
-  quickAddWindow.on('closed', () => {
-    quickAddWindow = null
+  quickAddWindow = win
+  guardRendererNavigation(win.webContents)
+  const ready = (event: Electron.IpcMainEvent): void => {
+    if (quickAddWindow !== win || win.isDestroyed() || event.sender !== win.webContents) return
+    try { assertTrustedSender(event) } catch { return }
+    ipcMain.removeListener('quickadd:ready', ready)
+    centerOnActiveDisplay(win)
+    win.show()
+    win.focus()
+  }
+  ipcMain.on('quickadd:ready', ready)
+  win.on('closed', () => {
+    ipcMain.removeListener('quickadd:ready', ready)
+    if (quickAddWindow === win) quickAddWindow = null
+  })
+  win.on('blur', () => {
+    if (!win.isDestroyed()) win.destroy()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    quickAddWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '?window=quickadd')
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'] + '?window=quickadd')
   } else {
-    quickAddWindow.loadFile(join(__dirname, '../renderer/index.html'), {
+    win.loadFile(join(__dirname, '../renderer/index.html'), {
       search: 'window=quickadd'
     })
   }
 
-  // Wait for renderer to signal theme is applied before showing
-  ipcMain.once('quickadd:ready', () => {
-    if (!quickAddWindow || quickAddWindow.isDestroyed()) return
-    centerOnActiveDisplay(quickAddWindow)
-    quickAddWindow.show()
-    quickAddWindow.focus()
-    // Destroy on blur (clicking outside, switching apps, etc.)
-    quickAddWindow.on('blur', () => {
-      if (quickAddWindow && !quickAddWindow.isDestroyed()) {
-        quickAddWindow.destroy()
-        quickAddWindow = null
-      }
-    })
-  })
-
-  return quickAddWindow
+  return win
 }
 
 function centerOnActiveDisplay(win: BrowserWindow): void {
@@ -68,6 +68,7 @@ function centerOnActiveDisplay(win: BrowserWindow): void {
 }
 
 export function showQuickAddWindow(): void {
+  if (!getDatabaseUserId()) return
   // Always create fresh — ensures theme, projects, and settings are current
   if (quickAddWindow && !quickAddWindow.isDestroyed()) {
     quickAddWindow.destroy()

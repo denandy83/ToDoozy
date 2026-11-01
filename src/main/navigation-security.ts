@@ -12,7 +12,7 @@ export function trustedRendererUrl(): string {
     : pathToFileURL(join(__dirname, '../renderer/index.html')).href
 }
 
-export function assertTrustedSender(event: IpcMainInvokeEvent): void {
+export function assertTrustedSender(event: Pick<IpcMainInvokeEvent, 'senderFrame'>): void {
   const frame = event.senderFrame
   if (!frame || frame.parent !== null || !isTrustedAppUrl(frame.url, trustedRendererUrl())) {
     throw new Error('Untrusted IPC sender')

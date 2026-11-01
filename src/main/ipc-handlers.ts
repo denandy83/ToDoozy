@@ -6,7 +6,7 @@ import { join, basename, extname } from 'path'
 import { app } from 'electron'
 import { getDatabase, switchDatabase, getDatabasePath, clearDatabaseUserId } from './database'
 import { createRepositories, type Repositories } from './repositories'
-import { hideQuickAddWindow } from './quick-add'
+import { hideQuickAddWindow, getQuickAddWindow } from './quick-add'
 import { registerQuickAddShortcut, registerAppToggleShortcut } from './index'
 import { is } from '@electron-toolkit/utils'
 import { getReservedShortcutName } from '../shared/shortcut-utils'
@@ -119,6 +119,9 @@ function registerAuthHandlers(): void {
   })
 
   handle('auth:clearSession', () => {
+    setTrayUserId(null)
+    clearTimerState()
+    hideQuickAddWindow()
     databaseGeneration++
     databaseUserId = null
     getMainWindow()?.webContents.send('sync:context-changed', { generation: databaseGeneration, userId: databaseUserId })
@@ -185,10 +188,14 @@ function registerAuthHandlers(): void {
   })
 
   handle('auth:switchDatabase', (_e, userId: string, email?: string) => {
+    setTrayUserId(null)
+    clearTimerState()
+    hideQuickAddWindow()
     databaseGeneration++
     databaseUserId = userId
     getMainWindow()?.webContents.send('sync:context-changed', { generation: databaseGeneration, userId: databaseUserId })
     switchDatabase(userId, email)
+    setTrayUserId(userId)
     // Reset repos so they use the new DB
     repos = null
   })
@@ -934,11 +941,13 @@ export function registerIpcHandlers(): void {
   )
 
   // ── Quick Add ─────────────────────────────────────────────────────
-  handle('quickadd:hide', () => {
+  handle('quickadd:hide', (event) => {
+    if (event.sender !== getQuickAddWindow()?.webContents) return
     hideQuickAddWindow()
   })
 
   handle('quickadd:notifyTaskCreated', (event) => {
+    if (!databaseUserId || event.sender !== getQuickAddWindow()?.webContents) return
     // Broadcast tasks-changed to all windows except the sender
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed() && win.webContents !== event.sender) {
@@ -992,7 +1001,8 @@ export function registerIpcHandlers(): void {
 
   // ── Tray ──────────────────────────────────────────────────────────
   handle('tray:setUserId', (_e, userId: string) => {
-    setTrayUserId(userId)
+    if (!databaseUserId || userId !== databaseUserId) throw new Error('Native account changed')
+    refreshTray()
   })
 
   handle('tray:refresh', () => {
@@ -1000,22 +1010,29 @@ export function registerIpcHandlers(): void {
   })
 
   // ── Timer ──────────────────────────────────────────────────────────
-  handle('timer:updateTimer', (_e, state: TimerTrayState) => {
+  const assertTimerScope = (scope: string | null): void => {
+    if (!databaseUserId || scope !== JSON.stringify([databaseUserId, databaseGeneration])) throw new Error('Native timer context changed')
+  }
+  handle('timer:updateTimer', (_e, state: TimerTrayState, scope: string | null) => {
+    assertTimerScope(scope)
     setTimerState(state)
   })
 
-  handle('timer:clearTimer', () => {
+  handle('timer:clearTimer', (_e, scope: string | null) => {
+    assertTimerScope(scope)
     clearTimerState()
   })
 
-  handle('timer:minimizeToTray', () => {
+  handle('timer:minimizeToTray', (_e, scope: string | null) => {
+    assertTimerScope(scope)
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.hide()
     }
   })
 
-  handle('timer:navigateToTask', (_e, taskId: string) => {
+  handle('timer:navigateToTask', (_e, taskId: string, scope: string | null) => {
+    assertTimerScope(scope)
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.show()

@@ -66,3 +66,17 @@ it('forwards optional project constraints and bulk task ownership through preloa
   await api.tasks.applyRemoteTaskLabels('t',['l'],[],'p')
   expect(harness.invoke).toHaveBeenLastCalledWith('tasks:applyRemoteTaskLabels','t',['l'],[],'p')
 })
+
+it('forwards the retained timer scope rather than a later native generation',async()=>{
+  const state={taskTitle:'PRIVATE OLD TIMER'} as Parameters<typeof api.timer.updateTimer>[0]
+  harness.events.get('sync:context-changed')!(null,{generation:1,userId:'a'})
+  const original=api.sync.currentContext()
+  harness.events.get('sync:context-changed')!(null,{generation:2,userId:'b'})
+  harness.invoke.mockResolvedValue(undefined)
+  await api.timer.updateTimer(state,original)
+  expect(harness.invoke).toHaveBeenLastCalledWith('timer:updateTimer',state,'["a",1]')
+  await api.timer.clearTimer(original)
+  expect(harness.invoke).toHaveBeenLastCalledWith('timer:clearTimer','["a",1]')
+  await api.timer.navigateToTask('current-task')
+  expect(harness.invoke).toHaveBeenLastCalledWith('timer:navigateToTask','current-task','["b",2]')
+})

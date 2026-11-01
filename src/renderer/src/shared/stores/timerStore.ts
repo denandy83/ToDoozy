@@ -105,6 +105,7 @@ export type TimerStore = TimerState & TimerActions
 
 let tickInterval: ReturnType<typeof setInterval> | null = null
 let cachedUserId: string | null = null
+let timerScope: string | null = null
 let lastTickAt = 0
 
 function clearTickInterval(): void {
@@ -183,6 +184,8 @@ export const useTimerStore = createWithEqualityFn<TimerStore>((set, get) => ({
   startTimer(params): void {
     clearTickInterval()
     cachedUserId = params.userId
+    const scope = typeof window !== 'undefined' ? window.api?.sync?.currentContext() ?? null : null
+    timerScope = scope && (JSON.parse(scope) as [string, number])[0] === params.userId ? scope : null
 
     // Daily stats reset
     const today = getTodayKey()
@@ -522,9 +525,9 @@ function syncTrayTimer(state: TimerState): void {
   if (typeof window === 'undefined' || !window.api?.timer) return
 
   if (!state.isRunning) {
-    window.api.timer.clearTimer()
+    void Promise.resolve(window.api.timer.clearTimer(timerScope)).catch(() => {})
   } else {
-    window.api.timer.updateTimer({
+    void Promise.resolve(window.api.timer.updateTimer({
       remainingSeconds: state.remainingSeconds,
       isPaused: state.isPaused,
       phase: state.phase,
@@ -539,7 +542,7 @@ function syncTrayTimer(state: TimerState): void {
       totalFocusSecondsToday: state.totalFocusSecondsToday,
       isCookieBreakPhase: state.isCookieBreakPhase,
       cookiePoolSeconds: state.cookiePoolSeconds
-    })
+    }, timerScope)).catch(() => {})
   }
 }
 
@@ -617,6 +620,6 @@ export function resetTimerForAccount(): void {
   cachedUserId = null
   useTimerStore.setState(useTimerStore.getInitialState(), true)
   if (typeof window !== 'undefined') {
-    try { void Promise.resolve(window.api?.timer?.clearTimer()).catch(()=>{}) } catch { /* bridge may be closing */ }
+    try { void Promise.resolve(window.api?.timer?.clearTimer(timerScope)).catch(()=>{}) } catch { /* bridge may be closing */ }
   }
 }

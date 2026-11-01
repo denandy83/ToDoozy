@@ -327,8 +327,8 @@ export interface TimerTrayState {
 }
 
 export interface TimerAPI {
-  updateTimer(state: TimerTrayState): Promise<void>
-  clearTimer(): Promise<void>
+  updateTimer(state: TimerTrayState, scope: string | null): Promise<void>
+  clearTimer(scope: string | null): Promise<void>
   minimizeToTray(): Promise<void>
   navigateToTask(taskId: string): Promise<void>
   onPause(callback: () => void): () => void

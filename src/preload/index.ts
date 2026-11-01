@@ -254,10 +254,10 @@ const api: TodoozyAPI = {
   },
 
   timer: {
-    updateTimer: (state) => ipcRenderer.invoke('timer:updateTimer', state),
-    clearTimer: () => ipcRenderer.invoke('timer:clearTimer'),
-    minimizeToTray: () => ipcRenderer.invoke('timer:minimizeToTray'),
-    navigateToTask: (taskId) => ipcRenderer.invoke('timer:navigateToTask', taskId),
+    updateTimer: (state, scope) => ipcRenderer.invoke('timer:updateTimer', state, scope),
+    clearTimer: (scope) => ipcRenderer.invoke('timer:clearTimer', scope),
+    minimizeToTray: () => ipcRenderer.invoke('timer:minimizeToTray', api.sync.currentContext()),
+    navigateToTask: (taskId) => ipcRenderer.invoke('timer:navigateToTask', taskId, api.sync.currentContext()),
     onPause: (callback) => {
       ipcRenderer.on('timer:pause', callback)
       return () => { ipcRenderer.removeListener('timer:pause', callback) }
