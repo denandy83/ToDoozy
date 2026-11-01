@@ -1013,7 +1013,7 @@ export async function acceptInvite(token: string, userId: string, origin = captu
     const { data: membership, error: membershipError } = await accepted.client.from('project_members')
       .select('user_id').eq('project_id', projectId).eq('user_id', userId).maybeSingle()
     if (membershipError || membership?.user_id !== userId) throw new Error(membershipError?.message ?? 'Project membership is no longer available')
-    await syncProjectDown(projectId, userId, accepted)
+    await syncProjectDown(projectId, userId, accepted, true)
     await requireProducerCurrent(origin)
     accepted.assertCurrent()
     return projectId
@@ -1201,7 +1201,7 @@ async function syncMembersDown(projectId: string, context: SyncContext, snapshot
 /**
  * Sync all shared project data from Supabase to local SQLite.
  */
-export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext): Promise<void> {
+export async function syncProjectDown(projectId: string, userId: string, context?: SyncContext, requireComplete = false): Promise<void> {
   const projectCurrent = captureProjectScope()
   const admission = membershipSnapshot()
   // Never sync down when offline — would delete all local tasks
@@ -1279,18 +1279,24 @@ export async function syncProjectDown(projectId: string, userId: string, context
     for (const pl of remoteProjectLabels) {
       const labelId = pl.label_id as string
       const deletedAt = (pl.deleted_at as string | null | undefined) ?? null
-      const exists = await api.labels.findById(labelId).catch(() => null)
-      if (!exists) continue
+      const exists = await api.labels.findById(labelId).catch(error => {
+        if (requireComplete) throw error
+        return null
+      })
+      if (!exists) {
+        if (requireComplete && !deletedAt) throw new Error('Project label unavailable')
+        continue
+      }
       await api.labels.applyRemoteProjectLabel({
         project_id: projectId,
         label_id: labelId,
         created_at: (pl.created_at as string | null) ?? null,
         deleted_at: deletedAt
-      }).catch(() => {})
+      }).catch(error => { if (requireComplete) throw error })
       if (deletedAt) {
         await api.labels
           .softDeleteTaskLabelsForProjectLabel(projectId, labelId)
-          .catch(() => {})
+          .catch(error => { if (requireComplete) throw error })
       }
     }
   }
@@ -1390,6 +1396,7 @@ export async function syncProjectDown(projectId: string, userId: string, context
           deleted_at: task.deleted_at ?? null
         })
       } catch (e) {
+        if (requireComplete) throw e
         // Don't let a single task failure (e.g. dangling FK) abort the whole sync
         console.error(`[SyncService] Failed to sync task "${task.title}" (${task.id}):`, e)
         continue
@@ -1406,14 +1413,14 @@ export async function syncProjectDown(projectId: string, userId: string, context
 
   if (remoteTasks?.length) {
     const { pullTaskLabelsForTasks } = await import('./PersonalSyncService')
-    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context,projectId)
+    await pullTaskLabelsForTasks(remoteTasks.map((task)=>String(task.id)),userId,context,projectId,requireComplete)
   }
 
   // Delete local tasks that no longer exist in Supabase
   const localTasks = await api.tasks.findByProjectId(projectId)
   for (const lt of localTasks) {
     if (!remoteTaskIds.has(lt.id)) {
-      await api.tasks.delete(lt.id).catch(() => {})
+      await api.tasks.delete(lt.id).catch(error => { if (requireComplete) throw error })
     }
   }
 

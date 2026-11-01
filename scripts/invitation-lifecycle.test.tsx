@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { runInContext } from 'node:vm'
 import { act, createElement, useLayoutEffect, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
@@ -290,7 +291,7 @@ it.each(['Accept','Decline'])('reserves the first %s action before a delayed nat
   expect(f.h.fixtureErrors).toEqual([])
 })
 
-it.each(['normal','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
+it.each(['normal','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before','task-fetch','task-apply','project-label-fetch','label-fetch','label-apply','project-label-probe','project-label-apply','project-label-cleanup','task-label-fetch','task-label-definition-fetch','task-label-definition-apply','task-label-snapshot','task-label-apply','task-cleanup','project-label-unavailable','task-label-unavailable'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
   const {PGlite}=await import('@electric-sql/pglite')
   const {readFileSync}=await import('node:fs')
   const pg=new PGlite()
@@ -306,14 +307,66 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
     const migration=readFileSync(new URL('../supabase/migrations/20261030213612_security_performance_hardening.sql',import.meta.url),'utf8')
     await pg.exec(migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION public.accept_invite'),migration.indexOf('-- A recipient may consume')))
     const f=await setup(),h=f.h
+    const NativeError = runInContext('Error', h.sandbox) as ErrorConstructor
     for(const row of h.remote.projects)if(row.id==='joined')row.id=project
     for(const table of ['project_members','statuses'])for(const row of h.remote[table])if(row.project_id==='joined')row.project_id=project
+    const timestamp='2030-01-01T00:00:00.000Z'
+    const joinedTask={id:'joined-task',project_id:project,owner_id:'u',status_id:'joined-status',title:'JOINED TASK',parent_id:null,created_at:timestamp,updated_at:timestamp,deleted_at:null}
+    h.remote.tasks.push(joinedTask)
+    const labels=[
+      {id:'joined-label',user_id:'u',name:'JOINED LABEL',color:'#123456'},
+      {id:'deleted-label',user_id:'u',name:'DELETED LABEL',color:'#654321'},
+      {id:'task-only-label',user_id:'u',name:'TASK ONLY LABEL',color:'#abcdef'}
+    ].map(label=>({...label,order_index:0,created_at:timestamp,updated_at:timestamp,deleted_at:null}))
+    h.remote.user_labels.push(...labels)
+    h.remote.project_labels.push(
+      {project_id:project,label_id:'joined-label',created_at:timestamp,deleted_at:null},
+      {project_id:project,label_id:'deleted-label',created_at:timestamp,deleted_at:timestamp}
+    )
+    h.remote.task_labels.push({task_id:'joined-task',label_id:'joined-label',deleted_at:null},{task_id:'joined-task',label_id:'task-only-label',deleted_at:null})
+    if(mode==='task-cleanup'||mode==='project-label-cleanup'){
+      h.repo.projects.applyRemote(h.remote.projects.find((row:{id:string})=>row.id===project))
+      h.repo.projects.addMember(project,'u','member')
+      h.repo.statuses.applyRemote(h.remote.statuses.find((row:{id:string})=>row.id==='joined-status'))
+      if(mode==='task-cleanup')h.repo.tasks.create({...joinedTask,id:'obsolete-task',title:'OBSOLETE TASK'})
+      else{
+        h.repo.tasks.applyRemoteTask(joinedTask)
+        h.repo.labels.applyRemote(labels[1])
+        h.repo.labels.addToProject(project,'deleted-label')
+        h.repo.tasks.addLabel('joined-task','deleted-label')
+      }
+    }
     const transport=h.sandbox.fetch
     let calls=0,sqlCalls=0,failed=false,probePending=false,probeFailures=0
+    const nativeFailures:Record<string,[string,string,(args:unknown[])=>boolean]>={
+      'task-apply':['tasks','applyRemoteTask',args=>(args[0] as {id:string}).id==='joined-task'],
+      'label-apply':['labels','applyRemote',args=>(args[0] as {id:string}).id==='joined-label'],
+      'project-label-apply':['labels','applyRemoteProjectLabel',args=>(args[0] as {label_id:string}).label_id==='joined-label'],
+      'project-label-cleanup':['labels','softDeleteTaskLabelsForProjectLabel',()=>true],
+      'task-label-definition-apply':['labels','applyRemote',args=>(args[0] as {id:string}).id==='task-only-label'],
+      'task-label-snapshot':['tasks','getLabelState',args=>args[0]==='joined-task'],
+      'task-label-apply':['tasks','applyRemoteTaskLabels',args=>args[0]==='joined-task'],
+      'task-cleanup':['tasks','delete',args=>args[0]==='obsolete-task']
+    }
+    const failure=nativeFailures[mode]
+    if(failure){
+      const [namespace,method,matches]=failure,original=h.repo[namespace][method].bind(h.repo[namespace])
+      h.repo[namespace][method]=(...args:unknown[])=>{
+        if(!failed&&matches(args)){failed=true;throw new NativeError('Synthetic '+mode+' failure')}
+        return original(...args)
+      }
+    }
     const originalApi=h.sandbox.window.api
     h.sandbox.window.api=new Proxy(originalApi,{get(target,namespace){
       if(namespace!=='sync')return Reflect.get(target,namespace)
       return new Proxy(target.sync,{get(sync,method){
+        if(method==='invokeContext')return (origin:unknown,channel:string,args:unknown[])=>{
+          if(mode==='project-label-probe'&&!failed&&channel==='labels:findById'&&args[0]==='joined-label'&&h.repo.labels.findById('joined-label')){
+            failed=true
+            throw new NativeError('Synthetic '+mode+' failure')
+          }
+          return sync.invokeContext(origin,channel,args)
+        }
         if(method!=='captureContext')return Reflect.get(sync,method)
         return async()=>{
           const current=await sync.captureContext()
@@ -347,6 +400,18 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
         if(mode==='offline-completion'&&!failed){failed=true;h.sandbox.navigator.onLine=false}
         return response(rows)
       }
+      if(!failed&&parsed.pathname.endsWith('/user_labels')&&(
+        (mode==='project-label-unavailable'&&parsed.searchParams.get('id')?.includes('joined-label'))
+        ||(mode==='task-label-unavailable'&&parsed.searchParams.get('id')?.includes('task-only-label')))){
+        failed=true
+        return response([])
+      }
+      const failureTable:Record<string,string>={'task-fetch':'tasks','project-label-fetch':'project_labels','label-fetch':'user_labels','task-label-fetch':'task_labels','task-label-definition-fetch':'user_labels'}
+      if(!failed&&parsed.pathname.endsWith('/'+failureTable[mode])
+        &&(mode!=='task-label-definition-fetch'||parsed.searchParams.get('id')?.includes('task-only-label'))){
+        failed=true
+        return response({message:'Synthetic '+mode+' failure'},503)
+      }
       return transport(url,init)
     }
     const apply=h.repo.projects.applyRemote.bind(h.repo.projects)
@@ -366,6 +431,17 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
     if(mode!=='normal'){
       expect(f.host.textContent).toContain('PRIVATE FIRST')
       expect(f.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+      if(mode in nativeFailures||['project-label-probe','task-fetch','project-label-fetch','label-fetch','task-label-fetch','task-label-definition-fetch'].includes(mode)){
+        expect(failed).toBe(true)
+        expect(f.host.textContent).toContain('Failed to join the project: Synthetic '+mode+' failure')
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+        expect(h.channels.some((channel:{topic:string})=>channel.topic==='project:'+project)).toBe(false)
+      }
+      if(mode.endsWith('-unavailable')){
+        expect(failed).toBe(true)
+        expect(f.host.textContent).toContain(mode==='project-label-unavailable'?'Project label unavailable':'Task label unavailable')
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+      }
       if(mode==='post-probe'){expect(probeFailures).toBe(1);expect(h.sandbox.window.api.sync.currentContext()).toBe(originalScope);expect(h.repo.projects.findById(project)).toBeUndefined()}
       if(mode==='offline-completion')expect(h.repo.projects.findById(project)).toBeUndefined()
       h.sandbox.navigator.onLine=true
@@ -384,9 +460,44 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
       expect(f.host.textContent).toContain('PRIVATE QUEUED')
       expect(h.repo.projects.findById(project)).toBeDefined()
       expect(h.stores.useViewStore.getState().selectedProjectId).toBe(project)
+      expect(h.repo.tasks.findByProjectId(project).map((task:{id:string})=>task.id)).toEqual(['joined-task'])
+      expect(h.repo.tasks.getLabels('joined-task').map((link:{label_id:string})=>link.label_id).sort()).toEqual(['joined-label','task-only-label'])
+      expect(h.repo.labels.findByProjectId(project).map((label:{id:string})=>label.id).sort()).toEqual(['joined-label','task-only-label'])
+      if(mode==='task-cleanup')expect(h.repo.tasks.findById('obsolete-task').deleted_at).toBeTruthy()
       expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(1)
     }
     expect((await pg.query<{status:string}>('SELECT status FROM project_invites')).rows[0].status).toBe('accepted')
     expect(h.fixtureErrors).toEqual([])
   }finally{await pg.close()}
 },20000)
+
+it.each(['tasks', 'task_labels'].flatMap(table => ['account', 'database', 'project'].flatMap(change => [false, true].map(fail => ({ table, change, fail })))))(
+  'cancels accepted $table hydration after $change invalidation (late failure=$fail)', async ({ table, change, fail }) => {
+    const f = await setup(), h = f.h, pause = gate(), transport = h.sandbox.fetch
+    const timestamp = '2030-01-01T00:00:00.000Z'
+    h.remote.tasks.push({ id: 'held-task', project_id: 'joined', owner_id: 'u', status_id: 'joined-status', title: 'HELD TASK', created_at: timestamp, updated_at: timestamp })
+    h.remote.user_labels.push({ id: 'held-label', user_id: 'u', name: 'HELD LABEL', color: '#123456', created_at: timestamp, updated_at: timestamp })
+    h.remote.task_labels.push({ task_id: 'held-task', label_id: 'held-label', deleted_at: null })
+    let held = false
+    h.sandbox.fetch = async (url: string, init: RequestInit) => {
+      const result = await transport(url, init), parsed = new URL(String(url))
+      if (!held && parsed.pathname.endsWith('/' + table) && (table === 'task_labels' || parsed.searchParams.get('project_id') === 'eq.joined')) {
+        held = true; pause.enter(); await pause.wait
+        if (fail) return response({ message: 'PRIVATE HYDRATION ERROR' }, 403)
+      }
+      return result
+    }
+    await f.mount(); await f.click('Accept'); await pause.entered
+    if (change === 'project') h.services.evictProjectData('joined')
+    else await f.change(change as 'account' | 'database')
+    const native = h.nativeCalls.length
+    pause.release(); await f.idle()
+    expect(h.nativeCalls.slice(native)).toEqual([])
+    expect(f.mutations).toEqual(['accept_invite'])
+    expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+    expect(h.channels.some((channel: { topic: string }) => channel.topic === 'project:joined')).toBe(false)
+    expect(f.host.textContent).not.toContain('PRIVATE HYDRATION ERROR')
+    if (change === 'project') expect(f.host.textContent).toContain('PRIVATE FIRST')
+    else expect(f.host.textContent).toContain('CURRENT INVITE')
+    expect(h.fixtureErrors).toEqual([])
+  }, 15000)

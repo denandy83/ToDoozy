@@ -527,3 +527,51 @@ it('retains a denied self-leave and allows a manual retry without publishing a f
   expect(messages.at(-1)).toContain('A local copy has been kept')
   expect(f.h.fixtureErrors).toEqual([])
 })
+
+const recoveryNameCases = [
+  { name: 'İ', other: 'i\u0307', reuse: false },
+  { name: 'i\u0307', other: 'İ', reuse: false },
+  { name: 'ΟΣ', other: 'ος', reuse: false },
+  { name: 'ος', other: 'ΟΣ', reuse: false },
+  { name: 'Bug', other: 'bug', reuse: true },
+  { name: '100%_Bug[.]', other: '100wildcardXBug.', reuse: false }
+]
+it.each(recoveryNameCases.flatMap(names => ['copy', 'offline-copy', 'leave'].map(entry => ({ ...names, entry }))))(
+  'preserves literal label identity for $name versus $other through $entry', async ({ name, other, reuse, entry }) => {
+    const f = await setup()
+    f.h.repo.labels.hardDelete('label')
+    const candidate = f.h.repo.labels.create({ id: 'owned-name', user_id: 'u', name: other, color: '#abcdef' })
+    f.h.services.db.prepare('UPDATE labels SET updated_at=?,created_at=? WHERE id=?').run('2020-01-01', '2020-01-01', candidate.id)
+    const candidateBefore = { ...f.h.repo.labels.findById(candidate.id) }
+    f.h.repo.labels.create({ id: 'label', user_id: 'other', project_id: 'p0', name, color: '#123456' })
+    f.h.repo.tasks.addLabel('child', 'label')
+    f.h.remote.user_labels = [{ ...candidateBefore }, { ...f.h.repo.labels.findById('label') }]
+    const offline = entry === 'offline-copy'
+    f.h.stores.useAuthStore.setState({ isOffline: offline })
+    f.h.sandbox.navigator.onLine = !offline
+    if (offline) f.h.sandbox.fetch = async () => new Response(JSON.stringify({ message: 'Synthetic offline transport' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
+    if (entry === 'leave') {
+      await act(async () => { f.root.render(createElement(f.h.services.MemberSettings, { project: f.h.repo.projects.findById('p0'), onToast: () => {} })); await f.h.untilIdle() })
+      await click('Leave Project')
+    } else {
+      f.h.repo.projects.removeMember('p0', 'u')
+      f.h.services.evictProjectData('p0')
+      await mount(f, 'copy', vi.fn())
+    }
+    await click('Keep Copy'); await idle(f.h)
+    const copy = f.h.repo.projects.getProjectsForUser('u').find((project: { id: string }) => project.id !== 'p0')
+    expect(copy).toBeDefined()
+    expect(f.h.repo.projects.findById('p0').deleted_at).toBeTruthy()
+    const palette = f.h.repo.labels.findByProjectId(copy.id)
+    expect(palette).toHaveLength(1)
+    expect(palette[0]).toMatchObject({ user_id: 'u', name: reuse ? other : name, color: reuse ? '#abcdef' : '#123456' })
+    if (reuse && !offline) expect(palette[0].id).toBe(candidate.id)
+    else expect(palette[0].id).not.toBe(candidate.id)
+    if (!reuse) expect(f.h.repo.labels.findById(candidate.id)).toMatchObject({ id: candidate.id, user_id: 'u', name: other, color: '#abcdef', created_at: candidateBefore.created_at, updated_at: candidateBefore.updated_at, deleted_at: null })
+    const tasks = f.h.repo.tasks.findAllByProject(copy.id)
+    expect(tasks).toHaveLength(2)
+    const child = tasks.find((task: { parent_id: string | null }) => task.parent_id)
+    expect(f.h.repo.tasks.getLabels(child.id).map((link: { label_id: string }) => link.label_id)).toEqual([palette[0].id])
+    expect(f.h.repo.syncQueue.findAll().some((row: { table_name: string; payload: string }) => row.table_name === 'project_labels' && JSON.parse(row.payload).labelId === palette[0].id)).toBe(true)
+    expect(f.h.fixtureErrors).toEqual([])
+  }, 15000)

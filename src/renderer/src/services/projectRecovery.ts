@@ -28,8 +28,7 @@ export async function hydrateProjectLabel(label: Label, userId: string, context:
 
 async function ownedSnapshot(label: Label, origin: SyncProducer): Promise<{ label: Label; previousId: string | null }> {
   const userId = origin.userId!
-  const candidates = await origin.api.labels.findAllByUser(userId)
-  const candidate = candidates.find(item => item.name.toLowerCase() === label.name.toLowerCase())
+  const candidate = await origin.api.labels.findByName(userId, label.name)
   if (candidate) {
     let owned = false
     try {

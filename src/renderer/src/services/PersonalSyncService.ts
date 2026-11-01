@@ -1511,9 +1511,9 @@ export async function pullStatuses(projectId: string, context?: SyncContext): Pr
  */
 async function ensureLabelsExistLocally(
   labelIds: string[],
-  projectId: string | null,
   expectedUserId: string | undefined,
-  context: SyncContext
+  context: SyncContext,
+  requireComplete: boolean
 ): Promise<Map<string, string>> {
   const api = context.api
   const remap = new Map<string, string>()
@@ -1525,10 +1525,6 @@ async function ensureLabelsExistLocally(
     if (expectedUserId && useAuthStore.getState().currentUser?.id !== expectedUserId) throw new Error('Search account changed')
   }
   assertUser()
-
-  const link = async (labelId: string): Promise<void> => {
-    if (projectId) await api.labels.applyRemoteProjectLabel({ project_id: projectId, label_id: labelId, created_at: null, deleted_at: null }).catch(() => {})
-  }
 
   const localLabels = new Map((await Promise.all(labelIds.map((id) => api.labels.findById(id))))
     .filter((label): label is Label => !!label).map((label) => [label.id, label]))
@@ -1545,30 +1541,28 @@ async function ensureLabelsExistLocally(
     if (localLabel) {
       // Already present. Own it (or legacy NULL-owner) → use as-is. A
       // foreign-owned local row (rare in a single-user DB) → adopt to our own.
-      if (!ownerId || localLabel.user_id === ownerId || localLabel.user_id == null) {
-        await link(localLabel.id)
-      } else {
+      if (ownerId && localLabel.user_id != null && localLabel.user_id !== ownerId) {
         const own = await api.labels.adopt(ownerId, localLabel)
-        await link(own.id)
         if (own.id !== labelId) remap.set(labelId, own.id)
       }
       continue
     }
 
     const remoteLabel = remoteLabels.get(labelId)
-    if (!remoteLabel) continue
+    if (!remoteLabel) {
+      if (requireComplete) throw new Error('Task label unavailable')
+      continue
+    }
 
     if (!ownerId || remoteLabel.user_id === ownerId) {
       // Our own label (from another device), or no signed-in user to enforce
       // ownership: store the remote row faithfully, preserving its id.
-      await api.labels.applyRemote(remoteLabel as Label).catch(() => {})
-      await link(labelId)
+      await api.labels.applyRemote(remoteLabel as Label)
       continue
     }
 
     // Foreign / null-owner label → current user must own a same-name copy.
     const own = await api.labels.adopt(ownerId, remoteLabel as Label)
-    await link(own.id)
     if (own.id !== labelId) remap.set(labelId, own.id)
   }
   return remap
@@ -1584,14 +1578,14 @@ async function ensureLabelsExistLocally(
  * updated_at doesn't advance (which is why pullNewTasks never sees it).
  * Returns the number of newly applied label assignments.
  */
-export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string, context?: SyncContext, projectId?: string): Promise<number> {
+export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?: string, context?: SyncContext, projectId?: string, requireComplete = false): Promise<number> {
   const projectCurrent = captureProjectScope()
   if (!taskIds.length) return 0
   try {
     context ??= await captureSyncContext()
     if (projectId !== undefined) {
       const current = projectSyncContext(context, projectId, projectCurrent)
-      return await pullTaskLabelsForProject(projectId, taskIds, expectedUserId, current)
+      return await pullTaskLabelsForProject(projectId, taskIds, expectedUserId, current, requireComplete)
     }
     const projects = new Map<string, string[]>()
     for (const task of await context.api.tasks.findByIds(taskIds)) {
@@ -1603,16 +1597,17 @@ export async function pullTaskLabelsForTasks(taskIds: string[], expectedUserId?:
     for (const [projectId, ids] of projects) {
       const current = projectSyncContext(context, projectId, projectCurrent)
       if (!await current.isCurrent()) continue
-      added += await pullTaskLabelsForProject(projectId, ids, expectedUserId, current)
+      added += await pullTaskLabelsForProject(projectId, ids, expectedUserId, current, requireComplete)
     }
     return added
   } catch (error) {
+    if (requireComplete) throw error
     if (context && await context.isCurrent()) console.warn('[PersonalSync] pullTaskLabelsForTasks failed:', error)
     return 0
   }
 }
 
-async function pullTaskLabelsForProject(projectId: string, taskIds: string[], expectedUserId: string | undefined, context: SyncContext): Promise<number> {
+async function pullTaskLabelsForProject(projectId: string, taskIds: string[], expectedUserId: string | undefined, context: SyncContext, requireComplete: boolean): Promise<number> {
   if (!taskIds.length) return 0
   try {
     const api = context.api
@@ -1622,7 +1617,7 @@ async function pullTaskLabelsForProject(projectId: string, taskIds: string[], ex
       .in('task_id', ids).is('deleted_at', null), ['task_id', 'label_id'])
     if (error) throw new Error(error.message)
     const labelIds = [...new Set(pairs.map((p) => p.label_id as string))]
-    const remap = await ensureLabelsExistLocally(labelIds, null, expectedUserId, context)
+    const remap = await ensureLabelsExistLocally(labelIds, expectedUserId, context, requireComplete)
     let added = 0
     const { useAuthStore } = await import('../shared/stores/authStore')
     for (const taskId of taskIds) {
@@ -1632,6 +1627,7 @@ async function pullTaskLabelsForProject(projectId: string, taskIds: string[], ex
     }
     return added
   } catch (err) {
+    if (requireComplete) throw err
     if (context && await context.isCurrent()) console.warn('[PersonalSync] pullTaskLabelsForTasks failed:', err)
     return 0
   }
