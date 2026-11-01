@@ -1,4 +1,5 @@
-import { hydrationContext } from './hydrationContext'
+import { hydrationContext, type HydrationOrigin } from './hydrationContext'
+import { useAuthStore } from './authStore'
 import { useMemo } from 'react'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -12,7 +13,7 @@ interface AttachmentState {
 interface AttachmentActions {
   hydrateAttachments(taskId: string): Promise<void>
   addAttachment(attachment: Attachment, origin: ReturnType<typeof hydrationContext>): Promise<void>
-  removeAttachment(id: string): Promise<boolean>
+  removeAttachment(id: string, origin?: HydrationOrigin): Promise<boolean>
   clearAttachments(): void
 }
 
@@ -20,16 +21,38 @@ export type AttachmentStore = AttachmentState & AttachmentActions
 
 let attachmentRequest = 0
 
-export const useAttachmentStore = createWithEqualityFn<AttachmentStore>((set) => ({
+export async function attachmentContext(taskId: string, origin?: HydrationOrigin): Promise<ReturnType<typeof hydrationContext>> {
+  const initial = hydrationContext(origin)
+  const userId = useAuthStore.getState().currentUser?.id
+  const task = await initial.api.tasks.findById(taskId)
+  if (!userId || !task || task.deleted_at || !initial.isProjectCurrent(task.project_id)) throw new Error('Attachment task unavailable')
+  const context = hydrationContext(initial, task.project_id)
+  return { ...context, isCurrent: async () => {
+    try {
+      if (!await context.isCurrent()) return false
+      const [current, projects] = await Promise.all([
+        context.api.tasks.findById(taskId),
+        context.api.projects.getProjectsForUser(userId, task.project_id)
+      ])
+      context.assertCurrent()
+      return !!current && !current.deleted_at && current.project_id === task.project_id && projects.some(project => project.id === task.project_id)
+    } catch { return false }
+  } }
+}
+
+export const useAttachmentStore = createWithEqualityFn<AttachmentStore>((set, get) => ({
   attachments: {},
   loading: false,
 
   async hydrateAttachments(taskId: string): Promise<void> {
     const request = ++attachmentRequest
-    const origin = hydrationContext()
-    const current = async (): Promise<boolean> => request === attachmentRequest && await origin.isCurrent()
-    set({ loading: true })
+    const initial = hydrationContext()
+    let origin: Awaited<ReturnType<typeof attachmentContext>> | undefined
+    const current = async (): Promise<boolean> => request === attachmentRequest && await (origin ?? initial).isCurrent()
     try {
+      origin = await attachmentContext(taskId, initial)
+      if (!await current()) return
+      set({ loading: true })
       const list = await origin.api.attachments.findByTaskId(taskId)
       if (!await current()) return
       const map: Record<string, Attachment> = {}
@@ -46,13 +69,18 @@ export const useAttachmentStore = createWithEqualityFn<AttachmentStore>((set) =>
 
   async addAttachment(attachment: Attachment, origin: ReturnType<typeof hydrationContext>): Promise<void> {
     if (!await origin.isCurrent()) return
+    const current = await attachmentContext(attachment.task_id, origin)
+    if (!await current.isCurrent()) return
     set((state) => ({
       attachments: { ...state.attachments, [attachment.id]: attachment }
     }))
   },
 
-  async removeAttachment(id: string): Promise<boolean> {
-    const origin = hydrationContext()
+  async removeAttachment(id: string, producer?: HydrationOrigin): Promise<boolean> {
+    const attachment = get().attachments[id]
+    if (!attachment) return false
+    const origin = await attachmentContext(attachment.task_id, producer)
+    if (!await origin.isCurrent()) return false
     const result = await origin.api.attachments.delete(id)
     if (!await origin.isCurrent()) return false
     if (result) {
@@ -66,7 +94,7 @@ export const useAttachmentStore = createWithEqualityFn<AttachmentStore>((set) =>
 
   clearAttachments(): void {
     attachmentRequest++
-    set({ attachments: {} })
+    set({ attachments: {}, loading: false })
   }
 }), shallow)
 

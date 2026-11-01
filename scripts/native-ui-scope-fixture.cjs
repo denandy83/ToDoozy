@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const esbuild = require('esbuild');
 const root = path.resolve(__dirname, '..');
-async function nativeUiFixture() {
+async function nativeUiFixture({ ui = false } = {}) {
   const runtime = { handlers: new Map(), windows: [], title: '', menu: [], session: null, files: new Map(), userId: null, contexts: new Set(), scope: null, held: null, messages: [], ready: 0 };
   class Contents extends EventEmitter {
     send(channel, context) {
@@ -60,6 +60,19 @@ async function nativeUiFixture() {
     import { trustedRendererUrl } from './src/main/navigation-security';
     import { useTimerStore, resetTimerForAccount } from './src/renderer/src/shared/stores/timerStore';
     import QuickAddApp from './src/renderer/src/QuickAddApp';
+    ${ui ? `import { AppLayout } from './src/renderer/src/AppLayout';
+    import { DetailAttachments } from './src/renderer/src/features/detail/DetailAttachments';
+    import { ProjectsSettingsContent } from './src/renderer/src/features/settings/ProjectsSettingsContent';
+    import { RemovedFromProjectDialog } from './src/renderer/src/features/collaboration/RemovedFromProjectDialog';
+    import { ToastContainer } from './src/renderer/src/shared/components/Toast';
+    import { useAuthStore } from './src/renderer/src/shared/stores/authStore';
+    import { useAttachmentStore } from './src/renderer/src/shared/stores/attachmentStore';
+    import { useNotificationStore } from './src/renderer/src/shared/stores/notificationStore';
+    import { useProjectAreaStore } from './src/renderer/src/shared/stores/projectAreaStore';
+    import { useProjectStore } from './src/renderer/src/shared/stores/projectStore';
+    import { useTaskStore } from './src/renderer/src/shared/stores/taskStore';
+    import { useViewStore } from './src/renderer/src/shared/stores/viewStore';
+    import { evictProjectData } from './src/renderer/src/shared/stores/projectCache';` : ''}
     const databases = new Map(), repositories = new Map();
     for (const user of ['a','b']) {
       const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys=ON;CREATE TABLE schema_version(version INTEGER PRIMARY KEY)');
@@ -73,26 +86,31 @@ async function nativeUiFixture() {
     }
     globalThis.runtime.databases=databases;globalThis.runtime.db=databases.get('a');
     registerIpcHandlers();tray.createTray();
-    module.exports={tray,quick,useTimerStore,resetTimerForAccount,QuickAddApp,repositories,databases,trustedRendererUrl};`;
-  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', jsx: 'automatic', logLevel: 'silent', plugins: [{name:'native-fixture',setup(build) {
+    module.exports={${ui ? 'AppLayout,DetailAttachments,ProjectsSettingsContent,RemovedFromProjectDialog,ToastContainer,useAuthStore,useAttachmentStore,useNotificationStore,useProjectAreaStore,useProjectStore,useTaskStore,useViewStore,evictProjectData,' : ''}tray,quick,useTimerStore,resetTimerForAccount,QuickAddApp,repositories,databases,trustedRendererUrl};`;
+  const result = await esbuild.build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, loader: { '.png': 'dataurl' }, bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', jsx: 'automatic', logLevel: 'silent', plugins: [{name:'native-fixture',setup(build) {
+    if(ui)build.onResolve({filter:/^tiptap-markdown$/},()=>({path:path.join(root,'node_modules/tiptap-markdown/dist/tiptap-markdown.es.js')}));
     build.onLoad({filter:/\.[cm]?[jt]sx?$/}, args => {
+      if(args.path.includes(path.sep+'node_modules'+path.sep))return;
       const rel=path.relative(root,args.path).replaceAll(path.sep,'/');
       let contents;
       if (rel==='src/main/index.ts') contents='export const getMainWindow=()=>globalThis.runtime.mainWindow;export const registerQuickAddShortcut=()=>({success:true});export const registerAppToggleShortcut=()=>({success:true});';
       else if (rel==='src/main/database/index.ts') contents='export const getDatabase=()=>globalThis.runtime.db;export const switchDatabase=(id)=>{globalThis.runtime.userId=id;return globalThis.runtime.db=globalThis.runtime.databases.get(id)};export const clearDatabaseUserId=()=>{globalThis.runtime.userId=null};export const getDatabaseUserId=()=>globalThis.runtime.userId;export const getDatabasePath=()=>null;';
+      else if (ui && rel==='src/renderer/src/services/sessionRecovery.ts') contents='export const requireSession=async()=>null;export const tryRestoreSession=async()=>null;export const startRecoveryTimer=()=>{};export const stopRecoveryTimer=()=>{};export const resetPermanentlyDeadFlag=()=>{};export const isPermanentlyDead=()=>false;';
       else if (rel==='src/main/priority-icons.ts') contents='export const getPriorityDotIcon=()=>null;';
       else contents=process.env.REVIEW_BASE_REF ? cp.execFileSync('git',['show',process.env.REVIEW_BASE_REF+':'+rel],{cwd:root,encoding:'utf8'}) : fs.readFileSync(args.path,'utf8');
       return {contents,loader:args.path.endsWith('tsx')?'tsx':'ts'};
     });
   }}] });
   const localRequire = name => {
+    if (ui && name.endsWith('.css')) return {};
+    if (ui && name==='@dnd-kit/core') { const actual=require(name);return {...actual,DndContext:props=>{runtime.drag=props;return require('react').createElement(actual.DndContext,props)}}; }
     if (name==='electron') return runtime.electron;
     if (name==='@electron-toolkit/utils') return {is:{dev:false}};
     if (name==='keytar') return {default:{}};
-    if (name==='fs') return {existsSync: name => runtime.files.has(name), readFileSync: name => runtime.files.get(name), writeFileSync: (name,value) => runtime.files.set(name,value), unlinkSync: name => runtime.files.delete(name)};
+    if (name==='fs') return {existsSync: name => runtime.files.has(name), readFileSync: name => runtime.files.has(name) ? runtime.files.get(name) : fs.readFileSync(name), statSync: fs.statSync, writeFileSync: (name,value) => runtime.files.set(name,value), unlinkSync: name => runtime.files.delete(name)};
     return require(name);
   };
-  const sandbox = {runtime,module:{exports:{}},exports:{},require:localRequire,__dirname:path.join(root,'src/main'),process,Buffer,console,URL,setTimeout,clearTimeout,setInterval,clearInterval,crypto:require('node:crypto').webcrypto,atob,navigator:{onLine:false},window:null,document:globalThis.document};
+  const sandbox = {runtime,module:{exports:{}},exports:{},require:localRequire,__dirname:path.join(root,'src/main'),process,Buffer,console,URL,setTimeout,clearTimeout,setInterval,clearInterval,crypto:require('node:crypto').webcrypto,atob,fetch:async()=>{throw Error('External fixture request blocked')},navigator:{onLine:false},localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},requestAnimationFrame: callback=>setTimeout(()=>callback(0),0),cancelAnimationFrame:clearTimeout,window:null,document:globalThis.document};
   vm.runInNewContext(result.outputFiles[0].text,sandbox);
   const services=sandbox.module.exports;
   const event = (sender=runtime.mainWindow.webContents, frame={parent:null,url:services.trustedRendererUrl()}) => ({sender,senderFrame:frame});
@@ -101,7 +119,7 @@ async function nativeUiFixture() {
   const clear = () => invoke('auth:clearSession');
   const hold = channel => {
     let release,entered;const wait=new Promise(resolve=>{release=resolve}),entry=new Promise(resolve=>{entered=resolve});
-    runtime.held={channel,wait,entered};return {release,entered:entry};
+    const held={channel,wait,entered};runtime.held=held;return {release,entered:entry,fail:()=>{held.fail=true}};
   };
   const apiFor = win => new Proxy({}, {get(_,namespace) {
     if(namespace==='sync') return {
@@ -111,16 +129,16 @@ async function nativeUiFixture() {
       invokeContext:async(context,channel,args)=>{
         if(runtime.failChannel===channel) throw new Error('synthetic read failure');
         const result=runtime.handlers.get('sync:invokeContext')(event(win.webContents),context,channel,args);
-        if(runtime.held?.channel===channel){const gate=runtime.held;runtime.held=null;gate.entered();await gate.wait}
+        if(runtime.held?.channel===channel){const gate=runtime.held;runtime.held=null;gate.entered();await gate.wait;if(gate.fail)throw Error('Synthetic delayed native failure')}
         return result;
       }
     };
-    return new Proxy({}, {get(_,method){return async(...args)=>{
+    return new Proxy({}, {get(_,method){if(ui && method.startsWith('on'))return ()=>()=>{};return async(...args)=>{
       const channel=namespace+':'+method;
       if(channel==='quickadd:signalReady'){runtime.ready++;ipcMain.emit('quickadd:ready',event(win.webContents));return}
       if(channel==='timer:minimizeToTray'||channel==='timer:navigateToTask') args.push(runtime.scope);
       const result=runtime.handlers.get(channel)(event(win.webContents),...args);
-      if(runtime.held?.channel===channel){const gate=runtime.held;runtime.held=null;gate.entered();await gate.wait}
+      if(runtime.held?.channel===channel){const gate=runtime.held;runtime.held=null;gate.entered();await gate.wait;if(gate.fail)throw Error('Synthetic delayed native failure')}
       return result;
     }}});
   }});

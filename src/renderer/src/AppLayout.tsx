@@ -195,7 +195,7 @@ export function AppLayout(): React.JSX.Element {
   // Hydrate notifications on mount
   const hydrateNotifications = useNotificationStore((s) => s.hydrate)
   useEffect(() => {
-    hydrateNotifications()
+    void hydrateNotifications().catch(() => {})
   }, [hydrateNotifications])
 
   // Show toast when a recurring task clone is created

@@ -7,7 +7,7 @@ import { isRemoteNewer, toCanonicalIso } from './lww'
 const UPDATABLE_COLUMNS = ['name', 'color', 'icon', 'sidebar_order', 'is_collapsed'] as const
 
 export class ProjectAreaRepository {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: DatabaseSync, private userId: string | null = null) {}
 
   /**
    * Raw lookup — returns tombstones too (sync layer needs them).
@@ -121,9 +121,12 @@ export class ProjectAreaRepository {
 
   assignProject(projectId: string, areaId: string | null): void {
     const now = new Date().toISOString()
-    this.db
-      .prepare('UPDATE projects SET area_id = ?, updated_at = ? WHERE id = ?')
-      .run(areaId, now, projectId)
+    const result = this.db
+      .prepare(`UPDATE projects SET area_id = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
+        AND ($user IS NULL OR owner_id = $user OR EXISTS (SELECT 1 FROM project_members WHERE project_id = projects.id AND user_id = $user))
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM project_areas WHERE id = ? AND deleted_at IS NULL AND ($user IS NULL OR user_id = $user)))`)
+      .run({ user: this.userId }, areaId, now, projectId, areaId, areaId)
+    if (!result.changes) throw new Error('Project or area unavailable')
   }
 
   /**

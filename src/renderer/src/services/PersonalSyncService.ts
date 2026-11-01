@@ -1557,7 +1557,7 @@ async function ensureLabelsExistLocally(
     if (!ownerId || remoteLabel.user_id === ownerId) {
       // Our own label (from another device), or no signed-in user to enforce
       // ownership: store the remote row faithfully, preserving its id.
-      await api.labels.applyRemote(remoteLabel as Label)
+      await api.labels.applyRemote(remoteLabel as Label).catch(error => { if (requireComplete) throw error })
       continue
     }
 

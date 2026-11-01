@@ -4,11 +4,15 @@ import { useStatusStore } from './statusStore'
 import { useLabelStore } from './labelStore'
 import { useViewStore } from './viewStore'
 import { useAuthStore } from './authStore'
+import { useAttachmentStore } from './attachmentStore'
 
 export function evictProjectData(projectId: string): void {
   invalidateProjectHydration(projectId)
   const removedLabels = new Set(useLabelStore.getState().projectLabels[projectId] ?? [])
   const initial = useTaskStore.getState()
+  useAttachmentStore.setState(state => ({
+    attachments: Object.fromEntries(Object.entries(state.attachments).filter(([, attachment]) => initial.tasks[attachment.task_id]?.project_id !== projectId))
+  }))
   for (const task of Object.values(initial.tasks)) if (task.project_id === projectId) {
     for (const label of initial.taskLabels[task.id] ?? []) removedLabels.add(label.id)
   }

@@ -1,3 +1,4 @@
+import { captureProjectProducer, requireProducerCurrent } from '../../services/syncContext'
 import { ArchivedProjectsList } from './ArchivedProjectsList'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Pencil, X, Check, FolderOpen, Plus, Trash2 } from 'lucide-react'
@@ -340,6 +341,7 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
 }): React.JSX.Element {
   const areas = useProjectAreaStore(selectProjectAreas)
   const { assignProject, createArea, deleteArea, updateArea } = useProjectAreaStore()
+  const { addToast } = useToast()
   const currentUser = useAuthStore((s) => s.currentUser)
   const sortedAreas = useMemo(() => [...areas].sort((a, b) => a.sidebar_order - b.sidebar_order), [areas])
   const ungrouped = useMemo(() => projects.filter((p) => !p.area_id), [projects])
@@ -462,62 +464,71 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
   }, [activeItemId, getTargetAreaId, isPointerIndented])
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    const { active, over } = event
-    const saved = dropIndicatorRef.current
-    cleanupPointer()
-    setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null; lastOverIdRef.current = null
+    const origin = captureProjectProducer(String(event.active.id).startsWith('area:') ? undefined : String(event.active.id))
+    try {
+      const { active, over } = event
+      const saved = dropIndicatorRef.current
+      cleanupPointer()
+      setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null; lastOverIdRef.current = null
 
-    if (!over || active.id === over.id) return
-    const activeId = String(active.id)
-    const overId = String(over.id)
-    const intent = saved?.targetId === overId ? saved.intent : 'above'
+      if (!over || active.id === over.id) return
+      const activeId = String(active.id)
+      const overId = String(over.id)
+      const intent = saved?.targetId === overId ? saved.intent : 'above'
 
-    // 'inside' intent → assign project to the target's folder
-    if (!activeId.startsWith('area:') && intent === 'inside') {
-      const targetAreaId = getTargetAreaId(overId)
-      if (targetAreaId) {
-        await assignProject(activeId, targetAreaId)
-        return
+      // 'inside' intent → assign project to the target's folder
+      if (!activeId.startsWith('area:') && intent === 'inside') {
+        const targetAreaId = getTargetAreaId(overId)
+        if (targetAreaId) {
+          await assignProject(activeId, targetAreaId)
+          await requireProducerCurrent(origin)
+          return
+        }
       }
+
+      // Build current top-level order
+      const topLevel: Array<{ id: string; isArea: boolean }> = []
+      for (const p of projects.filter((p) => !p.area_id).sort((a, b) => a.sidebar_order - b.sidebar_order)) topLevel.push({ id: p.id, isArea: false })
+      for (const a of sortedAreas) topLevel.push({ id: `area:${a.id}`, isArea: true })
+      topLevel.sort((a, b) => {
+        const oA = a.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === a.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === a.id)?.sidebar_order ?? 0)
+        const oB = b.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === b.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === b.id)?.sidebar_order ?? 0)
+        return oA - oB
+      })
+
+      // Grouped project dragged with non-inside intent → unassign (pull out of folder)
+      const draggedProject = projects.find((p) => p.id === activeId)
+      if (draggedProject?.area_id && intent !== 'inside') {
+        await assignProject(activeId, null)
+        await requireProducerCurrent(origin)
+        if (!topLevel.find((t) => t.id === activeId)) topLevel.push({ id: activeId, isArea: false })
+      }
+
+      // Reorder top-level (find positions using overId — for grouped targets, use the area header)
+      let reorderOverId = overId
+      if (!overId.startsWith('area:')) {
+        const target = projects.find((p) => p.id === overId)
+        if (target?.area_id) reorderOverId = `area:${target.area_id}`
+      }
+
+      const oldIdx = topLevel.findIndex((t) => t.id === (activeId.startsWith('area:') ? activeId : activeId))
+      const overIdx = topLevel.findIndex((t) => t.id === reorderOverId)
+      if (oldIdx === -1 || overIdx === -1) return
+      const reordered = topLevel.filter((t) => t.id !== topLevel[oldIdx].id)
+      const insertAt = intent === 'below' ? Math.min(overIdx, reordered.length) : Math.max(0, overIdx > oldIdx ? overIdx - 1 : overIdx)
+      reordered.splice(insertAt, 0, topLevel[oldIdx])
+
+      for (let i = 0; i < reordered.length; i++) {
+        const item = reordered[i]
+        await requireProducerCurrent(origin)
+        if (item.isArea) await origin.api.projectAreas.update(item.id.slice(5), { sidebar_order: i })
+        else await updateProject(item.id, { sidebar_order: i })
+        await requireProducerCurrent(origin)
+      }
+    } catch {
+      if (await origin.isCurrent()) addToast({ message: 'Could not move project', variant: 'danger' })
     }
-
-    // Build current top-level order
-    const topLevel: Array<{ id: string; isArea: boolean }> = []
-    for (const p of projects.filter((p) => !p.area_id).sort((a, b) => a.sidebar_order - b.sidebar_order)) topLevel.push({ id: p.id, isArea: false })
-    for (const a of sortedAreas) topLevel.push({ id: `area:${a.id}`, isArea: true })
-    topLevel.sort((a, b) => {
-      const oA = a.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === a.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === a.id)?.sidebar_order ?? 0)
-      const oB = b.isArea ? (sortedAreas.find((ar) => `area:${ar.id}` === b.id)?.sidebar_order ?? 0) : (projects.find((p) => p.id === b.id)?.sidebar_order ?? 0)
-      return oA - oB
-    })
-
-    // Grouped project dragged with non-inside intent → unassign (pull out of folder)
-    const draggedProject = projects.find((p) => p.id === activeId)
-    if (draggedProject?.area_id && intent !== 'inside') {
-      await assignProject(activeId, null)
-      if (!topLevel.find((t) => t.id === activeId)) topLevel.push({ id: activeId, isArea: false })
-    }
-
-    // Reorder top-level (find positions using overId — for grouped targets, use the area header)
-    let reorderOverId = overId
-    if (!overId.startsWith('area:')) {
-      const target = projects.find((p) => p.id === overId)
-      if (target?.area_id) reorderOverId = `area:${target.area_id}`
-    }
-
-    const oldIdx = topLevel.findIndex((t) => t.id === (activeId.startsWith('area:') ? activeId : activeId))
-    const overIdx = topLevel.findIndex((t) => t.id === reorderOverId)
-    if (oldIdx === -1 || overIdx === -1) return
-    const reordered = topLevel.filter((t) => t.id !== topLevel[oldIdx].id)
-    const insertAt = intent === 'below' ? Math.min(overIdx, reordered.length) : Math.max(0, overIdx > oldIdx ? overIdx - 1 : overIdx)
-    reordered.splice(insertAt, 0, topLevel[oldIdx])
-
-    for (let i = 0; i < reordered.length; i++) {
-      const item = reordered[i]
-      if (item.isArea) await window.api.projectAreas.update(item.id.slice(5), { sidebar_order: i })
-      else await updateProject(item.id, { sidebar_order: i })
-    }
-  }, [sortedAreas, assignProject, projects, cleanupPointer, handleProjectDragEnd, updateProject, getTargetAreaId])
+  }, [sortedAreas, assignProject, projects, cleanupPointer, handleProjectDragEnd, updateProject, getTargetAreaId, addToast])
 
   const handleDragCancel = useCallback(() => {
     cleanupPointer(); setActiveItemId(null); setDropIndicator(null); dropIndicatorRef.current = null

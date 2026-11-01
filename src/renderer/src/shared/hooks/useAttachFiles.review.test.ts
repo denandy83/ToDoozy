@@ -17,10 +17,13 @@ beforeEach(async()=>{
   useAuthStore.setState({currentUser:{id:'a'} as never})
   create=vi.fn(async(...[task_id,path]:unknown[])=>({id:path,task_id}))
   dialog=vi.fn().mockResolvedValue({canceled:false,filePaths:['one','two']})
+  const task = { id: 'shared-task', project_id: 'shared-project', deleted_at: null }
   Object.assign(window,{api:{fs:{showOpenDialog:dialog},attachments:{createFromFile:create},sync:{
     captureContext:async()=>({generation,userId:useAuthStore.getState().currentUser?.id}),
     invokeContext:async(origin:{generation:number},channel:string,args:unknown[])=>{
       if(origin.generation!==generation)throw Error('Database changed')
+      if(channel==='tasks:findById')return task
+      if(channel==='projects:getProjectsForUser')return [{id:'shared-project'}]
       if(channel!=='attachments:createFromFile')throw Error('Unexpected operation')
       return create(...args)
     }
@@ -35,6 +38,7 @@ it('does not create attachments after an old-account file dialog completes',asyn
   let finish!:(value:unknown)=>void
   dialog.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
   const pending=attach()
+  await vi.waitFor(()=>expect(dialog).toHaveBeenCalledOnce())
   generation++;useAuthStore.setState({currentUser:{id:'b'} as never})
   finish({canceled:false,filePaths:['private-a']})
   await act(async()=>{await pending})

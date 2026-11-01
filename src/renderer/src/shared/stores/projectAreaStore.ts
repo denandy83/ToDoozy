@@ -1,4 +1,4 @@
-import { captureSyncProducer, requireProducerCurrent, syncContextFromProducer } from '../../services/syncContext'
+import { captureSyncProducer, captureProjectProducer, requireProducerCurrent, syncContextFromProducer } from '../../services/syncContext'
 import { hydrationContext, type HydrationOrigin } from './hydrationContext'
 import { createWithEqualityFn } from 'zustand/traditional'
 import { shallow } from 'zustand/shallow'
@@ -124,15 +124,17 @@ export const useProjectAreaStore = createWithEqualityFn<ProjectAreaStore>((set) 
   },
 
   async assignProject(projectId: string, areaId: string | null): Promise<void> {
-    const origin = captureSyncProducer()
-    await origin.api.projectAreas.assignProject(projectId, areaId)
+    const origin = captureProjectProducer(projectId)
+    const context = hydrationContext(origin, projectId, origin.userId)
+    await context.api.projectAreas.assignProject(projectId, areaId)
     // Sync the updated project to Supabase (area_id changed)
-    const project = await origin.api.projects.findById(projectId)
+    const project = await context.api.projects.findById(projectId)
     await requireProducerCurrent(origin)
     if (project) {
-      import('../../services/PersonalSyncService').then(({ pushProject }) => {
-        pushProject(project, origin).catch((err) => console.error('[ProjectAreaStore] pushProject failed:', err))
-      })
+      void import('../../services/PersonalSyncService').then(async ({ pushProject }) => {
+        if (!await origin.isCurrent()) return
+        await pushProject(project, origin)
+      }).catch(() => {})
     }
   },
 

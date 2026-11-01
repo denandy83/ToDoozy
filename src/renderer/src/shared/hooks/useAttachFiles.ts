@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { hydrationContext } from '../stores/hydrationContext'
+import { attachmentContext } from '../stores/attachmentStore'
 import { useAttachmentStore } from '../stores'
 import { useToast } from '../components/Toast'
 
@@ -8,7 +8,8 @@ export function useAttachFiles(taskId: string): () => Promise<void> {
   const { addToast } = useToast()
 
   return useCallback(async () => {
-    const origin = hydrationContext()
+    const origin = await attachmentContext(taskId).catch(() => null)
+    if (!origin || !await origin.isCurrent()) return
     const result = await window.api.fs.showOpenDialog()
     if (!await origin.isCurrent()) return
     if (result.canceled || result.filePaths.length === 0) return
