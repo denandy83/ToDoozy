@@ -1,4 +1,4 @@
-import { captureProjectProducer, requireProducerCurrent } from '../../services/syncContext'
+import { captureProjectProducer, captureSyncProducer, requireProducerCurrent } from '../../services/syncContext'
 import { ArchivedProjectsList } from './ArchivedProjectsList'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Pencil, X, Check, FolderOpen, Plus, Trash2 } from 'lucide-react'
@@ -464,7 +464,9 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
   }, [activeItemId, getTargetAreaId, isPointerIndented])
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    const origin = captureProjectProducer(String(event.active.id).startsWith('area:') ? undefined : String(event.active.id))
+    const isArea = String(event.active.id).startsWith('area:')
+    const origin = captureProjectProducer(isArea ? undefined : String(event.active.id))
+    const feedback = isArea ? captureSyncProducer() : origin
     try {
       const { active, over } = event
       const saved = dropIndicatorRef.current
@@ -526,7 +528,10 @@ function SidebarOrderSection({ projects, selectedProjectId, onProjectChange, sen
         await requireProducerCurrent(origin)
       }
     } catch {
-      if (await origin.isCurrent()) addToast({ message: 'Could not move project', variant: 'danger' })
+      if (await feedback.isCurrent()) addToast({
+        message: isArea ? 'Could not finish reordering the sidebar. Some changes may be saved.' : 'Could not move project',
+        variant: 'danger'
+      })
     }
   }, [sortedAreas, assignProject, projects, cleanupPointer, handleProjectDragEnd, updateProject, getTargetAreaId, addToast])
 

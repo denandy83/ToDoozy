@@ -186,3 +186,53 @@ it('retains a successful native attachment write without publishing its delayed 
   expect(f.s.useAttachmentStore.getState().attachments).toEqual({})
   expect(f.db.prepare('SELECT id FROM attachments').all()).toHaveLength(1)
 }, 20000)
+
+it.each(['normal-area', 'normal-project', 'unrelated-revoke', 'project-revoke', 'project-delete', 'native-failure', 'account', 'database'])(
+  'reports mounted sidebar reorder completion within the original account/database (%s)', async mode => {
+    const f = await setup()
+    f.repo.projects.update('p-a', { sidebar_order: 10 })
+    for (const [id, sidebar_order] of [['first', 20], ['second', 30]] as const) f.repo.projectAreas.create({ id, user_id: 'a', name: id, sidebar_order })
+    f.repo.projects.create({ id: 'unrelated', owner_id: 'b', name: 'UNRELATED PROJECT' })
+    f.repo.projects.addMember('unrelated', 'a', 'member')
+    f.s.useProjectAreaStore.setState({ areas: f.repo.projectAreas.findByUserId('a') })
+    const project = f.repo.projects.findById('p-a')
+    await mount(f, f.s.ProjectsSettingsContent, { projects: [project], selectedProject: project, selectedProjectId: project.id, statuses: f.repo.statuses.findByProjectId(project.id), onProjectChange: () => {}, onClose: () => {} })
+    const sidebar = [...f.host.querySelectorAll('button')].find(button => button.textContent?.includes('Sidebar & Folders'))!
+    await act(async () => { sidebar.click(); await settle() })
+    const pause = mode.startsWith('normal') ? null : f.h.hold('projectAreas:update')
+    const originalScope = f.h.runtime.scope
+    const bBefore = { ...f.s.repositories.get('b').projects.findById('p-b') }
+    let operation!: Promise<void>
+    await act(async () => {
+      operation = f.h.runtime.drag.onDragEnd({ active: { id: mode === 'normal-project' ? 'p-a' : 'area:second' }, over: { id: mode === 'normal-project' ? 'area:second' : 'p-a' } })
+      await settle()
+    })
+    if (pause) {
+      await pause.entered
+      expect(f.repo.projectAreas.findById('second').sidebar_order).toBe(0)
+      expect(f.repo.syncQueue.findAll().some((row: { table_name: string; row_id: string }) => row.table_name === 'user_project_areas' && row.row_id === 'second')).toBe(true)
+      expect(f.repo.projects.findById('p-a').sidebar_order).toBe(10)
+      expect(f.repo.projectAreas.findById('first').sidebar_order).toBe(20)
+      if (mode === 'unrelated-revoke') {
+        await act(async () => { f.repo.projects.removeMember('unrelated', 'a'); f.s.evictProjectData('unrelated'); await settle() })
+        expect(f.h.runtime.scope).toBe(originalScope)
+      } else if (mode === 'project-revoke') await invalidate(f, 'revoke')
+      else if (mode === 'project-delete') await invalidate(f, 'project-delete')
+      else if (mode === 'native-failure') pause.fail()
+      else await invalidate(f, mode)
+      const retained = { ...f.repo.projects.findById('p-a') }
+      pause.release(); await act(async () => { await operation; await settle() })
+      expect(f.repo.projectAreas.findById('second').sidebar_order).toBe(0)
+      expect(f.repo.projectAreas.findById('first').sidebar_order).toBe(20)
+      expect(f.repo.projects.findById('p-a')).toEqual(retained)
+      expect(f.s.repositories.get('b').projects.findById('p-b')).toEqual(bBefore)
+      if (mode === 'account' || mode === 'database') expect(f.host.textContent).not.toContain('Could not')
+      else expect(f.host.textContent).toContain('Could not finish reordering the sidebar. Some changes may be saved.')
+    } else {
+      await act(async () => { await operation; await settle() })
+      expect(f.repo.projects.findById('p-a').sidebar_order).toBe(1)
+      expect(f.repo.projectAreas.findById('first').sidebar_order).toBe(mode === 'normal-project' ? 0 : 2)
+      expect(f.repo.projectAreas.findById('second').sidebar_order).toBe(mode === 'normal-project' ? 2 : 0)
+      expect(f.host.textContent).not.toContain('Could not')
+    }
+  }, 20000)
