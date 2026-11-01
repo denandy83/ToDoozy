@@ -71,7 +71,8 @@ candidate, an authorized operator should:
    back; the old silent-polling risk returns until a corrected candidate ships.
 
 No desktop/MCP writer or pending SQL activation is included in bot deployment.
-Their separately documented coordinated paused-writer rollout still applies.
+See the [rollout guide](../../docs/security-optimization-2026-10-30.md#deployment-and-verification)
+for their deployment order and client compatibility requirements.
 
 ## Dependency audit scope
 

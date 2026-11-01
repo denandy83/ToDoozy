@@ -11,6 +11,8 @@ User-facing changes by date. Most recent first.
 - Fixed several cases involving subtasks, task labels, project archives, recurring dates, timers and attachments.
 - The Logs view can show private, locally retained Supabase request summaries and host metrics when monitoring is configured.
 
+See the [rollout guide](docs/security-optimization-2026-10-30.md#deployment-and-verification) for release availability and backend activation status.
+
 ## v1.11.0 — 30 October 2026
 
 - Menus, popups, panels and notifications now share consistent fades and movement. Keyboard actions stay immediate, and dragging has clearer feedback.
