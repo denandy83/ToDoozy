@@ -15,7 +15,7 @@ const settle = () => new Promise(setImmediate);
 function textOf(file, ref) {
   return ref ? cp.execFileSync('git', ['show', `${ref}:${file}`], { cwd: source, encoding: 'utf8' }) : fs.readFileSync(path.join(source, file), 'utf8');
 }
-async function compilation(ref, invitations = false, sharedHook = false) {
+async function compilation(ref, invitations = false, sharedHook = false, nativeUserId = null) {
   const app = ts.createSourceFile('App.tsx', textOf('src/renderer/src/App.tsx', ref), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let effect, startupEffect, localBootstrapEffect, localBootstrapDeps, projectEffect, projectDeps, localChangeEffect, invitationCall, invitationView;
   function walk(node) {
@@ -84,7 +84,7 @@ async function compilation(ref, invitations = false, sharedHook = false) {
     const db=new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys=ON;CREATE TABLE schema_version(version INTEGER PRIMARY KEY)');
     for(const migrate of migrations)migrate(db);
-    const repo=createRepositories(db);
+    const repo=createRepositories(db,${JSON.stringify(nativeUserId)});
     const realtimeEffectRunCount={current:0},currentProjectRef={current:null};
     function runEffect(){const databaseScope=window.api.sync.currentContext();const userId=useAuthStore.getState().currentUser?.id,isOffline=false;return (${effect})();}
     function runStartup(){const databaseScope=window.api.sync.currentContext();const startupUserId=useAuthStore.getState().currentUser?.id,isAuthenticated=!!startupUserId,isOffline=false;return (${startupEffect})();}
@@ -139,7 +139,7 @@ function expression(row,value) {
   if(value.startsWith('and('))return split(value.slice(4,-1)).every(x=>expression(row,x));
   const dot=value.indexOf('.');return predicate(row,value.slice(0,dot),value.slice(dot+1));
 }
-async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false,invitations=false,sharedHook=false}={}) {
+async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=true,projectCount=20,archived=0,shared=0,latency=0,inspectAuthorization=false,invitations=false,sharedHook=false,nativeUserId=null}={}) {
   const authorizations=[];let session=null,beforeSession=null,localChange=null,inviteReceived=null;
   const requests=[],channels=[],logs=[],fixtureErrors=[],intervals=new Map(),timers=new Map();
   const remote={projects:[],project_members:[],tasks:[],statuses:[],user_labels:[],user_settings:[],user_themes:[],user_saved_views:[],user_project_areas:[],project_templates:[],project_labels:[],task_labels:[],activity_log:[]};
@@ -191,7 +191,7 @@ async function makeHarness({ref=process.env.TODOOZY_BENCH_REF??null,connected=tr
     const channel={topic,state:'joining',closed:false,bindings:[],on(_kind,filter,callback){this.bindings.push({filter,callback});return this},subscribe(callback){this.status=status=>{if(status==='SUBSCRIBED')this.state='joined';callback(status)};channels.push(this);if(connected)queueMicrotask(()=>{if(!this.closed)this.status('SUBSCRIBED')});return this},emit(table,eventType='UPDATE',row={}){for(const binding of this.bindings)if(binding.filter.table===table)binding.callback({eventType,new:row,old:row})}};
     return channel;
   },removeChannel:async(channel)=>{channel.closed=true;channel.state='closed';return 'ok'}};
-  const code=await compilation(ref,invitations,sharedHook);
+  const code=await compilation(ref,invitations,sharedHook,nativeUserId);
   const sandbox={module:{exports:{}},exports:{},require,console:{log:noop,info:noop,warn:noop,error:(...args)=>logs.push(args)},process,Buffer,queueMicrotask,crypto:require('node:crypto').webcrypto,URL,Headers,Request,Response,AbortController,TextEncoder,TextDecoder,performance,Date,Map,Set,Promise,fetch:transport,navigator:{onLine:true},localStorage:{getItem:()=>null,setItem:noop,removeItem:noop},runtime,
     setInterval:(fn,ms)=>{const id=nextId++;intervals.set(id,{fn,ms});return id},clearInterval:id=>intervals.delete(id),setTimeout:(fn,ms)=>{const id=nextId++;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id)};
   runtime.getSupabase=async()=>runtime.client;runtime.requireSession=async()=>(await runtime.client.auth.getSession()).data.session;runtime.isSuspended=()=>suspended;

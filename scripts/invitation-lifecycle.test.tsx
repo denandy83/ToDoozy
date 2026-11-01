@@ -20,7 +20,7 @@ function gate(): Gate {
   let enter!: () => void, release!: () => void
   return {entered:new Promise<void>(resolve => {enter=resolve}),wait:new Promise<void>(resolve => {release=resolve}),enter:()=>enter(),release:()=>release()}
 }
-type Point = 'pending'|'deep-link'|'realtime'|'accept'|'decline'|'sync-down'|'hydration'|'project-subscription'|'invite-subscription'
+type Point = 'pending'|'deep-link'|'realtime'|'accept'|'decline'|'sync-down'|'membership'|'classification'|'hydration'|'project-subscription'|'invite-subscription'
 interface InvitationFixture {
   h: Awaited<ReturnType<typeof makeHarness>>
   host: HTMLDivElement
@@ -36,8 +36,8 @@ interface InvitationFixture {
   mutations: string[]
   setPending(tokens:string[]): void
 }
-async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
-  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,invitations:true,connected:false})
+async function setup(point?:Point, fail=false, nativeUserId?:string): Promise<InvitationFixture> {
+  const h=await makeHarness({ref:process.env.REVIEW_BASE_REF,projectCount:1,invitations:true,connected:false,nativeUserId})
   const host=document.createElement('div'); document.body.append(host)
   const root=createRoot(host); opened.push({h,root,host})
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true})
@@ -81,6 +81,7 @@ async function setup(point?:Point, fail=false): Promise<InvitationFixture> {
       if(method!=='invokeContext') return sync[method]
       return async (origin:unknown,channel:string,args:unknown[])=>{
         if(armed&&!blocked&&((point==='sync-down'&&channel==='projects:applyRemote'&&(args[0] as {id:string}).id==='joined') || (point==='hydration'&&channel==='projects:getProjectsForUser'&&h.repo.projects.findById('joined')))) await hold(undefined)
+        if(armed&&!blocked&&args[0]==='joined'&&((point==='membership'&&channel==='projects:addMember') || (point==='classification'&&channel==='projects:update'))) return hold(await sync.invokeContext(origin,channel,args))
         return sync.invokeContext(origin,channel,args)
       }
     }})
@@ -123,10 +124,10 @@ afterEach(async()=>{
     host.remove();await h.stop()
   }
 })
-const points:Point[]=['pending','deep-link','realtime','accept','decline','sync-down','hydration','project-subscription','invite-subscription']
+const points:Point[]=['pending','deep-link','realtime','accept','decline','sync-down','membership','classification','hydration','project-subscription','invite-subscription']
 it.each(points.flatMap(point=>['account','database'].flatMap(kind=>[false,true].map(fail=>({point,kind:kind as 'account'|'database',fail})))))(
   'executes actual App invitation $point boundary across $kind replacement (late error=$fail)', async({point,kind,fail})=>{
-    const f=await setup(point,fail)
+    const f=await setup(point,fail,['membership','classification'].includes(point)?'u':undefined)
     if(point==='pending'||point==='invite-subscription') f.arm()
     if(point==='deep-link'||point==='realtime') f.setPending([])
     await f.mount()
@@ -136,7 +137,7 @@ it.each(points.flatMap(point=>['account','database'].flatMap(kind=>[false,true].
       const channel=f.h.channels.find((row:{topic:string;closed:boolean})=>row.topic==='invites:u@example.invalid'&&!row.closed)
       expect(channel).toBeDefined()
       await act(async()=>{channel.emit('project_invites','INSERT',{token:'PRIVATE REALTIME',status:'pending'});await f.h.untilIdle()})
-    } else if(['accept','decline','sync-down','hydration','project-subscription'].includes(point)) {
+    } else if(['accept','decline','sync-down','membership','classification','hydration','project-subscription'].includes(point)) {
       expect(f.host.textContent).toContain('PRIVATE FIRST')
       f.arm();await f.click(point==='decline'?'Decline':'Accept')
     }
@@ -291,7 +292,7 @@ it.each(['Accept','Decline'])('reserves the first %s action before a delayed nat
   expect(f.h.fixtureErrors).toEqual([])
 })
 
-it.each(['normal','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before','task-fetch','task-apply','project-label-fetch','label-fetch','label-apply','project-label-probe','project-label-apply','project-label-cleanup','task-label-fetch','task-label-definition-fetch','task-label-definition-apply','task-label-snapshot','task-label-apply','task-cleanup','project-label-unavailable','task-label-unavailable'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
+it.each(['normal','membership-insert','membership-absent','membership-foreign','classification-denied','before-accept','native','channel','revoked','deleted','post-probe','offline-completion','offline-before','task-fetch','task-apply','project-label-fetch','label-fetch','label-apply','project-label-probe','project-label-apply','project-label-cleanup','task-label-fetch','task-label-definition-fetch','task-label-definition-apply','task-label-snapshot','task-label-apply','task-cleanup','project-label-unavailable','task-label-unavailable'])('retries acknowledged acceptance with the original one-use SQL contract (%s)',async mode=>{
   const {PGlite}=await import('@electric-sql/pglite')
   const {readFileSync}=await import('node:fs')
   const pg=new PGlite()
@@ -306,7 +307,7 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
       INSERT INTO public.project_invites VALUES('${token}','${project}','pending','u@example.invalid',null,'2099-01-01');`)
     const migration=readFileSync(new URL('../supabase/migrations/20261030213612_security_performance_hardening.sql',import.meta.url),'utf8')
     await pg.exec(migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION public.accept_invite'),migration.indexOf('-- A recipient may consume')))
-    const f=await setup(),h=f.h
+    const f=await setup(undefined,false,'u'),h=f.h
     const NativeError = runInContext('Error', h.sandbox) as ErrorConstructor
     for(const row of h.remote.projects)if(row.id==='joined')row.id=project
     for(const table of ['project_members','statuses'])for(const row of h.remote[table])if(row.project_id==='joined')row.project_id=project
@@ -338,6 +339,10 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
     }
     const transport=h.sandbox.fetch
     let calls=0,sqlCalls=0,failed=false,probePending=false,probeFailures=0
+    let incompleteRoster=['membership-absent','membership-foreign'].includes(mode)
+    const classificationModes=['membership-insert','membership-absent','membership-foreign','classification-denied']
+    if(mode==='membership-insert')h.services.db.exec(`CREATE TRIGGER fail_membership BEFORE INSERT ON project_members WHEN NEW.project_id='${project}' AND NEW.user_id='u' BEGIN SELECT RAISE(ABORT,'Synthetic membership insertion failure'); END`)
+    if(mode==='classification-denied')h.services.db.exec(`CREATE TRIGGER deny_classification BEFORE UPDATE OF is_shared ON projects WHEN NEW.id='${project}' BEGIN SELECT RAISE(IGNORE); END`)
     const nativeFailures:Record<string,[string,string,(args:unknown[])=>boolean]>={
       'task-apply':['tasks','applyRemoteTask',args=>(args[0] as {id:string}).id==='joined-task'],
       'label-apply':['labels','applyRemote',args=>(args[0] as {id:string}).id==='joined-label'],
@@ -400,6 +405,10 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
         if(mode==='offline-completion'&&!failed){failed=true;h.sandbox.navigator.onLine=false}
         return response(rows)
       }
+      if(incompleteRoster&&parsed.pathname.endsWith('/project_members')&&parsed.searchParams.get('project_id')==='eq.'+project){
+        failed=true
+        return response(mode==='membership-absent'||parsed.searchParams.has('or')?[]:h.remote.project_members.filter((row:{project_id:string;user_id:string})=>row.project_id===project&&row.user_id!=='u'))
+      }
       if(!failed&&parsed.pathname.endsWith('/user_labels')&&(
         (mode==='project-label-unavailable'&&parsed.searchParams.get('id')?.includes('joined-label'))
         ||(mode==='task-label-unavailable'&&parsed.searchParams.get('id')?.includes('task-only-label')))){
@@ -431,6 +440,18 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
     if(mode!=='normal'){
       expect(f.host.textContent).toContain('PRIVATE FIRST')
       expect(f.host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+      if(classificationModes.includes(mode)){
+        expect(calls).toBe(1);expect(sqlCalls).toBe(1)
+        expect(f.host.textContent).toContain('Failed to join the project')
+        expect(h.repo.projects.findById(project)?.is_shared).toBe(0)
+        expect(h.repo.projects.getMembers(project).some((member:{user_id:string})=>member.user_id==='u')).toBe(mode==='classification-denied')
+        expect(h.repo.tasks.findByProjectId(project)).toEqual([])
+        expect(h.stores.useProjectStore.getState().projects[project]).toBeUndefined()
+        expect(h.stores.useViewStore.getState().selectedProjectId).toBe('p0')
+        expect(h.channels.some((channel:{topic:string})=>channel.topic==='project:'+project)).toBe(false)
+        if(mode==='membership-insert')h.services.db.exec('DROP TRIGGER fail_membership')
+        if(mode==='classification-denied')h.services.db.exec('DROP TRIGGER deny_classification')
+      }
       if(mode in nativeFailures||['project-label-probe','task-fetch','project-label-fetch','label-fetch','task-label-fetch','task-label-definition-fetch'].includes(mode)){
         expect(failed).toBe(true)
         expect(f.host.textContent).toContain('Failed to join the project: Synthetic '+mode+' failure')
@@ -444,6 +465,7 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
       }
       if(mode==='post-probe'){expect(probeFailures).toBe(1);expect(h.sandbox.window.api.sync.currentContext()).toBe(originalScope);expect(h.repo.projects.findById(project)).toBeUndefined()}
       if(mode==='offline-completion')expect(h.repo.projects.findById(project)).toBeUndefined()
+      incompleteRoster=false
       h.sandbox.navigator.onLine=true
       if(mode==='revoked')await pg.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[project,actor])
       if(mode==='deleted')h.remote.projects.find((row:{id:string})=>row.id===project).deleted_at=new Date().toISOString()
@@ -458,13 +480,21 @@ it.each(['normal','before-accept','native','channel','revoked','deleted','post-p
     }else{
       expect(f.host.textContent).not.toContain('PRIVATE FIRST')
       expect(f.host.textContent).toContain('PRIVATE QUEUED')
-      expect(h.repo.projects.findById(project)).toBeDefined()
+      expect(h.repo.projects.findById(project)?.is_shared).toBe(1)
+      expect(h.stores.useProjectStore.getState().projects[project]?.is_shared).toBe(1)
+      expect(h.repo.projects.getMembers(project).map((member:{user_id:string})=>member.user_id).sort()).toEqual(['other','u'])
       expect(h.stores.useViewStore.getState().selectedProjectId).toBe(project)
       expect(h.repo.tasks.findByProjectId(project).map((task:{id:string})=>task.id)).toEqual(['joined-task'])
       expect(h.repo.tasks.getLabels('joined-task').map((link:{label_id:string})=>link.label_id).sort()).toEqual(['joined-label','task-only-label'])
       expect(h.repo.labels.findByProjectId(project).map((label:{id:string})=>label.id).sort()).toEqual(['joined-label','task-only-label'])
       if(mode==='task-cleanup')expect(h.repo.tasks.findById('obsolete-task').deleted_at).toBeTruthy()
       expect((await pg.query('SELECT * FROM project_members')).rows).toHaveLength(1)
+      if(mode==='normal'||classificationModes.includes(mode)){
+        await h.services.shared.unsubscribeFromProject(project)
+        await h.services.shared.reconcileSharedSubscriptions(Object.values(h.stores.useProjectStore.getState().projects),await h.context(),true)
+        expect(h.channels.filter((channel:{topic:string;closed:boolean})=>channel.topic==='project:'+project&&!channel.closed)).toHaveLength(1)
+        expect(h.channels.filter((channel:{topic:string;closed:boolean})=>channel.topic==='personal:'+project&&!channel.closed)).toEqual([])
+      }
     }
     expect((await pg.query<{status:string}>('SELECT status FROM project_invites')).rows[0].status).toBe('accepted')
     expect(h.fixtureErrors).toEqual([])

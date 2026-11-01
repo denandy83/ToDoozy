@@ -1256,11 +1256,12 @@ export async function syncProjectDown(projectId: string, userId: string, context
       -1
     )
     await api.projects.applyRemote({ ...project, sidebar_order: maxLocalOrder + 1 })
-    // Add current user as member locally
-    await api.projects.addMember(projectId, userId, 'member')
   }
   if (localProject) await api.projects.applyRemote(project)
-  await api.projects.update(projectId, { is_shared: 1 })
+  const members = await admission(projectId, context)
+  await syncMembersDown(projectId, members)
+  const sharedProject = await members.api.projects.update(projectId, { is_shared: 1 })
+  if (sharedProject?.is_shared !== 1) throw new Error('Shared project classification was not saved')
 
   // Sync project↔label links from the project_labels junction (the source
   // of truth — preserves tombstones). Reading the legacy projects.label_data
@@ -1424,8 +1425,6 @@ export async function syncProjectDown(projectId: string, userId: string, context
     }
   }
 
-  const members = await admission(projectId, context)
-  try { await syncMembersDown(projectId, members) } catch (error) { if (await members.isCurrent()) throw error }
   context.assertCurrent()
 }
 
